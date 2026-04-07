@@ -96,18 +96,11 @@
     body:not(.pipMode) .chip.primaryChip { display: none; }
     body:not(.pipMode) .chip.utilityChip { display: inline-flex; }
     body:not(.pipMode) #btnMovePrimary { display: inline-flex; }
-    /* Lean toolbar for pocket-lite workflow: keep Save, Move, Rename, Open, PiP. */
+    /* Lean toolbar for pocket-lite workflow: keep Save, Move, Rename, Edit, PiP. */
     .topbar #btnUnfoldAll,
-    .topbar #btnPaneOrder,
     .topbar #btnAddPrimary,
     .topbar #btnDeletePrimary,
-    .topbar #btnOpenPrimary,
-    .topbar #btnImportNow,
-    .topbar #btnCancelImport,
-    .topbar #btnUndoImport,
-    .topbar #btnCopyTemplates,
-    .topbar #btnRememberNow,
-    .topbar #btnExportChanges {
+    .topbar #btnOpenPrimary {
       display: none !important;
     }
     .topbar #btnExportTree,
@@ -244,24 +237,7 @@
       flex-direction: column;
       overflow: hidden;
     }
-    .filterPanel, .treePanel, .changePanel { grid-column: 1; }
-    .filterPanel { display: none; }
-    .layout[data-pane-order="tree_entry"] .treePanel { order: 1; }
-    .layout[data-pane-order="tree_entry"] .changePanel { order: 2; }
-    .layout[data-pane-order="entry_tree"] .changePanel { order: 1; }
-    .layout[data-pane-order="entry_tree"] .treePanel { order: 2; }
-    .changePanel { display: none; }
-    .filterPanel .panelBody {
-      display: block;
-      padding: 8px 10px;
-    }
-    .filterPanel .search {
-      width: 100%;
-      min-width: 0;
-    }
-    .changePanel textarea {
-      min-height: 140px;
-    }
+    .treePanel { grid-column: 1; }
     .panelHead {
       padding: 8px 10px;
       border-bottom: 1px solid var(--tree-panel-border);
@@ -294,47 +270,6 @@
       font-size: 12px;
       padding: 5px 10px;
     }
-    .panelBody {
-      padding: 10px;
-      display: grid;
-      gap: 10px;
-      min-height: 0;
-    }
-    .meta {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.35;
-      word-break: break-word;
-    }
-    textarea {
-      width: 100%;
-      min-height: 240px;
-      resize: none;
-      border: 1px solid var(--tree-panel-border);
-      border-radius: 14px;
-      padding: 12px;
-      font: inherit;
-      color: var(--text);
-      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.02));
-    }
-    .btnRow {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .status {
-      font-size: 13px;
-      border: 1px solid var(--tree-panel-border);
-      border-radius: 12px;
-      padding: 8px 10px;
-      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.03));
-      color: var(--muted);
-      min-height: 38px;
-      display: flex;
-      align-items: center;
-    }
-    .status.ok { color: var(--ok); }
-    .status.warn { color: var(--warn); }
     .detailOverlay {
       position: absolute;
       inset: 0;
@@ -563,10 +498,6 @@
       letter-spacing: 0.08px;
       user-select: none;
     }
-    .hint {
-      font-size: 12px;
-      color: var(--muted);
-    }
     @media (max-width: 1080px) {
       .topStatusLane { display: none; }
     }
@@ -576,9 +507,6 @@
     body.pipMode .layout {
       grid-template-columns: 1fr;
       min-height: calc(100vh - 86px);
-    }
-    body.pipMode .changePanel {
-      display: none;
     }
     body.pipMode #btnPip {
       display: none;
@@ -680,19 +608,12 @@
       <button id="btnLoad" class="chip utilityChip">Open</button>
       <button id="btnExportTree" class="chip utilityChip" disabled>Save</button>
       <button id="btnUnfoldAll" class="chip primaryChip" disabled>Unfold</button>
-      <button id="btnPaneOrder" class="chip utilityChip">Layout</button>
       <button id="btnAddPrimary" class="chip primaryChip" disabled>Add</button>
       <button id="btnMovePrimary" class="chip primaryChip" disabled>Move</button>
       <button id="btnRenamePrimary" class="chip primaryChip" disabled>Rename</button>
       <button id="btnDeletePrimary" class="chip primaryChip" disabled>Delete</button>
-      <button id="btnOpenPrimary" class="chip primaryChip" disabled>Open</button>
-      <button id="btnImportNow" class="chip utilityChip" disabled>Import now</button>
-      <button id="btnCancelImport" class="chip utilityChip" disabled>Cancel import</button>
-      <button id="btnUndoImport" class="chip utilityChip" disabled>Undo import</button>
-      <button id="btnCopyTemplates" class="chip utilityChip" disabled>Copy templates</button>
-      <button id="btnRememberNow" class="chip utilityChip" disabled>Remember now</button>
+      <button id="btnOpenPrimary" class="chip primaryChip" disabled>Edit</button>
       <button id="btnPip" class="chip utilityChip">Pop-out</button>
-      <button id="btnExportChanges" class="chip utilityChip" disabled>Save changes bundle</button>
       <input id="fileInput" type="file" accept=".json,.txt,.md" hidden>
       <div class="grow"></div>
       <div class="topStatusLane">
@@ -701,13 +622,6 @@
     </div>
 
     <div class="layout">
-      <section class="panel filterPanel">
-        <div class="panelHead">Filter</div>
-        <div class="panelBody">
-          <input class="search" placeholder="Filter tree (hides unmatched branches)">
-        </div>
-      </section>
-
       <section class="panel treePanel">
         <div class="panelHead treeHead">
           <span>Your Pocket</span>
@@ -720,22 +634,6 @@
         </div>
       </section>
 
-      <section class="panel changePanel">
-        <div class="panelHead">Remember</div>
-        <div class="panelBody">
-          <div id="sourceMeta" class="meta">No file loaded yet.</div>
-          <div id="selectedMeta" class="meta">Selected: none</div>
-          <textarea id="draft" placeholder="Type text here. One line = one item."></textarea>
-          <div class="btnRow">
-            <button id="btnAddChild" class="chip" disabled>Add child</button>
-            <button id="btnRename" class="chip" disabled>Rename</button>
-            <button id="btnDelete" class="chip" disabled>Delete</button>
-            <button id="btnMoveMode" class="chip" disabled>Move mode</button>
-          </div>
-          <div id="status" class="status">Load a tree file to begin.</div>
-          <div id="opsMeta" class="hint">Changes recorded: 0</div>
-        </div>
-      </section>
     </div>
 
     <button id="btnAddMobile" class="mobileAddFab" type="button" aria-label="Add item" title="Add item">+</button>
@@ -767,39 +665,6 @@
       if (isPipMode) document.body.classList.add("pipMode");
       const PIP_SNAPSHOT_KEY = "pocketLite.pip.snapshot.v1";
       const AUTO_CACHE_KEY = "pocketLite.auto.cache.v1";
-      const LAST_SAVE_SNAPSHOT_KEY = "pocketLite.lastSaveSnapshot.v1";
-      const PANE_ORDER_KEY = "pocketLite.layout.order.v1";
-      const AUTO_SOURCE_DEFAULT = "JSONs/pocket-data.json";
-      const AUTO_SOURCE_FALLBACKS = [
-        AUTO_SOURCE_DEFAULT,
-        "pocket-data.json",
-        "JSONs/portal.mtt.latest.json",
-        "portal.mtt.latest.json",
-        "JSONs/1portal.mtt.latest.json",
-      ];
-      const CHANGE_LOG_DEFAULT = "JSONs/pocket-change-log.ndjson";
-      const CHANGE_LOG_FALLBACKS = [
-        CHANGE_LOG_DEFAULT,
-        "pocket-change-log.ndjson",
-      ];
-      const MOVE_MODE_IDLE_MS = 12000;
-      const MOVE_PAD_REPEAT_INITIAL_MS = 260;
-      const MOVE_PAD_REPEAT_MS = 95;
-      const PANE_ORDER_OPTIONS = Object.freeze([
-        "tree_entry",
-        "entry_tree",
-      ]);
-      const PANE_ORDER_LABELS = Object.freeze({
-        tree_entry: "Tree → Remember",
-        entry_tree: "Remember → Tree",
-      });
-      const LEGACY_PANE_ORDER_MAP = Object.freeze({
-        filter_tree_entry: "tree_entry",
-        tree_filter_entry: "tree_entry",
-        tree_entry_filter: "tree_entry",
-        entry_tree_filter: "entry_tree",
-      });
-
       const state = {
         nodes: [],
         tombstones: [],
@@ -813,7 +678,6 @@
           schema: "",
           fileName: "",
           writtenAt: "",
-          loadedAt: "",
         },
         inlineEdit: {
           id: "",
@@ -824,9 +688,6 @@
           autoFocus: false,
         },
         moveMode: false,
-        pendingPathImport: null,
-        lastImportBatch: null,
-        paneOrder: "tree_entry",
         detailsEdit: {
           id: "",
           originalLabel: "",
@@ -837,8 +698,6 @@
           cycle: 0,
           lastAt: 0,
         },
-        hasSaveSnapshot: false,
-        lastSaveSnapshotAt: "",
         saveInProgress: false,
       };
       let titleToastTimer = null;
@@ -847,7 +706,6 @@
       let moveModeIdleTimer = null;
       let movePadRepeatStartTimer = null;
       let movePadRepeatInterval = null;
-      let statusToastActiveUntil = 0;
       let statusActionHandler = null;
       let lastDeleteUndoSnapshot = null;
       let lastMoveUndoSnapshot = null;
@@ -867,20 +725,13 @@
 
       const el = {
         btnUnfoldAll: document.getElementById("btnUnfoldAll"),
-        btnPaneOrder: document.getElementById("btnPaneOrder"),
         btnAddPrimary: document.getElementById("btnAddPrimary"),
         btnMovePrimary: document.getElementById("btnMovePrimary"),
         btnRenamePrimary: document.getElementById("btnRenamePrimary"),
         btnDeletePrimary: document.getElementById("btnDeletePrimary"),
         btnOpenPrimary: document.getElementById("btnOpenPrimary"),
-        btnImportNow: document.getElementById("btnImportNow"),
-        btnCancelImport: document.getElementById("btnCancelImport"),
-        btnUndoImport: document.getElementById("btnUndoImport"),
         btnLoad: document.getElementById("btnLoad"),
-        btnCopyTemplates: document.getElementById("btnCopyTemplates"),
-        btnRememberNow: document.getElementById("btnRememberNow"),
         btnPip: document.getElementById("btnPip"),
-        btnExportChanges: document.getElementById("btnExportChanges"),
         btnExportTree: document.getElementById("btnExportTree"),
         btnAddMobile: document.getElementById("btnAddMobile"),
         btnMovePadUp: document.getElementById("btnMovePadUp"),
@@ -890,18 +741,7 @@
         fileInput: document.getElementById("fileInput"),
         titleToast: document.getElementById("titleToast"),
         search: document.getElementById("search"),
-        sourceMeta: document.getElementById("sourceMeta"),
-        selectedMeta: document.getElementById("selectedMeta"),
-        draft: document.getElementById("draft"),
-        btnAddChild: document.getElementById("btnAddChild"),
-        btnRename: document.getElementById("btnRename"),
-        btnDelete: document.getElementById("btnDelete"),
-        btnMoveMode: document.getElementById("btnMoveMode"),
-        status: document.getElementById("status"),
-        opsMeta: document.getElementById("opsMeta"),
         focusPath: document.getElementById("focusPath"),
-        btnFocusUp: document.getElementById("btnFocusUp"),
-        layout: document.querySelector(".layout"),
         treeWrap: document.getElementById("treeWrap"),
         treeRoot: document.getElementById("treeRoot"),
         detailOverlay: document.getElementById("detailOverlay"),
@@ -912,49 +752,6 @@
         btnDetailSave: document.getElementById("btnDetailSave"),
         btnDetailCancel: document.getElementById("btnDetailCancel"),
       };
-
-      function normalisePaneOrder(value) {
-        const key = cleanText(value, 40).toLowerCase();
-        const mapped = LEGACY_PANE_ORDER_MAP[key] || key;
-        return PANE_ORDER_OPTIONS.includes(mapped) ? mapped : PANE_ORDER_OPTIONS[0];
-      }
-
-      function loadPaneOrder() {
-        try {
-          return normalisePaneOrder(localStorage.getItem(PANE_ORDER_KEY) || "");
-        } catch {
-          return PANE_ORDER_OPTIONS[0];
-        }
-      }
-
-      function savePaneOrder(value) {
-        try {
-          localStorage.setItem(PANE_ORDER_KEY, normalisePaneOrder(value));
-        } catch {}
-      }
-
-      function applyPaneOrder() {
-        const paneOrder = normalisePaneOrder(state.paneOrder);
-        state.paneOrder = paneOrder;
-        if (el.layout instanceof HTMLElement) {
-          el.layout.setAttribute("data-pane-order", paneOrder);
-        }
-        if (el.btnPaneOrder instanceof HTMLButtonElement) {
-          const label = PANE_ORDER_LABELS[paneOrder] || PANE_ORDER_LABELS[PANE_ORDER_OPTIONS[0]];
-          el.btnPaneOrder.textContent = "Layout";
-          el.btnPaneOrder.title = `Pane order: ${label}. Click to cycle.`;
-        }
-      }
-
-      function cyclePaneOrder() {
-        const current = normalisePaneOrder(state.paneOrder);
-        const currentIndex = Math.max(0, PANE_ORDER_OPTIONS.indexOf(current));
-        const next = PANE_ORDER_OPTIONS[(currentIndex + 1) % PANE_ORDER_OPTIONS.length];
-        state.paneOrder = next;
-        savePaneOrder(next);
-        applyPaneOrder();
-        setStatus(`Layout: ${PANE_ORDER_LABELS[next] || "updated"}.`, "ok");
-      }
 
       function nowIso() {
         return new Date().toISOString();
@@ -1197,13 +994,10 @@
         collapseAllNodes();
         state.selectedId = "";
         state.focusRootId = "";
-        state.pendingPathImport = null;
-        state.lastImportBatch = null;
         state.source = {
           schema: cleanText(sourceInfo.schema || norm.schema, 80),
           fileName: cleanText(sourceInfo.fileName, 120),
           writtenAt: cleanText(sourceInfo.writtenAt || norm.writtenAt, 40),
-          loadedAt: nowIso(),
         };
         const baselinePayload = {
           ...(state.rootExtras || {}),
@@ -1244,24 +1038,6 @@
         } catch {}
       }
 
-      function readLastSaveSnapshot() {
-        try {
-          const raw = localStorage.getItem(LAST_SAVE_SNAPSHOT_KEY);
-          if (!raw) return null;
-          const parsed = JSON.parse(raw);
-          if (!parsed || typeof parsed !== "object") return null;
-          const payload = parsed.payload && typeof parsed.payload === "object" ? parsed.payload : null;
-          if (!payload) return null;
-          return {
-            capturedAt: cleanText(parsed.capturedAt, 40),
-            source: parsed.source && typeof parsed.source === "object" ? parsed.source : {},
-            payload,
-          };
-        } catch {
-          return null;
-        }
-      }
-
       function saveLastSaveSnapshot(payload) {
         if (!payload || typeof payload !== "object") return false;
         const clone = safeJsonClone(payload, 5000000);
@@ -1277,51 +1053,11 @@
             },
             payload: clone,
           };
-          localStorage.setItem(LAST_SAVE_SNAPSHOT_KEY, JSON.stringify(entry));
-          state.hasSaveSnapshot = true;
-          state.lastSaveSnapshotAt = cleanText(entry.capturedAt, 40);
+          localStorage.setItem("pocketLite.lastSaveSnapshot.v1", JSON.stringify(entry));
           return true;
         } catch {
           return false;
         }
-      }
-
-      function restoreLastSaveSnapshot() {
-        const snapshot = readLastSaveSnapshot();
-        if (!snapshot || !snapshot.payload) {
-          setStatus("No saved snapshot yet.", "warn");
-          return false;
-        }
-        const unsavedCount = Array.isArray(state.ops) ? state.ops.length : 0;
-        if (unsavedCount > 0) {
-          const ok = window.confirm(
-            `Restore last snapshot and discard ${unsavedCount} unsaved change${unsavedCount === 1 ? "" : "s"}?`
-          );
-          if (!ok) {
-            setStatus("Restore cancelled.", "warn");
-            return false;
-          }
-        }
-        const norm = normaliseInput(snapshot.payload);
-        if (!Array.isArray(norm.nodes)) {
-          setStatus("Snapshot could not be restored.", "warn");
-          return false;
-        }
-        applyLoadedState(norm, {
-          schema: cleanText(snapshot?.source?.schema, 80) || norm.schema || "portal.export.v1",
-          fileName: "Last save snapshot",
-          writtenAt: cleanText(snapshot.capturedAt, 40) || cleanText(norm.writtenAt, 40),
-        });
-        recordOp({
-          type: "restore_last_snapshot",
-          snapshotAt: cleanText(snapshot.capturedAt, 40),
-        });
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus("Restored last snapshot.", "ok");
-        flashSaveChip("Restored");
-        return true;
       }
 
       function snapshotCurrentTreeForRestore() {
@@ -1340,7 +1076,6 @@
           },
         };
         const ok = saveLastSaveSnapshot(payload);
-        if (ok && el.btnRestoreLast) el.btnRestoreLast.disabled = !state.hasSaveSnapshot;
         return ok;
       }
 
@@ -1361,7 +1096,7 @@
             norm,
             source: {
               schema: cleanText(parsed?.source?.schema, 80) || "portal.mtt.web.v1",
-              fileName: cleanText(parsed?.source?.fileName, 120) || `${AUTO_SOURCE_DEFAULT} (cached)`,
+              fileName: cleanText(parsed?.source?.fileName, 120) || "JSONs/pocket-data.json (cached)",
               writtenAt: cleanText(parsed?.source?.writtenAt, 40),
             },
           };
@@ -1484,7 +1219,7 @@
       }
 
       async function loadLatestSnapshotFromChangeLog() {
-        for (const sourcePath of CHANGE_LOG_FALLBACKS) {
+        for (const sourcePath of ["JSONs/pocket-change-log.ndjson", "pocket-change-log.ndjson"]) {
           try {
             const text = await readSourceText(sourcePath);
             const entries = parseNdjsonLines(text);
@@ -1508,7 +1243,9 @@
         if (isPipMode) return false;
         if (state.nodes.length > 0) return true;
         const sourceParam = cleanText(url.searchParams.get("source"), 260);
-        const sourcePaths = sourceParam ? [sourceParam] : AUTO_SOURCE_FALLBACKS;
+        const sourcePaths = sourceParam
+          ? [sourceParam]
+          : ["JSONs/pocket-data.json"];
 
         for (const sourcePath of sourcePaths) {
           try {
@@ -1574,7 +1311,7 @@
           setStatus(`Loaded cached tree (${cached.norm.nodes.length} nodes).`, "ok");
           return true;
         }
-        const sourceHint = sourceParam || AUTO_SOURCE_DEFAULT;
+        const sourceHint = sourceParam || "JSONs/pocket-data.json";
         setStatus(`Auto-load could not read ${sourceHint}. Click "Open" once to seed cache.`, "warn");
         return false;
       }
@@ -1622,7 +1359,6 @@
             schema: cleanText(parsed.source && parsed.source.schema, 80),
             fileName: cleanText(parsed.source && parsed.source.fileName, 120),
             writtenAt: cleanText(parsed.source && parsed.source.writtenAt, 40),
-            loadedAt: nowIso(),
           };
           refreshMeta();
           renderTree();
@@ -1659,22 +1395,20 @@
         }
       }
 
-      function findTreeRowByNodeId(nodeId) {
-        const id = cleanText(nodeId, 80);
-        if (!id || !(el.treeWrap instanceof HTMLElement)) return null;
-        const rows = el.treeWrap.querySelectorAll(".row[data-node-id]");
-        for (const row of rows) {
-          if (!(row instanceof HTMLElement)) continue;
-          const rowId = cleanText(row.getAttribute("data-node-id"), 80);
-          if (rowId === id) return row;
-        }
-        return null;
-      }
-
       function showRowCopyToast(nodeId) {
         const id = cleanText(nodeId, 80);
         if (!id) return false;
-        const row = findTreeRowByNodeId(id);
+        if (!(el.treeWrap instanceof HTMLElement)) return false;
+        let row = null;
+        const rows = el.treeWrap.querySelectorAll(".row[data-node-id]");
+        for (const item of rows) {
+          if (!(item instanceof HTMLElement)) continue;
+          const rowId = cleanText(item.getAttribute("data-node-id"), 80);
+          if (rowId === id) {
+            row = item;
+            break;
+          }
+        }
         if (!(row instanceof HTMLElement)) return false;
         const prevTimer = rowCopyToastTimers.get(id);
         if (prevTimer) clearTimeout(prevTimer);
@@ -1823,19 +1557,6 @@
         return null;
       }
 
-      function findPathNode(labels) {
-        const parts = Array.isArray(labels) ? labels.map((v) => cleanText(v, 120)).filter(Boolean) : [];
-        if (parts.length === 0) return null;
-        let parentId = "root";
-        let found = null;
-        for (const part of parts) {
-          found = findChildByLabel(parentId, part);
-          if (!found) return null;
-          parentId = found.id;
-        }
-        return found;
-      }
-
       function ensurePathNodeUnder(rootParentId, labels) {
         const parts = Array.isArray(labels) ? labels.map((v) => cleanText(v, 120)).filter(Boolean) : [];
         if (parts.length === 0) return null;
@@ -1877,53 +1598,6 @@
           guard += 1;
         }
         return cur || null;
-      }
-
-      function inferAnchorHeadFromPaths(paths) {
-        if (!Array.isArray(paths) || paths.length === 0) return null;
-        const roots = state.nodes.filter((n) => (n.parentId || "root") === "root");
-        if (roots.length === 0) return null;
-        const byLabel = new Map();
-        for (const root of roots) {
-          const key = cleanText(root.label, 220).toLowerCase();
-          if (!key) continue;
-          if (!byLabel.has(key)) byLabel.set(key, root);
-        }
-        const matched = [];
-        for (const parts of paths) {
-          const first = Array.isArray(parts) && parts.length > 0 ? cleanText(parts[0], 220).toLowerCase() : "";
-          if (!first) return null;
-          const root = byLabel.get(first);
-          if (!root) return null;
-          matched.push(root.id);
-        }
-        const uniqueIds = Array.from(new Set(matched));
-        if (uniqueIds.length !== 1) return null;
-        const map = nodeMap();
-        return map.get(uniqueIds[0]) || null;
-      }
-
-      function inferSingleTopSegment(paths) {
-        if (!Array.isArray(paths) || paths.length === 0) return "";
-        const tops = [];
-        for (const parts of paths) {
-          const first = Array.isArray(parts) && parts.length > 0 ? cleanText(parts[0], 120) : "";
-          if (!first) return "";
-          tops.push(first);
-        }
-        const unique = Array.from(new Set(tops.map((x) => x.toLowerCase())));
-        if (unique.length !== 1) return "";
-        return tops[0];
-      }
-
-      function topLevelLabelSet() {
-        const out = new Set();
-        for (const n of state.nodes) {
-          if ((n.parentId || "root") !== "root") continue;
-          const label = cleanText(n.label, 220).toLowerCase();
-          if (label) out.add(label);
-        }
-        return out;
       }
 
       function extractIndentedPathsFromText(rawText) {
@@ -1979,15 +1653,34 @@
           .replace(/\r\n?/g, "\n")
           .replace(/[\u2028\u2029]/g, "\n");
         const withoutCommand = source.replace(/^\s*(?:add|new|create)\s+/i, "");
+        const isBoundaryBeforeSlash = (line, slashIndex) => {
+          if (slashIndex <= 0) return true;
+          const prev = line[slashIndex - 1] || "";
+          return /\s/.test(prev) || /[|,;:>\])}]/.test(prev);
+        };
 
         const normalisePathLine = (line) => {
           let cleaned = String(line || "").trim();
           if (!cleaned) return "";
-          cleaned = cleaned.replace(/^[>\-*\u2022]+\s*/, "");
-          cleaned = cleaned.replace(/^\d+[\.\)]\s+/, "");
+          cleaned = cleaned.replace(/^[>\-*\u2022\u00B7\u25E6\u2023\u25AA\u25CF]+\s*/, "");
+          cleaned = cleaned.replace(/^\d+[\.\)]\s*/, "");
+          cleaned = cleaned.replace(/^(?:add|new|create)\s+/i, "");
+          cleaned = cleaned.replace(/^`+|`+$/g, "");
           const firstSlash = cleaned.indexOf("/");
           if (firstSlash > 0 && /^[^a-z0-9/]+$/i.test(cleaned.slice(0, firstSlash))) {
             cleaned = cleaned.slice(firstSlash);
+          }
+          const slashCount = (cleaned.match(/\//g) || []).length;
+          if (
+            !cleaned.startsWith("/") &&
+            slashCount >= 2 &&
+            !/^[a-z][a-z0-9+.-]*:\/\//i.test(cleaned)
+          ) {
+            const parts = cleaned
+              .split("/")
+              .map((part) => cleanText(part, 120))
+              .filter(Boolean);
+            if (parts.length >= 2) cleaned = `/${parts.join("/")}`;
           }
           return cleanText(cleaned, 900);
         };
@@ -2015,7 +1708,7 @@
           let starts = [];
           for (let i = 0; i < compact.length; i += 1) {
             if (compact[i] !== "/") continue;
-            if (i === 0 || /\s/.test(compact[i - 1])) starts.push(i);
+            if (isBoundaryBeforeSlash(compact, i)) starts.push(i);
           }
 
           if (starts.length < 2) {
@@ -2117,6 +1810,20 @@
         }
 
         if (entries.length === 0) return { matched: false, ok: false };
+        if (entries.length === 1) {
+          const compactSource = withoutCommand.replace(/\s+/g, " ").trim();
+          const slashCount = (compactSource.match(/\//g) || []).length;
+          const looksSingleLine = compactSource.length > 0 && !withoutCommand.includes("\n");
+          // Safety: very long single-line slash input is almost always a collapsed list.
+          // Reject it loudly so we never silently import one giant malformed branch.
+          if (looksSingleLine && slashCount >= 12) {
+            return {
+              matched: true,
+              ok: false,
+              message: "Path list looks collapsed into one line. Use one /path/item per line before import.",
+            };
+          }
+        }
         return { matched: true, ok: true, entries };
       }
 
@@ -2249,53 +1956,6 @@
         return indented;
       }
 
-      function analyseBulkPathIntent(rawText) {
-        const raw = String(rawText || "");
-        const lines = raw
-          .split(/\r?\n/)
-          .map((line) => cleanText(line, 400))
-          .filter(Boolean);
-        if (lines.length < 2) {
-          return {
-            lineCount: lines.length,
-            parsedPathCount: 0,
-            pathishCount: 0,
-            parsedThreshold: 0,
-            pathishThreshold: 0,
-            isLikelyBulk: false,
-          };
-        }
-        const parsedPathCount = extractSlashPathsFromText(raw).length;
-        const parsedThreshold = Math.max(2, Math.ceil(lines.length * 0.4));
-        let pathishCount = 0;
-        for (const rawLine of lines) {
-          let line = rawLine;
-          line = line.replace(/^>+\s+/, "");
-          line = line.replace(/^[-*+]\s+\[[xX ]\]\s+/, "");
-          line = line.replace(/^[*\-+•]\s+/, "");
-          line = line.replace(/^\d+[.)]\s+/, "");
-          line = line.replace(/^add\s+/i, "").trim();
-          if (/[\\/]|->|>|\|/.test(line)) pathishCount += 1;
-        }
-        const pathishThreshold = Math.max(2, Math.ceil(lines.length * 0.5));
-        const isLikelyBulk = (
-          (parsedPathCount > 0 && parsedPathCount >= parsedThreshold)
-          || pathishCount >= pathishThreshold
-        );
-        return {
-          lineCount: lines.length,
-          parsedPathCount,
-          pathishCount,
-          parsedThreshold,
-          pathishThreshold,
-          isLikelyBulk,
-        };
-      }
-
-      function looksLikeBulkPathIntent(rawText) {
-        return analyseBulkPathIntent(rawText).isLikelyBulk;
-      }
-
       function isMostlyFlatPathList(paths) {
         const safe = Array.isArray(paths) ? paths : [];
         if (safe.length < 8) return false;
@@ -2307,7 +1967,12 @@
       }
 
       function buildPathImportPlan(paths, anchorHead) {
-        const topLevelNames = topLevelLabelSet();
+        const topLevelNames = new Set();
+        for (const n of state.nodes) {
+          if ((n.parentId || "root") !== "root") continue;
+          const label = cleanText(n.label, 220).toLowerCase();
+          if (label) topLevelNames.add(label);
+        }
         const keySep = "\u0000";
         const childByKey = new Map();
         for (const n of state.nodes) {
@@ -2367,7 +2032,6 @@
 
       function queuePathImport(rawText, options = {}) {
         const opts = {
-          clearDraft: false,
           requireAnchor: false,
           sourceInfo: null,
           ...options,
@@ -2394,9 +2058,55 @@
           setStatus("Import looks like a flat list. Focus a destination node first, then import.", "warn");
           return -1;
         }
-        const inferredTop = inferSingleTopSegment(paths);
+        let inferredTop = "";
+        if (Array.isArray(paths) && paths.length > 0) {
+          const tops = [];
+          let validTop = true;
+          for (const parts of paths) {
+            const first = Array.isArray(parts) && parts.length > 0 ? cleanText(parts[0], 120) : "";
+            if (!first) {
+              validTop = false;
+              break;
+            }
+            tops.push(first);
+          }
+          if (validTop) {
+            const unique = Array.from(new Set(tops.map((x) => x.toLowerCase())));
+            if (unique.length === 1) inferredTop = tops[0];
+          }
+        }
         if (opts.requireAnchor && !anchorHead) {
-          anchorHead = inferAnchorHeadFromPaths(paths);
+          const roots = state.nodes.filter((n) => (n.parentId || "root") === "root");
+          if (roots.length > 0) {
+            const byLabel = new Map();
+            for (const root of roots) {
+              const key = cleanText(root.label, 220).toLowerCase();
+              if (!key) continue;
+              if (!byLabel.has(key)) byLabel.set(key, root);
+            }
+            const matched = [];
+            let canInfer = true;
+            for (const parts of paths) {
+              const first = Array.isArray(parts) && parts.length > 0 ? cleanText(parts[0], 220).toLowerCase() : "";
+              if (!first) {
+                canInfer = false;
+                break;
+              }
+              const root = byLabel.get(first);
+              if (!root) {
+                canInfer = false;
+                break;
+              }
+              matched.push(root.id);
+            }
+            if (canInfer) {
+              const uniqueIds = Array.from(new Set(matched));
+              if (uniqueIds.length === 1) {
+                const map = nodeMap();
+                anchorHead = map.get(uniqueIds[0]) || null;
+              }
+            }
+          }
         }
         if (opts.requireAnchor && !anchorHead && !inferredTop) {
           setStatus("Pick a head node first, then import.", "warn");
@@ -2407,21 +2117,18 @@
           setStatus("No valid path lines to import.", "warn");
           return -1;
         }
-        const ROOT_SAFETY_TOP_LEVEL_LIMIT = 8;
         const hasSharedFirstSegment = !!inferredTop;
-        if (!anchorHead && !hasSharedFirstSegment && plan.newTopLevelCount >= ROOT_SAFETY_TOP_LEVEL_LIMIT) {
+        if (!anchorHead && !hasSharedFirstSegment && plan.newTopLevelCount >= 8) {
           setStatus(
-            `Safety check: preview would create ${plan.newTopLevelCount} new top-level nodes. Focus a destination first, or use a shared first segment path like /Role Map/...`,
+            `Safety check: import would create ${plan.newTopLevelCount} new top-level nodes. Focus a destination first, or use a shared first segment path like /Role Map/...`,
             "warn"
           );
           return -1;
         }
-        state.pendingPathImport = {
-          queuedAt: nowIso(),
+        const pending = {
           anchorHeadId: anchorHead ? anchorHead.id : "",
           autoAnchorHeadLabel: (!anchorHead && hasSharedFirstSegment) ? inferredTop : "",
           sourceInfo: opts.sourceInfo && typeof opts.sourceInfo === "object" ? opts.sourceInfo : null,
-          clearDraft: !!opts.clearDraft,
           entries: plan.entries,
           pathCount: plan.pathCount,
           newNodeCount: plan.newNodeCount,
@@ -2429,19 +2136,18 @@
           newTopLevelCount: plan.newTopLevelCount,
           ignoredNonAbsoluteCount,
         };
-        if (opts.clearDraft) el.draft.value = "";
         const targetText = anchorHead
           ? getPath(anchorHead.id)
           : (inferredTop || "inferred root path");
-        let previewTargetNode = anchorHead || null;
-        if (!previewTargetNode && inferredTop) {
-          previewTargetNode = findChildByLabel("root", inferredTop);
+        let importTargetNode = anchorHead || null;
+        if (!importTargetNode && inferredTop) {
+          importTargetNode = findChildByLabel("root", inferredTop);
         }
-        if (previewTargetNode) {
-          state.selectedId = previewTargetNode.id;
-          state.focusRootId = previewTargetNode.id;
-          state.collapsed.delete(previewTargetNode.id);
-          expandPathToNode(previewTargetNode.id);
+        if (importTargetNode) {
+          state.selectedId = importTargetNode.id;
+          state.focusRootId = importTargetNode.id;
+          state.collapsed.delete(importTargetNode.id);
+          expandPathToNode(importTargetNode.id);
         }
         const ignoredText = ignoredNonAbsoluteCount > 0
           ? ` Ignored ${ignoredNonAbsoluteCount} non-path line${ignoredNonAbsoluteCount === 1 ? "" : "s"}.`
@@ -2450,20 +2156,28 @@
           ? " Auto-anchor: first segment."
           : "";
         setStatus(
-          `Import ready: ${plan.pathCount} path line${plan.pathCount === 1 ? "" : "s"}, ${plan.newNodeCount} new, ${plan.existingCount} existing. Target: ${targetText}.${anchorModeText}${ignoredText} Click Import now or Cancel import.`,
+          `Importing ${plan.pathCount} path line${plan.pathCount === 1 ? "" : "s"} to ${targetText}.${anchorModeText}${ignoredText}`,
           "ok"
         );
         refreshMeta();
         renderTree();
         persistPipSnapshot();
-        if (previewTargetNode) revealPreviewTargetNode(previewTargetNode.id);
-        return plan.pathCount;
+        if (importTargetNode && el.treeRoot) {
+          requestAnimationFrame(() => {
+            const escaped = (window.CSS && typeof window.CSS.escape === "function")
+              ? window.CSS.escape(importTargetNode.id)
+              : String(importTargetNode.id).replace(/"/g, '\\"');
+            const row = el.treeRoot.querySelector(`[data-node-id="${escaped}"]`);
+            if (!row) return;
+            row.scrollIntoView({ block: "nearest", inline: "nearest" });
+          });
+        }
+        return commitPathImport(pending);
       }
 
-      function commitPendingPathImport() {
-        const pending = state.pendingPathImport;
+      function commitPathImport(pending) {
         if (!pending || !Array.isArray(pending.entries) || pending.entries.length === 0) {
-          setStatus("No pending import.", "warn");
+          setStatus("Nothing to import.", "warn");
           return 0;
         }
         // Safety snapshot before bulk import, so Restore last can recover quickly.
@@ -2481,7 +2195,6 @@
           },
         };
         saveLastSaveSnapshot(safetyPayload);
-        if (el.btnRestoreLast) el.btnRestoreLast.disabled = !state.hasSaveSnapshot;
         const map = nodeMap();
         let anchorHead = pending.anchorHeadId ? (map.get(pending.anchorHeadId) || null) : null;
         if (!anchorHead) {
@@ -2532,16 +2245,8 @@
             schema: cleanText(pending.sourceInfo.schema, 80) || "path.lines",
             fileName: cleanText(pending.sourceInfo.fileName, 120),
             writtenAt: cleanText(pending.sourceInfo.writtenAt, 40),
-            loadedAt: nowIso(),
           };
         }
-        state.lastImportBatch = {
-          createdIds,
-          pathCount: pending.pathCount || 0,
-          anchorHeadId: anchorHead ? anchorHead.id : (pending.anchorHeadId || ""),
-          at: nowIso(),
-        };
-        state.pendingPathImport = null;
         recordOp({
           type: "import_paths",
           pathCount: pending.pathCount || 0,
@@ -2551,77 +2256,32 @@
         refreshMeta();
         renderTree();
         persistPipSnapshot();
-        if (focusNode) revealImportedNode(focusNode.id);
+        if (focusNode && el.treeRoot) {
+          requestAnimationFrame(() => {
+            const escaped = (window.CSS && typeof window.CSS.escape === "function")
+              ? window.CSS.escape(focusNode.id)
+              : String(focusNode.id).replace(/"/g, '\\"');
+            const row = el.treeRoot.querySelector(`[data-node-id="${escaped}"]`);
+            if (!row) return;
+            row.scrollIntoView({ block: "nearest", inline: "nearest" });
+            row.classList.add("importFlash");
+            if (importRevealTimer) {
+              clearTimeout(importRevealTimer);
+              importRevealTimer = null;
+            }
+            importRevealTimer = window.setTimeout(() => {
+              row.classList.remove("importFlash");
+            }, 1200);
+          });
+        }
         const importPath = focusNode ? getPath(focusNode.id) : (anchorHead ? getPath(anchorHead.id) : "");
         const ignoredNonAbsoluteCount = Math.max(0, Number(pending.ignoredNonAbsoluteCount || 0));
         const ignoredText = ignoredNonAbsoluteCount > 0
           ? ` Ignored ${ignoredNonAbsoluteCount} non-path line${ignoredNonAbsoluteCount === 1 ? "" : "s"}.`
           : "";
         setStatus(importPath ? `Imported to: ${importPath}.${ignoredText}` : `Imported ${pending.pathCount} path line${pending.pathCount === 1 ? "" : "s"}.${ignoredText}`, "ok");
+        refocusTreeNavigation(state.selectedId || (focusNode ? focusNode.id : ""));
         return pending.pathCount || 0;
-      }
-
-      function cancelPendingPathImport() {
-        const pending = state.pendingPathImport;
-        const count = pending && Number(pending.pathCount || 0) > 0 ? Number(pending.pathCount) : 0;
-        if (count === 0) {
-          setStatus("No pending import.", "warn");
-          return 0;
-        }
-        state.pendingPathImport = null;
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus(`Import preview cleared (${count}).`, "ok");
-        return count;
-      }
-
-      function undoLastImportBatch() {
-        const batch = state.lastImportBatch;
-        if (!batch || !Array.isArray(batch.createdIds) || batch.createdIds.length === 0) {
-          setStatus("No import to undo.", "warn");
-          return 0;
-        }
-        const drop = new Set(batch.createdIds.map((id) => cleanText(id, 80)).filter(Boolean));
-        const before = state.nodes.length;
-        state.nodes = state.nodes.filter((n) => !drop.has(n.id));
-        const removed = Math.max(0, before - state.nodes.length);
-        if (removed === 0) {
-          state.lastImportBatch = null;
-          refreshMeta();
-          renderTree();
-          persistPipSnapshot();
-          setStatus("Nothing changed to undo.", "warn");
-          return 0;
-        }
-        const deletedAt = nowIso();
-        state.tombstones.push(...Array.from(drop).map((id) => ({ id, deletedAt })));
-        if (state.selectedId && drop.has(state.selectedId)) state.selectedId = "";
-        if (state.focusRootId && drop.has(state.focusRootId)) state.focusRootId = "";
-        state.lastImportBatch = null;
-        recordOp({
-          type: "undo_import_paths",
-          removed,
-        });
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus(`Undo import: removed ${removed} node${removed === 1 ? "" : "s"}.`, "ok");
-        return removed;
-      }
-
-      function ancestorIds(nodeId) {
-        const map = nodeMap();
-        const out = [];
-        let cur = map.get(nodeId) || null;
-        let guard = 0;
-        while (cur && guard < 200) {
-          out.push(cur.id);
-          if (!cur.parentId || cur.parentId === "root") break;
-          cur = map.get(cur.parentId) || null;
-          guard += 1;
-        }
-        return out;
       }
 
       function getExpandableIds() {
@@ -2640,28 +2300,15 @@
       }
 
       function expandPathToNode(nodeId) {
-        const ids = ancestorIds(nodeId);
-        for (const id of ids) state.collapsed.delete(id);
-      }
-
-      function focusUpOneLevel() {
-        if (!state.focusRootId) return;
         const map = nodeMap();
-        const current = map.get(state.focusRootId);
-        if (!current) {
-          state.focusRootId = "";
-          refreshMeta();
-          renderTree();
-          persistPipSnapshot();
-          return;
+        let cur = map.get(nodeId) || null;
+        let guard = 0;
+        while (cur && guard < 200) {
+          state.collapsed.delete(cur.id);
+          if (!cur.parentId || cur.parentId === "root") break;
+          cur = map.get(cur.parentId) || null;
+          guard += 1;
         }
-        const next = current.parentId && current.parentId !== "root" ? current.parentId : "";
-        state.focusRootId = next;
-        state.selectedId = next || current.id;
-        if (next) state.collapsed.add(next);
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
       }
 
       function toggleUnfoldAll() {
@@ -2682,36 +2329,6 @@
         renderTree();
         refocusTreeNavigation(state.selectedId);
         persistPipSnapshot();
-      }
-
-      function focusTodayNode() {
-        const todayNode = findPathNode(["Work (CoA)", "Current"])
-          || findPathNode(["Personal", "Today"])
-          || findPathNode(["Today"]);
-        if (!todayNode) {
-          setStatus('Could not find "Today" node.', "warn");
-          return;
-        }
-        state.focusRootId = todayNode.id;
-        state.selectedId = todayNode.id;
-        state.collapsed.add(todayNode.id);
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus(`Focused: ${getPath(todayNode.id)}.`, "ok");
-      }
-
-      function focusSelectedNode() {
-        if (!state.selectedId) {
-          setStatus("Select a node first.", "warn");
-          return;
-        }
-        state.focusRootId = state.selectedId;
-        state.collapsed.add(state.selectedId);
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus(`Focused: ${getPath(state.selectedId)}.`, "ok");
       }
 
       function isDetailsEditorOpen() {
@@ -2857,71 +2474,6 @@
         }
       }
 
-      function isDescendantOf(nodeId, ancestorId) {
-        if (!nodeId || !ancestorId) return false;
-        const map = nodeMap();
-        let cur = map.get(nodeId) || null;
-        let guard = 0;
-        while (cur && guard < 200) {
-          if (cur.id === ancestorId) return true;
-          if (!cur.parentId || cur.parentId === "root") return false;
-          cur = map.get(cur.parentId) || null;
-          guard += 1;
-        }
-        return false;
-      }
-
-      function moveSelectedToFocus() {
-        if (!state.selectedId) {
-          setStatus("Select a node to move.", "warn");
-          return;
-        }
-        if (!state.focusRootId) {
-          setStatus("Open (focus) a destination node first.", "warn");
-          return;
-        }
-        if (state.selectedId === state.focusRootId) {
-          setStatus("Selected node is already focused.", "warn");
-          return;
-        }
-        if (isDescendantOf(state.focusRootId, state.selectedId)) {
-          setStatus("Cannot move a node into one of its own children.", "warn");
-          return;
-        }
-        const map = nodeMap();
-        const node = map.get(state.selectedId);
-        const target = map.get(state.focusRootId);
-        if (!node || !target) {
-          setStatus("Move failed: selected or destination node not found.", "warn");
-          return;
-        }
-        if ((node.parentId || "root") === target.id) {
-          setStatus(`"${node.label}" is already under ${getPath(target.id)}.`, "warn");
-          return;
-        }
-        const fromPath = getPath(node.id);
-        const toPath = getPath(target.id);
-        lastMoveUndoSnapshot = createTreeUndoSnapshot("move_to_focus");
-        lastTreeUndoKind = "move";
-        node.parentId = target.id;
-        node.order = maxSiblingOrder(target.id) + 1;
-        node.updatedAt = nowIso();
-        recordOp({
-          type: "move",
-          id: node.id,
-          from: fromPath,
-          to: `${toPath} > ${node.label}`,
-        });
-        expandPathToNode(node.id);
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus(`Moved "${node.label}" to ${toPath}.`, "ok", {
-          actionLabel: "Undo",
-          onAction: () => undoLastMoveAction(),
-        });
-      }
-
       function isUnderCopyTemplates(nodeId) {
         const map = nodeMap();
         let cur = map.get(nodeId) || null;
@@ -2970,7 +2522,6 @@
           ...op,
           at: nowIso(),
         });
-        el.opsMeta.textContent = `Changes recorded: ${state.ops.length}`;
       }
 
       function cloneForUndo(value) {
@@ -3064,34 +2615,7 @@
 
         const nextIdx = msg.toLowerCase().indexOf(" next:");
         if (nextIdx > 0) msg = msg.slice(0, nextIdx).trim();
-
-        if (/^Loaded \d+ node/i.test(msg)) {
-          msg = msg.replace(/ from .*$/i, ".");
-        } else if (/^Import ready:/i.test(msg)) {
-          msg = "Import ready.";
-        } else if (/^Imported \d+ path line/i.test(msg)) {
-          msg = "Import complete.";
-        } else if (/^Undo import:/i.test(msg)) {
-          msg = "Import undone.";
-        } else if (/^Copy Templates focused/i.test(msg)) {
-          msg = "Copy mode ready.";
-        } else if (/^Move mode on/i.test(msg)) {
-          msg = "Nudge mode on.";
-        } else if (/^Move mode off/i.test(msg)) {
-          msg = "Nudge mode off.";
-        } else if (/^Remembered \d+ item/i.test(msg)) {
-          msg = msg.replace(/ in .*/i, ".");
-        } else if (/^Focused:/i.test(msg)) {
-          msg = msg.replace(/^Focused:\s*/i, "Focus: ");
-        } else if (/^Select a node first\./i.test(msg)) {
-          msg = "Pick a node first.";
-        } else if (/^Open \(focus\) or select a destination node first\./i.test(msg)) {
-          msg = "Pick a destination first.";
-        } else if (/^Type one or more lines/i.test(msg)) {
-          msg = "Type something first.";
-        } else if (/^Type a new label/i.test(msg)) {
-          msg = "Type a new name first.";
-        }
+        msg = msg.replace(/\s+/g, " ").trim();
 
         if (!kind && msg.length > 74) {
           msg = `${msg.slice(0, 71).trimEnd()}...`;
@@ -3101,49 +2625,12 @@
         return msg;
       }
 
-      function showDraftHintToast() {
-        if (!el.titleToast) return;
-        if (Date.now() < statusToastActiveUntil) return;
-        const raw = String(el.draft?.value || "");
-        const lines = raw.split(/\r?\n/);
-        const nonBlank = lines.filter((line) => cleanText(line, 260).length > 0);
-        const firstLine = nonBlank[0] || "";
-        const directed = parseDirectedDraft(raw);
-        const hasDirectedPrefix = /^\s*(add\s+to\s+\/|add\s+.+\s+to\s+\/|to\s+\/)/i.test(firstLine);
-        const parsedPathCount = extractSlashPathsFromText(raw).length;
-        const hasPathIntent = parsedPathCount > 0 && (
-          nonBlank.length > 1
-          || /^\s*[\/>*\-+]/.test(raw)
-          || /[\\/]|->|>|\|/.test(nonBlank[0] || "")
-        );
-        const hasPendingImport = !!(state.pendingPathImport && Number(state.pendingPathImport.pathCount || 0) > 0);
-        let hint = "Enter to save.";
-        if (!nonBlank.length) {
-          hint = hasPendingImport ? "Import ready: Enter or click Import." : "Enter to save.";
-        } else if (directed) {
-          hint = "Enter to save to path.";
-        } else if (hasDirectedPrefix) {
-          hint = "Add item text, then Enter.";
-        } else if (hasPathIntent) {
-          hint = "Enter to preview import.";
-        } else if (nonBlank.length > 1) {
-          hint = "Enter to save lines.";
-        } else if (/^\s*(add|move|rename|delete|open|find)\b/i.test(nonBlank[0])) {
-          hint = "Enter to run.";
-        } else {
-          hint = "Enter to remember.";
-        }
-        el.titleToast.textContent = hint;
-        el.titleToast.className = "topStatusToast show";
-      }
-
       function setStatus(text, kind = "", options = {}) {
         const opts = options && typeof options === "object" ? options : {};
-        const actionLabel = cleanText(opts.actionLabel, 20);
-        const actionHandler = typeof opts.onAction === "function" ? opts.onAction : null;
+        const action = opts.action && typeof opts.action === "object" ? opts.action : null;
+        const actionLabel = cleanText(action && action.label, 20);
+        const actionHandler = typeof (action && action.onClick) === "function" ? action.onClick : null;
         statusActionHandler = actionLabel && actionHandler ? actionHandler : null;
-        el.status.className = `status${kind ? ` ${kind}` : ""}`;
-        el.status.textContent = text;
         if (!el.titleToast) return;
         if (titleToastTimer) {
           clearTimeout(titleToastTimer);
@@ -3172,13 +2659,11 @@
         const hideAfterMs = Number.isFinite(requestedMs) && requestedMs > 0
           ? Math.max(actionMinMs, requestedMs)
           : actionMinMs;
-        statusToastActiveUntil = Date.now() + hideAfterMs;
         titleToastTimer = window.setTimeout(() => {
           statusActionHandler = null;
           el.titleToast.removeAttribute("tabindex");
           el.titleToast.removeAttribute("role");
           el.titleToast.classList.remove("show");
-          showDraftHintToast();
         }, hideAfterMs);
       }
 
@@ -3198,58 +2683,14 @@
         }, 1200);
       }
 
-      function revealImportedNode(nodeId) {
-        if (!nodeId || !el.treeRoot) return;
-        requestAnimationFrame(() => {
-          const escaped = (window.CSS && typeof window.CSS.escape === "function")
-            ? window.CSS.escape(nodeId)
-            : String(nodeId).replace(/"/g, '\\"');
-          const row = el.treeRoot.querySelector(`[data-node-id="${escaped}"]`);
-          if (!row) return;
-          row.scrollIntoView({ block: "nearest", inline: "nearest" });
-          row.classList.add("importFlash");
-          if (importRevealTimer) {
-            clearTimeout(importRevealTimer);
-            importRevealTimer = null;
-          }
-          importRevealTimer = window.setTimeout(() => {
-            row.classList.remove("importFlash");
-          }, 1200);
-        });
-      }
-
-      function revealPreviewTargetNode(nodeId) {
-        if (!nodeId || !el.treeRoot) return;
-        requestAnimationFrame(() => {
-          const escaped = (window.CSS && typeof window.CSS.escape === "function")
-            ? window.CSS.escape(nodeId)
-            : String(nodeId).replace(/"/g, '\\"');
-          const row = el.treeRoot.querySelector(`[data-node-id="${escaped}"]`);
-          if (!row) return;
-          row.scrollIntoView({ block: "nearest", inline: "nearest" });
-        });
-      }
-
       function refreshMeta() {
-        const src = state.source;
-        el.sourceMeta.textContent = src.fileName
-          ? `Loaded: ${src.fileName}${src.schema ? ` | ${src.schema}` : ""}${src.writtenAt ? ` | written ${src.writtenAt}` : ""}`
-          : "No file loaded yet.";
         if (!state.selectedId) state.moveMode = false;
-        if (!state.selectedId) {
-          el.selectedMeta.textContent = "Selected: none";
-        } else {
-          const path = getPath(state.selectedId);
-          el.selectedMeta.textContent = path ? `Selected: ${path}` : "Selected: none";
-        }
         const focusPath = state.focusRootId ? getPath(state.focusRootId) : "";
         if (el.focusPath) el.focusPath.textContent = focusPath ? `Focus: ${focusPath}` : "Focus: all";
-        if (el.btnFocusUp) el.btnFocusUp.disabled = !focusPath;
         const hasData = state.nodes.length > 0;
         const unsavedCount = Array.isArray(state.ops) ? state.ops.length : 0;
         const hasUnsaved = unsavedCount > 0;
         const hasSelection = !!state.selectedId;
-        const hasFocus = !!state.focusRootId;
         const expandableIds = getExpandableIds();
         const anyCollapsed = expandableIds.some((id) => state.collapsed.has(id));
         if (el.btnUnfoldAll) {
@@ -3271,47 +2712,6 @@
         if (el.btnRenamePrimary) el.btnRenamePrimary.disabled = !hasSelection;
         if (el.btnDeletePrimary) el.btnDeletePrimary.disabled = !hasSelection;
         if (el.btnOpenPrimary) el.btnOpenPrimary.disabled = !hasSelection;
-        if (el.btnImportNow) {
-          const pending = state.pendingPathImport;
-          const ready = !!pending && Number(pending.pathCount || 0) > 0;
-          el.btnImportNow.disabled = !ready;
-          el.btnImportNow.textContent = ready
-            ? `Import (${pending.pathCount})`
-            : "Import now";
-          if (ready) {
-            const map = nodeMap();
-            const anchorId = cleanText(pending.anchorHeadId, 80);
-            const anchor = anchorId ? (map.get(anchorId) || null) : null;
-            const targetText = anchor
-              ? getPath(anchor.id)
-              : (cleanText(pending.autoAnchorHeadLabel, 120) || "inferred root path");
-            el.btnImportNow.title = `Import ${pending.pathCount} lines, ${pending.newNodeCount || 0} new, ${pending.existingCount || 0} existing. Target: ${targetText}.`;
-          } else {
-            el.btnImportNow.title = "No pending import.";
-          }
-        }
-        if (el.btnCancelImport) {
-          const pending = state.pendingPathImport;
-          const count = pending && Number(pending.pathCount || 0) > 0 ? Number(pending.pathCount) : 0;
-          el.btnCancelImport.disabled = !(count > 0);
-          el.btnCancelImport.textContent = count > 0
-            ? "Cancel"
-            : "Cancel import";
-          el.btnCancelImport.title = count > 0
-            ? `Cancel pending import (${count} lines).`
-            : "No pending import.";
-        }
-        if (el.btnUndoImport) {
-          const batch = state.lastImportBatch;
-          const count = batch && Array.isArray(batch.createdIds) ? batch.createdIds.length : 0;
-          el.btnUndoImport.disabled = !(count > 0);
-          el.btnUndoImport.textContent = count > 0
-            ? `Undo import (${count})`
-            : "Undo import";
-        }
-        if (el.btnCopyTemplates) el.btnCopyTemplates.disabled = !hasData;
-        if (el.btnRememberNow) el.btnRememberNow.disabled = !hasData;
-        el.btnExportChanges.disabled = !hasData;
         const isSaving = !!state.saveInProgress;
         el.btnExportTree.disabled = !hasData || isSaving;
         if (isSaving) {
@@ -3322,20 +2722,6 @@
           el.btnExportTree.title = hasUnsaved
             ? `${unsavedCount} unsaved change${unsavedCount === 1 ? "" : "s"}`
             : "No unsaved changes";
-        }
-        if (el.btnRestoreLast) {
-          el.btnRestoreLast.disabled = !state.hasSaveSnapshot;
-          el.btnRestoreLast.title = state.lastSaveSnapshotAt
-            ? `Restore snapshot from ${state.lastSaveSnapshotAt}`
-            : "No snapshot available yet";
-        }
-        el.btnAddChild.disabled = !state.selectedId;
-        el.btnRename.disabled = !state.selectedId;
-        el.btnDelete.disabled = !state.selectedId;
-        if (el.btnMoveMode) {
-          el.btnMoveMode.disabled = !state.selectedId;
-          el.btnMoveMode.classList.toggle("on", !!state.moveMode && !!state.selectedId);
-          el.btnMoveMode.textContent = state.moveMode && state.selectedId ? "Done moving" : "Move mode";
         }
         const movePadEnabled = !!state.moveMode && !!state.selectedId;
         if (el.btnMovePadUp) el.btnMovePadUp.disabled = !movePadEnabled;
@@ -3417,7 +2803,6 @@
             },
           };
           saveLastSaveSnapshot(safetyPayload);
-          if (el.btnRestoreLast) el.btnRestoreLast.disabled = !state.hasSaveSnapshot;
           clearInlineEditState();
           if (edit.isNew && node && !state.nodes.some((entry) => (entry.parentId || "root") === node.id)) {
             state.nodes = state.nodes.filter((entry) => entry.id !== node.id);
@@ -3555,12 +2940,26 @@
           setStatus("Selected node was not found.", "warn");
           return false;
         }
-        const ids = collectSubtreeIds(node.id);
+        const byParent = childrenMap();
+        const ids = [];
+        const q = [node.id];
+        const seen = new Set();
+        while (q.length > 0) {
+          const id = q.shift();
+          if (!id || seen.has(id)) continue;
+          seen.add(id);
+          ids.push(id);
+          const kids = byParent.get(id) || [];
+          for (const k of kids) q.push(k.id);
+        }
         const childCount = Math.max(0, ids.length - 1);
         const message = childCount > 0
           ? `Delete "${node.label}" and ${childCount} child item(s)?`
           : `Delete "${node.label}"?`;
-        if (opts.confirm && !window.confirm(message)) return false;
+        if (opts.confirm && !window.confirm(message)) {
+          refocusTreeNavigation(state.selectedId || node.id);
+          return false;
+        }
 
         // Safety snapshot before destructive delete, so Restore last can recover quickly.
         const safetyPayload = {
@@ -3577,7 +2976,6 @@
           },
         };
         saveLastSaveSnapshot(safetyPayload);
-        if (el.btnRestoreLast) el.btnRestoreLast.disabled = !state.hasSaveSnapshot;
 
         const drop = new Set(ids);
         lastDeleteUndoSnapshot = createTreeUndoSnapshot("delete");
@@ -3598,8 +2996,7 @@
         if (state.inlineEdit.id && drop.has(state.inlineEdit.id)) clearInlineEditState();
         state.selectedId = fallbackSelection;
         setStatus(`Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}.`, "ok", {
-          actionLabel: "Undo",
-          onAction: () => undoLastDeleteAction(),
+          action: { label: "Undo", onClick: () => undoLastDeleteAction() },
         });
         refreshMeta();
         renderTree();
@@ -3637,8 +3034,7 @@
         renderTree();
         persistPipSnapshot();
         setStatus(`Indented "${node.label}" under "${previousSibling.label}".`, "ok", {
-          actionLabel: "Undo",
-          onAction: () => undoLastMoveAction(),
+          action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
       }
 
@@ -3674,8 +3070,7 @@
         renderTree();
         persistPipSnapshot();
         setStatus(`Outdented "${node.label}".`, "ok", {
-          actionLabel: "Undo",
-          onAction: () => undoLastMoveAction(),
+          action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
       }
 
@@ -3713,8 +3108,7 @@
         renderTree();
         persistPipSnapshot();
         setStatus(`${direction < 0 ? "Moved up" : "Moved down"}: "${node.label}".`, "ok", {
-          actionLabel: "Undo",
-          onAction: () => undoLastMoveAction(),
+          action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
       }
 
@@ -3752,6 +3146,23 @@
           if (el.treeWrap instanceof HTMLElement) {
             el.treeWrap.focus({ preventScroll: true });
           }
+        });
+      }
+
+      function clearFilterForCopyLoop() {
+        if (!(el.search instanceof HTMLInputElement)) return false;
+        const hadFilter = cleanText(el.search.value, 120).length > 0;
+        if (!hadFilter) return false;
+        el.search.value = "";
+        return true;
+      }
+
+      function refocusFilterForCopyLoop() {
+        if (!(el.search instanceof HTMLInputElement)) return;
+        requestAnimationFrame(() => {
+          if (!(el.search instanceof HTMLInputElement)) return;
+          el.search.focus({ preventScroll: true });
+          el.search.setSelectionRange(0, 0);
         });
       }
 
@@ -3889,8 +3300,8 @@
               return;
             }
             moveSelectedViaPad(direction);
-          }, MOVE_PAD_REPEAT_MS);
-        }, MOVE_PAD_REPEAT_INITIAL_MS);
+          }, 95);
+        }, 260);
       }
 
       function armMoveModeIdleTimer() {
@@ -3903,7 +3314,8 @@
           stopMovePadRepeat();
           refreshMeta();
           setStatus("Move mode off (idle).", "ok");
-        }, MOVE_MODE_IDLE_MS);
+          refocusTreeNavigation(state.selectedId);
+        }, 12000);
       }
 
       function toggleMoveMode(force) {
@@ -3923,6 +3335,7 @@
           clearMoveModeIdleTimer();
           stopMovePadRepeat();
           setStatus("Move mode off.", "ok");
+          refocusTreeNavigation(state.selectedId);
         }
       }
 
@@ -3945,21 +3358,6 @@
           ev.preventDefault();
           undoMostRecentTreeMutation();
           return;
-        }
-        const hasPendingImport = !!(state.pendingPathImport && Number(state.pendingPathImport.pathCount || 0) > 0);
-        if (hasPendingImport && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
-          if (ev.key === "Enter" && !ev.shiftKey) {
-            ev.preventDefault();
-            commitPendingPathImport();
-            refocusTreeNavigation(state.selectedId);
-            return;
-          }
-          if (ev.key === "Escape") {
-            ev.preventDefault();
-            cancelPendingPathImport();
-            refocusTreeNavigation(state.selectedId);
-            return;
-          }
         }
         if (
           !ev.metaKey
@@ -4422,17 +3820,14 @@
 
           row.addEventListener("click", () => {
             const copyOnClick = shouldCopyOnSingleClick(node, hasKids);
-            const hasFilterText = cleanText(el.search?.value || "", 120).length > 0;
-
-            if (copyOnClick && hasFilterText && el.search) {
-              el.search.value = "";
-            }
+            const shouldRefocusFilter = copyOnClick && clearFilterForCopyLoop();
 
             state.selectedId = node.id;
             row.focus();
             refreshMeta();
             renderTree();
-            focusRowByNodeId(node.id);
+            if (shouldRefocusFilter) refocusFilterForCopyLoop();
+            else focusRowByNodeId(node.id);
 
             if (copyOnClick) {
               void copyText(node.label).then((ok) => {
@@ -4443,15 +3838,13 @@
           row.addEventListener("dblclick", (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            const hasFilterText = cleanText(el.search?.value || "", 120).length > 0;
-            if (hasFilterText && el.search) {
-              el.search.value = "";
-            }
+            const shouldRefocusFilter = clearFilterForCopyLoop();
             state.selectedId = node.id;
             row.focus();
             refreshMeta();
             renderTree();
-            focusRowByNodeId(node.id);
+            if (shouldRefocusFilter) refocusFilterForCopyLoop();
+            else focusRowByNodeId(node.id);
             void copyText(node.label).then((ok) => {
               if (ok) showCopiedFeedback(node.id);
             });
@@ -4526,39 +3919,6 @@
         return max;
       }
 
-      function addChildItems() {
-        if (!state.selectedId) {
-          setStatus("Select a node first.", "warn");
-          return;
-        }
-        const lines = el.draft.value.split(/\r?\n/).map((s) => cleanText(s, 220)).filter(Boolean);
-        if (lines.length === 0) {
-          setStatus("Type one or more lines first.", "warn");
-          return;
-        }
-        const parentId = state.selectedId;
-        let order = maxSiblingOrder(parentId);
-        for (const line of lines) {
-          order += 1;
-          const id = makeId("node");
-          const node = {
-            id,
-            parentId,
-            label: line,
-            source: "manual",
-            order,
-            updatedAt: nowIso(),
-          };
-          state.nodes.push(node);
-          recordOp({ type: "add", id, parentId, label: line });
-        }
-        setStatus(`Added ${lines.length} item${lines.length === 1 ? "" : "s"}.`, "ok");
-        el.draft.value = "";
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-      }
-
       function addItemsFromPrimaryAction() {
         const map = nodeMap();
         const selectedId = cleanText(state.selectedId, 80);
@@ -4608,137 +3968,6 @@
         setStatus("New top-level item. Type to name it.", "ok");
       }
 
-      function addItemsToParent(parentId, lines) {
-        const cleanLines = (Array.isArray(lines) ? lines : [])
-          .map((s) => cleanText(s, 220))
-          .filter(Boolean);
-        if (!parentId || cleanLines.length === 0) return 0;
-        let order = maxSiblingOrder(parentId);
-        for (const line of cleanLines) {
-          order += 1;
-          const id = makeId("node");
-          const node = {
-            id,
-            parentId,
-            label: line,
-            source: "manual",
-            order,
-            updatedAt: nowIso(),
-          };
-          state.nodes.push(node);
-          recordOp({ type: "add", id, parentId, label: line });
-        }
-        return cleanLines.length;
-      }
-
-      function parsePathLabels(rawPath) {
-        return String(rawPath || "")
-          .split("/")
-          .map((seg) => cleanText(seg, 120))
-          .filter(Boolean);
-      }
-
-      function parseDirectedDraft(rawText) {
-        const rawLines = String(rawText || "")
-          .replace(/\r/g, "")
-          .split("\n")
-          .map((line) => cleanText(line, 360))
-          .filter(Boolean);
-        if (rawLines.length === 0) return null;
-        const first = rawLines[0];
-        let pathRaw = "";
-        let firstBody = "";
-
-        let m = first.match(/^add\s+to\s+\/(.+?)\s*:\s*(.+)$/i);
-        if (m) {
-          pathRaw = m[1] || "";
-          firstBody = m[2] || "";
-        } else {
-          m = first.match(/^add\s+(.+?)\s+to\s+\/(.+)$/i);
-          if (m) {
-            firstBody = m[1] || "";
-            pathRaw = m[2] || "";
-          } else {
-            m = first.match(/^to\s+\/(.+)$/i);
-            if (m) pathRaw = m[1] || "";
-          }
-        }
-
-        const pathLabels = parsePathLabels(pathRaw);
-        if (pathLabels.length === 0) return null;
-        const lines = [];
-        if (firstBody) lines.push(firstBody);
-        lines.push(...rawLines.slice(1));
-        const bodyLines = lines
-          .map((line) => cleanText(line, 220))
-          .filter(Boolean);
-        if (bodyLines.length === 0) return null;
-        return { pathLabels, bodyLines };
-      }
-
-      function saveDirectedDraft(rawText) {
-        const directed = parseDirectedDraft(rawText);
-        if (!directed) return false;
-        const target = ensurePathNode(directed.pathLabels);
-        if (!target) {
-          setStatus("Could not resolve destination path.", "warn");
-          return true;
-        }
-        const added = addItemsToParent(target.id, directed.bodyLines);
-        if (added <= 0) {
-          setStatus("Nothing to save.", "warn");
-          return true;
-        }
-        state.selectedId = target.id;
-        expandPathToNode(target.id);
-        el.draft.value = "";
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus(`Saved ${added} item${added === 1 ? "" : "s"} in ${getPath(target.id)}.`, "ok");
-        return true;
-      }
-
-      function openCopyTemplates() {
-        const copyNode = findPathNode(["Work (CoA)", "Projects", "Copy Templates"]) || findPathNode(["Copy Templates"]);
-        if (!copyNode) {
-          setStatus('Could not find "Copy Templates" in this tree.', "warn");
-          return;
-        }
-        state.selectedId = copyNode.id;
-        state.focusRootId = copyNode.id;
-        expandPathToNode(copyNode.id);
-        el.search.value = "";
-        refreshMeta();
-        renderTree();
-        persistPipSnapshot();
-        setStatus('Copy Templates focused. Single-click a template item to copy.', "ok");
-      }
-
-      function rememberNow() {
-        const lines = el.draft.value.split(/\r?\n/).map((s) => cleanText(s, 220)).filter(Boolean);
-        if (lines.length === 0) {
-          setStatus("Type one or more lines to remember.", "warn");
-          return;
-        }
-        const map = nodeMap();
-        let target = state.focusRootId ? map.get(state.focusRootId) : null;
-        if (!target) {
-          target = findPathNode(["Work (CoA)", "Current"]) || ensurePathNode(["Work (CoA)", "Current"]);
-        }
-        if (!target) {
-          setStatus('Could not find or create "Work (CoA) > Current".', "warn");
-          return;
-        }
-        const added = addItemsToParent(target.id, lines);
-        state.selectedId = target.id;
-        expandPathToNode(target.id);
-        el.draft.value = "";
-        refreshMeta();
-        renderTree();
-        setStatus(`Remembered ${added} item${added === 1 ? "" : "s"} in ${getPath(target.id)}.`, "ok");
-      }
-
       function renameSelected() {
         if (!state.selectedId) {
           setStatus("Select a node first.", "warn");
@@ -4764,51 +3993,12 @@
         setStatus(`Renaming "${node.label}". Enter saves, Esc cancels.`, "ok");
       }
 
-      function collectSubtreeIds(rootId) {
-        const byParent = childrenMap();
-        const out = [];
-        const q = [rootId];
-        const seen = new Set();
-        while (q.length > 0) {
-          const id = q.shift();
-          if (!id || seen.has(id)) continue;
-          seen.add(id);
-          out.push(id);
-          const kids = byParent.get(id) || [];
-          for (const k of kids) q.push(k.id);
-        }
-        return out;
-      }
-
       function deleteSelected() {
         if (!state.selectedId) {
           setStatus("Select a node first.", "warn");
           return;
         }
         deleteNodeById(state.selectedId, { confirm: true });
-      }
-
-      function downloadJson(name, payload) {
-        const text = JSON.stringify(payload, null, 2);
-        downloadText(name, text, "application/json");
-      }
-
-      function downloadText(name, text, mimeType = "text/plain") {
-        const blob = new Blob([text], { type: mimeType });
-        const href = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = href;
-        a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(href);
-      }
-
-      function fileStamp() {
-        const d = new Date();
-        const p = (n) => String(n).padStart(2, "0");
-        return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
       }
 
       function buildPipUrl() {
@@ -4861,34 +4051,6 @@
           setStatus(`PiP unavailable: ${err && err.message ? err.message : "not supported"}`, "warn");
           openPopupFallback();
         }
-      }
-
-      function exportChanges() {
-        if (state.nodes.length === 0) return;
-        const entry = {
-          schema: "pocket.change.v1",
-          writtenAt: nowIso(),
-          source: state.source,
-          summary: {
-            nodeCount: state.nodes.length,
-            tombstoneCount: state.tombstones.length,
-            operationCount: state.ops.length,
-          },
-          operations: state.ops,
-          snapshot: {
-            schema: "portal.export.v1",
-            writtenAt: nowIso(),
-            mainThoughtTree: state.nodes,
-            mainThoughtTreeTombstones: state.tombstones,
-            data: {
-              ...(state.dataExtras || {}),
-              mainThoughtTree: state.nodes,
-              mainThoughtTreeTombstones: state.tombstones,
-            },
-          },
-        };
-        downloadText("pocket-change-log.ndjson", `${JSON.stringify(entry)}\n`, "application/x-ndjson");
-        setStatus("Change log entry saved.", "ok");
       }
 
       async function writeTruthFile(payload) {
@@ -5006,12 +4168,10 @@
             },
           };
           saveLastSaveSnapshot(payload);
-          if (el.btnRestoreLast) el.btnRestoreLast.disabled = !state.hasSaveSnapshot;
           const writeResult = await writeTruthFile(payload);
           if (writeResult.ok) {
             // Only clear ops that existed at save start.
             state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
-            if (el.opsMeta) el.opsMeta.textContent = `Changes recorded: ${state.ops.length}`;
             if (state.ops.length > 0) {
               setStatus(`Saved snapshot. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} pending.`, "ok");
             } else {
@@ -5026,7 +4186,15 @@
             refocusTreeNavigation(state.selectedId);
             return false;
           }
-          downloadJson("pocket-data.json", payload);
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+          const href = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = href;
+          a.download = "pocket-data.json";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(href);
           setStatus("Could not overwrite truth file here, downloaded pocket-data.json instead.", "warn");
           refocusTreeNavigation(state.selectedId);
           return true;
@@ -5064,7 +4232,6 @@
             return;
           }
           const queued = queuePathImport(text, {
-            clearDraft: false,
             requireAnchor: true,
             sourceInfo: {
               schema: "path.lines",
@@ -5080,7 +4247,6 @@
         const norm = normaliseInput(parsed);
         if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) {
           const queued = queuePathImport(text, {
-            clearDraft: false,
             requireAnchor: true,
             sourceInfo: {
               schema: "path.lines",
@@ -5106,9 +4272,23 @@
         setStatus(`Loaded ${state.nodes.length} node${state.nodes.length === 1 ? "" : "s"}.`, "ok");
       }
 
+      function triggerStatusAction(event) {
+        if (!statusActionHandler) return false;
+        event.preventDefault();
+        event.stopPropagation();
+        const action = statusActionHandler;
+        statusActionHandler = null;
+        try {
+          action();
+        } catch (err) {
+          console.error("[pocket-lite] status action failed:", err);
+          setStatus("Could not complete action.", "warn");
+        }
+        return true;
+      }
+
       function bind() {
         el.btnUnfoldAll?.addEventListener("click", toggleUnfoldAll);
-        el.btnPaneOrder?.addEventListener("click", cyclePaneOrder);
         el.btnAddPrimary?.addEventListener("click", addItemsFromPrimaryAction);
         el.btnAddMobile?.addEventListener("click", addItemsFromPrimaryAction);
         el.btnMovePrimary?.addEventListener("click", () => toggleMoveMode());
@@ -5139,12 +4319,7 @@
         el.btnRenamePrimary?.addEventListener("click", renameSelected);
         el.btnDeletePrimary?.addEventListener("click", deleteSelected);
         el.btnOpenPrimary?.addEventListener("click", openDetailsEditorForSelectedNode);
-        el.btnImportNow?.addEventListener("click", commitPendingPathImport);
-        el.btnCancelImport?.addEventListener("click", cancelPendingPathImport);
-        el.btnUndoImport?.addEventListener("click", undoLastImportBatch);
         el.btnLoad.addEventListener("click", () => el.fileInput.click());
-        el.btnCopyTemplates?.addEventListener("click", openCopyTemplates);
-        el.btnRememberNow?.addEventListener("click", rememberNow);
         el.btnPip?.addEventListener("click", () => {
           void openPipWindow();
         });
@@ -5187,12 +4362,13 @@
             const copyOnEnter = !!targetNode && shouldCopyOnSingleClick(targetNode, targetHasKids);
             state.selectedId = targetId;
             if (copyOnEnter) {
-              if (el.search instanceof HTMLInputElement && cleanText(el.search.value, 120)) {
-                el.search.value = "";
-              }
+              const hadFilter = cleanText(el.search.value, 120).length > 0;
+              if (hadFilter) el.search.value = "";
+              const shouldRefocusFilter = hadFilter && isCopyFocusMode();
               refreshMeta();
               renderTree();
-              refocusTreeNavigation(targetId);
+              if (shouldRefocusFilter) refocusFilterForCopyLoop();
+              else refocusTreeNavigation(targetId);
               void copyText(targetNode.label).then((ok) => {
                 if (ok) showCopiedFeedback(targetId);
               });
@@ -5214,11 +4390,6 @@
           }
         });
         el.treeWrap?.addEventListener("keydown", handleTreeKeydown);
-        el.btnAddChild.addEventListener("click", addChildItems);
-        el.btnRename.addEventListener("click", renameSelected);
-        el.btnDelete.addEventListener("click", deleteSelected);
-        el.btnMoveMode?.addEventListener("click", () => toggleMoveMode());
-        el.btnFocusUp?.addEventListener("click", focusUpOneLevel);
         el.btnDetailSave?.addEventListener("click", saveDetailsEditor);
         el.btnDetailCancel?.addEventListener("click", () => {
           closeDetailsEditor({ restoreFocus: true });
@@ -5231,36 +4402,15 @@
         });
         el.detailEditorLabel?.addEventListener("keydown", handleDetailsEditorKeydown);
         el.detailEditorBody?.addEventListener("keydown", handleDetailsEditorKeydown);
-        el.btnExportChanges.addEventListener("click", exportChanges);
         el.btnExportTree.addEventListener("click", () => {
           void exportTree();
         });
         el.titleToast?.addEventListener("click", (ev) => {
-          if (!statusActionHandler) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          const action = statusActionHandler;
-          statusActionHandler = null;
-          try {
-            action();
-          } catch (err) {
-            console.error("[pocket-lite] status action failed:", err);
-            setStatus("Could not complete action.", "warn");
-          }
+          triggerStatusAction(ev);
         });
         el.titleToast?.addEventListener("keydown", (ev) => {
-          if (!statusActionHandler) return;
           if (ev.key !== "Enter" && ev.key !== " ") return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          const action = statusActionHandler;
-          statusActionHandler = null;
-          try {
-            action();
-          } catch (err) {
-            console.error("[pocket-lite] status action failed:", err);
-            setStatus("Could not complete action.", "warn");
-          }
+          triggerStatusAction(ev);
         });
         const handleGlobalShortcuts = (ev) => {
           const key = String(ev.key || "").toLowerCase();
@@ -5298,13 +4448,6 @@
               ev.preventDefault();
               ev.stopPropagation();
               toggleMoveMode(false);
-              refocusTreeNavigation(state.selectedId);
-              return;
-            }
-            if (state.pendingPathImport && Number(state.pendingPathImport.pathCount || 0) > 0) {
-              ev.preventDefault();
-              ev.stopPropagation();
-              cancelPendingPathImport();
               refocusTreeNavigation(state.selectedId);
               return;
             }
@@ -5351,16 +4494,17 @@
             if (!selectedNode) return;
             ev.preventDefault();
             ev.stopPropagation();
-            const hadFilterText = cleanText(el.search?.value || "", 120).length > 0;
+            const selectedHasKids = sortNodesForParent(selectedNode.id).length > 0;
+            const copyLoopMode = shouldCopyOnSingleClick(selectedNode, selectedHasKids);
+            if (copyLoopMode) {
+              const shouldRefocusFilter = clearFilterForCopyLoop();
+              refreshMeta();
+              renderTree();
+              if (shouldRefocusFilter) refocusFilterForCopyLoop();
+              else refocusTreeNavigation(selectedId);
+            }
             void copyText(selectedNode.label).then((ok) => {
               if (!ok) return;
-              if (hadFilterText && el.search instanceof HTMLInputElement) {
-                el.search.value = "";
-                renderTree();
-                refocusTreeNavigation(selectedId);
-                showCopiedFeedback(selectedId);
-                return;
-              }
               showCopiedFeedback(selectedId);
             });
             return;
@@ -5368,131 +4512,20 @@
         };
         window.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
         document.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
+        const handleWindowFocusToTree = () => {
+          if (isDetailsEditorOpen()) return;
+          refocusTreeNavigation(state.selectedId);
+        };
+        window.addEventListener("focus", handleWindowFocusToTree);
         window.addEventListener("beforeunload", (ev) => {
           const hasUnsavedChanges = Array.isArray(state.ops) && state.ops.length > 0;
           if (!hasUnsavedChanges) return;
           ev.preventDefault();
           ev.returnValue = "";
         });
-        el.draft.addEventListener("keydown", (ev) => {
-          const draftText = String(el.draft.value || "");
-          const hasDraftText = !!cleanText(draftText, 2000);
-          const isArrowKey = ev.key === "ArrowUp" || ev.key === "ArrowDown" || ev.key === "ArrowLeft" || ev.key === "ArrowRight";
-          const isTreeArrowNavFromDraft = isArrowKey
-            && !hasDraftText
-            && !ev.altKey
-            && !ev.shiftKey
-            && !ev.metaKey
-            && !ev.ctrlKey;
-          const isTreeEdgeJumpFromDraft = (ev.key === "ArrowUp" || ev.key === "ArrowDown")
-            && !hasDraftText
-            && !ev.altKey
-            && !ev.shiftKey
-            && (ev.metaKey || ev.ctrlKey);
-          if (isTreeArrowNavFromDraft || isTreeEdgeJumpFromDraft) {
-            ev.preventDefault();
-            if (el.treeWrap instanceof HTMLElement) {
-              el.treeWrap.focus({ preventScroll: true });
-            }
-            handleTreeKeydown(ev);
-            return;
-          }
-          const isTreeTabIndentFromDraft = ev.key === "Tab"
-            && !hasDraftText
-            && !!state.selectedId
-            && !ev.altKey
-            && !ev.metaKey
-            && !ev.ctrlKey;
-          if (isTreeTabIndentFromDraft) {
-            ev.preventDefault();
-            if (el.treeWrap instanceof HTMLElement) {
-              el.treeWrap.focus({ preventScroll: true });
-            }
-            if (ev.shiftKey) outdentNodeById(state.selectedId);
-            else indentNodeById(state.selectedId);
-            return;
-          }
-          if (ev.key === "Escape") {
-            ev.preventDefault();
-            const hadText = String(el.draft.value || "").length > 0;
-            const hadMoveMode = !!state.moveMode;
-            const hadPendingImport = !!(state.pendingPathImport && Number(state.pendingPathImport.pathCount || 0) > 0);
-            if (hadText) el.draft.value = "";
-            if (hadMoveMode) state.moveMode = false;
-            if (hadPendingImport) state.pendingPathImport = null;
-            if (hadText || hadMoveMode || hadPendingImport) {
-              refreshMeta();
-              persistPipSnapshot();
-              setStatus("Cleared.", "ok");
-              showDraftHintToast();
-            } else {
-              setStatus("Nothing to clear.", "warn");
-            }
-            return;
-          }
-          if (ev.key !== "Enter") return;
-          if (ev.altKey) return;
-          if (ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
-          ev.preventDefault();
-          if (!cleanText(draftText, 2000)) {
-            const hasPendingImport = !!(state.pendingPathImport && Number(state.pendingPathImport.pathCount || 0) > 0);
-            if (hasPendingImport) {
-              commitPendingPathImport();
-              showDraftHintToast();
-              return;
-            }
-          }
-          if (saveDirectedDraft(draftText)) {
-            showDraftHintToast();
-            return;
-          }
-          const queued = queuePathImport(draftText, {
-            clearDraft: true,
-            requireAnchor: true,
-            sourceInfo: {
-              schema: "path.lines",
-              fileName: "Draft capture",
-              writtenAt: "",
-            },
-          });
-          if (queued === 0) {
-            const pathIntent = analyseBulkPathIntent(draftText);
-            if (pathIntent.isLikelyBulk) {
-              setStatus(
-                `Could not preview import. Parsed ${pathIntent.parsedPathCount} path line${pathIntent.parsedPathCount === 1 ? "" : "s"} from ${pathIntent.lineCount} line${pathIntent.lineCount === 1 ? "" : "s"}. Use one absolute path per line, e.g. /Role Map/Top Level/CEO/Andrew Sharpe.`,
-                "warn"
-              );
-              return;
-            }
-          }
-          if (queued !== 0) return;
-          if (state.selectedId) addChildItems();
-          else rememberNow();
-        });
-        el.draft.addEventListener("focus", () => showDraftHintToast());
-        el.draft.addEventListener("input", () => {
-          const hasPendingImport = !!(state.pendingPathImport && Number(state.pendingPathImport.pathCount || 0) > 0);
-          const hasDraftText = !!cleanText(el.draft.value, 2000);
-          if (hasPendingImport && hasDraftText) {
-            state.pendingPathImport = null;
-            refreshMeta();
-            persistPipSnapshot();
-          }
-          showDraftHintToast();
-        });
-        el.draft.addEventListener("blur", () => {
-          if (Date.now() < statusToastActiveUntil) return;
-          if (!el.titleToast) return;
-          el.titleToast.classList.remove("show");
-        });
       }
 
-      state.paneOrder = loadPaneOrder();
-      const bootSnapshot = readLastSaveSnapshot();
-      state.hasSaveSnapshot = !!bootSnapshot;
-      state.lastSaveSnapshotAt = bootSnapshot ? cleanText(bootSnapshot.capturedAt, 40) : "";
       bind();
-      applyPaneOrder();
       refreshMeta();
       renderTree();
       if (!restoreFromPipSnapshot()) {
