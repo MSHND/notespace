@@ -16,6 +16,7 @@
       --tree-panel-lift: 0 4px 10px -12px rgba(28, 36, 48, 0.06);
       --tree-panel-surface: rgba(255, 255, 255, 0.98);
       --text: rgba(20, 25, 30, 0.95);
+      --text-strong: rgba(13, 17, 22, 0.99);
       --muted: rgba(62, 71, 83, 0.74);
       --chip: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.04));
       --chip-border: rgba(148, 163, 184, 0.28);
@@ -421,6 +422,22 @@
       -webkit-user-select: none;
       user-select: none;
     }
+    .row.urgent .label,
+    .label.urgent {
+      font-weight: 600;
+    }
+    .row.urgent .label::before,
+    .label.urgent::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: color-mix(in srgb, #c27a17 78%, var(--text) 22%);
+      margin-right: 8px;
+      display: inline-block;
+      vertical-align: middle;
+      opacity: 0.9;
+    }
     .detailBadge {
       grid-column: 3;
       flex: 0 0 auto;
@@ -673,6 +690,7 @@
         selectedId: "",
         focusRootId: "",
         collapsed: new Set(),
+        urgentCollectorExpanded: false,
         ops: [],
         source: {
           schema: "",
@@ -759,6 +777,30 @@
 
       function cleanText(v, max = 220) {
         return String(v || "").replace(/\s+/g, " ").trim().slice(0, max);
+      }
+
+      function normaliseUrgentFlag(value) {
+        if (typeof value === "boolean") return value;
+        const raw = cleanText(value, 16).toLowerCase();
+        if (!raw) return false;
+        return raw === "1" || raw === "true" || raw === "yes" || raw === "y";
+      }
+
+      function parseUrgentDetailsBody(rawValue) {
+        const source = String(rawValue || "");
+        const hasUrgentTag = /(^|\s)#urgent\b/i.test(source);
+        const details = normaliseDetails(source, 4000);
+        return {
+          details,
+          urgent: hasUrgentTag,
+        };
+      }
+
+      function composeDetailsEditorValue(rawValue, urgentValue) {
+        const details = normaliseDetails(rawValue, 4000);
+        if (!normaliseUrgentFlag(urgentValue)) return details;
+        if (/(^|\s)#urgent\b/i.test(details)) return details;
+        return details ? `${details}\n#urgent` : "#urgent";
       }
 
       function normaliseDetails(v, max = 4000) {
@@ -880,6 +922,7 @@
         "order",
         "updatedAt",
         "source",
+        "urgent",
         "details",
         "task",
         "taskMeta",
@@ -1444,6 +1487,7 @@
           const orderRaw = Number(item.order);
           const order = Number.isFinite(orderRaw) ? Math.round(orderRaw) : (1000 + out.length);
           const updatedAt = cleanText(item.updatedAt, 40) || nowIso();
+          const urgent = normaliseUrgentFlag(item.urgent);
           const details = normaliseDetails(item.details, 4000);
           const task = normaliseTreeTaskMeta(item.task || item.taskMeta);
           const profile = normaliseTreeProfile(item.profile);
@@ -1456,6 +1500,7 @@
             updatedAt,
             source: cleanText(item.source, 30) || "manual",
           };
+          if (urgent) payload.urgent = true;
           if (details) payload.details = details;
           if (task) payload.task = task;
           if (profile) payload.profile = profile;
@@ -2377,7 +2422,7 @@
           el.detailEditorLabel.value = cleanText(node.label, 220);
         }
         if (el.detailEditorBody instanceof HTMLTextAreaElement) {
-          el.detailEditorBody.value = normaliseDetails(node.details, 4000);
+          el.detailEditorBody.value = composeDetailsEditorValue(node.details, node.urgent);
         }
         if (el.detailOverlay instanceof HTMLElement) {
           el.detailOverlay.hidden = false;
@@ -2405,6 +2450,8 @@
           return;
         }
         const nextLabel = cleanText(el.detailEditorLabel?.value, 220);
+        const parsedDetails = parseUrgentDetailsBody(el.detailEditorBody?.value);
+        const nextUrgent = parsedDetails.urgent;
         if (!nextLabel) {
           setStatus("Name cannot be blank.", "warn");
           if (el.detailEditorLabel instanceof HTMLInputElement) {
@@ -2413,17 +2460,21 @@
           }
           return;
         }
-        const nextDetails = normaliseDetails(el.detailEditorBody?.value, 4000);
+        const nextDetails = parsedDetails.details;
         const prevLabel = cleanText(node.label, 220);
         const prevDetails = normaliseDetails(node.details, 4000);
+        const prevUrgent = normaliseUrgentFlag(node.urgent);
         const labelChanged = nextLabel !== prevLabel;
         const detailsChanged = nextDetails !== prevDetails;
-        if (!labelChanged && !detailsChanged) {
+        const urgentChanged = nextUrgent !== prevUrgent;
+        if (!labelChanged && !detailsChanged && !urgentChanged) {
           closeDetailsEditor({ restoreFocus: true, nodeId });
           setStatus("No detail changes.", "warn");
           return;
         }
         node.label = nextLabel;
+        if (nextUrgent) node.urgent = true;
+        else delete node.urgent;
         if (nextDetails) node.details = nextDetails;
         else delete node.details;
         node.updatedAt = nowIso();
@@ -2431,6 +2482,7 @@
         const changedParts = [];
         if (labelChanged) changedParts.push("name");
         if (detailsChanged) changedParts.push("details");
+        if (urgentChanged) changedParts.push("urgent");
         recordOp({
           type: "details_edit",
           id: node.id,
@@ -2515,6 +2567,19 @@
           guard += 1;
         }
         return parts.reverse().join(" > ");
+      }
+
+      function buildUrgentCollectorEntries() {
+        const out = [];
+        for (const node of Array.isArray(state.nodes) ? state.nodes : []) {
+          const id = cleanText(node?.id, 80);
+          if (!id) continue;
+          if (!normaliseUrgentFlag(node?.urgent)) continue;
+          const path = cleanText(getPath(id), 500) || cleanText(node?.label, 220) || id;
+          out.push({ id, path });
+        }
+        out.sort((left, right) => left.path.localeCompare(right.path));
+        return out;
       }
 
       function recordOp(op) {
@@ -3688,13 +3753,104 @@
           return 30 + ((d - 3) * 6);
         }
 
+        function buildUrgentCollectorNode() {
+          if (focusRoot) return null;
+          const entries = buildUrgentCollectorEntries().filter((entry) => {
+            if (tokens.length === 0) return true;
+            const haystack = cleanText(entry.path, 500).toLowerCase();
+            return tokens.every((token) => haystack.includes(token));
+          });
+          if (entries.length === 0) return null;
+
+          const li = document.createElement("li");
+          li.className = "treeNode";
+
+          const rootRow = document.createElement("div");
+          rootRow.className = "row";
+          rootRow.style.paddingLeft = `${depthIndentPx(0)}px`;
+          rootRow.tabIndex = 0;
+
+          const toggleUrgentCollector = () => {
+            state.urgentCollectorExpanded = !state.urgentCollectorExpanded;
+            refreshMeta();
+            renderTree();
+            refocusTreeNavigation(state.selectedId);
+          };
+
+          const twisty = document.createElement("button");
+          twisty.className = "twisty";
+          twisty.textContent = state.urgentCollectorExpanded ? "▾" : "▸";
+          twisty.title = state.urgentCollectorExpanded ? "Collapse urgent list" : "Expand urgent list";
+          twisty.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            toggleUrgentCollector();
+          });
+          rootRow.appendChild(twisty);
+
+          const label = document.createElement("div");
+          label.className = "label";
+          label.textContent = "Urgent";
+          rootRow.appendChild(label);
+
+          const countBadge = document.createElement("span");
+          countBadge.className = "detailBadge";
+          countBadge.textContent = String(entries.length);
+          countBadge.title = "Virtual urgent view";
+          rootRow.appendChild(countBadge);
+
+          rootRow.addEventListener("click", () => toggleUrgentCollector());
+          li.appendChild(rootRow);
+
+          if (!state.urgentCollectorExpanded) return li;
+
+          const ul = document.createElement("ul");
+          ul.className = "children";
+          for (const entry of entries) {
+            const childLi = document.createElement("li");
+            childLi.className = "treeNode";
+
+            const row = document.createElement("div");
+            row.className = `row${state.selectedId === entry.id ? " selected" : ""}`;
+            row.style.paddingLeft = `${depthIndentPx(1)}px`;
+            row.tabIndex = 0;
+
+            const bullet = document.createElement("span");
+            bullet.className = "twisty empty";
+            bullet.textContent = "•";
+            row.appendChild(bullet);
+
+            const entryLabel = document.createElement("div");
+            entryLabel.className = "label urgent";
+            entryLabel.textContent = `/${entry.path}`;
+            entryLabel.setAttribute("data-full-label", `/${cleanText(entry.path, 500)}`);
+            row.appendChild(entryLabel);
+
+            row.addEventListener("click", () => {
+              state.focusRootId = "";
+              state.selectedId = entry.id;
+              expandPathToNode(entry.id);
+              refreshMeta();
+              renderTree();
+              focusRowByNodeId(entry.id, { block: "nearest" });
+            });
+
+            childLi.appendChild(row);
+            ul.appendChild(childLi);
+          }
+
+          if (ul.childNodes.length > 0) li.appendChild(ul);
+          return li;
+        }
+
         function build(node, depth) {
           if (!matches(node) && !hasVisibleDesc(node.id)) return null;
           const li = document.createElement("li");
           li.className = "treeNode";
 
           const row = document.createElement("div");
-          row.className = `row${state.selectedId === node.id ? " selected" : ""}`;
+          const isUrgent = normaliseUrgentFlag(node.urgent);
+          row.className = `row${state.selectedId === node.id ? " selected" : ""}${isUrgent ? " urgent" : ""}`;
           row.setAttribute("data-node-id", node.id);
           row.style.paddingLeft = `${depthIndentPx(depth)}px`;
           row.tabIndex = 0;
@@ -3776,7 +3932,7 @@
             }
           } else {
             const label = document.createElement("div");
-            label.className = "label";
+            label.className = `label${isUrgent ? " urgent" : ""}`;
             label.textContent = node.label;
             label.setAttribute("data-full-label", cleanText(node.label, 500) || getPath(node.id));
             row.appendChild(label);
@@ -3871,6 +4027,8 @@
           const node = build(root, 0);
           if (node) rendered.push(node);
         }
+        const urgentCollectorNode = buildUrgentCollectorNode();
+        if (urgentCollectorNode) rendered.unshift(urgentCollectorNode);
 
         el.treeRoot.innerHTML = "";
         for (const n of rendered) el.treeRoot.appendChild(n);
