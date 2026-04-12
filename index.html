@@ -126,6 +126,12 @@
       border-color: var(--chip-on-border);
       color: rgba(29, 78, 216, 0.88);
     }
+    /* Keep import controls plumbing-only in Pocket Lite for now. */
+    #btnImportNow,
+    #btnCancelImport,
+    #btnUndoImport {
+      display: none !important;
+    }
     .grow { flex: 1 1 20px; min-width: 20px; }
     .topStatusLane {
       flex: 0 1 340px;
@@ -333,6 +339,53 @@
       resize: vertical;
       outline: none;
     }
+    .detailMetaRow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--tree-panel-border);
+      border-radius: 10px;
+      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.02));
+      padding: 6px 8px;
+    }
+    .detailMetaLabel {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .detailDueInput {
+      margin-left: auto;
+      width: 152px;
+      max-width: 100%;
+      min-width: 0;
+      height: 28px;
+      border: 1px solid var(--tree-panel-border);
+      border-radius: 9px;
+      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.05));
+      color: var(--text);
+      font: inherit;
+      font-size: 13px;
+      padding: 0 8px;
+      box-sizing: border-box;
+      outline: none;
+    }
+    .detailCopyContextToggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      line-height: 1.2;
+      color: var(--muted);
+      white-space: nowrap;
+      margin-left: 6px;
+      user-select: none;
+    }
+    .detailCopyContextInput {
+      width: 14px;
+      height: 14px;
+      margin: 0;
+      accent-color: rgba(var(--tree-accent-rgb), 0.88);
+    }
     .detailBtnRow {
       display: flex;
       justify-content: flex-end;
@@ -423,20 +476,43 @@
       user-select: none;
     }
     .row.urgent .label,
-    .label.urgent {
+    .label.urgent,
+    .row.overdue .label,
+    .label.overdue {
       font-weight: 600;
     }
+    .row.dueToday .label,
+    .label.dueToday {
+      font-weight: 560;
+    }
     .row.urgent .label::before,
-    .label.urgent::before {
+    .label.urgent::before,
+    .row.overdue .label::before,
+    .label.overdue::before,
+    .row.dueToday .label::before,
+    .label.dueToday::before {
       content: "";
       width: 6px;
       height: 6px;
       border-radius: 999px;
-      background: color-mix(in srgb, #c27a17 78%, var(--text) 22%);
       margin-right: 8px;
       display: inline-block;
       vertical-align: middle;
+    }
+    .row.urgent .label::before,
+    .label.urgent::before {
+      background: color-mix(in srgb, #c27a17 78%, var(--text) 22%);
       opacity: 0.9;
+    }
+    .row.overdue .label::before,
+    .label.overdue::before {
+      background: color-mix(in srgb, #b76b14 84%, var(--text) 16%);
+      opacity: 0.92;
+    }
+    .row.dueToday .label::before,
+    .label.dueToday::before {
+      background: color-mix(in srgb, #d39e44 64%, var(--text) 36%);
+      opacity: 0.74;
     }
     .detailBadge {
       grid-column: 3;
@@ -631,6 +707,9 @@
       <button id="btnDeletePrimary" class="chip primaryChip" disabled>Delete</button>
       <button id="btnOpenPrimary" class="chip primaryChip" disabled>Edit</button>
       <button id="btnPip" class="chip utilityChip">Pop-out</button>
+      <button id="btnImportNow" class="chip utilityChip" type="button" hidden>Import now</button>
+      <button id="btnCancelImport" class="chip utilityChip" type="button" hidden>Cancel import</button>
+      <button id="btnUndoImport" class="chip utilityChip" type="button" hidden>Undo import</button>
       <input id="fileInput" type="file" accept=".json,.txt,.md" hidden>
       <div class="grow"></div>
       <div class="topStatusLane">
@@ -667,6 +746,14 @@
         <div id="detailEditorPath" class="detailPath"></div>
         <input id="detailEditorLabel" class="detailLabelInput" type="text" placeholder="Item name">
         <textarea id="detailEditorBody" class="detailBodyInput" placeholder="Extra details (kept inside this item, not shown in tree rows)"></textarea>
+        <div class="detailMetaRow">
+          <label class="detailMetaLabel" for="detailEditorDue">Due:</label>
+          <input id="detailEditorDue" class="detailDueInput" type="date" aria-label="Due date">
+          <label class="detailCopyContextToggle" for="detailEditorCopyContext">
+            <input id="detailEditorCopyContext" class="detailCopyContextInput" type="checkbox" aria-label="Copy context for children">
+            <span>Copy context for children</span>
+          </label>
+        </div>
         <div class="detailBtnRow">
           <button id="btnDetailCancel" class="chip">Cancel</button>
           <button id="btnDetailSave" class="chip">Save</button>
@@ -710,6 +797,7 @@
           id: "",
           originalLabel: "",
           originalDetails: "",
+          originalDue: "",
         },
         typeJump: {
           query: "",
@@ -728,6 +816,9 @@
       let lastDeleteUndoSnapshot = null;
       let lastMoveUndoSnapshot = null;
       let lastTreeUndoKind = "";
+      let pendingDeleteConfirmNodeId = "";
+      let pendingDeleteConfirmExpiresAt = 0;
+      const TREE_DELETE_CONFIRM_WINDOW_MS = 12000;
       const rowCopyToastTimers = new Map();
       let truthFileHandle = null;
       let exportTreeQueue = Promise.resolve();
@@ -740,6 +831,7 @@
         source: "none",
         parseError: "",
       };
+      let pendingPathImport = null;
 
       const el = {
         btnUnfoldAll: document.getElementById("btnUnfoldAll"),
@@ -750,6 +842,9 @@
         btnOpenPrimary: document.getElementById("btnOpenPrimary"),
         btnLoad: document.getElementById("btnLoad"),
         btnPip: document.getElementById("btnPip"),
+        btnImportNow: document.getElementById("btnImportNow"),
+        btnCancelImport: document.getElementById("btnCancelImport"),
+        btnUndoImport: document.getElementById("btnUndoImport"),
         btnExportTree: document.getElementById("btnExportTree"),
         btnAddMobile: document.getElementById("btnAddMobile"),
         btnMovePadUp: document.getElementById("btnMovePadUp"),
@@ -767,6 +862,8 @@
         detailEditorPath: document.getElementById("detailEditorPath"),
         detailEditorLabel: document.getElementById("detailEditorLabel"),
         detailEditorBody: document.getElementById("detailEditorBody"),
+        detailEditorDue: document.getElementById("detailEditorDue"),
+        detailEditorCopyContext: document.getElementById("detailEditorCopyContext"),
         btnDetailSave: document.getElementById("btnDetailSave"),
         btnDetailCancel: document.getElementById("btnDetailCancel"),
       };
@@ -784,6 +881,13 @@
         const raw = cleanText(value, 16).toLowerCase();
         if (!raw) return false;
         return raw === "1" || raw === "true" || raw === "yes" || raw === "y";
+      }
+
+      function normaliseCopyContextFlag(value) {
+        if (typeof value === "boolean") return value;
+        const raw = cleanText(value, 24).toLowerCase();
+        if (!raw) return false;
+        return raw === "1" || raw === "true" || raw === "yes" || raw === "y" || raw === "on" || raw === "copy";
       }
 
       function parseUrgentDetailsBody(rawValue) {
@@ -822,6 +926,23 @@
       function normaliseDateYmd(value) {
         const raw = String(value || "").trim();
         return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+      }
+
+      function localTodayYmd() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      }
+
+      function nodeAttentionState(node, todayYmd = localTodayYmd()) {
+        if (normaliseUrgentFlag(node?.urgent)) return "manual_urgent";
+        const due = normaliseDateYmd(node?.due);
+        if (!due) return "";
+        if (due < todayYmd) return "overdue";
+        if (due === todayYmd) return "due_today";
+        return "";
       }
 
       function uniqueTextArray(raw, maxItems = 200, maxLen = 80) {
@@ -922,6 +1043,7 @@
         "order",
         "updatedAt",
         "source",
+        "due",
         "urgent",
         "details",
         "task",
@@ -1467,8 +1589,11 @@
       }
 
       function showCopiedFeedback(nodeId) {
-        showRowCopyToast(nodeId);
-        setStatus("Copied.", "ok");
+        const id = cleanText(nodeId, 80);
+        const sourceNode = id ? (nodeMap().get(id) || null) : null;
+        const copiedLabel = cleanText(sourceNode?.label, 220);
+        showRowCopyToast(id);
+        setStatus(copiedLabel ? `Copied "${copiedLabel}".` : "Copied.", "ok");
       }
 
       function normaliseNodes(raw) {
@@ -1487,6 +1612,7 @@
           const orderRaw = Number(item.order);
           const order = Number.isFinite(orderRaw) ? Math.round(orderRaw) : (1000 + out.length);
           const updatedAt = cleanText(item.updatedAt, 40) || nowIso();
+          const due = normaliseDateYmd(item.due);
           const urgent = normaliseUrgentFlag(item.urgent);
           const details = normaliseDetails(item.details, 4000);
           const task = normaliseTreeTaskMeta(item.task || item.taskMeta);
@@ -1500,6 +1626,7 @@
             updatedAt,
             source: cleanText(item.source, 30) || "manual",
           };
+          if (due) payload.due = due;
           if (urgent) payload.urgent = true;
           if (details) payload.details = details;
           if (task) payload.task = task;
@@ -2217,7 +2344,32 @@
             row.scrollIntoView({ block: "nearest", inline: "nearest" });
           });
         }
+        pendingPathImport = pending;
+        return commitPendingPathImport();
+      }
+
+      function commitPendingPathImport() {
+        if (!pendingPathImport) {
+          setStatus("Nothing to import.", "warn");
+          return 0;
+        }
+        const pending = pendingPathImport;
+        pendingPathImport = null;
         return commitPathImport(pending);
+      }
+
+      function cancelPendingPathImport() {
+        if (!pendingPathImport) {
+          setStatus("No pending import.", "warn");
+          return false;
+        }
+        pendingPathImport = null;
+        setStatus("Import cancelled.", "warn");
+        return true;
+      }
+
+      function undoLastImportBatch() {
+        undoMostRecentTreeMutation();
       }
 
       function commitPathImport(pending) {
@@ -2389,7 +2541,14 @@
           id: "",
           originalLabel: "",
           originalDetails: "",
+          originalDue: "",
         };
+        if (el.detailEditorDue instanceof HTMLInputElement) {
+          el.detailEditorDue.value = "";
+        }
+        if (el.detailEditorCopyContext instanceof HTMLInputElement) {
+          el.detailEditorCopyContext.checked = false;
+        }
         if (options.restoreFocus === false) return;
         refocusTreeNavigation(preferredNodeId);
       }
@@ -2409,6 +2568,7 @@
           id: node.id,
           originalLabel: cleanText(node.label, 220),
           originalDetails: normaliseDetails(node.details, 4000),
+          originalDue: normaliseDateYmd(node.due),
         };
         if (el.detailEditorTitle) {
           el.detailEditorTitle.textContent = `Edit ${cleanText(node.label, 80) || "item"}`;
@@ -2423,6 +2583,12 @@
         }
         if (el.detailEditorBody instanceof HTMLTextAreaElement) {
           el.detailEditorBody.value = composeDetailsEditorValue(node.details, node.urgent);
+        }
+        if (el.detailEditorDue instanceof HTMLInputElement) {
+          el.detailEditorDue.value = normaliseDateYmd(node.due);
+        }
+        if (el.detailEditorCopyContext instanceof HTMLInputElement) {
+          el.detailEditorCopyContext.checked = normaliseCopyContextFlag(node.copyContext);
         }
         if (el.detailOverlay instanceof HTMLElement) {
           el.detailOverlay.hidden = false;
@@ -2452,6 +2618,10 @@
         const nextLabel = cleanText(el.detailEditorLabel?.value, 220);
         const parsedDetails = parseUrgentDetailsBody(el.detailEditorBody?.value);
         const nextUrgent = parsedDetails.urgent;
+        const nextDue = normaliseDateYmd(el.detailEditorDue?.value);
+        const nextCopyContext = el.detailEditorCopyContext instanceof HTMLInputElement
+          ? !!el.detailEditorCopyContext.checked
+          : false;
         if (!nextLabel) {
           setStatus("Name cannot be blank.", "warn");
           if (el.detailEditorLabel instanceof HTMLInputElement) {
@@ -2464,10 +2634,14 @@
         const prevLabel = cleanText(node.label, 220);
         const prevDetails = normaliseDetails(node.details, 4000);
         const prevUrgent = normaliseUrgentFlag(node.urgent);
+        const prevDue = normaliseDateYmd(node.due);
+        const prevCopyContext = normaliseCopyContextFlag(node.copyContext);
         const labelChanged = nextLabel !== prevLabel;
         const detailsChanged = nextDetails !== prevDetails;
         const urgentChanged = nextUrgent !== prevUrgent;
-        if (!labelChanged && !detailsChanged && !urgentChanged) {
+        const copyContextChanged = nextCopyContext !== prevCopyContext;
+        const dueChanged = nextDue !== prevDue;
+        if (!labelChanged && !detailsChanged && !urgentChanged && !copyContextChanged && !dueChanged) {
           closeDetailsEditor({ restoreFocus: true, nodeId });
           setStatus("No detail changes.", "warn");
           return;
@@ -2475,6 +2649,10 @@
         node.label = nextLabel;
         if (nextUrgent) node.urgent = true;
         else delete node.urgent;
+        if (nextCopyContext) node.copyContext = true;
+        else delete node.copyContext;
+        if (nextDue) node.due = nextDue;
+        else delete node.due;
         if (nextDetails) node.details = nextDetails;
         else delete node.details;
         node.updatedAt = nowIso();
@@ -2483,6 +2661,8 @@
         if (labelChanged) changedParts.push("name");
         if (detailsChanged) changedParts.push("details");
         if (urgentChanged) changedParts.push("urgent");
+        if (copyContextChanged) changedParts.push("copy context");
+        if (dueChanged) changedParts.push("due");
         recordOp({
           type: "details_edit",
           id: node.id,
@@ -2502,6 +2682,7 @@
         const target = ev.target instanceof HTMLElement ? ev.target : null;
         const isLabelField = target === el.detailEditorLabel;
         const isBodyField = target === el.detailEditorBody;
+        const isDueField = target === el.detailEditorDue;
         if (ev.key === "Escape") {
           ev.preventDefault();
           closeDetailsEditor({ restoreFocus: true });
@@ -2523,28 +2704,61 @@
         if (ev.key === "Enter" && isBodyField && (ev.metaKey || ev.ctrlKey)) {
           ev.preventDefault();
           saveDetailsEditor();
+          return;
+        }
+        if (ev.key === "Enter" && isDueField && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+          ev.preventDefault();
+          saveDetailsEditor();
         }
       }
 
-      function isUnderCopyTemplates(nodeId) {
+      function isCopyContextMarkerNode(node) {
+        if (!node || typeof node !== "object") return false;
+        const id = cleanText(node.id, 80);
+        if (id === "m1") return true;
+        if (normaliseCopyContextFlag(node.copyContext)) return true;
+        const roleCandidates = [
+          cleanText(node.role, 40).toLowerCase(),
+          cleanText(node.copyRole, 40).toLowerCase(),
+          cleanText(node?.profile?.role, 40).toLowerCase(),
+          cleanText(node?.profile?.copyRole, 40).toLowerCase(),
+        ];
+        for (const role of roleCandidates) {
+          if (role === "copy") return true;
+        }
+        return false;
+      }
+
+      function isCopyContextLabelFallbackNode(node) {
+        const key = cleanText(node?.label, 220).toLowerCase();
+        return key === "copy templates" || key === "copy";
+      }
+
+      function isCopyContextRootNode(node) {
+        return isCopyContextMarkerNode(node) || isCopyContextLabelFallbackNode(node);
+      }
+
+      function findCopyContextRootId(nodeId) {
         const map = nodeMap();
         let cur = map.get(nodeId) || null;
         let guard = 0;
         while (cur && guard < 200) {
-          if (cleanText(cur.label, 220).toLowerCase() === "copy templates") return true;
+          if (isCopyContextRootNode(cur)) return cleanText(cur.id, 80);
           if (!cur.parentId || cur.parentId === "root") break;
           cur = map.get(cur.parentId) || null;
           guard += 1;
         }
-        return false;
+        return "";
+      }
+
+      function isUnderCopyTemplates(nodeId) {
+        return !!findCopyContextRootId(nodeId);
       }
 
       function isCopyFocusMode() {
         if (isPipMode) return true;
         if (!state.focusRootId) return false;
-        const focusPath = getPath(state.focusRootId).toLowerCase();
-        if (!focusPath) return false;
-        return focusPath.includes("copy templates") || focusPath.endsWith(" > copy") || focusPath === "copy";
+        return !!findCopyContextRootId(state.focusRootId);
       }
 
       function shouldCopyOnSingleClick(node, hasKids) {
@@ -2574,9 +2788,10 @@
         for (const node of Array.isArray(state.nodes) ? state.nodes : []) {
           const id = cleanText(node?.id, 80);
           if (!id) continue;
-          if (!normaliseUrgentFlag(node?.urgent)) continue;
+          const attentionState = nodeAttentionState(node);
+          if (!attentionState) continue;
           const path = cleanText(getPath(id), 500) || cleanText(node?.label, 220) || id;
-          out.push({ id, path });
+          out.push({ id, path, attentionState });
         }
         out.sort((left, right) => left.path.localeCompare(right.path));
         return out;
@@ -3021,10 +3236,26 @@
         const message = childCount > 0
           ? `Delete "${node.label}" and ${childCount} child item(s)?`
           : `Delete "${node.label}"?`;
-        if (opts.confirm && !window.confirm(message)) {
-          refocusTreeNavigation(state.selectedId || node.id);
-          return false;
+        if (opts.confirm) {
+          const nowMs = Date.now();
+          const isArmed = pendingDeleteConfirmNodeId === node.id && pendingDeleteConfirmExpiresAt > nowMs;
+          if (!isArmed) {
+            const guidance = childCount > 0
+              ? "This removes the whole branch."
+              : "This cannot be undone except via Undo.";
+            pendingDeleteConfirmNodeId = node.id;
+            pendingDeleteConfirmExpiresAt = nowMs + TREE_DELETE_CONFIRM_WINDOW_MS;
+            setStatus(`${message} ${guidance} Press - or Delete again to confirm.`, "", {
+              durationMs: TREE_DELETE_CONFIRM_WINDOW_MS,
+            });
+            refocusTreeNavigation(state.selectedId || node.id);
+            return false;
+          }
+          pendingDeleteConfirmNodeId = "";
+          pendingDeleteConfirmExpiresAt = 0;
         }
+        pendingDeleteConfirmNodeId = "";
+        pendingDeleteConfirmExpiresAt = 0;
 
         // Safety snapshot before destructive delete, so Restore last can recover quickly.
         const safetyPayload = {
@@ -3392,7 +3623,9 @@
         state.moveMode = !!next && !!state.selectedId;
         refreshMeta();
         if (state.moveMode) {
-          setStatus("Move mode on. Use ↑ ↓ to reorder, → to indent, ← to outdent.", "ok");
+          const selected = nodeMap().get(state.selectedId);
+          const label = cleanText(selected?.label, 120) || "item";
+          setStatus(`Move "${label}": Move mode on. Use ↑ ↓ to reorder, → to indent, ← to outdent. Enter confirms, Esc cancels.`, "ok");
           armMoveModeIdleTimer();
           refocusTreeNavigation(state.selectedId);
         }
@@ -3418,10 +3651,45 @@
       function handleTreeKeydown(ev) {
         if (isDetailsEditorOpen()) return;
         if (state.inlineEdit.id) return;
+        const hasPendingImport = !!pendingPathImport;
+        if (
+          hasPendingImport
+          && !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && !ev.shiftKey
+          && ev.key === "Enter"
+        ) {
+          ev.preventDefault();
+          commitPendingPathImport();
+          refocusTreeNavigation(state.selectedId);
+          return;
+        }
+        if (
+          hasPendingImport
+          && !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && !ev.shiftKey
+          && ev.key === "Escape"
+        ) {
+          ev.preventDefault();
+          cancelPendingPathImport();
+          refocusTreeNavigation(state.selectedId);
+          return;
+        }
         const lowerKey = String(ev.key || "").toLowerCase();
         if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && lowerKey === "z") {
           ev.preventDefault();
           undoMostRecentTreeMutation();
+          return;
+        }
+        if (ev.key === "Escape" && pendingDeleteConfirmNodeId && pendingDeleteConfirmExpiresAt > Date.now()) {
+          ev.preventDefault();
+          pendingDeleteConfirmNodeId = "";
+          pendingDeleteConfirmExpiresAt = 0;
+          setStatus("Delete cancelled.", "ok");
+          refocusTreeNavigation(state.selectedId);
           return;
         }
         if (
@@ -3589,6 +3857,7 @@
           if (ev.key === "Escape") {
             ev.preventDefault();
             toggleMoveMode(false);
+            setStatus("Move cancelled.", "ok");
             return;
           }
         }
@@ -3791,12 +4060,13 @@
           const label = document.createElement("div");
           label.className = "label";
           label.textContent = "Urgent";
+          label.title = "Virtual view: manual #urgent, overdue, and due today";
           rootRow.appendChild(label);
 
           const countBadge = document.createElement("span");
           countBadge.className = "detailBadge";
           countBadge.textContent = String(entries.length);
-          countBadge.title = "Virtual urgent view";
+          countBadge.title = "Virtual view: manual #urgent, overdue, and due today";
           rootRow.appendChild(countBadge);
 
           rootRow.addEventListener("click", () => toggleUrgentCollector());
@@ -3821,7 +4091,10 @@
             row.appendChild(bullet);
 
             const entryLabel = document.createElement("div");
-            entryLabel.className = "label urgent";
+            const entryAttentionClass = entry.attentionState === "due_today"
+              ? "dueToday"
+              : (entry.attentionState === "overdue" ? "overdue" : "urgent");
+            entryLabel.className = `label ${entryAttentionClass}`;
             entryLabel.textContent = `/${entry.path}`;
             entryLabel.setAttribute("data-full-label", `/${cleanText(entry.path, 500)}`);
             row.appendChild(entryLabel);
@@ -3849,8 +4122,11 @@
           li.className = "treeNode";
 
           const row = document.createElement("div");
-          const isUrgent = normaliseUrgentFlag(node.urgent);
-          row.className = `row${state.selectedId === node.id ? " selected" : ""}${isUrgent ? " urgent" : ""}`;
+          const attentionState = nodeAttentionState(node);
+          const rowAttentionClass = attentionState === "due_today"
+            ? " dueToday"
+            : (attentionState === "overdue" ? " overdue" : (attentionState === "manual_urgent" ? " urgent" : ""));
+          row.className = `row${state.selectedId === node.id ? " selected" : ""}${rowAttentionClass}`;
           row.setAttribute("data-node-id", node.id);
           row.style.paddingLeft = `${depthIndentPx(depth)}px`;
           row.tabIndex = 0;
@@ -3932,7 +4208,10 @@
             }
           } else {
             const label = document.createElement("div");
-            label.className = `label${isUrgent ? " urgent" : ""}`;
+            const labelAttentionClass = attentionState === "due_today"
+              ? " dueToday"
+              : (attentionState === "overdue" ? " overdue" : (attentionState === "manual_urgent" ? " urgent" : ""));
+            label.className = `label${labelAttentionClass}`;
             label.textContent = node.label;
             label.setAttribute("data-full-label", cleanText(node.label, 500) || getPath(node.id));
             row.appendChild(label);
@@ -4481,6 +4760,9 @@
         el.btnPip?.addEventListener("click", () => {
           void openPipWindow();
         });
+        el.btnImportNow?.addEventListener("click", commitPendingPathImport);
+        el.btnCancelImport?.addEventListener("click", cancelPendingPathImport);
+        el.btnUndoImport?.addEventListener("click", undoLastImportBatch);
         el.fileInput.addEventListener("change", async (ev) => {
           const file = ev.target.files && ev.target.files[0] ? ev.target.files[0] : null;
           await loadFromFile(file);
@@ -4560,6 +4842,7 @@
         });
         el.detailEditorLabel?.addEventListener("keydown", handleDetailsEditorKeydown);
         el.detailEditorBody?.addEventListener("keydown", handleDetailsEditorKeydown);
+        el.detailEditorDue?.addEventListener("keydown", handleDetailsEditorKeydown);
         el.btnExportTree.addEventListener("click", () => {
           void exportTree();
         });
