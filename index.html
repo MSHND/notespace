@@ -583,6 +583,14 @@
       padding: 0;
       list-style: none;
     }
+    .children.groupedChildBlock {
+      margin: 2px 0 4px;
+      margin-left: var(--group-indent, 10px);
+      border-radius: 10px;
+      background: rgba(108, 116, 126, 0.02);
+      box-shadow: inset 0 0 0 1px rgba(108, 116, 126, 0.04);
+      overflow: hidden;
+    }
     .treeEmptyHint {
       margin: 8px 0;
       padding: 10px 12px;
@@ -4016,10 +4024,10 @@
         function depthIndentPx(depth) {
           const d = Math.max(0, Number(depth) || 0);
           if (d <= 0) return 8;
-          if (d === 1) return 16;
-          if (d === 2) return 24;
-          if (d === 3) return 30;
-          return 30 + ((d - 3) * 6);
+          if (d === 1) return 20;
+          if (d === 2) return 32;
+          if (d === 3) return 42;
+          return 42 + ((d - 3) * 9);
         }
 
         function buildUrgentCollectorNode() {
@@ -4289,9 +4297,12 @@
 
           if (hasKids && !isCollapsed) {
             const ul = document.createElement("ul");
-            ul.className = "children";
+            const childDepth = depth + 1;
+            const childGroupIndentPx = Math.max(10, depthIndentPx(childDepth) - 8);
+            ul.className = "children groupedChildBlock";
+            ul.style.setProperty("--group-indent", `${childGroupIndentPx}px`);
             for (const kid of children) {
-              const child = build(kid, depth + 1);
+              const child = build(kid, childDepth);
               if (child) ul.appendChild(child);
             }
             if (ul.childNodes.length > 0) li.appendChild(ul);
