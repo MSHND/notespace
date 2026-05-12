@@ -353,21 +353,21 @@
       color: var(--muted);
       white-space: nowrap;
     }
-    .detailDueInput {
-      margin-left: auto;
-      width: 152px;
-      max-width: 100%;
-      min-width: 0;
-      height: 28px;
-      border: 1px solid var(--tree-panel-border);
-      border-radius: 9px;
-      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.05));
-      color: var(--text);
-      font: inherit;
-      font-size: 13px;
-      padding: 0 8px;
-      box-sizing: border-box;
-      outline: none;
+    .detailUrgentToggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      line-height: 1.2;
+      color: var(--muted);
+      white-space: nowrap;
+      user-select: none;
+    }
+    .detailUrgentInput {
+      width: 15px;
+      height: 15px;
+      margin: 0;
+      accent-color: rgba(194, 122, 23, 0.88);
     }
     .detailCopyContextToggle {
       display: inline-flex;
@@ -476,21 +476,11 @@
       user-select: none;
     }
     .row.urgent .label,
-    .label.urgent,
-    .row.overdue .label,
-    .label.overdue {
+    .label.urgent {
       font-weight: 600;
     }
-    .row.dueToday .label,
-    .label.dueToday {
-      font-weight: 560;
-    }
     .row.urgent .label::before,
-    .label.urgent::before,
-    .row.overdue .label::before,
-    .label.overdue::before,
-    .row.dueToday .label::before,
-    .label.dueToday::before {
+    .label.urgent::before {
       content: "";
       width: 6px;
       height: 6px;
@@ -498,21 +488,8 @@
       margin-right: 8px;
       display: inline-block;
       vertical-align: middle;
-    }
-    .row.urgent .label::before,
-    .label.urgent::before {
       background: color-mix(in srgb, #c27a17 78%, var(--text) 22%);
       opacity: 0.9;
-    }
-    .row.overdue .label::before,
-    .label.overdue::before {
-      background: color-mix(in srgb, #b76b14 84%, var(--text) 16%);
-      opacity: 0.92;
-    }
-    .row.dueToday .label::before,
-    .label.dueToday::before {
-      background: color-mix(in srgb, #d39e44 64%, var(--text) 36%);
-      opacity: 0.74;
     }
     .detailBadge {
       grid-column: 3;
@@ -758,8 +735,10 @@
         <input id="detailEditorLabel" class="detailLabelInput" type="text" placeholder="Item name">
         <textarea id="detailEditorBody" class="detailBodyInput" placeholder="Extra details (kept inside this item, not shown in tree rows)"></textarea>
         <div class="detailMetaRow">
-          <label class="detailMetaLabel" for="detailEditorDue">Due:</label>
-          <input id="detailEditorDue" class="detailDueInput" type="date" aria-label="Due date">
+          <label class="detailUrgentToggle" for="detailEditorUrgent">
+            <input id="detailEditorUrgent" class="detailUrgentInput" type="checkbox" aria-label="Urgent">
+            <span>Urgent</span>
+          </label>
           <label class="detailCopyContextToggle" for="detailEditorCopyContext">
             <input id="detailEditorCopyContext" class="detailCopyContextInput" type="checkbox" aria-label="Copy context for children">
             <span>Copy context for children</span>
@@ -810,7 +789,6 @@
           originalLabel: "",
           originalDetails: "",
           originalUrgent: false,
-          originalDue: "",
           originalCopyContext: false,
           draftOpRecorded: false,
           opsStartLength: 0,
@@ -878,7 +856,7 @@
         detailEditorPath: document.getElementById("detailEditorPath"),
         detailEditorLabel: document.getElementById("detailEditorLabel"),
         detailEditorBody: document.getElementById("detailEditorBody"),
-        detailEditorDue: document.getElementById("detailEditorDue"),
+        detailEditorUrgent: document.getElementById("detailEditorUrgent"),
         detailEditorCopyContext: document.getElementById("detailEditorCopyContext"),
         btnDetailSave: document.getElementById("btnDetailSave"),
         btnDetailCancel: document.getElementById("btnDetailCancel"),
@@ -917,10 +895,7 @@
       }
 
       function composeDetailsEditorValue(rawValue, urgentValue) {
-        const details = normaliseDetails(rawValue, 4000);
-        if (!normaliseUrgentFlag(urgentValue)) return details;
-        if (/(^|\s)#urgent\b/i.test(details)) return details;
-        return details ? `${details}\n#urgent` : "#urgent";
+        return normaliseDetails(rawValue, 4000);
       }
 
       function hasCompletionTag(rawValue) {
@@ -962,13 +937,8 @@
         return `${year}-${month}-${day}`;
       }
 
-      function nodeAttentionState(node, todayYmd = localTodayYmd()) {
-        if (normaliseUrgentFlag(node?.urgent)) return "manual_urgent";
-        const due = normaliseDateYmd(node?.due);
-        if (!due) return "";
-        if (due < todayYmd) return "overdue";
-        if (due === todayYmd) return "due_today";
-        return "";
+      function nodeAttentionState(node) {
+        return normaliseUrgentFlag(node?.urgent) ? "manual_urgent" : "";
       }
 
       function uniqueTextArray(raw, maxItems = 200, maxLen = 80) {
@@ -992,7 +962,6 @@
         const status = ["open", "in_progress", "blocked", "done"].includes(statusRaw) ? statusRaw : "";
         const priorityRaw = cleanText(value.priority, 24).toLowerCase();
         const priority = ["low", "normal", "high", "urgent"].includes(priorityRaw) ? priorityRaw : "";
-        const due = normaliseDateYmd(value.due);
         const followUpBy = normaliseDateYmd(value.followUpBy || value.follow_up_by);
         const waitingFor = cleanText(value.waitingFor || value.waiting_for || value.owner, 120);
         const contactTypeRaw = cleanText(value.contactType || value.contact_type, 40).toLowerCase();
@@ -1007,7 +976,6 @@
         const out = {};
         if (status) out.status = status;
         if (priority) out.priority = priority;
-        if (due) out.due = due;
         if (followUpBy) out.followUpBy = followUpBy;
         if (waitingFor) out.waitingFor = waitingFor;
         if (contactType) out.contactType = contactType;
@@ -1796,7 +1764,6 @@
           const orderRaw = Number(item.order);
           const order = Number.isFinite(orderRaw) ? Math.round(orderRaw) : (1000 + out.length);
           const updatedAt = cleanText(item.updatedAt, 40) || nowIso();
-          const due = normaliseDateYmd(item.due);
           const urgent = normaliseUrgentFlag(item.urgent);
           const details = normaliseDetails(item.details, 4000);
           const task = normaliseTreeTaskMeta(item.task || item.taskMeta);
@@ -1812,7 +1779,6 @@
             updatedAt,
             source: cleanText(item.source, 30) || "manual",
           };
-          if (due) payload.due = due;
           if (urgent) payload.urgent = true;
           if (details) payload.details = details;
           if (task) payload.task = task;
@@ -2729,20 +2695,24 @@
         const baseBody = node
           ? composeDetailsEditorValue(node.details, node.urgent)
           : normaliseDetails(state.detailsEdit.originalDetails, 4000);
-        const baseDue = node ? normaliseDateYmd(node.due) : normaliseDateYmd(state.detailsEdit.originalDue);
+        const baseUrgent = node
+          ? normaliseUrgentFlag(node.urgent)
+          : normaliseUrgentFlag(state.detailsEdit.originalUrgent);
         const baseCopyContext = node
           ? normaliseCopyContextFlag(node.copyContext)
           : normaliseCopyContextFlag(state.detailsEdit.originalCopyContext);
         const nextLabel = cleanText(el.detailEditorLabel?.value, 220);
         const nextBody = normaliseDetails(el.detailEditorBody?.value, 4000);
-        const nextDue = normaliseDateYmd(el.detailEditorDue?.value);
+        const parsedBody = parseUrgentDetailsBody(nextBody);
+        const nextUrgent = (el.detailEditorUrgent instanceof HTMLInputElement && el.detailEditorUrgent.checked)
+          || parsedBody.urgent;
         const nextCopyContext = el.detailEditorCopyContext instanceof HTMLInputElement
           ? !!el.detailEditorCopyContext.checked
           : false;
         return (
           nextLabel !== baseLabel
-          || nextBody !== normaliseDetails(baseBody, 4000)
-          || nextDue !== baseDue
+          || parsedBody.details !== normaliseDetails(baseBody, 4000)
+          || nextUrgent !== baseUrgent
           || nextCopyContext !== baseCopyContext
         );
       }
@@ -2862,9 +2832,6 @@
         else delete node.details;
         if (normaliseUrgentFlag(edit.originalUrgent)) node.urgent = true;
         else delete node.urgent;
-        const originalDue = normaliseDateYmd(edit.originalDue);
-        if (originalDue) node.due = originalDue;
-        else delete node.due;
         if (normaliseCopyContextFlag(edit.originalCopyContext)) node.copyContext = true;
         else delete node.copyContext;
         node.updatedAt = nowIso();
@@ -2886,8 +2853,8 @@
         const nextLabel = cleanText(el.detailEditorLabel?.value, 220);
         const parsedDetails = parseUrgentDetailsBody(String(el.detailEditorBody?.value || ""));
         const nextDetails = parsedDetails.details;
-        const nextUrgent = parsedDetails.urgent;
-        const nextDue = normaliseDateYmd(el.detailEditorDue?.value);
+        const nextUrgent = (el.detailEditorUrgent instanceof HTMLInputElement && el.detailEditorUrgent.checked)
+          || parsedDetails.urgent;
         const nextCopyContext = el.detailEditorCopyContext instanceof HTMLInputElement
           ? !!el.detailEditorCopyContext.checked
           : false;
@@ -2904,11 +2871,6 @@
         if (nextCopyContext !== normaliseCopyContextFlag(node.copyContext)) {
           if (nextCopyContext) node.copyContext = true;
           else delete node.copyContext;
-          changed = true;
-        }
-        if (nextDue !== normaliseDateYmd(node.due)) {
-          if (nextDue) node.due = nextDue;
-          else delete node.due;
           changed = true;
         }
         if (nextDetails !== normaliseDetails(node.details, 4000)) {
@@ -2947,13 +2909,12 @@
           originalLabel: "",
           originalDetails: "",
           originalUrgent: false,
-          originalDue: "",
           originalCopyContext: false,
           draftOpRecorded: false,
           opsStartLength: 0,
         };
-        if (el.detailEditorDue instanceof HTMLInputElement) {
-          el.detailEditorDue.value = "";
+        if (el.detailEditorUrgent instanceof HTMLInputElement) {
+          el.detailEditorUrgent.checked = false;
         }
         if (el.detailEditorCopyContext instanceof HTMLInputElement) {
           el.detailEditorCopyContext.checked = false;
@@ -2978,7 +2939,6 @@
           originalLabel: cleanText(node.label, 220),
           originalDetails: normaliseDetails(node.details, 4000),
           originalUrgent: normaliseUrgentFlag(node.urgent),
-          originalDue: normaliseDateYmd(node.due),
           originalCopyContext: normaliseCopyContextFlag(node.copyContext),
           draftOpRecorded: false,
           opsStartLength: Array.isArray(state.ops) ? state.ops.length : 0,
@@ -2997,8 +2957,9 @@
         if (el.detailEditorBody instanceof HTMLTextAreaElement) {
           el.detailEditorBody.value = composeDetailsEditorValue(node.details, node.urgent);
         }
-        if (el.detailEditorDue instanceof HTMLInputElement) {
-          el.detailEditorDue.value = normaliseDateYmd(node.due);
+        if (el.detailEditorUrgent instanceof HTMLInputElement) {
+          const parsedBody = parseUrgentDetailsBody(node.details);
+          el.detailEditorUrgent.checked = normaliseUrgentFlag(node.urgent) || parsedBody.urgent;
         }
         if (el.detailEditorCopyContext instanceof HTMLInputElement) {
           el.detailEditorCopyContext.checked = normaliseCopyContextFlag(node.copyContext);
@@ -3041,8 +3002,8 @@
         const parsedDetails = parseUrgentDetailsBody(
           canApplyCompletionMove ? stripCompletionTags(rawBodyValue) : rawBodyValue
         );
-        const nextUrgent = parsedDetails.urgent;
-        const nextDue = normaliseDateYmd(el.detailEditorDue?.value);
+        const nextUrgent = (el.detailEditorUrgent instanceof HTMLInputElement && el.detailEditorUrgent.checked)
+          || parsedDetails.urgent;
         const nextCopyContext = el.detailEditorCopyContext instanceof HTMLInputElement
           ? !!el.detailEditorCopyContext.checked
           : false;
@@ -3058,14 +3019,12 @@
         const prevLabel = cleanText(node.label, 220);
         const prevDetails = normaliseDetails(node.details, 4000);
         const prevUrgent = normaliseUrgentFlag(node.urgent);
-        const prevDue = normaliseDateYmd(node.due);
         const prevCopyContext = normaliseCopyContextFlag(node.copyContext);
         const labelChanged = nextLabel !== prevLabel;
         const detailsChanged = nextDetails !== prevDetails;
         const urgentChanged = nextUrgent !== prevUrgent;
         const copyContextChanged = nextCopyContext !== prevCopyContext;
-        const dueChanged = nextDue !== prevDue;
-        const hasFieldChanges = labelChanged || detailsChanged || urgentChanged || copyContextChanged || dueChanged;
+        const hasFieldChanges = labelChanged || detailsChanged || urgentChanged || copyContextChanged;
         const hadDraftChanges = !!state.detailsEdit.draftOpRecorded;
         if (!hasFieldChanges && !canApplyCompletionMove) {
           closeDetailsEditor({ restoreFocus: true, nodeId });
@@ -3080,8 +3039,6 @@
         else delete node.urgent;
         if (nextCopyContext) node.copyContext = true;
         else delete node.copyContext;
-        if (nextDue) node.due = nextDue;
-        else delete node.due;
         if (nextDetails) node.details = nextDetails;
         else delete node.details;
         node.updatedAt = nowIso();
@@ -3101,7 +3058,6 @@
         if (detailsChanged) changedParts.push("details");
         if (urgentChanged) changedParts.push("urgent");
         if (copyContextChanged) changedParts.push("copy context");
-        if (dueChanged) changedParts.push("due");
         if (completionResult.moved) changedParts.push("completed");
         recordOp({
           type: "details_edit",
@@ -3132,7 +3088,6 @@
         const target = ev.target instanceof HTMLElement ? ev.target : null;
         const isLabelField = target === el.detailEditorLabel;
         const isBodyField = target === el.detailEditorBody;
-        const isDueField = target === el.detailEditorDue;
         if (ev.key === "Escape") {
           ev.preventDefault();
           closeDetailsEditor({ restoreFocus: true, revertDraft: true });
@@ -3155,10 +3110,6 @@
           ev.preventDefault();
           saveDetailsEditor();
           return;
-        }
-        if (ev.key === "Enter" && isDueField && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
-          ev.preventDefault();
-          saveDetailsEditor();
         }
       }
 
@@ -4560,13 +4511,13 @@ function clearFilterForCopyLoop() {
           const label = document.createElement("div");
           label.className = "label";
           label.textContent = "Urgent";
-          label.title = "Virtual view: manual #urgent, overdue, and due today";
+          label.title = "Virtual view: items marked urgent";
           rootRow.appendChild(label);
 
           const countBadge = document.createElement("span");
           countBadge.className = "detailBadge";
           countBadge.textContent = String(entries.length);
-          countBadge.title = "Virtual view: manual #urgent, overdue, and due today";
+          countBadge.title = "Virtual view: items marked urgent";
           rootRow.appendChild(countBadge);
 
           rootRow.addEventListener("click", () => toggleUrgentCollector());
@@ -4591,10 +4542,7 @@ function clearFilterForCopyLoop() {
             row.appendChild(bullet);
 
             const entryLabel = document.createElement("div");
-            const entryAttentionClass = entry.attentionState === "due_today"
-              ? "dueToday"
-              : (entry.attentionState === "overdue" ? "overdue" : "urgent");
-            entryLabel.className = `label ${entryAttentionClass}`;
+            entryLabel.className = "label urgent";
             entryLabel.textContent = `/${entry.path}`;
             entryLabel.setAttribute("data-full-label", `/${cleanText(entry.path, 500)}`);
             row.appendChild(entryLabel);
@@ -4630,9 +4578,7 @@ function clearFilterForCopyLoop() {
 
           const row = document.createElement("div");
           const attentionState = nodeAttentionState(node);
-          const rowAttentionClass = attentionState === "due_today"
-            ? " dueToday"
-            : (attentionState === "overdue" ? " overdue" : (attentionState === "manual_urgent" ? " urgent" : ""));
+          const rowAttentionClass = attentionState === "manual_urgent" ? " urgent" : "";
           row.className = `row${state.selectedId === node.id ? " selected" : ""}${rowAttentionClass}`;
           row.setAttribute("data-node-id", node.id);
           row.style.paddingLeft = `${depthIndentPx(depth)}px`;
@@ -4715,9 +4661,7 @@ function clearFilterForCopyLoop() {
             }
           } else {
             const label = document.createElement("div");
-            const labelAttentionClass = attentionState === "due_today"
-              ? " dueToday"
-              : (attentionState === "overdue" ? " overdue" : (attentionState === "manual_urgent" ? " urgent" : ""));
+            const labelAttentionClass = attentionState === "manual_urgent" ? " urgent" : "";
             label.className = `label${labelAttentionClass}`;
             label.textContent = node.label;
             label.setAttribute("data-full-label", cleanText(node.label, 500) || getPath(node.id));
@@ -5407,11 +5351,9 @@ function clearFilterForCopyLoop() {
         });
         el.detailEditorLabel?.addEventListener("keydown", handleDetailsEditorKeydown);
         el.detailEditorBody?.addEventListener("keydown", handleDetailsEditorKeydown);
-        el.detailEditorDue?.addEventListener("keydown", handleDetailsEditorKeydown);
         el.detailEditorLabel?.addEventListener("input", stageDetailsEditorDraft);
         el.detailEditorBody?.addEventListener("input", stageDetailsEditorDraft);
-        el.detailEditorDue?.addEventListener("input", stageDetailsEditorDraft);
-        el.detailEditorDue?.addEventListener("change", stageDetailsEditorDraft);
+        el.detailEditorUrgent?.addEventListener("change", stageDetailsEditorDraft);
         el.detailEditorCopyContext?.addEventListener("change", stageDetailsEditorDraft);
         el.btnExportTree.addEventListener("click", saveCurrentContext);
         el.titleToast?.addEventListener("click", (ev) => {
