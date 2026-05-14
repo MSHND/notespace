@@ -340,7 +340,7 @@
       outline: none;
     }
     .detailMetaRow {
-      display: flex;
+      display: none;
       align-items: center;
       gap: 8px;
       border: 1px solid var(--tree-panel-border);
@@ -436,6 +436,11 @@
     .row.copyFlash {
       background: rgba(37, 99, 235, 0.12);
       border-color: rgba(37, 99, 235, 0.30);
+      transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    .row.touchFlash {
+      background: rgba(17, 102, 63, 0.10);
+      border-color: rgba(17, 102, 63, 0.24);
       transition: background-color 120ms ease, border-color 120ms ease;
     }
     @keyframes importFlashPulse {
@@ -806,6 +811,8 @@
       let moveModeIdleTimer = null;
       let movePadRepeatStartTimer = null;
       let movePadRepeatInterval = null;
+      let pendingCopyClickTimer = null;
+      const COPY_CLICK_DELAY_MS = 190;
       let statusActionHandler = null;
       let lastDeleteUndoSnapshot = null;
       let lastMoveUndoSnapshot = null;
@@ -814,6 +821,8 @@
       let pendingDeleteConfirmExpiresAt = 0;
       const TREE_DELETE_CONFIRM_WINDOW_MS = 12000;
       const rowCopyToastTimers = new Map();
+      const rowTouchFlashTimers = new Map();
+      let lastSavedLabel = "";
       let truthFileHandle = null;
       let exportTreeQueue = Promise.resolve();
       let lastPathExtractMeta = {
@@ -1740,12 +1749,62 @@
         return true;
       }
 
-      function showCopiedFeedback(nodeId) {
+      function flashTouchedRow(nodeId) {
+        const id = cleanText(nodeId, 80);
+        if (!id || !(el.treeWrap instanceof HTMLElement)) return false;
+        let row = null;
+        const rows = el.treeWrap.querySelectorAll(".row[data-node-id]");
+        for (const item of rows) {
+          if (!(item instanceof HTMLElement)) continue;
+          const rowId = cleanText(item.getAttribute("data-node-id"), 80);
+          if (rowId === id) {
+            row = item;
+            break;
+          }
+        }
+        if (!(row instanceof HTMLElement)) return false;
+        const prevTimer = rowTouchFlashTimers.get(id);
+        if (prevTimer) clearTimeout(prevTimer);
+        row.classList.remove("touchFlash");
+        void row.offsetWidth;
+        row.classList.add("touchFlash");
+        const timer = window.setTimeout(() => {
+          row.classList.remove("touchFlash");
+          rowTouchFlashTimers.delete(id);
+        }, 950);
+        rowTouchFlashTimers.set(id, timer);
+        return true;
+      }
+
+      function advanceSelectionAfterCopy(nodeId) {
+        const id = cleanText(nodeId, 80);
+        const visibleIds = getVisibleNodeIdsInRenderOrder();
+        if (!id || visibleIds.length === 0) return false;
+        const index = visibleIds.indexOf(id);
+        if (index < 0) return false;
+        const nextId = visibleIds[index + 1] || visibleIds[0];
+        if (!nextId || nextId === id) {
+          refocusTreeNavigation(id);
+          flashTouchedRow(id);
+          return false;
+        }
+        state.selectedId = nextId;
+        refreshMeta();
+        renderTree();
+        refocusTreeNavigation(nextId);
+        requestAnimationFrame(() => flashTouchedRow(id));
+        return true;
+      }
+
+      function showCopiedFeedback(nodeId, options = {}) {
         const id = cleanText(nodeId, 80);
         const sourceNode = id ? (nodeMap().get(id) || null) : null;
         const copiedLabel = cleanText(sourceNode?.label, 220);
         showRowCopyToast(id);
         setStatus(copiedLabel ? `Copied "${copiedLabel}".` : "Copied.", "ok");
+        if (options.advance === true) {
+          requestAnimationFrame(() => advanceSelectionAfterCopy(id));
+        }
       }
 
       function normaliseNodes(raw) {
@@ -3073,10 +3132,13 @@
           state.selectedId = completionResult.bucketId;
           expandPathToNode(completionResult.bucketId);
         }
+        const focusAfterDetailsId = completionResult.moved && completionResult.bucketId ? completionResult.bucketId : node.id;
+        if (!completionResult.moved) state.selectedId = node.id;
         closeDetailsEditor({
           restoreFocus: true,
-          nodeId: completionResult.moved && completionResult.bucketId ? completionResult.bucketId : node.id,
+          nodeId: focusAfterDetailsId,
         });
+        requestAnimationFrame(() => flashTouchedRow(focusAfterDetailsId));
         const statusText = completionResult.moved
           ? `Saved ${changedParts.join(" + ")} for "${nextLabel}". Moved to Completed.`
           : `Saved ${changedParts.join(" + ")} for "${nextLabel}".`;
@@ -3168,6 +3230,29 @@
         if (isPipMode) return !hasKids;
         if (isCopyFocusMode()) return !hasKids;
         return false;
+      }
+
+      function cancelPendingCopyClick() {
+        if (!pendingCopyClickTimer) return;
+        clearTimeout(pendingCopyClickTimer);
+        pendingCopyClickTimer = null;
+      }
+
+      function scheduleCopyClick(nodeId, label) {
+        cancelPendingCopyClick();
+        const id = cleanText(nodeId, 80);
+        const value = cleanText(label, 220);
+        if (!id || !value) return;
+        pendingCopyClickTimer = window.setTimeout(() => {
+          pendingCopyClickTimer = null;
+          clearFilterForCopyLoop();
+          refreshMeta();
+          renderTree();
+          focusRowByNodeId(id);
+          void copyText(value).then((ok) => {
+            if (ok) showCopiedFeedback(id, { advance: true });
+          });
+        }, COPY_CLICK_DELAY_MS);
       }
 
       function getPath(nodeId) {
@@ -3348,6 +3433,20 @@
         }, hideAfterMs);
       }
 
+      function formatSaveClockLabel(date = new Date()) {
+        try {
+          return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
+        } catch {
+          const hours = String(date.getHours()).padStart(2, "0");
+          const mins = String(date.getMinutes()).padStart(2, "0");
+          return `${hours}:${mins}`;
+        }
+      }
+
+      function markSavedNow() {
+        lastSavedLabel = formatSaveClockLabel(new Date());
+      }
+
       function flashSaveChip(label = "Saved") {
         if (!el.btnExportTree) return;
         const nextLabel = cleanText(label, 40) || "Saved";
@@ -3358,9 +3457,9 @@
         el.btnExportTree.textContent = nextLabel;
         el.btnExportTree.classList.add("on");
         saveChipTimer = window.setTimeout(() => {
-          el.btnExportTree.textContent = "Save";
           el.btnExportTree.classList.remove("on");
           saveChipTimer = null;
+          refreshMeta();
         }, 1200);
       }
 
@@ -3400,12 +3499,14 @@
           el.btnExportTree.textContent = "Saving...";
           el.btnExportTree.title = "Writing to truth file";
         } else if (!saveChipTimer) {
-          el.btnExportTree.textContent = hasUnsaved ? "Save *" : "Save";
+          el.btnExportTree.textContent = hasUnsaved
+            ? "Unsaved"
+            : (lastSavedLabel ? `Saved ${lastSavedLabel}` : "Save");
           el.btnExportTree.title = hasUnsavedDetails
             ? "Unsaved detail edit"
             : (hasUnsaved
             ? `${unsavedCount} unsaved change${unsavedCount === 1 ? "" : "s"}`
-            : "No unsaved changes");
+            : (lastSavedLabel ? `Last saved at ${lastSavedLabel}` : "No unsaved changes"));
         }
         const movePadEnabled = !!state.moveMode && !!state.selectedId;
         if (el.btnMovePadUp) el.btnMovePadUp.disabled = !movePadEnabled;
@@ -3573,6 +3674,7 @@
         renderTree();
         persistPipSnapshot();
         refocusTreeNavigation(node.id);
+        requestAnimationFrame(() => flashTouchedRow(node.id));
         if (postAction === "indent") indentNodeById(node.id);
         if (postAction === "outdent") outdentNodeById(node.id);
       }
@@ -3616,6 +3718,37 @@
           parentId,
         });
         setStatus(`New item below "${node.label}". Type to name it.`, "ok");
+      }
+
+      function insertChildUnder(nodeId) {
+        const map = nodeMap();
+        const node = map.get(nodeId);
+        if (!node) {
+          setStatus("Node not found.", "warn");
+          return;
+        }
+        if (isManagedSystemBucketNode(node)) {
+          setStatus("System buckets stay managed. Select a normal item first.", "warn");
+          return;
+        }
+        const parentId = node.id;
+        const newNode = {
+          id: makeId("node"),
+          parentId,
+          label: "",
+          source: "manual",
+          order: maxSiblingOrder(parentId) + 1,
+          updatedAt: nowIso(),
+        };
+        state.nodes.push(newNode);
+        state.collapsed.delete(parentId);
+        beginInlineEdit(newNode.id, {
+          isNew: true,
+          originalLabel: "",
+          afterId: "",
+          parentId,
+        });
+        setStatus(`New item under "${node.label}". Type to name it.`, "ok");
       }
 
       function deleteNodeById(nodeId, options = {}) {
@@ -3736,6 +3869,8 @@
         refreshMeta();
         renderTree();
         persistPipSnapshot();
+        refocusTreeNavigation(node.id);
+        requestAnimationFrame(() => flashTouchedRow(node.id));
         setStatus(`Indented "${node.label}" under "${previousSibling.label}".`, "ok", {
           action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
@@ -3772,6 +3907,8 @@
         refreshMeta();
         renderTree();
         persistPipSnapshot();
+        refocusTreeNavigation(node.id);
+        requestAnimationFrame(() => flashTouchedRow(node.id));
         setStatus(`Outdented "${node.label}".`, "ok", {
           action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
@@ -3810,6 +3947,8 @@
         refreshMeta();
         renderTree();
         persistPipSnapshot();
+        refocusTreeNavigation(node.id);
+        requestAnimationFrame(() => flashTouchedRow(node.id));
         setStatus(`${direction < 0 ? "Moved up" : "Moved down"}: "${node.label}".`, "ok", {
           action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
@@ -3893,6 +4032,7 @@ function clearFilterForCopyLoop() {
         const hadFilter = cleanText(el.search.value, 120).length > 0;
         if (!hadFilter) return false;
         el.search.value = "";
+        resetTypeJump();
         return true;
       }
 
@@ -3903,6 +4043,25 @@ function clearFilterForCopyLoop() {
           el.search.focus({ preventScroll: true });
           el.search.setSelectionRange(0, 0);
         });
+      }
+
+      function resetTypeJump() {
+        state.typeJump.query = "";
+        state.typeJump.cycle = 0;
+        state.typeJump.lastAt = 0;
+      }
+
+      function clearFilterAndReturnHome(statusText = "Filter cleared.") {
+        if (!(el.search instanceof HTMLInputElement)) return false;
+        const hadFilter = cleanText(el.search.value, 120).length > 0;
+        if (!hadFilter) return false;
+        el.search.value = "";
+        resetTypeJump();
+        renderTree();
+        refocusTreeNavigation(state.selectedId);
+        softlyEnsureSelectionVisible();
+        if (statusText) setStatus(statusText, "ok");
+        return true;
       }
 
       function selectNodeById(nodeId, options = {}) {
@@ -3968,15 +4127,20 @@ function clearFilterForCopyLoop() {
         const map = nodeMap();
         const nowMs = Date.now();
         const activeWindowMs = 850;
+        const previousQuery = cleanText(state.typeJump.query, 40).toLowerCase();
         const withinWindow = (nowMs - Number(state.typeJump.lastAt || 0)) <= activeWindowMs;
+        const repeatSingleKey = previousQuery.length === 1 && previousQuery === key;
+        let cycleFromCurrentSelection = false;
 
-        if (!withinWindow) {
+        if (repeatSingleKey) {
           state.typeJump.query = key;
           state.typeJump.cycle = 0;
-        } else if (state.typeJump.query.length === 1 && state.typeJump.query === key) {
-          state.typeJump.cycle += 1;
+          cycleFromCurrentSelection = true;
+        } else if (!withinWindow) {
+          state.typeJump.query = key;
+          state.typeJump.cycle = 0;
         } else {
-          state.typeJump.query = `${state.typeJump.query}${key}`.slice(0, 40);
+          state.typeJump.query = `${previousQuery}${key}`.slice(0, 40);
           state.typeJump.cycle = 0;
         }
         state.typeJump.lastAt = nowMs;
@@ -3998,10 +4162,18 @@ function clearFilterForCopyLoop() {
           matches = findMatches(query);
           state.typeJump.query = query;
           state.typeJump.cycle = 0;
+          cycleFromCurrentSelection = true;
         }
         if (matches.length === 0) return false;
 
-        const targetId = matches[state.typeJump.cycle % matches.length];
+        let targetId = "";
+        if (cycleFromCurrentSelection) {
+          const currentMatchIndex = matches.indexOf(state.selectedId);
+          const nextMatchIndex = currentMatchIndex >= 0 ? (currentMatchIndex + 1) % matches.length : 0;
+          targetId = matches[nextMatchIndex];
+        } else {
+          targetId = matches[0];
+        }
         if (!targetId || !state.nodes.some((n) => n.id === targetId)) return false;
         state.selectedId = targetId;
         refreshMeta();
@@ -4134,6 +4306,19 @@ function clearFilterForCopyLoop() {
           pendingDeleteConfirmExpiresAt = 0;
           setStatus("Delete cancelled.", "ok");
           refocusTreeNavigation(state.selectedId);
+          return;
+        }
+        if (
+          !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && !ev.shiftKey
+          && ev.key === "Escape"
+          && !state.moveMode
+        ) {
+          ev.preventDefault();
+          const cleared = clearFilterAndReturnHome("Filter cleared.");
+          if (!cleared) refocusTreeNavigation(state.selectedId);
           return;
         }
         if (
@@ -4411,24 +4596,6 @@ function clearFilterForCopyLoop() {
           && ev.key === "Enter"
         ) {
           ev.preventDefault();
-          if (state.selectedId) {
-            const map = nodeMap();
-            const current = map.get(state.selectedId) || null;
-            const hasKids = !!current && sortNodesForParent(current.id).length > 0;
-            if (current && shouldCopyOnSingleClick(current, hasKids)) {
-              if (el.search instanceof HTMLInputElement && cleanText(el.search.value, 120)) {
-                el.search.value = "";
-              }
-              refreshMeta();
-              renderTree();
-              refocusTreeNavigation(current.id);
-          softlyEnsureSelectionVisible();
-              void copyText(current.label).then((ok) => {
-                if (ok) showCopiedFeedback(current.id);
-              });
-              return;
-            }
-          }
           openDetailsEditorForSelectedNode();
           return;
         }
@@ -4706,34 +4873,28 @@ function clearFilterForCopyLoop() {
 
           row.addEventListener("click", () => {
             const copyOnClick = shouldCopyOnSingleClick(node, hasKids);
-            const shouldRefocusFilter = copyOnClick && clearFilterForCopyLoop();
 
             state.selectedId = node.id;
             row.focus();
             refreshMeta();
             renderTree();
-            if (shouldRefocusFilter) refocusFilterForCopyLoop();
-            else focusRowByNodeId(node.id);
+            focusRowByNodeId(node.id);
 
             if (copyOnClick) {
-              void copyText(node.label).then((ok) => {
-                if (ok) showCopiedFeedback(node.id);
-              });
+              scheduleCopyClick(node.id, node.label);
+            } else {
+              cancelPendingCopyClick();
             }
           });
           row.addEventListener("dblclick", (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            const shouldRefocusFilter = clearFilterForCopyLoop();
+            cancelPendingCopyClick();
             state.selectedId = node.id;
-            row.focus();
             refreshMeta();
             renderTree();
-            if (shouldRefocusFilter) refocusFilterForCopyLoop();
-            else focusRowByNodeId(node.id);
-            void copyText(node.label).then((ok) => {
-              if (ok) showCopiedFeedback(node.id);
-            });
+            focusRowByNodeId(node.id);
+            openDetailsEditorForSelectedNode();
           });
 
           li.appendChild(row);
@@ -4816,7 +4977,7 @@ function clearFilterForCopyLoop() {
         const focusId = cleanText(state.focusRootId, 80);
 
         if (selectedId && map.has(selectedId)) {
-          insertSiblingBelow(selectedId);
+          insertChildUnder(selectedId);
           return;
         }
 
@@ -5094,12 +5255,13 @@ function clearFilterForCopyLoop() {
           saveLastSaveSnapshot(payload);
           const writeResult = await writeTruthFile(payload);
           if (writeResult.ok) {
+            markSavedNow();
             // Only clear ops that existed at save start.
             state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
             if (state.ops.length > 0) {
-              setStatus(`Saved snapshot. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} pending.`, "ok");
+              setStatus(`Saved snapshot at ${lastSavedLabel}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} pending.`, "ok");
             } else {
-              setStatus("Saved.", "ok");
+              setStatus(`Saved ${lastSavedLabel}.`, "ok");
             }
             flashSaveChip("Saved");
             persistPipSnapshot();
@@ -5278,7 +5440,10 @@ function clearFilterForCopyLoop() {
           ev.target.value = "";
         });
 
-        el.search.addEventListener("input", () => renderTree());
+        el.search.addEventListener("input", () => {
+          resetTypeJump();
+          renderTree();
+        });
         el.search.addEventListener("keydown", (ev) => {
           if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
           if (ev.key === "Tab") {
@@ -5312,14 +5477,15 @@ function clearFilterForCopyLoop() {
             state.selectedId = targetId;
             if (copyOnEnter) {
               const hadFilter = cleanText(el.search.value, 120).length > 0;
-              if (hadFilter) el.search.value = "";
-              const shouldRefocusFilter = hadFilter && isCopyFocusMode();
+              if (hadFilter) {
+                el.search.value = "";
+                resetTypeJump();
+              }
               refreshMeta();
               renderTree();
-              if (shouldRefocusFilter) refocusFilterForCopyLoop();
-              else refocusTreeNavigation(targetId);
+              refocusTreeNavigation(targetId);
               void copyText(targetNode.label).then((ok) => {
-                if (ok) showCopiedFeedback(targetId);
+                if (ok) showCopiedFeedback(targetId, { advance: true });
               });
               return;
             }
@@ -5330,12 +5496,8 @@ function clearFilterForCopyLoop() {
           }
           if (ev.key === "Escape") {
             ev.preventDefault();
-            const hadFilter = cleanText(el.search.value, 120).length > 0;
-            if (hadFilter) {
-              el.search.value = "";
-              renderTree();
-            }
-            refocusTreeNavigation(state.selectedId);
+            const cleared = clearFilterAndReturnHome("Filter cleared.");
+            if (!cleared) refocusTreeNavigation(state.selectedId);
           }
         });
         el.treeWrap?.addEventListener("keydown", handleTreeKeydown);
@@ -5406,11 +5568,7 @@ function clearFilterForCopyLoop() {
             if (hasFilterText && el.search instanceof HTMLInputElement) {
               ev.preventDefault();
               ev.stopPropagation();
-              el.search.value = "";
-              renderTree();
-              refocusTreeNavigation(state.selectedId);
-          softlyEnsureSelectionVisible();
-              setStatus("Filter cleared.", "ok");
+              clearFilterAndReturnHome("Filter cleared.");
               return;
             }
           }
@@ -5449,15 +5607,14 @@ function clearFilterForCopyLoop() {
             const selectedHasKids = sortNodesForParent(selectedNode.id).length > 0;
             const copyLoopMode = shouldCopyOnSingleClick(selectedNode, selectedHasKids);
             if (copyLoopMode) {
-              const shouldRefocusFilter = clearFilterForCopyLoop();
+              clearFilterForCopyLoop();
               refreshMeta();
               renderTree();
-              if (shouldRefocusFilter) refocusFilterForCopyLoop();
-              else refocusTreeNavigation(selectedId);
+              refocusTreeNavigation(selectedId);
             }
             void copyText(selectedNode.label).then((ok) => {
               if (!ok) return;
-              showCopiedFeedback(selectedId);
+              showCopiedFeedback(selectedId, { advance: copyLoopMode });
             });
             return;
           }
