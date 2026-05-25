@@ -1,0 +1,51 @@
+/* phone mode: intentional thumb-friendly mode, not just a narrow-screen fallback. */
+
+body.phoneMode .row {
+  min-height: 50px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+body.phoneMode .label {
+  font-size: 15px;
+  line-height: 1.38;
+}
+
+body.phoneMode .treeWrap {
+  padding-top: 12px;
+  padding-bottom: 18px;
+}
+
+body.phoneMode .chip {
+  min-height: 30px;
+}
+
+body.phoneMode #btnPhoneMode {
+  font-style: italic;
+}
+
+body.phoneMode .detailOverlay {
+  align-items: stretch;
+  padding: 8px;
+}
+
+body.phoneMode .detailCard {
+  width: 100%;
+  max-height: none;
+  min-height: calc(100vh - 16px);
+  border-radius: 14px;
+}
+
+body.phoneMode .detailBodyInput {
+  min-height: 36vh;
+}
+
+@media (max-width: 520px) {
+  body.phoneMode .topbar {
+    gap: 5px;
+  }
+
+  body.phoneMode #btnPip {
+    display: none !important;
+  }
+}
