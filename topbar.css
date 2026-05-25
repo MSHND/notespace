@@ -1,7 +1,9 @@
-/* topbar polish: clearer utilities, no special phone pill. */
+/* topbar polish: quiet utilities with one shared visual rhythm. */
 
 body:not(.pipMode) .topbar .chip.utilityChip,
+body:not(.pipMode) .topbar .chip.utilityChip:disabled,
 body:not(.pipMode) .topbar #btnLoad,
+body:not(.pipMode) .topbar #btnExportTree,
 body:not(.pipMode) .topbar #btnPip,
 body:not(.pipMode) .topbar #btnPhoneMode {
   background: transparent !important;
@@ -10,21 +12,27 @@ body:not(.pipMode) .topbar #btnPhoneMode {
   border-radius: 4px !important;
   padding-inline: 5px !important;
   min-width: 0 !important;
-  color: rgba(51, 65, 85, 0.82) !important;
+  opacity: 1 !important;
+  color: rgba(51, 65, 85, 0.78) !important;
   font-style: normal !important;
   font-weight: 500 !important;
   text-decoration: none !important;
 }
 
-body:not(.pipMode) .topbar .chip.utilityChip:hover,
+body:not(.pipMode) .topbar .chip.utilityChip:not(:disabled):hover,
 body:not(.pipMode) .topbar #btnLoad:hover,
+body:not(.pipMode) .topbar #btnExportTree:not(:disabled):hover,
 body:not(.pipMode) .topbar #btnPip:hover,
 body:not(.pipMode) .topbar #btnPhoneMode:hover {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
-  color: rgba(30, 41, 59, 0.98) !important;
+  color: rgba(30, 41, 59, 0.96) !important;
   text-decoration: none !important;
+}
+
+body:not(.pipMode) .topbar #btnExportTree.safetyNeed {
+  font-style: italic !important;
 }
 
 body:not(.pipMode) .topbar #btnPhoneMode.on,
@@ -32,7 +40,7 @@ body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
-  color: rgba(30, 41, 59, 0.98) !important;
+  color: rgba(30, 41, 59, 0.96) !important;
   font-style: italic !important;
   text-decoration: none !important;
 }
