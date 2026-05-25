@@ -4,6 +4,7 @@
   "use strict";
 
   const STORAGE_KEY = "pocket.phoneMode.v1";
+  const AUTO_RESTORE_KEY = "pocket.phoneMode.autoRestoreSeen.v1";
 
   function readSavedMode() {
     try {
@@ -28,10 +29,34 @@
     button.title = enabled ? "Leave phone mode" : "Use phone mode";
   }
 
+  function shouldAutoRestoreLocalPhoneCopy() {
+    if (!document.body.classList.contains("phoneMode")) return false;
+    if (Array.isArray(global.state?.nodes) && global.state.nodes.length > 0) return false;
+    if (typeof global.readLocalSafetySnapshot !== "function") return false;
+    if (typeof global.restoreLocalSafetySnapshot !== "function") return false;
+    return !!global.readLocalSafetySnapshot();
+  }
+
+  function maybeAutoRestoreLocalPhoneCopy() {
+    if (!shouldAutoRestoreLocalPhoneCopy()) return false;
+    const snapshot = global.readLocalSafetySnapshot();
+    const ok = global.restoreLocalSafetySnapshot(snapshot);
+    if (ok) {
+      try { global.localStorage.setItem(AUTO_RESTORE_KEY, new Date().toISOString()); } catch (_error) {}
+      if (typeof global.setStatus === "function") {
+        global.setStatus("opened local phone copy", "ok", { durationMs: 4200 });
+      }
+    }
+    return ok;
+  }
+
   function setPhoneMode(enabled) {
     document.body.classList.toggle("phoneMode", enabled);
     saveMode(enabled);
     syncButton(document.getElementById("btnPhoneMode"), enabled);
+    if (enabled) {
+      requestAnimationFrame(() => maybeAutoRestoreLocalPhoneCopy());
+    }
   }
 
   function togglePhoneMode() {
@@ -47,7 +72,8 @@
   global.PocketPhoneMode = Object.freeze({
     init: initPhoneMode,
     set: setPhoneMode,
-    toggle: togglePhoneMode
+    toggle: togglePhoneMode,
+    maybeAutoRestoreLocalPhoneCopy
   });
 
   if (document.readyState === "loading") {
