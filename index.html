@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Pocket Lite (Work Bridge)</title>
+  <title>pocket</title>
   <style>
     :root {
       --bg-rgb: 249, 250, 248;
@@ -62,12 +62,18 @@
       overflow-x: auto;
       overflow-y: hidden;
       scrollbar-width: none;
+      opacity: 0.72;
+      transition: opacity 160ms ease;
+    }
+    .topbar:hover,
+    .topbar:focus-within {
+      opacity: 1;
     }
     .topbar::-webkit-scrollbar {
       display: none;
     }
     .title {
-      font-size: 12px;
+      font-size: 14px;
       font-weight: 600;
       letter-spacing: 0.16px;
       color: var(--muted);
@@ -110,6 +116,17 @@
     .topbar #btnLoad {
       display: inline-flex !important;
     }
+
+    /* Toolbar cut pass: row actions now live in right-click / . menu, so the topbar only keeps file/safety controls. */
+    body:not(.pipMode) .topbar #btnMovePrimary,
+    body:not(.pipMode) .topbar #btnRenamePrimary,
+    body:not(.pipMode) .topbar #btnDeletePrimary,
+    body:not(.pipMode) .topbar #btnOpenPrimary,
+    body:not(.pipMode) .topbar #btnAddPrimary,
+    body:not(.pipMode) .topbar #btnUnfoldAll {
+      display: none !important;
+    }
+
     body:not(.pipMode) .topbar #btnPip {
       display: inline-flex !important;
     }
@@ -126,7 +143,100 @@
       border-color: var(--chip-on-border);
       color: rgba(29, 78, 216, 0.88);
     }
-    /* Keep import controls plumbing-only in Pocket Lite for now. */
+    #btnExportTree.safetySafe {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+      color: rgba(71, 85, 105, 0.72);
+      padding-inline: 8px;
+      font-style: normal;
+    }
+    #btnExportTree.safetySafe:hover {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(51, 65, 85, 0.86);
+    }
+    #btnExportTree.safetyNeed {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+      color: rgba(71, 85, 105, 0.78);
+      padding-inline: 8px;
+      font-style: italic;
+    }
+    #btnExportTree.safetyNeed:hover {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(51, 65, 85, 0.92);
+    }
+    #btnExportTree.safetyCheck {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+      color: rgba(71, 85, 105, 0.78);
+      padding-inline: 8px;
+      font-style: normal;
+    }
+    #btnExportTree.safetyCheck:hover {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(51, 65, 85, 0.92);
+    }
+
+
+    /* Keep save visually equal to open/popout: no extra attention ring/pill. */
+    #btnExportTree.on {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+      color: rgba(71, 85, 105, 0.78);
+      font-style: normal;
+    }
+    #btnExportTree.on:hover {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(51, 65, 85, 0.92);
+    }
+
+
+
+    /* Save is document-state text, not a pill/button: plain save, italic save* when dirty. */
+    .topbar #btnExportTree,
+    .topbar #btnExportTree.safetySafe,
+    .topbar #btnExportTree.safetyNeed,
+    .topbar #btnExportTree.safetyCheck,
+    .topbar #btnExportTree.on {
+      background: transparent !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      border-radius: 4px !important;
+      padding-inline: 4px !important;
+      min-width: 0 !important;
+      color: rgba(71, 85, 105, 0.78) !important;
+    }
+    .topbar #btnExportTree:hover,
+    .topbar #btnExportTree.safetySafe:hover,
+    .topbar #btnExportTree.safetyNeed:hover,
+    .topbar #btnExportTree.safetyCheck:hover,
+    .topbar #btnExportTree.on:hover {
+      background: transparent !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      color: rgba(51, 65, 85, 0.94) !important;
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+    .topbar #btnExportTree.safetyNeed {
+      font-style: italic !important;
+    }
+    .topbar #btnExportTree.safetySafe,
+    .topbar #btnExportTree.safetyCheck,
+    .topbar #btnExportTree.on {
+      font-style: normal !important;
+    }
+
+    /* Keep import controls plumbing-only for pocket for now. */
     #btnImportNow,
     #btnCancelImport,
     #btnUndoImport {
@@ -224,6 +334,30 @@
       color: var(--text);
       opacity: 0.86;
     }
+
+
+    /* Soft filter cut pass: the filter stays tiny until it is actually being used. */
+    .topbarSearch {
+      flex-basis: 46px;
+      width: 46px;
+      max-width: 46px;
+      min-width: 34px;
+      transition: flex-basis 150ms ease, width 150ms ease, max-width 150ms ease, background 140ms ease, opacity 140ms ease;
+    }
+    .topbarSearch:hover {
+      background: rgba(var(--panel-rgb), 0.22);
+      opacity: 0.82;
+    }
+    .topbarSearch:focus {
+      flex-basis: min(184px, 38vw);
+      width: min(184px, 38vw);
+      max-width: min(184px, 38vw);
+    }
+    .topbarSearch:not(:focus):not(:placeholder-shown) {
+      flex-basis: min(132px, 26vw);
+      width: min(132px, 26vw);
+      max-width: min(132px, 26vw);
+    }
     .layout {
       display: grid;
       gap: 10px;
@@ -258,6 +392,24 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      transition: opacity 140ms ease, padding 140ms ease, min-height 140ms ease, border-color 140ms ease;
+    }
+
+    /* Tree-first header cut: hide the repeated heading until it is actually useful. */
+    body:not(.focusedView):not(.moveModeActive) .panelHead.treeHead {
+      min-height: 0;
+      height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      border-bottom-color: transparent;
+      opacity: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    body.focusedView .panelHead.treeHead > span:first-child,
+    body.moveModeActive .panelHead.treeHead > span:first-child {
+      display: none;
     }
     .focusMeta {
       display: flex;
@@ -277,6 +429,132 @@
       font-size: 12px;
       padding: 5px 10px;
     }
+
+    .commandOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 45;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 58px 14px 14px;
+      background: rgba(17, 24, 39, 0.10);
+      backdrop-filter: blur(2px);
+    }
+    .commandOverlay[hidden] { display: none; }
+    .commandCard {
+      width: min(430px, 100%);
+      border: 1px solid var(--tree-panel-border);
+      border-radius: 16px;
+      background: rgba(var(--panel-rgb), 0.995);
+      box-shadow: 0 18px 42px -28px rgba(17, 24, 39, 0.50);
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+    }
+    .commandTitle {
+      padding: 6px 10px 4px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.12px;
+    }
+    .commandBtn {
+      width: 100%;
+      border: 1px solid transparent;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 34px;
+      padding: 7px 10px;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+      font-size: 13px;
+    }
+    .commandBtn:hover,
+    .commandBtn:focus {
+      outline: none;
+      background: rgba(108, 116, 126, 0.065);
+      border-color: rgba(108, 116, 126, 0.13);
+    }
+    .commandBtn[disabled] {
+      opacity: 0.42;
+      cursor: default;
+    }
+    .commandHint {
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .controlsOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 48;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+      background: rgba(17, 24, 39, 0.14);
+      backdrop-filter: blur(2px);
+    }
+    .controlsOverlay[hidden] { display: none; }
+    .controlsCard {
+      width: min(560px, 100%);
+      border: 1px solid var(--tree-panel-border);
+      border-radius: 16px;
+      background: rgba(var(--panel-rgb), 0.99);
+      box-shadow: 0 14px 32px -20px rgba(17, 24, 39, 0.42);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .controlsTitle {
+      font-size: 13px;
+      font-weight: 650;
+      color: var(--text-strong);
+    }
+    .controlsIntro {
+      font-size: 12px;
+      line-height: 1.35;
+      color: var(--muted);
+    }
+    .controlsList {
+      display: grid;
+      gap: 6px;
+      margin: 2px 0 0;
+    }
+    .controlRow {
+      display: grid;
+      grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+      gap: 10px;
+      align-items: baseline;
+      border: 1px solid rgba(119, 127, 140, 0.12);
+      border-radius: 10px;
+      padding: 7px 9px;
+      background: rgba(108, 116, 126, 0.025);
+      font-size: 12px;
+    }
+    .controlKey {
+      font-weight: 650;
+      color: var(--text-strong);
+      white-space: nowrap;
+    }
+    .controlMeaning {
+      color: var(--muted);
+      min-width: 0;
+    }
+    .controlsFooter {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
     .detailOverlay {
       position: absolute;
       inset: 0;
@@ -396,6 +674,17 @@
       padding: 14px 12px;
       min-height: 0;
       flex: 1;
+      outline: none;
+    }
+    .treeWrap:focus,
+    .treeWrap:focus-visible,
+    .treeWrap:focus-within {
+      outline: none;
+      box-shadow: none;
+    }
+    .treePanel:focus-within {
+      outline: none;
+      box-shadow: var(--tree-panel-lift);
     }
     .treeRoot {
       margin: 0;
@@ -416,7 +705,7 @@
       border: 1px solid transparent;
       border-radius: 10px;
       min-height: 42px;
-      padding: 6px 10px;
+      padding: 6px 28px 6px 10px;
       margin: 3px 0;
       cursor: pointer;
       background: transparent;
@@ -425,8 +714,9 @@
     }
     .row:hover { background: rgba(108, 116, 126, 0.045); }
     .row.selected {
-      background: rgba(108, 116, 126, 0.07);
-      border-color: rgba(108, 116, 126, 0.17);
+      background: rgba(37, 99, 235, 0.065);
+      border-color: transparent;
+      box-shadow: none;
     }
     .row.importFlash {
       background: rgba(37, 99, 235, 0.14);
@@ -434,14 +724,41 @@
       animation: importFlashPulse 1.15s ease;
     }
     .row.copyFlash {
-      background: rgba(37, 99, 235, 0.12);
-      border-color: rgba(37, 99, 235, 0.30);
-      transition: background-color 120ms ease, border-color 120ms ease;
+      background: rgba(37, 99, 235, 0.15);
+      border-color: transparent;
+      box-shadow: none;
+      transition: background-color 160ms ease;
+      animation: copyColourDeepen 0.72s ease-out;
+    }
+    @keyframes copyColourDeepen {
+      0% {
+        background: rgba(37, 99, 235, 0.26);
+      }
+      38% {
+        background: rgba(37, 99, 235, 0.19);
+      }
+      100% {
+        background: rgba(37, 99, 235, 0.15);
+      }
     }
     .row.touchFlash {
-      background: rgba(17, 102, 63, 0.10);
-      border-color: rgba(17, 102, 63, 0.24);
-      transition: background-color 120ms ease, border-color 120ms ease;
+      background: rgba(37, 99, 235, 0.12);
+      border-color: rgba(37, 99, 235, 0.32);
+      transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+      animation: rowTouchPulse 0.95s ease;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+    }
+    @keyframes rowTouchPulse {
+      0% {
+        background: rgba(37, 99, 235, 0.18);
+        border-color: rgba(37, 99, 235, 0.40);
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
+      }
+      100% {
+        background: rgba(37, 99, 235, 0.12);
+        border-color: rgba(37, 99, 235, 0.32);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+      }
     }
     @keyframes importFlashPulse {
       0% {
@@ -525,40 +842,130 @@
       outline: none;
     }
     .rowActions {
-      grid-column: 4;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.2s ease 0.1s;
-    }
-    .row:hover .rowActions {
-      opacity: 0.42;
-      pointer-events: auto;
+      display: none !important;
     }
     .rowActionBtn {
-      width: 24px;
+      width: 22px;
       height: 24px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: #fff;
+      border: 0;
+      border-radius: 7px;
+      background: rgba(var(--panel-rgb), 0.84);
       color: var(--muted);
       cursor: pointer;
       padding: 0;
-      font-size: 16px;
+      font-size: 13px;
+      font-weight: 600;
       line-height: 1;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      box-shadow: none;
+      backdrop-filter: blur(3px);
     }
     .rowActionBtn:hover {
-      background: var(--row);
+      outline: none;
+      color: var(--text);
+      background: rgba(var(--panel-rgb), 0.96);
+      border-radius: 7px;
     }
-    .rowActionBtn.delete:hover {
-      background: #fff1f2;
-      border-color: #f0bcc5;
-      color: #b42318;
+    .rowActionBtn:focus-visible {
+      outline: 1px solid rgba(37, 99, 235, 0.22);
+      outline-offset: 2px;
+      color: var(--text);
+      background: transparent;
+    }
+    .rowMiniMenu {
+      position: fixed;
+      z-index: 80;
+      width: min(138px, calc(100vw - 12px));
+      max-height: min(230px, calc(100vh - 12px));
+      overflow: auto;
+      border: 1px solid rgba(119, 127, 140, 0.22);
+      border-radius: 9px;
+      padding: 3px;
+      background: rgb(var(--panel-rgb));
+      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
+    }
+    .rowMiniMenuTitle {
+      display: none;
+      padding: 6px 8px 5px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      user-select: none;
+    }
+    .rowMiniMenuBtn {
+      width: 100%;
+      border: 0;
+      border-radius: 7px;
+      padding: 6px 7px;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      font-size: 12px;
+      line-height: 1.2;
+      text-align: left;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .rowMiniMenuLabel {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rowMiniMenuShortcut {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 10.5px;
+      opacity: 0.62;
+    }
+    .rowMiniMenuBtn:hover,
+    .rowMiniMenuBtn:focus-visible {
+      background: rgba(108, 116, 126, 0.08);
+      outline: none;
+    }
+    .rowMiniMenuBtn[disabled] {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .rowMiniMenuSep {
+      height: 1px;
+      margin: 3px 4px;
+      background: var(--line);
+      opacity: 0.8;
+    }
+
+    .row.menuOpen {
+      background: rgba(37, 99, 235, 0.075);
+      box-shadow: inset 2px 0 0 rgba(37, 99, 235, 0.42);
+    }
+    .row.copyReady .label::after {
+      content: "copy";
+      margin-left: 8px;
+      border: 1px solid rgba(37, 99, 235, 0.18);
+      border-radius: 999px;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 500;
+      color: rgba(29, 78, 216, 0.62);
+      background: rgba(37, 99, 235, 0.045);
+      vertical-align: 1px;
+      opacity: 0;
+      transition: opacity 140ms ease;
+    }
+    .row.copyReady.selected .label::after,
+    .row.copyReady:focus .label::after,
+    .row.copyReady:hover .label::after {
+      opacity: 1;
     }
     .children {
       margin: 0;
@@ -583,6 +990,52 @@
       font-size: 12px;
       letter-spacing: 0.08px;
       user-select: none;
+    }
+    .emptyState {
+      display: grid;
+      gap: 8px;
+      max-width: 420px;
+      margin: 18px auto;
+      padding: 18px 20px;
+      border: 1px solid var(--tree-panel-border);
+      border-radius: 14px;
+      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.02));
+      box-shadow: 0 8px 18px -18px rgba(15, 23, 42, 0.32);
+      text-align: center;
+    }
+    .emptyStateTitle {
+      font-size: 14px;
+      font-weight: 650;
+      color: var(--text);
+    }
+    .emptyStateText {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--muted);
+    }
+    .emptyStateActions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 2px;
+    }
+    .emptyStateAction {
+      border: 1px solid var(--chip-border);
+      background: var(--chip);
+      color: var(--text);
+      border-radius: 999px;
+      min-height: 28px;
+      padding: 0 12px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .emptyStateAction:hover {
+      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.10));
+      border-color: rgba(116, 124, 136, 0.26);
     }
     @media (max-width: 1080px) {
       .topStatusLane { display: none; }
@@ -676,6 +1129,257 @@
     .mobileMoveBtn.down { bottom: 0; left: 44px; }
     .mobileMoveBtn.left { top: 44px; left: 0; }
     .mobileMoveBtn.right { top: 44px; right: 0; }
+
+    .modePill {
+      flex: 0 0 auto;
+      display: none;
+      align-items: center;
+      min-height: 20px;
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 999px;
+      padding: 0 8px;
+      font-size: 11px;
+      line-height: 1;
+      color: var(--muted);
+      background: rgba(var(--panel-rgb), calc(var(--panel-alpha) + 0.02));
+      white-space: nowrap;
+    }
+    .modePill.show {
+      display: inline-flex;
+    }
+    .modePill.move {
+      color: rgba(29, 78, 216, 0.90);
+      border-color: rgba(37, 99, 235, 0.28);
+      background: rgba(37, 99, 235, 0.07);
+    }
+    .modePill.focus {
+      color: rgba(138, 93, 8, 0.88);
+      border-color: rgba(138, 93, 8, 0.22);
+      background: rgba(138, 93, 8, 0.06);
+    }
+    @media (max-width: 360px) {
+      .treeWrap {
+        padding: 8px 6px;
+      }
+      .row {
+        grid-template-columns: 14px minmax(0, 1fr) auto;
+        gap: 5px;
+        min-height: 34px;
+        padding: 4px 30px 4px 6px;
+        margin: 1px 0;
+        border-radius: 8px;
+      }
+      .twisty {
+        width: 14px;
+        font-size: 11px;
+      }
+      .label {
+        font-size: 13.5px;
+        line-height: 1.25;
+      }
+      .detailBadge {
+        display: none !important;
+      }
+      .children.groupedChildBlock {
+        margin-left: 6px;
+        border-radius: 7px;
+      }
+      .rowActions {
+        right: 2px;
+      }
+      .rowActionBtn {
+        width: 28px;
+        height: 30px;
+        font-size: 14px;
+        background: rgba(var(--panel-rgb), 0.92);
+      }
+      .rowMiniMenu {
+        width: min(138px, calc(100vw - 12px));
+      }
+    }
+
+    .rowMiniMenu.sheetMode {
+      left: 6px !important;
+      right: 6px !important;
+      bottom: 6px !important;
+      top: auto !important;
+      width: auto !important;
+      max-height: min(48vh, 230px);
+      border-radius: 12px;
+      padding: 5px;
+    }
+    .rowMiniMenu.sheetMode .rowMiniMenuTitle {
+      display: block;
+      max-width: calc(100vw - 32px);
+    }
+    .rowMiniMenu.sheetMode .rowMiniMenuBtn {
+      padding: 8px 9px;
+      font-size: 12.5px;
+      border-radius: 8px;
+    }
+
+
+
+    /* Micro topbar cut: remove duplicate branding and keep file controls as tiny utilities. */
+    body:not(.pipMode) .topbar {
+      min-height: 32px;
+      padding-top: 2px;
+      padding-bottom: 2px;
+      border-bottom-color: rgba(148, 163, 184, 0.10);
+    }
+    body:not(.pipMode) .topbar .title {
+      display: none !important;
+    }
+    body:not(.pipMode) .topbar #btnLoad,
+    body:not(.pipMode) .topbar #btnPip {
+      background: transparent;
+      border-color: transparent;
+      box-shadow: none;
+      color: rgba(71, 85, 105, 0.78);
+      padding-inline: 7px;
+    }
+    body:not(.pipMode) .topbar #btnLoad:hover,
+    body:not(.pipMode) .topbar #btnPip:hover {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(51, 65, 85, 0.92);
+    }
+    body:not(.pipMode) .topbar #btnPip {
+      min-width: 26px;
+      padding-inline: 6px;
+    }
+
+    /* Sidebar intentional layout: when pocket is narrow, protect the tree first. */
+    @media (max-width: 420px) {
+      .app {
+        margin: 4px;
+        height: calc(100vh - 8px);
+        border-radius: 12px;
+      }
+      .topbar {
+        min-height: 30px;
+        padding: 2px 5px;
+        gap: 3px;
+        opacity: 0.66;
+      }
+      .topbar:focus-within,
+      .topbar:hover {
+        opacity: 1;
+      }
+      .title,
+      .topStatusLane,
+      body:not(.pipMode) .topbar #btnPip,
+      .topbar #btnMovePrimary,
+      .topbar #btnRenamePrimary {
+        display: none !important;
+      }
+      .topbarSearch {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 36px;
+        max-width: none;
+        height: 24px;
+        padding: 0 3px;
+      }
+      .topbarSearch:focus {
+        padding: 3px 7px;
+      }
+      .topbarSearch {
+        flex: 0 0 38px;
+        width: 38px;
+        min-width: 32px;
+        max-width: 38px;
+      }
+      .topbarSearch:focus {
+        flex: 1 1 100%;
+        width: 100%;
+        max-width: none;
+      }
+      .topbarSearch:not(:focus):not(:placeholder-shown) {
+        flex: 1 1 92px;
+        width: auto;
+        max-width: none;
+      }
+      .chip {
+        height: 24px;
+        min-width: 0;
+        padding: 0 7px;
+        font-size: 11px;
+        box-shadow: none;
+      }
+      #btnExportTree {
+        max-width: 76px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .layout {
+        padding: 6px;
+        gap: 6px;
+      }
+      .panelHead {
+        min-height: 28px;
+        padding: 5px 8px;
+        font-size: 11.5px;
+        border-bottom-color: rgba(119, 127, 140, 0.10);
+      }
+      .treeWrap {
+        padding: 7px 5px;
+      }
+      .row {
+        grid-template-columns: 13px minmax(0, 1fr);
+        gap: 5px;
+        min-height: 33px;
+        padding: 4px 27px 4px 5px;
+        margin: 1px 0;
+        border-radius: 8px;
+        border-color: transparent;
+      }
+      .row:hover {
+        background: rgba(108, 116, 126, 0.035);
+      }
+      .row.selected {
+        background: rgba(37, 99, 235, 0.075);
+        border-color: transparent;
+        box-shadow: none;
+      }
+      .twisty {
+        width: 13px;
+        font-size: 10.5px;
+      }
+      .label {
+        font-size: 13.5px;
+        line-height: 1.24;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .row.copyReady .label::after,
+      .detailBadge,
+      .rowGhostPrompt,
+      .focusMeta,
+      .modePill {
+        display: none !important;
+      }
+      .children.groupedChildBlock {
+        margin-left: 5px;
+        border-radius: 7px;
+        background: rgba(108, 116, 126, 0.012);
+        box-shadow: none;
+      }
+      .rowActions {
+        right: 2px;
+      }
+      .rowActionBtn {
+        width: 26px;
+        height: 28px;
+        font-size: 13px;
+        background: rgba(var(--panel-rgb), 0.94);
+      }
+    }
+    @media (max-width: 720px) {
+      .rowGhostPrompt { display: none; }
+      .modePill { display: none !important; }
+    }
+
     @media (max-width: 860px), (pointer: coarse) {
       body:not(.pipMode) .mobileAddFab {
         display: inline-flex;
@@ -684,22 +1388,244 @@
         display: block;
       }
     }
+  
+
+    /* pocket identity pass: keep the place marker; keep popout findable but quiet. */
+    body:not(.pipMode) .topbar .title {
+      display: inline-flex !important;
+      align-items: center;
+      flex: 0 0 auto;
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.12px;
+      color: rgba(51, 65, 85, 0.82);
+      margin-right: 5px;
+      white-space: nowrap;
+    }
+    body:not(.pipMode) .topbar #btnPip {
+      display: inline-flex !important;
+      min-width: auto;
+      padding-inline: 7px;
+      background: transparent;
+      border-color: transparent;
+      color: rgba(71, 85, 105, 0.78);
+      font-weight: inherit;
+      box-shadow: none;
+    }
+    body:not(.pipMode) .topbar #btnPip:hover,
+    body:not(.pipMode) .topbar #btnPip:focus-visible {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.16);
+      color: rgba(51, 65, 85, 0.92);
+    }
+    @media (max-width: 420px) {
+      body:not(.pipMode) .topbar .title {
+        display: inline-flex !important;
+        font-size: 11.5px;
+        margin-right: 3px;
+      }
+      body:not(.pipMode) .topbar #btnPip {
+        display: inline-flex !important;
+        max-width: none;
+        padding-inline: 6px;
+        font-size: 11px;
+      }
+    }
+
+
+    /* Final topbar equality pass: open/save/popout share one quiet text style.
+       Save state is shown only by italic + star in the label/class. */
+    body:not(.pipMode) .topbar #btnLoad,
+    body:not(.pipMode) .topbar #btnExportTree,
+    body:not(.pipMode) .topbar #btnExportTree.safetySafe,
+    body:not(.pipMode) .topbar #btnExportTree.safetyNeed,
+    body:not(.pipMode) .topbar #btnExportTree.safetyCheck,
+    body:not(.pipMode) .topbar #btnExportTree.on,
+    body:not(.pipMode) .topbar #btnPip {
+      height: 24px !important;
+      min-width: 0 !important;
+      padding: 0 7px !important;
+      border: 1px solid transparent !important;
+      border-radius: 4px !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      color: rgba(71, 85, 105, 0.78) !important;
+      font-size: 12px !important;
+      font-weight: 400 !important;
+      opacity: 1 !important;
+      text-decoration: none !important;
+    }
+    body:not(.pipMode) .topbar #btnLoad:hover,
+    body:not(.pipMode) .topbar #btnExportTree:hover,
+    body:not(.pipMode) .topbar #btnExportTree.safetySafe:hover,
+    body:not(.pipMode) .topbar #btnExportTree.safetyNeed:hover,
+    body:not(.pipMode) .topbar #btnExportTree.safetyCheck:hover,
+    body:not(.pipMode) .topbar #btnExportTree.on:hover,
+    body:not(.pipMode) .topbar #btnPip:hover,
+    body:not(.pipMode) .topbar #btnLoad:focus-visible,
+    body:not(.pipMode) .topbar #btnExportTree:focus-visible,
+    body:not(.pipMode) .topbar #btnPip:focus-visible {
+      background: transparent !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      color: rgba(51, 65, 85, 0.94) !important;
+      outline: none !important;
+      text-decoration: none !important;
+    }
+    body:not(.pipMode) .topbar #btnExportTree.safetyNeed {
+      font-style: italic !important;
+    }
+    body:not(.pipMode) .topbar #btnExportTree.safetySafe,
+    body:not(.pipMode) .topbar #btnExportTree.safetyCheck,
+    body:not(.pipMode) .topbar #btnExportTree.on {
+      font-style: normal !important;
+    }
+
+
+    /* Font shrink timing pass: keep tree labels at normal size a little longer.
+       The compact sidebar layout can start, but text only shrinks once pocket is truly narrow. */
+    @media (min-width: 361px) and (max-width: 420px) {
+      .label {
+        font-size: 14.5px !important;
+        line-height: 1.35 !important;
+      }
+    }
+
+
+    /* Narrow text pass: when the tree finally shrinks, keep the same visual language.
+       Only the type/spacing compresses; selection and grouped-child shading stay intact. */
+    @media (max-width: 360px) {
+      .row {
+        border-radius: 10px !important;
+        border-color: transparent !important;
+        transition: background-color 140ms ease, border-color 140ms ease !important;
+      }
+      .row:hover {
+        background: rgba(108, 116, 126, 0.045) !important;
+      }
+      .row.selected {
+        background: rgba(37, 99, 235, 0.065) !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+      }
+      .children.groupedChildBlock {
+        border-radius: 9px !important;
+        background: rgba(108, 116, 126, 0.018) !important;
+        box-shadow: inset 0 0 0 1px rgba(108, 116, 126, 0.03) !important;
+      }
+      .children.groupedChildBlock > .treeNode > .row {
+        margin: 1px 0 !important;
+      }
+    }
+
+
+    /* Compact visual parity pass: narrow pocket should keep the same visual language.
+       It may compress slightly, but selection, grouped shading, and row utility cues stay visible. */
+    @media (max-width: 420px) {
+      .row {
+        border-radius: 10px !important;
+        transition: background-color 140ms ease, border-color 140ms ease !important;
+      }
+      .row:hover {
+        background: rgba(108, 116, 126, 0.045) !important;
+      }
+      .row.selected {
+        background: rgba(37, 99, 235, 0.065) !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+      }
+      .children.groupedChildBlock {
+        margin-left: var(--group-indent, 10px) !important;
+        border-radius: 9px !important;
+        background: rgba(108, 116, 126, 0.018) !important;
+        box-shadow: inset 0 0 0 1px rgba(108, 116, 126, 0.03) !important;
+        overflow: hidden !important;
+      }
+      .children.groupedChildBlock > .treeNode > .row {
+        margin: 1px 0 !important;
+      }
+      .detailBadge {
+        display: inline-flex !important;
+      }
+      .row.copyReady .label::after {
+        display: inline-block !important;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .label {
+        font-size: 13.5px !important;
+        line-height: 1.24 !important;
+      }
+    }
+
+
+    /* Row breathing-space pass: compact/narrow pocket keeps the same visuals, just less cramped vertically. */
+    @media (max-width: 420px) {
+      .treeWrap {
+        padding-top: 9px !important;
+        padding-bottom: 9px !important;
+      }
+      .row {
+        min-height: 40px !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+        margin-top: 2px !important;
+        margin-bottom: 2px !important;
+      }
+      .children.groupedChildBlock > .treeNode > .row {
+        margin-top: 2px !important;
+        margin-bottom: 2px !important;
+      }
+      .label {
+        line-height: 1.32 !important;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .row {
+        min-height: 38px !important;
+        padding-top: 5px !important;
+        padding-bottom: 5px !important;
+      }
+      .label {
+        line-height: 1.30 !important;
+      }
+    }
+
+
+
+    /* Copy feedback: a quick, subtle deepening without changing the row edge. */
+    .row.copyFlash,
+    .row.copyFlash.selected,
+    .row.copyFlash:hover,
+    .row.copyFlash:focus {
+      background: rgba(37, 99, 235, 0.13) !important;
+      border-color: transparent !important;
+      box-shadow: none !important;
+      animation: copyColourDeepenSoft 0.58s ease-out !important;
+    }
+    @keyframes copyColourDeepenSoft {
+      0% { background: rgba(37, 99, 235, 0.18); }
+      34% { background: rgba(37, 99, 235, 0.145); }
+      100% { background: rgba(37, 99, 235, 0.075); }
+    }
   </style>
 </head>
 <body>
   <div class="app">
     <div class="topbar">
-      <div class="title">Your Pocket</div>
+      <div class="title">pocket</div>
       <input id="search" class="search topbarSearch" placeholder="Filter">
       <button id="btnLoad" class="chip utilityChip">Open</button>
-      <button id="btnExportTree" class="chip utilityChip" disabled>Save</button>
+      <button id="btnExportTree" class="chip utilityChip" disabled>save</button>
       <button id="btnUnfoldAll" class="chip primaryChip" disabled>Unfold</button>
       <button id="btnAddPrimary" class="chip primaryChip" disabled>Add</button>
       <button id="btnMovePrimary" class="chip primaryChip" disabled>Move</button>
       <button id="btnRenamePrimary" class="chip primaryChip" disabled>Rename</button>
       <button id="btnDeletePrimary" class="chip primaryChip" disabled>Delete</button>
       <button id="btnOpenPrimary" class="chip primaryChip" disabled>Edit</button>
-      <button id="btnPip" class="chip utilityChip">Pop-out</button>
+      <button id="btnPip" class="chip utilityChip" title="Open pocket in a small pop-out window" aria-label="Pop out pocket">popout</button>
       <button id="btnImportNow" class="chip utilityChip" type="button" hidden>Import now</button>
       <button id="btnCancelImport" class="chip utilityChip" type="button" hidden>Cancel import</button>
       <button id="btnUndoImport" class="chip utilityChip" type="button" hidden>Undo import</button>
@@ -713,9 +1639,10 @@
     <div class="layout">
       <section class="panel treePanel">
         <div class="panelHead treeHead">
-          <span>Your Pocket</span>
+          <span>pocket</span>
           <div class="focusMeta">
             <span id="focusPath" class="focusPath">Focus: all</span>
+            <span id="modePill" class="modePill" aria-live="polite"></span>
           </div>
         </div>
         <div id="treeWrap" class="treeWrap" tabindex="0">
@@ -731,6 +1658,44 @@
       <button id="btnMovePadDown" class="mobileMoveBtn down" type="button" aria-label="Move down" title="Move down">&#8595;</button>
       <button id="btnMovePadLeft" class="mobileMoveBtn left" type="button" aria-label="Outdent" title="Outdent">&#8592;</button>
       <button id="btnMovePadRight" class="mobileMoveBtn right" type="button" aria-label="Indent" title="Indent">&#8594;</button>
+    </div>
+
+
+    <div id="commandOverlay" class="commandOverlay" hidden>
+      <div class="commandCard" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
+        <div id="commandPaletteTitle" class="commandTitle">What do you want to do?</div>
+        <button id="cmdAddChild" class="commandBtn" type="button"><span>Add child</span><span class="commandHint">palette</span></button>
+        <button id="cmdAddSibling" class="commandBtn" type="button"><span>Add sibling below</span><span class="commandHint">+</span></button>
+        <button id="cmdRename" class="commandBtn" type="button"><span>Rename</span><span class="commandHint">R</span></button>
+        <button id="cmdEdit" class="commandBtn" type="button"><span>Edit details</span><span class="commandHint">Enter</span></button>
+        <button id="cmdMove" class="commandBtn" type="button"><span>Move mode</span><span class="commandHint">arrows</span></button>
+        <button id="cmdFocus" class="commandBtn" type="button"><span>Focus here</span><span class="commandHint">Shift + F</span></button>
+        <button id="cmdSearch" class="commandBtn" type="button"><span>Filter</span><span class="commandHint">Ctrl/Cmd + F</span></button>
+        <button id="cmdSave" class="commandBtn" type="button"><span>save</span><span class="commandHint">Ctrl/Cmd + S</span></button>
+        <button id="cmdHealth" class="commandBtn" type="button"><span>Health check</span><span class="commandHint">calm status</span></button>
+        <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Restore previous local version</span><span class="commandHint">safety</span></button>
+        <button id="cmdHelp" class="commandBtn" type="button"><span>Show controls</span><span class="commandHint">?</span></button>
+      </div>
+    </div>
+
+    <div id="controlsOverlay" class="controlsOverlay" hidden>
+      <div class="controlsCard" role="dialog" aria-modal="true" aria-labelledby="controlsTitle">
+        <div id="controlsTitle" class="controlsTitle">pocket controls</div>
+        <div class="controlsIntro">These are the current rules. The toolbar stays quiet; row actions live on right-click / .; Ctrl/Cmd+F wakes the filter</div>
+        <div class="controlsList">
+          <div class="controlRow"><span class="controlKey">+</span><span class="controlMeaning">add a new item below the selected item</span></div>
+          <div class="controlRow"><span class="controlKey">Enter</span><span class="controlMeaning">edit details; in copy branches, copy the selected text</span></div>
+          <div class="controlRow"><span class="controlKey">Double-click</span><span class="controlMeaning">edit details, including in copy branches</span></div>
+          <div class="controlRow"><span class="controlKey">Arrow keys</span><span class="controlMeaning">move through the tree; in Move mode, move the item</span></div>
+          <div class="controlRow"><span class="controlKey">Space</span><span class="controlMeaning">fold or unfold children</span></div>
+          <div class="controlRow"><span class="controlKey">Esc</span><span class="controlMeaning">close, clear, or return to the tree</span></div>
+          <div class="controlRow"><span class="controlKey">Right-click / .</span><span class="controlMeaning">open row actions, including Delete</span></div>
+          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + S</span><span class="controlMeaning">export backup</span></div>
+        </div>
+        <div class="controlsFooter">
+          <button id="btnControlsClose" class="chip" type="button">Done</button>
+        </div>
+      </div>
     </div>
 
     <div id="detailOverlay" class="detailOverlay" hidden>
@@ -764,7 +1729,13 @@
       if (isPipMode) document.body.classList.add("pipMode");
       const PIP_SNAPSHOT_KEY = "pocketLite.pip.snapshot.v1";
       const AUTO_CACHE_KEY = "pocketLite.auto.cache.v1";
-      const UNSAVED_CLOSE_MESSAGE = "You have unsaved Pocket changes.";
+      const WORKSPACE_STATE_KEY = "pocketLite.workspace.state.v1";
+      const LOCAL_SAFETY_KEY = "pocketLite.localSafety.snapshot.v1";
+      const LOCAL_SAFETY_TRAIL_KEY = "pocketLite.localSafety.trail.v1";
+      const LOCAL_SAFETY_TRAIL_MAX = 8;
+      const LAST_BACKUP_META_KEY = "pocketLite.lastBackup.meta.v1";
+      const LOCAL_INSTANCE_ID_KEY = "pocketLite.instanceId.v1";
+      const UNSAVED_CLOSE_MESSAGE = "You have local changes not backed up yet.";
       const state = {
         nodes: [],
         tombstones: [],
@@ -804,6 +1775,25 @@
           lastAt: 0,
         },
         saveInProgress: false,
+        commandPaletteOpen: false,
+        rowMiniMenuOpen: false,
+        rowMiniMenuNodeId: "",
+        captureRhythm: {
+          parentId: "",
+          lastAddedId: "",
+          expiresAt: 0,
+        },
+        navigationMemory: {
+          filterSelectedId: "",
+          filterFocusRootId: "",
+          preFocusSelectedId: "",
+        },
+        conflictGuard: {
+          active: false,
+          reason: "",
+          loadedAt: "",
+          newerAt: "",
+        },
       };
       let titleToastTimer = null;
       let saveChipTimer = null;
@@ -816,6 +1806,7 @@
       let statusActionHandler = null;
       let lastDeleteUndoSnapshot = null;
       let lastMoveUndoSnapshot = null;
+      let lastEditUndoSnapshot = null;
       let lastTreeUndoKind = "";
       let pendingDeleteConfirmNodeId = "";
       let pendingDeleteConfirmExpiresAt = 0;
@@ -825,6 +1816,7 @@
       let lastSavedLabel = "";
       let truthFileHandle = null;
       let exportTreeQueue = Promise.resolve();
+      let pendingStaleExportConfirmExpiresAt = 0;
       let lastPathExtractMeta = {
         strictAbsoluteMode: false,
         ignoredNonAbsoluteCount: 0,
@@ -858,8 +1850,23 @@
         titleToast: document.getElementById("titleToast"),
         search: document.getElementById("search"),
         focusPath: document.getElementById("focusPath"),
+        modePill: document.getElementById("modePill"),
         treeWrap: document.getElementById("treeWrap"),
         treeRoot: document.getElementById("treeRoot"),
+        commandOverlay: document.getElementById("commandOverlay"),
+        controlsOverlay: document.getElementById("controlsOverlay"),
+        btnControlsClose: document.getElementById("btnControlsClose"),
+        cmdAddChild: document.getElementById("cmdAddChild"),
+        cmdAddSibling: document.getElementById("cmdAddSibling"),
+        cmdRename: document.getElementById("cmdRename"),
+        cmdEdit: document.getElementById("cmdEdit"),
+        cmdMove: document.getElementById("cmdMove"),
+        cmdFocus: document.getElementById("cmdFocus"),
+        cmdSearch: document.getElementById("cmdSearch"),
+        cmdSave: document.getElementById("cmdSave"),
+        cmdHealth: document.getElementById("cmdHealth"),
+        cmdRestoreRecent: document.getElementById("cmdRestoreRecent"),
+        cmdHelp: document.getElementById("cmdHelp"),
         detailOverlay: document.getElementById("detailOverlay"),
         detailEditorTitle: document.getElementById("detailEditorTitle"),
         detailEditorPath: document.getElementById("detailEditorPath"),
@@ -1309,6 +2316,431 @@
         return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
       }
 
+      function saveWorkspaceState() {
+        try {
+          const payload = {
+            savedAt: nowIso(),
+            source: {
+              schema: cleanText(state.source?.schema, 80),
+              fileName: cleanText(state.source?.fileName, 120),
+              writtenAt: cleanText(state.source?.writtenAt, 40),
+            },
+            selectedId: cleanText(state.selectedId, 80),
+            focusRootId: cleanText(state.focusRootId, 80),
+            collapsedIds: Array.from(state.collapsed || new Set()).map((id) => cleanText(id, 80)).filter(Boolean),
+          };
+          localStorage.setItem(WORKSPACE_STATE_KEY, JSON.stringify(payload));
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function restoreWorkspaceState() {
+        try {
+          const raw = localStorage.getItem(WORKSPACE_STATE_KEY);
+          if (!raw) return false;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return false;
+          const ids = new Set(state.nodes.map((node) => cleanText(node?.id, 80)).filter(Boolean));
+          const selectedId = cleanText(parsed.selectedId, 80);
+          const focusRootId = cleanText(parsed.focusRootId, 80);
+          const collapsedIds = Array.isArray(parsed.collapsedIds)
+            ? parsed.collapsedIds.map((id) => cleanText(id, 80)).filter((id) => id && ids.has(id))
+            : null;
+
+          if (Array.isArray(collapsedIds)) {
+            state.collapsed = new Set(collapsedIds);
+          }
+          if (focusRootId && ids.has(focusRootId)) {
+            state.focusRootId = focusRootId;
+            state.collapsed.delete(focusRootId);
+          }
+          if (selectedId && ids.has(selectedId)) {
+            state.selectedId = selectedId;
+            expandPathToNode(selectedId);
+          }
+          return Array.isArray(collapsedIds) || !!state.focusRootId || !!state.selectedId;
+        } catch {
+          return false;
+        }
+      }
+
+      function buildPocketPayload(writtenAt = nowIso()) {
+        const treeNodes = JSON.parse(JSON.stringify(state.nodes || []));
+        const treeTombstones = JSON.parse(JSON.stringify(state.tombstones || []));
+        const rootExtras = JSON.parse(JSON.stringify(state.rootExtras || {}));
+        const dataExtras = JSON.parse(JSON.stringify(state.dataExtras || {}));
+        const pocketGuard = {
+          schema: "pocket.guard.v1",
+          instanceId: getPocketInstanceId(),
+          sourceFileName: cleanText(state.source?.fileName, 120),
+          sourceWrittenAt: cleanText(state.source?.writtenAt, 40),
+          backupWrittenAt: writtenAt,
+        };
+        return {
+          ...rootExtras,
+          pocketGuard,
+          schema: "portal.export.v1",
+          exportedAt: writtenAt,
+          writtenAt,
+          mainThoughtTree: treeNodes,
+          mainThoughtTreeTombstones: treeTombstones,
+          data: {
+            ...dataExtras,
+            pocketGuard,
+            mainThoughtTree: treeNodes,
+            mainThoughtTreeTombstones: treeTombstones,
+          },
+        };
+      }
+
+      function saveLocalSafetySnapshot(reason = "change") {
+        if (!Array.isArray(state.nodes) || state.nodes.length === 0) return false;
+        try {
+          const capturedAt = nowIso();
+          const entry = {
+            schema: "pocket.localSafety.v1",
+            capturedAt,
+            reason: cleanText(reason, 40),
+            source: {
+              schema: cleanText(state.source?.schema, 80),
+              fileName: cleanText(state.source?.fileName, 120),
+              writtenAt: cleanText(state.source?.writtenAt, 40),
+            },
+            selectedId: cleanText(state.selectedId, 80),
+            focusRootId: cleanText(state.focusRootId, 80),
+            collapsedIds: Array.from(state.collapsed || new Set()).map((id) => cleanText(id, 80)).filter(Boolean),
+            ops: JSON.parse(JSON.stringify(state.ops || [])),
+            payload: buildPocketPayload(capturedAt),
+          };
+          localStorage.setItem(LOCAL_SAFETY_KEY, JSON.stringify(entry));
+          appendLocalSafetyTrail(entry);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function readLocalSafetySnapshot() {
+        try {
+          const raw = localStorage.getItem(LOCAL_SAFETY_KEY);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return null;
+          const payload = parsed.payload && typeof parsed.payload === "object" ? parsed.payload : null;
+          if (!payload) return null;
+          const norm = normaliseInput(payload);
+          if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) return null;
+          const capturedAt = cleanText(parsed.capturedAt || norm.writtenAt, 40);
+          const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
+          if (capturedMs <= 0) return null;
+          return { parsed, norm, capturedAt, capturedMs };
+        } catch {
+          return null;
+        }
+      }
+
+      function readLocalSafetyTrail() {
+        try {
+          const raw = localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY);
+          const parsed = raw ? JSON.parse(raw) : [];
+          const arr = Array.isArray(parsed) ? parsed : [];
+          const out = [];
+          for (const item of arr) {
+            if (!item || typeof item !== "object") continue;
+            const payload = item.payload && typeof item.payload === "object" ? item.payload : null;
+            if (!payload) continue;
+            const norm = normaliseInput(payload);
+            if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) continue;
+            const capturedAt = cleanText(item.capturedAt || norm.writtenAt, 40);
+            const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
+            if (capturedMs <= 0) continue;
+            out.push({ parsed: item, norm, capturedAt, capturedMs });
+          }
+          out.sort((a, b) => b.capturedMs - a.capturedMs);
+          return out.slice(0, LOCAL_SAFETY_TRAIL_MAX);
+        } catch {
+          return [];
+        }
+      }
+
+      function writeLocalSafetyTrail(entries) {
+        try {
+          const arr = (Array.isArray(entries) ? entries : [])
+            .map((entry) => entry && entry.parsed ? entry.parsed : entry)
+            .filter((entry) => entry && typeof entry === "object")
+            .slice(0, LOCAL_SAFETY_TRAIL_MAX);
+          localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(arr));
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function readLastBackupMeta() {
+        try {
+          const raw = localStorage.getItem(LAST_BACKUP_META_KEY);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (!parsed || typeof parsed !== "object") return null;
+          const exportedAt = cleanText(parsed.exportedAt, 40);
+          const exportedMs = Number.isFinite(Date.parse(exportedAt)) ? Date.parse(exportedAt) : 0;
+          if (exportedMs <= 0) return null;
+          const nodeCountRaw = Number(parsed.nodeCount);
+          return {
+            exportedAt,
+            exportedMs,
+            label: cleanText(parsed.label, 40) || formatSaveClockLabel(new Date(exportedMs)),
+            nodeCount: Number.isFinite(nodeCountRaw) ? Math.max(0, Math.round(nodeCountRaw)) : 0,
+            sourceFileName: cleanText(parsed.sourceFileName, 120),
+          };
+        } catch {
+          return null;
+        }
+      }
+
+      function writeLastBackupMeta(payload) {
+        try {
+          const exportedAt = cleanText(payload?.writtenAt || payload?.exportedAt, 40) || nowIso();
+          const exportedMs = Number.isFinite(Date.parse(exportedAt)) ? Date.parse(exportedAt) : Date.now();
+          const label = formatSaveClockLabel(new Date(exportedMs));
+          const nodeCount = Array.isArray(payload?.mainThoughtTree)
+            ? payload.mainThoughtTree.length
+            : (Array.isArray(state.nodes) ? state.nodes.length : 0);
+          const entry = {
+            schema: "pocket.lastBackup.meta.v1",
+            exportedAt: new Date(exportedMs).toISOString(),
+            label,
+            nodeCount,
+            sourceFileName: cleanText(state.source?.fileName, 120),
+          };
+          localStorage.setItem(LAST_BACKUP_META_KEY, JSON.stringify(entry));
+          return entry;
+        } catch {
+          return null;
+        }
+      }
+
+      function backupProofLabel(meta = readLastBackupMeta()) {
+        if (!meta) return "Backup unknown";
+        const count = Number(meta.nodeCount) || 0;
+        return `Backed up ${meta.label}${count ? ` · ${count} node${count === 1 ? "" : "s"}` : ""}`;
+      }
+
+      function parseDateMs(value) {
+        const ms = Date.parse(cleanText(value, 40));
+        return Number.isFinite(ms) ? ms : 0;
+      }
+
+      function getPocketInstanceId() {
+        try {
+          const existing = cleanText(localStorage.getItem(LOCAL_INSTANCE_ID_KEY), 80);
+          if (existing) return existing;
+          const next = makeId("pocket");
+          localStorage.setItem(LOCAL_INSTANCE_ID_KEY, next);
+          return next;
+        } catch {
+          return "pocket_ephemeral";
+        }
+      }
+
+      function normaliseGuardMeta(value) {
+        if (!value || typeof value !== "object") return null;
+        const source = value;
+        const backupWrittenAt = cleanText(source.backupWrittenAt || source.writtenAt || source.exportedAt, 40);
+        const sourceWrittenAt = cleanText(source.sourceWrittenAt, 40);
+        const instanceId = cleanText(source.instanceId, 80);
+        const sourceFileName = cleanText(source.sourceFileName, 120);
+        if (!backupWrittenAt && !sourceWrittenAt && !instanceId && !sourceFileName) return null;
+        return { backupWrittenAt, sourceWrittenAt, instanceId, sourceFileName };
+      }
+
+      function guardMetaFromPayload(payload) {
+        if (!payload || typeof payload !== "object") return null;
+        return normaliseGuardMeta(payload.pocketGuard)
+          || normaliseGuardMeta(payload.data && payload.data.pocketGuard)
+          || null;
+      }
+
+      function assessStaleFileRisk(norm = {}, sourceInfo = {}) {
+        const loadedAt = cleanText(sourceInfo.writtenAt || norm.writtenAt, 40);
+        const loadedMs = parseDateMs(loadedAt);
+        const latestSafety = readLocalSafetySnapshot();
+        const backupMeta = readLastBackupMeta();
+        const safetyMs = latestSafety ? latestSafety.capturedMs : 0;
+        const backupMs = backupMeta ? backupMeta.exportedMs : 0;
+        const newerMs = Math.max(safetyMs, backupMs);
+        if (newerMs <= 0 || loadedMs <= 0 || newerMs <= loadedMs + 1000) {
+          return { active: false, reason: "", loadedAt, newerAt: "" };
+        }
+        const newerAt = new Date(newerMs).toISOString();
+        const reason = safetyMs >= backupMs
+          ? "local safety copy is newer than this file"
+          : "last backup record is newer than this file";
+        return { active: true, reason, loadedAt, newerAt };
+      }
+
+      function updateConflictGuardForLoadedSource(norm = {}, sourceInfo = {}) {
+        const risk = assessStaleFileRisk(norm, sourceInfo);
+        state.conflictGuard = risk;
+        pendingStaleExportConfirmExpiresAt = 0;
+        return risk;
+      }
+
+      function clearConflictGuard() {
+        state.conflictGuard = { active: false, reason: "", loadedAt: "", newerAt: "" };
+        pendingStaleExportConfirmExpiresAt = 0;
+      }
+
+      function conflictGuardLabel() {
+        const guard = state.conflictGuard || {};
+        if (!guard.active) return "conflict clear";
+        return `possible stale file: ${formatAgoLabel(guard.newerAt)} newer copy`;
+      }
+
+      function startupConfidenceText(prefix = "Welcome back") {
+        const nodeCount = Array.isArray(state.nodes) ? state.nodes.length : 0;
+        const nodeText = `${nodeCount} node${nodeCount === 1 ? "" : "s"}`;
+        const guard = state.conflictGuard || {};
+        if (guard.active) return `${prefix} · ${nodeText} · check backup`;
+        if (hasUnsavedPocketLiteChanges()) return `${prefix} · ${nodeText} · backup needed`;
+        const backupMeta = readLastBackupMeta();
+        if (backupMeta) return `${prefix} · ${nodeText} · backed up ${backupMeta.label}`;
+        return `${prefix} · ${nodeText} · backup unknown`;
+      }
+
+      function startupConfidenceKind() {
+        const guard = state.conflictGuard || {};
+        return (guard.active || hasUnsavedPocketLiteChanges()) ? "warn" : "ok";
+      }
+
+
+      function appendLocalSafetyTrail(entry) {
+        if (!entry || typeof entry !== "object") return false;
+        const capturedAt = cleanText(entry.capturedAt, 40);
+        const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
+        if (capturedMs <= 0) return false;
+        try {
+          const trail = readLocalSafetyTrail();
+          const latest = trail[0] || null;
+          const latestMs = latest ? latest.capturedMs : 0;
+          const compactEntry = safeJsonClone(entry, 900000);
+          if (!compactEntry) return false;
+          const nextEntry = { parsed: compactEntry, norm: normaliseInput(compactEntry.payload), capturedAt, capturedMs };
+          if (latest && Math.abs(capturedMs - latestMs) < 30000) {
+            trail[0] = nextEntry;
+          } else {
+            trail.unshift(nextEntry);
+          }
+          return writeLocalSafetyTrail(trail);
+        } catch {
+          return false;
+        }
+      }
+
+      function clearLocalSafetySnapshot() {
+        try {
+          localStorage.removeItem(LOCAL_SAFETY_KEY);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot()) {
+        if (!snapshot || !snapshot.norm) return false;
+        const parsed = snapshot.parsed || {};
+        applyLoadedState(snapshot.norm, {
+          schema: snapshot.norm.schema,
+          fileName: cleanText(parsed?.source?.fileName, 120) || "local safety snapshot",
+          writtenAt: snapshot.capturedAt || snapshot.norm.writtenAt,
+        }, { clearOps: false, skipLocalSafetyCheck: true });
+        state.ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+        const ids = new Set(state.nodes.map((node) => cleanText(node?.id, 80)).filter(Boolean));
+        const selectedId = cleanText(parsed.selectedId, 80);
+        const focusRootId = cleanText(parsed.focusRootId, 80);
+        if (focusRootId && ids.has(focusRootId)) state.focusRootId = focusRootId;
+        if (selectedId && ids.has(selectedId)) state.selectedId = selectedId;
+        if (Array.isArray(parsed.collapsedIds)) {
+          state.collapsed = new Set(parsed.collapsedIds.map((id) => cleanText(id, 80)).filter((id) => id && ids.has(id)));
+        }
+        if (state.selectedId) expandPathToNode(state.selectedId);
+        refreshMeta();
+        renderTree();
+        requestAnimationFrame(() => {
+          refocusTreeNavigation(state.selectedId);
+          softlyEnsureSelectionVisible();
+        });
+        setStatus("Local copy restored. save when ready.", "ok", { durationMs: 5200 });
+        return true;
+      }
+
+      function formatAgoLabel(value) {
+        const ms = Number.isFinite(Date.parse(value)) ? Date.parse(value) : 0;
+        if (ms <= 0) return "none";
+        const diffMs = Math.max(0, Date.now() - ms);
+        const mins = Math.round(diffMs / 60000);
+        if (mins < 1) return "just now";
+        if (mins < 60) return `${mins}m ago`;
+        const hours = Math.round(mins / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.round(hours / 24);
+        return `${days}d ago`;
+      }
+
+      function showPocketHealth() {
+        const latestSafety = readLocalSafetySnapshot();
+        const trail = readLocalSafetyTrail();
+        const sourceName = cleanText(state.source?.fileName, 80) || "no file yet";
+        const unsavedCount = Array.isArray(state.ops) ? state.ops.length : 0;
+        const backupMeta = readLastBackupMeta();
+        const backupText = backupMeta ? `${formatAgoLabel(backupMeta.exportedAt)} · ${backupMeta.nodeCount} node${backupMeta.nodeCount === 1 ? "" : "s"}` : "unknown";
+        const health = `${state.nodes.length} nodes · ${unsavedCount} unbacked · local ${formatAgoLabel(latestSafety?.capturedAt)} · backup ${backupText} · ${trail.length} recovery version${trail.length === 1 ? "" : "s"} · ${conflictGuardLabel()} · ${sourceName}`;
+        setStatus(`Health: ${health}`, "ok", { durationMs: 12000 });
+        refocusTreeNavigation(state.selectedId);
+      }
+
+      function restorePreviousLocalSafetyVersion() {
+        const trail = readLocalSafetyTrail();
+        const latest = readLocalSafetySnapshot();
+        const latestMs = latest ? latest.capturedMs : 0;
+        const previous = trail.find((item) => item && item.capturedMs > 0 && (!latestMs || item.capturedMs < latestMs - 1000));
+        if (!previous) {
+          setStatus("No earlier local version found yet.", "warn", { durationMs: 5200 });
+          refocusTreeNavigation(state.selectedId);
+          return false;
+        }
+        const ok = restoreLocalSafetySnapshot(previous);
+        if (ok) {
+          saveWorkspaceState();
+          requestAnimationFrame(() => {
+            if (state.selectedId) flashTouchedRow(state.selectedId);
+          });
+          setStatus(`Restored local version from ${formatAgoLabel(previous.capturedAt)} · ${previous.norm.nodes.length} nodes. save when ready.`, "ok", { durationMs: 7200 });
+        }
+        return ok;
+      }
+
+      function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
+        if (options && options.skipLocalSafetyCheck) return false;
+        const snapshot = readLocalSafetySnapshot();
+        if (!snapshot) return false;
+        const loadedStamp = cleanText(sourceInfo.writtenAt || state.source?.writtenAt, 40);
+        const loadedMs = Number.isFinite(Date.parse(loadedStamp)) ? Date.parse(loadedStamp) : 0;
+        const hasNewerLocal = snapshot.capturedMs > Math.max(loadedMs, 0) + 1000;
+        if (!hasNewerLocal) return false;
+        const label = formatSaveClockLabel(new Date(snapshot.capturedMs));
+        setStatus(`This file looks older. Newer local copy found (${label}).`, "warn", {
+          durationMs: 12000,
+          action: {
+            label: "Restore",
+            onClick: () => restoreLocalSafetySnapshot(snapshot),
+          },
+        });
+        return true;
+      }
+
       function applyLoadedState(norm, sourceInfo = {}, options = {}) {
         const clearOps = options.clearOps !== false;
         state.nodes = Array.isArray(norm.nodes) ? norm.nodes : [];
@@ -1324,6 +2756,8 @@
           fileName: cleanText(sourceInfo.fileName, 120),
           writtenAt: cleanText(sourceInfo.writtenAt || norm.writtenAt, 40),
         };
+        updateConflictGuardForLoadedSource(norm, state.source);
+        const restoredWorkspace = restoreWorkspaceState();
         const baselinePayload = {
           ...(state.rootExtras || {}),
           schema: "portal.export.v1",
@@ -1340,7 +2774,14 @@
         saveLastSaveSnapshot(baselinePayload);
         refreshMeta();
         renderTree();
+        if (restoredWorkspace && state.selectedId) {
+          requestAnimationFrame(() => {
+            refocusTreeNavigation(state.selectedId);
+            softlyEnsureSelectionVisible();
+          });
+        }
         persistPipSnapshot();
+        maybeOfferLocalSafetyRestore(state.source, options);
       }
 
       function saveAutoCache(norm, sourceInfo = {}) {
@@ -1599,7 +3040,7 @@
                     fileName: `${sourcePath} + ${overlay.sourcePath}`,
                     writtenAt: overlay.writtenAt || overlay.norm.writtenAt,
                   });
-                  setStatus(`Auto-loaded ${overlay.norm.nodes.length} nodes (change log applied).`, "ok");
+                  setStatus(startupConfidenceText("Welcome back · latest change log"), startupConfidenceKind(), { durationMs: 5200 });
                   return true;
                 }
               }
@@ -1608,7 +3049,7 @@
                 fileName: sourcePath,
                 writtenAt: norm.writtenAt,
               });
-              setStatus(`Auto-loaded ${norm.nodes.length} nodes.`, "ok");
+              setStatus(startupConfidenceText("Welcome back"), startupConfidenceKind(), { durationMs: 5200 });
               return true;
             }
           } catch {}
@@ -1626,18 +3067,18 @@
             fileName: overlayOnly.sourcePath,
             writtenAt: overlayOnly.writtenAt || overlayOnly.norm.writtenAt,
           });
-          setStatus(`Loaded ${overlayOnly.norm.nodes.length} nodes from change log.`, "ok");
+          setStatus(startupConfidenceText("Welcome back · change log"), startupConfidenceKind(), { durationMs: 5200 });
           return true;
         }
 
         const cached = restoreAutoCache();
         if (cached && cached.norm) {
           applyLoadedState(cached.norm, cached.source);
-          setStatus(`Loaded cached tree (${cached.norm.nodes.length} nodes).`, "ok");
+          setStatus(startupConfidenceText("Welcome back · restored local copy"), startupConfidenceKind(), { durationMs: 6200 });
           return true;
         }
         const sourceHint = sourceParam || "JSONs/pocket-data.json";
-        setStatus(`Auto-load could not read ${sourceHint}. Click "Open" once to seed cache.`, "warn");
+        setStatus(`Open a pocket file, restore local copy, or press + to start.`, "warn", { durationMs: 6500 });
         return false;
       }
 
@@ -1656,6 +3097,7 @@
             ops: state.ops,
           };
           localStorage.setItem(PIP_SNAPSHOT_KEY, JSON.stringify(payload));
+          saveWorkspaceState();
         } catch {}
       }
 
@@ -1721,21 +3163,59 @@
         }
       }
 
-      function showRowCopyToast(nodeId) {
+      function findRowElementByNodeId(nodeId) {
         const id = cleanText(nodeId, 80);
-        if (!id) return false;
-        if (!(el.treeWrap instanceof HTMLElement)) return false;
-        let row = null;
+        if (!id || !(el.treeWrap instanceof HTMLElement)) return null;
         const rows = el.treeWrap.querySelectorAll(".row[data-node-id]");
         for (const item of rows) {
           if (!(item instanceof HTMLElement)) continue;
           const rowId = cleanText(item.getAttribute("data-node-id"), 80);
-          if (rowId === id) {
-            row = item;
-            break;
+          if (rowId === id) return item;
+        }
+        return null;
+      }
+
+      function scrollRowComfortably(row, options = {}) {
+        if (!(row instanceof HTMLElement)) return false;
+        // Keyboard-driven tree movement feels calmer when the scroll follows instantly
+        // and only moves the minimum amount needed to keep a small cushion around the row.
+        const behavior = options.smooth === true && options.instant !== true ? "smooth" : "auto";
+        const container = el.treeWrap instanceof HTMLElement ? el.treeWrap : null;
+        if (!(container instanceof HTMLElement)) {
+          try { row.scrollIntoView({ block: "nearest", inline: "nearest", behavior }); } catch {}
+          return true;
+        }
+
+        const rowBox = row.getBoundingClientRect();
+        const wrapBox = container.getBoundingClientRect();
+        const rowHeight = Math.max(24, rowBox.height || 32);
+        const cushion = Math.min(84, Math.max(28, rowHeight * 2.25));
+        const visibleTop = wrapBox.top + cushion;
+        const visibleBottom = wrapBox.bottom - cushion;
+
+        let delta = 0;
+        if (rowBox.bottom > visibleBottom) {
+          delta = rowBox.bottom - visibleBottom;
+        } else if (rowBox.top < visibleTop) {
+          delta = rowBox.top - visibleTop;
+        }
+
+        if (Math.abs(delta) > 1) {
+          try {
+            container.scrollBy({ top: delta, left: 0, behavior });
+          } catch {
+            container.scrollTop += delta;
           }
         }
+        return true;
+      }
+
+      function showRowCopyToast(nodeId) {
+        const id = cleanText(nodeId, 80);
+        if (!id) return false;
+        const row = findRowElementByNodeId(id);
         if (!(row instanceof HTMLElement)) return false;
+        scrollRowComfortably(row);
         const prevTimer = rowCopyToastTimers.get(id);
         if (prevTimer) clearTimeout(prevTimer);
         row.classList.remove("copyFlash");
@@ -1744,25 +3224,17 @@
         const timer = window.setTimeout(() => {
           row.classList.remove("copyFlash");
           rowCopyToastTimers.delete(id);
-        }, 1050);
+        }, 780);
         rowCopyToastTimers.set(id, timer);
         return true;
       }
 
       function flashTouchedRow(nodeId) {
         const id = cleanText(nodeId, 80);
-        if (!id || !(el.treeWrap instanceof HTMLElement)) return false;
-        let row = null;
-        const rows = el.treeWrap.querySelectorAll(".row[data-node-id]");
-        for (const item of rows) {
-          if (!(item instanceof HTMLElement)) continue;
-          const rowId = cleanText(item.getAttribute("data-node-id"), 80);
-          if (rowId === id) {
-            row = item;
-            break;
-          }
-        }
+        if (!id) return false;
+        const row = findRowElementByNodeId(id);
         if (!(row instanceof HTMLElement)) return false;
+        scrollRowComfortably(row);
         const prevTimer = rowTouchFlashTimers.get(id);
         if (prevTimer) clearTimeout(prevTimer);
         row.classList.remove("touchFlash");
@@ -1796,15 +3268,13 @@
         return true;
       }
 
-      function showCopiedFeedback(nodeId, options = {}) {
+      function showCopiedFeedback(nodeId) {
         const id = cleanText(nodeId, 80);
         const sourceNode = id ? (nodeMap().get(id) || null) : null;
         const copiedLabel = cleanText(sourceNode?.label, 220);
         showRowCopyToast(id);
-        setStatus(copiedLabel ? `Copied "${copiedLabel}".` : "Copied.", "ok");
-        if (options.advance === true) {
-          requestAnimationFrame(() => advanceSelectionAfterCopy(id));
-        }
+        refocusTreeNavigation(id);
+        setStatus(copiedLabel ? `Copied · ${copiedLabel}` : "Copied.", "ok");
       }
 
       function normaliseNodes(raw) {
@@ -2856,7 +4326,7 @@
             : null;
         } catch {}
         if (typeof hostSave !== "function") {
-          setStatus("PiP cannot write the truth file directly here. Use Save in the main Pocket Lite window.", "warn");
+          setStatus("PiP cannot write the truth file directly here. Use Save in the main pocket window.", "warn");
           return false;
         }
         try {
@@ -2865,16 +4335,16 @@
             state.ops = [];
             refreshMeta();
             persistPipSnapshot();
-            flashSaveChip("Saved");
-            setStatus("Saved via main Pocket Lite window.", "ok");
+            flashSaveChip("Safe");
+            setStatus("Saved via main pocket window.", "ok");
             return true;
           }
           const errorText = cleanText(result && result.error, 180)
-            || "PiP save could not write the truth file. Use Save in the main Pocket Lite window.";
+            || "PiP save could not write the truth file. Use Save in the main pocket window.";
           setStatus(errorText, "warn");
           return false;
         } catch {
-          setStatus("PiP save could not reach the main Pocket Lite window.", "warn");
+          setStatus("Popout save could not reach the main pocket window.", "warn");
           return false;
         }
       }
@@ -3088,7 +4558,7 @@
         if (!hasFieldChanges && !canApplyCompletionMove) {
           closeDetailsEditor({ restoreFocus: true, nodeId });
           setStatus(
-            hadDraftChanges ? `Saved details for "${nextLabel}". Save Pocket to keep them.` : "No detail changes.",
+            hadDraftChanges ? `Saved details for "${nextLabel}". Save pocket to keep them.` : "No detail changes.",
             hadDraftChanges ? "ok" : "warn"
           );
           return;
@@ -3250,7 +4720,7 @@
           renderTree();
           focusRowByNodeId(id);
           void copyText(value).then((ok) => {
-            if (ok) showCopiedFeedback(id, { advance: true });
+            if (ok) showCopiedFeedback(id);
           });
         }, COPY_CLICK_DELAY_MS);
       }
@@ -3288,6 +4758,7 @@
           ...op,
           at: nowIso(),
         });
+        saveLocalSafetySnapshot(op && op.type ? op.type : "change");
       }
 
       function cloneForUndo(value) {
@@ -3336,7 +4807,7 @@
         }
         lastDeleteUndoSnapshot = null;
         lastTreeUndoKind = lastMoveUndoSnapshot ? "move" : "";
-        setStatus("Delete undone.", "ok");
+        setStatus("Back where it was.", "ok");
       }
 
       function undoLastMoveAction() {
@@ -3350,17 +4821,40 @@
           return;
         }
         lastMoveUndoSnapshot = null;
-        lastTreeUndoKind = lastDeleteUndoSnapshot ? "delete" : "";
-        setStatus("Move undone.", "ok");
+        lastTreeUndoKind = lastEditUndoSnapshot ? "edit" : (lastDeleteUndoSnapshot ? "delete" : "");
+        setStatus("Back where it was.", "ok");
+      }
+
+      function undoLastEditAction() {
+        if (!lastEditUndoSnapshot) {
+          setStatus("Nothing to undo.", "warn");
+          return;
+        }
+        const restored = restoreTreeUndoSnapshot(lastEditUndoSnapshot);
+        if (!restored) {
+          setStatus("Undo unavailable.", "warn");
+          return;
+        }
+        lastEditUndoSnapshot = null;
+        lastTreeUndoKind = lastMoveUndoSnapshot ? "move" : (lastDeleteUndoSnapshot ? "delete" : "");
+        setStatus("Back where it was.", "ok");
       }
 
       function undoMostRecentTreeMutation() {
+        if (lastTreeUndoKind === "edit" && lastEditUndoSnapshot) {
+          undoLastEditAction();
+          return true;
+        }
         if (lastTreeUndoKind === "delete" && lastDeleteUndoSnapshot) {
           undoLastDeleteAction();
           return true;
         }
         if (lastTreeUndoKind === "move" && lastMoveUndoSnapshot) {
           undoLastMoveAction();
+          return true;
+        }
+        if (lastEditUndoSnapshot) {
+          undoLastEditAction();
           return true;
         }
         if (lastMoveUndoSnapshot) {
@@ -3443,13 +4937,14 @@
         }
       }
 
-      function markSavedNow() {
-        lastSavedLabel = formatSaveClockLabel(new Date());
+      function markSavedNow(payload = null) {
+        const meta = payload ? writeLastBackupMeta(payload) : readLastBackupMeta();
+        lastSavedLabel = meta?.label || formatSaveClockLabel(new Date());
       }
 
-      function flashSaveChip(label = "Saved") {
+      function flashSaveChip(label = "saved") {
         if (!el.btnExportTree) return;
-        const nextLabel = cleanText(label, 40) || "Saved";
+        const nextLabel = cleanText(label, 40) || "saved";
         if (saveChipTimer) {
           clearTimeout(saveChipTimer);
           saveChipTimer = null;
@@ -3466,7 +4961,19 @@
       function refreshMeta() {
         if (!state.selectedId) state.moveMode = false;
         const focusPath = state.focusRootId ? getPath(state.focusRootId) : "";
+        document.body.classList.toggle("focusedView", !!state.focusRootId);
+        document.body.classList.toggle("moveModeActive", !!(state.moveMode && state.selectedId));
         if (el.focusPath) el.focusPath.textContent = focusPath ? `Focus: ${focusPath}` : "Focus: all";
+        if (el.modePill instanceof HTMLElement) {
+          const pillText = state.moveMode && state.selectedId
+            ? "Move mode"
+            : (state.focusRootId ? "Focused" : "");
+          el.modePill.textContent = pillText;
+          el.modePill.className = `modePill${pillText ? " show" : ""}${state.moveMode && state.selectedId ? " move" : (state.focusRootId ? " focus" : "")}`;
+          el.modePill.title = pillText === "Move mode"
+            ? "Use arrows to move. Esc exits."
+            : (pillText === "Focused" ? "Esc returns to full pocket." : "");
+        }
         const hasData = state.nodes.length > 0;
         const unsavedCount = Array.isArray(state.ops) ? state.ops.length : 0;
         const hasUnsavedDetails = hasUnsavedDetailsEditorChanges();
@@ -3495,18 +5002,32 @@
         if (el.btnOpenPrimary) el.btnOpenPrimary.disabled = !hasSelection;
         const isSaving = !!state.saveInProgress;
         el.btnExportTree.disabled = !hasData || isSaving;
+        el.btnExportTree.classList.remove("safetySafe", "safetyNeed", "safetyCheck");
         if (isSaving) {
-          el.btnExportTree.textContent = "Saving...";
-          el.btnExportTree.title = "Writing to truth file";
+          el.btnExportTree.textContent = "saving...";
+          el.btnExportTree.title = "Writing pocket file";
         } else if (!saveChipTimer) {
-          el.btnExportTree.textContent = hasUnsaved
-            ? "Unsaved"
-            : (lastSavedLabel ? `Saved ${lastSavedLabel}` : "Save");
-          el.btnExportTree.title = hasUnsavedDetails
-            ? "Unsaved detail edit"
+          const backupMeta = readLastBackupMeta();
+          const hasConflictRisk = !!(state.conflictGuard && state.conflictGuard.active);
+          if (hasConflictRisk) {
+            el.btnExportTree.textContent = "check";
+            el.btnExportTree.classList.add("safetyCheck");
+          } else if (hasUnsaved) {
+            el.btnExportTree.textContent = "save*";
+            el.btnExportTree.classList.add("safetyNeed");
+          } else if (backupMeta) {
+            el.btnExportTree.textContent = "save";
+            el.btnExportTree.classList.add("safetySafe");
+          } else {
+            el.btnExportTree.textContent = "save";
+          }
+          el.btnExportTree.title = hasConflictRisk
+            ? "This file looks older than a local/saved copy; save carefully"
+            : (hasUnsavedDetails
+            ? "Detail edit not saved yet"
             : (hasUnsaved
-            ? `${unsavedCount} unsaved change${unsavedCount === 1 ? "" : "s"}`
-            : (lastSavedLabel ? `Last saved at ${lastSavedLabel}` : "No unsaved changes"));
+            ? `Local changes only; save ${unsavedCount} change${unsavedCount === 1 ? "" : "s"} to your pocket file`
+            : (backupMeta ? `${backupProofLabel(backupMeta)} saved ${formatAgoLabel(backupMeta.exportedAt)}` : "Save a portable pocket copy")));
         }
         const movePadEnabled = !!state.moveMode && !!state.selectedId;
         if (el.btnMovePadUp) el.btnMovePadUp.disabled = !movePadEnabled;
@@ -3525,6 +5046,32 @@
           parentId: "",
           autoFocus: false,
         };
+      }
+
+      function clearCaptureRhythm() {
+        state.captureRhythm = { parentId: "", lastAddedId: "", expiresAt: 0 };
+      }
+
+      function armCaptureRhythm(parentId, lastAddedId) {
+        const safeParentId = cleanText(parentId, 80) || "root";
+        const safeLastAddedId = cleanText(lastAddedId, 80);
+        if (!safeLastAddedId) {
+          clearCaptureRhythm();
+          return;
+        }
+        state.captureRhythm = {
+          parentId: safeParentId,
+          lastAddedId: safeLastAddedId,
+          expiresAt: Date.now() + 45000,
+        };
+      }
+
+      function shouldContinueCaptureRhythm(selectedId) {
+        const rhythm = state.captureRhythm || {};
+        const safeSelectedId = cleanText(selectedId, 80);
+        return !!safeSelectedId
+          && cleanText(rhythm.lastAddedId, 80) === safeSelectedId
+          && Number(rhythm.expiresAt || 0) > Date.now();
       }
 
       function beginInlineEdit(nodeId, options = {}) {
@@ -3551,6 +5098,7 @@
         const edit = { ...state.inlineEdit };
         clearInlineEditState();
         if (edit.isNew) {
+          clearCaptureRhythm();
           deleteNodeById(nodeId, { confirm: false });
           setStatus("New item cancelled.", "warn");
           refocusTreeNavigation();
@@ -3661,14 +5209,25 @@
           return;
         }
         const prev = node.label;
+        if (!edit.isNew && next !== prev) {
+          lastEditUndoSnapshot = createTreeUndoSnapshot("rename");
+          lastTreeUndoKind = "edit";
+        }
         node.label = next;
         node.updatedAt = nowIso();
         if (edit.isNew) {
           recordOp({ type: "add_below", id: node.id, afterId: edit.afterId, parentId: edit.parentId, label: next });
-          setStatus(`Added "${next}".`, "ok");
+          armCaptureRhythm(edit.parentId || node.parentId || "root", node.id);
+          setStatus(`Caught.`, "ok", {
+            action: { label: "Undo", onClick: () => undoLastEditAction() },
+            durationMs: 7600,
+          });
         } else if (next !== prev) {
           recordOp({ type: "rename", id: node.id, from: prev, to: next });
-          setStatus(`Renamed "${prev}" to "${next}".`, "ok");
+          setStatus(`Renamed.`, "ok", {
+            action: { label: "Undo", onClick: () => undoLastEditAction() },
+            durationMs: 7600,
+          });
         }
         refreshMeta();
         renderTree();
@@ -3709,6 +5268,8 @@
           order: Number.isFinite(node.order) ? node.order + 0.5 : maxSiblingOrder(parentId) + 1,
           updatedAt: nowIso(),
         };
+        lastEditUndoSnapshot = createTreeUndoSnapshot("add");
+        lastTreeUndoKind = "edit";
         state.nodes.push(newNode);
         renumberChildren(parentId);
         beginInlineEdit(newNode.id, {
@@ -3717,7 +5278,7 @@
           afterId: node.id,
           parentId,
         });
-        setStatus(`New item below "${node.label}". Type to name it.`, "ok");
+        setStatus("Caught. Type, then Enter.", "ok");
       }
 
       function insertChildUnder(nodeId) {
@@ -3740,6 +5301,8 @@
           order: maxSiblingOrder(parentId) + 1,
           updatedAt: nowIso(),
         };
+        lastEditUndoSnapshot = createTreeUndoSnapshot("add");
+        lastTreeUndoKind = "edit";
         state.nodes.push(newNode);
         state.collapsed.delete(parentId);
         beginInlineEdit(newNode.id, {
@@ -3748,7 +5311,7 @@
           afterId: "",
           parentId,
         });
-        setStatus(`New item under "${node.label}". Type to name it.`, "ok");
+        setStatus("Caught. Type, then Enter.", "ok");
       }
 
       function deleteNodeById(nodeId, options = {}) {
@@ -3830,7 +5393,10 @@
         if (state.focusRootId && drop.has(state.focusRootId)) state.focusRootId = "";
         if (state.inlineEdit.id && drop.has(state.inlineEdit.id)) clearInlineEditState();
         state.selectedId = fallbackSelection;
-        setStatus(`Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}.`, "ok", {
+        const deletedLabel = ids.length === 1
+          ? "Deleted 1 item. Ctrl+Z to undo."
+          : `Deleted ${ids.length} items. Ctrl+Z to undo.`;
+        setStatus(deletedLabel, "ok", {
           action: { label: "Undo", onClick: () => undoLastDeleteAction() },
         });
         refreshMeta();
@@ -3871,7 +5437,7 @@
         persistPipSnapshot();
         refocusTreeNavigation(node.id);
         requestAnimationFrame(() => flashTouchedRow(node.id));
-        setStatus(`Indented "${node.label}" under "${previousSibling.label}".`, "ok", {
+        setStatus(`Tucked under "${previousSibling.label}".`, "ok", {
           action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
       }
@@ -3909,7 +5475,7 @@
         persistPipSnapshot();
         refocusTreeNavigation(node.id);
         requestAnimationFrame(() => flashTouchedRow(node.id));
-        setStatus(`Outdented "${node.label}".`, "ok", {
+        setStatus(`Lifted up a level.`, "ok", {
           action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
       }
@@ -3946,10 +5512,11 @@
         recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
         refreshMeta();
         renderTree();
+        saveWorkspaceState();
         persistPipSnapshot();
         refocusTreeNavigation(node.id);
         requestAnimationFrame(() => flashTouchedRow(node.id));
-        setStatus(`${direction < 0 ? "Moved up" : "Moved down"}: "${node.label}".`, "ok", {
+        setStatus(`${direction < 0 ? "Moved up" : "Moved down"}.`, "ok", {
           action: { label: "Undo", onClick: () => undoLastMoveAction() },
         });
       }
@@ -3961,6 +5528,23 @@
           .filter(Boolean);
       }
 
+      function repairVisibleSelectionAfterRender() {
+        if (state.inlineEdit.id || isDetailsEditorOpen()) return;
+        const visibleIds = getVisibleNodeIdsInRenderOrder();
+        if (visibleIds.length === 0) return;
+        const selectedId = cleanText(state.selectedId, 80);
+        if (selectedId && visibleIds.includes(selectedId)) return;
+        const nextId = visibleIds[0];
+        state.selectedId = nextId;
+        if (el.treeRoot instanceof HTMLElement) {
+          const escaped = typeof CSS?.escape === "function" ? CSS.escape(nextId) : nextId.replace(/"/g, '\\"');
+          const row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
+          if (row instanceof HTMLElement) row.classList.add("selected");
+        }
+        refreshMeta();
+        persistPipSnapshot();
+      }
+
       function focusRowByNodeId(nodeId, options = {}) {
         const id = cleanText(nodeId, 80);
         if (!id || !(el.treeRoot instanceof HTMLElement)) return;
@@ -3968,9 +5552,8 @@
           const escaped = typeof CSS?.escape === "function" ? CSS.escape(id) : id.replace(/"/g, '\\"');
           const row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
           if (row instanceof HTMLElement) {
-            row.focus();
-            const block = cleanText(options.block, 16).toLowerCase() === "center" ? "center" : "nearest";
-            row.scrollIntoView({ block, inline: "nearest" });
+            row.focus({ preventScroll: true });
+            scrollRowComfortably(row, { instant: options.instant === true });
           }
         });
       }
@@ -3982,7 +5565,7 @@
             const escaped = typeof CSS?.escape === "function" ? CSS.escape(id) : id.replace(/"/g, '\\"');
             const row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
             if (row instanceof HTMLElement) {
-              row.scrollIntoView({ block: "nearest", inline: "nearest" });
+              scrollRowComfortably(row);
             }
           }
           if (el.treeWrap instanceof HTMLElement) {
@@ -4005,11 +5588,7 @@
 
           const row = document.querySelector(".row.selected");
           if (row instanceof HTMLElement) {
-            row.scrollIntoView({
-              block: "nearest",
-              inline: "nearest",
-              behavior: "smooth",
-            });
+            scrollRowComfortably(row);
           }
         });
       }
@@ -4019,11 +5598,7 @@ function softlyEnsureSelectionVisible() {
           const selected = document.querySelector(".row.selected");
           if (!(selected instanceof HTMLElement)) return;
 
-          selected.scrollIntoView({
-            block: "nearest",
-            inline: "nearest",
-            behavior: "smooth",
-          });
+          scrollRowComfortably(selected);
         });
       }
 
@@ -4051,17 +5626,113 @@ function clearFilterForCopyLoop() {
         state.typeJump.lastAt = 0;
       }
 
+      function hasNodeId(nodeId) {
+        const id = cleanText(nodeId, 80);
+        return !!id && state.nodes.some((node) => cleanText(node?.id, 80) === id);
+      }
+
+      function rememberFilterOrigin() {
+        if (!state.navigationMemory || typeof state.navigationMemory !== "object") return;
+        if (state.navigationMemory.filterSelectedId || state.navigationMemory.filterFocusRootId) return;
+        state.navigationMemory.filterSelectedId = cleanText(state.selectedId, 80);
+        state.navigationMemory.filterFocusRootId = cleanText(state.focusRootId, 80);
+      }
+
+      function clearFilterMemory() {
+        if (!state.navigationMemory || typeof state.navigationMemory !== "object") return;
+        state.navigationMemory.filterSelectedId = "";
+        state.navigationMemory.filterFocusRootId = "";
+      }
+
+      function restoreRememberedSelectionAfterFilter(fallbackId = "") {
+        const memory = state.navigationMemory && typeof state.navigationMemory === "object" ? state.navigationMemory : {};
+        const rememberedFocusId = cleanText(memory.filterFocusRootId, 80);
+        const rememberedSelectedId = cleanText(memory.filterSelectedId, 80);
+        const fallback = cleanText(fallbackId || state.selectedId, 80);
+        const targetId = hasNodeId(rememberedSelectedId) ? rememberedSelectedId : (hasNodeId(fallback) ? fallback : "");
+
+        if (rememberedFocusId && hasNodeId(rememberedFocusId)) {
+          state.focusRootId = rememberedFocusId;
+        }
+        if (targetId) {
+          state.selectedId = targetId;
+          expandPathToNode(targetId);
+        }
+        clearFilterMemory();
+        return targetId;
+      }
+
       function clearFilterAndReturnHome(statusText = "Filter cleared.") {
         if (!(el.search instanceof HTMLInputElement)) return false;
         const hadFilter = cleanText(el.search.value, 120).length > 0;
         if (!hadFilter) return false;
+        const fallbackId = cleanText(state.selectedId, 80);
         el.search.value = "";
         resetTypeJump();
+        const targetId = restoreRememberedSelectionAfterFilter(fallbackId);
+        refreshMeta();
         renderTree();
-        refocusTreeNavigation(state.selectedId);
-        softlyEnsureSelectionVisible();
+        refocusTreeNavigation(targetId || state.selectedId);
+        requestAnimationFrame(() => {
+          if (targetId) flashTouchedRow(targetId);
+          else softlyEnsureSelectionVisible();
+        });
+        saveWorkspaceState();
         if (statusText) setStatus(statusText, "ok");
         return true;
+      }
+
+      function clearFocusAndReturnHome(statusText = "Back to full pocket.") {
+        if (!state.focusRootId) return false;
+        const previousFocusId = cleanText(state.focusRootId, 80);
+        const rememberedId = cleanText(state.navigationMemory?.preFocusSelectedId, 80);
+        const targetId = hasNodeId(rememberedId) ? rememberedId : (hasNodeId(state.selectedId) ? state.selectedId : previousFocusId);
+        state.focusRootId = "";
+        if (state.navigationMemory && typeof state.navigationMemory === "object") {
+          state.navigationMemory.preFocusSelectedId = "";
+        }
+        if (targetId) state.selectedId = targetId;
+        expandPathToNode(targetId || previousFocusId);
+        refreshMeta();
+        renderTree();
+        refocusTreeNavigation(targetId || previousFocusId);
+        requestAnimationFrame(() => {
+          if (targetId) flashTouchedRow(targetId);
+          else softlyEnsureSelectionVisible();
+        });
+        saveWorkspaceState();
+        persistPipSnapshot();
+        if (statusText) setStatus(statusText, "ok");
+        return true;
+      }
+
+      function toggleFocusHere() {
+        if (!state.selectedId) {
+          setStatus("Select something to focus.", "warn");
+          return;
+        }
+        const map = nodeMap();
+        const node = map.get(state.selectedId);
+        if (!node) {
+          setStatus("Selected node was not found.", "warn");
+          return;
+        }
+        if (state.focusRootId === node.id) {
+          clearFocusAndReturnHome("Back to full pocket.");
+          return;
+        }
+        if (state.navigationMemory && typeof state.navigationMemory === "object") {
+          state.navigationMemory.preFocusSelectedId = cleanText(state.selectedId, 80);
+        }
+        state.focusRootId = node.id;
+        state.selectedId = node.id;
+        state.collapsed.delete(node.id);
+        refreshMeta();
+        renderTree();
+        refocusTreeNavigation(node.id);
+        softlyEnsureSelectionVisible();
+        persistPipSnapshot();
+        setStatus("Focused. Esc returns.", "ok");
       }
 
       function selectNodeById(nodeId, options = {}) {
@@ -4073,6 +5744,7 @@ function clearFilterForCopyLoop() {
         refreshMeta();
         renderTree();
         focusRowByNodeId(id, { block: "nearest" });
+        saveWorkspaceState();
         return true;
       }
 
@@ -4116,6 +5788,7 @@ function clearFilterForCopyLoop() {
         refreshMeta();
         renderTree();
         focusRowByNodeId(id, { block: "nearest" });
+        saveWorkspaceState();
         return true;
       }
 
@@ -4254,7 +5927,14 @@ function clearFilterForCopyLoop() {
       }
 
       function moveSelectedViaPad(direction) {
-        if (!state.moveMode || !state.selectedId) return;
+        if (!state.selectedId) {
+          setStatus("Select an item first.", "warn");
+          return;
+        }
+        if (!state.moveMode) {
+          setStatus("Turn on Move mode first.", "warn");
+          return;
+        }
         if (direction === "up") moveNodeWithinSiblings(state.selectedId, -1);
         else if (direction === "down") moveNodeWithinSiblings(state.selectedId, 1);
         else if (direction === "left") outdentNodeById(state.selectedId);
@@ -4262,6 +5942,22 @@ function clearFilterForCopyLoop() {
         else return;
         armMoveModeIdleTimer();
         refocusTreeNavigation(state.selectedId);
+      }
+
+      function openRowMiniMenuForSelected() {
+        const id = cleanText(state.selectedId, 80);
+        if (!id) {
+          setStatus("Select an item first.", "warn");
+          return false;
+        }
+        const node = nodeMap().get(id) || null;
+        if (!node) {
+          setStatus("That item is not available now.", "warn");
+          return false;
+        }
+        const anchor = document.querySelector(`[data-node-id="${CSS.escape(id)}"] .rowActionBtn.more`);
+        const row = document.querySelector(`[data-node-id="${CSS.escape(id)}"]`);
+        return openRowMiniMenu(id, anchor instanceof HTMLElement ? anchor : row);
       }
 
       function handleTreeKeydown(ev) {
@@ -4295,6 +5991,28 @@ function clearFilterForCopyLoop() {
           return;
         }
         const lowerKey = String(ev.key || "").toLowerCase();
+        if (
+          !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && !ev.shiftKey
+          && (ev.key === "ContextMenu" || ev.key === ".")
+        ) {
+          ev.preventDefault();
+          openRowMiniMenuForSelected();
+          return;
+        }
+        if (
+          !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && ev.shiftKey
+          && ev.key === "F10"
+        ) {
+          ev.preventDefault();
+          openRowMiniMenuForSelected();
+          return;
+        }
         if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && lowerKey === "z") {
           ev.preventDefault();
           undoMostRecentTreeMutation();
@@ -4318,7 +6036,10 @@ function clearFilterForCopyLoop() {
         ) {
           ev.preventDefault();
           const cleared = clearFilterAndReturnHome("Filter cleared.");
-          if (!cleared) refocusTreeNavigation(state.selectedId);
+          if (!cleared) {
+            const unfocused = clearFocusAndReturnHome("Back to full pocket.");
+            if (!unfocused) refocusTreeNavigation(state.selectedId);
+          }
           return;
         }
         if (
@@ -4344,6 +6065,29 @@ function clearFilterForCopyLoop() {
         ) {
           ev.preventDefault();
           renameSelected();
+          return;
+        }
+        if (
+          !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && ev.shiftKey
+          && lowerKey === "f"
+        ) {
+          ev.preventDefault();
+          toggleFocusHere();
+          return;
+        }
+        if (
+          !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && ev.shiftKey
+          && (ev.key === "+" || ev.key === "=" || ev.key === "Add")
+        ) {
+          ev.preventDefault();
+          if (state.selectedId) insertSiblingBelow(state.selectedId);
+          else addItemsFromPrimaryAction();
           return;
         }
         if (
@@ -4500,12 +6244,21 @@ function clearFilterForCopyLoop() {
           && (ev.key === " " || ev.code === "Space")
         ) {
           ev.preventDefault();
-          if (!state.selectedId) return;
+          if (!state.selectedId) {
+            setStatus("Select an item first.", "warn");
+            return;
+          }
           const map = nodeMap();
           const current = map.get(state.selectedId);
-          if (!current) return;
+          if (!current) {
+            setStatus("That item is not available now.", "warn");
+            return;
+          }
           const hasKids = sortNodesForParent(current.id).length > 0;
-          if (!hasKids) return;
+          if (!hasKids) {
+            setStatus("No child items to fold.", "warn");
+            return;
+          }
           if (state.collapsed.has(current.id)) state.collapsed.delete(current.id);
           else state.collapsed.add(current.id);
           refreshMeta();
@@ -4540,7 +6293,10 @@ function clearFilterForCopyLoop() {
           }
           const kids = sortNodesForParent(current.id);
           if (ev.key === "ArrowRight") {
-            if (kids.length === 0) return;
+            if (kids.length === 0) {
+              setStatus("No child items to open.", "warn");
+              return;
+            }
             if (state.collapsed.has(current.id)) {
               if (el.treeWrap instanceof HTMLElement) {
                 el.treeWrap.focus({ preventScroll: true });
@@ -4596,14 +6352,108 @@ function clearFilterForCopyLoop() {
           && ev.key === "Enter"
         ) {
           ev.preventDefault();
+          if (state.selectedId) {
+            const map = nodeMap();
+            const node = map.get(state.selectedId) || null;
+            const hasKids = node ? sortNodesForParent(node.id).length > 0 : false;
+            if (node && shouldCopyOnSingleClick(node, hasKids)) {
+              cancelPendingCopyClick();
+              const id = cleanText(node.id, 80);
+              const value = cleanText(node.label, 220);
+              clearFilterForCopyLoop();
+              refreshMeta();
+              renderTree();
+              focusRowByNodeId(id);
+              void copyText(value).then((ok) => {
+                if (ok) showCopiedFeedback(id);
+                else setStatus("Copy did not work.", "warn");
+              });
+              return;
+            }
+          }
+          if (!state.selectedId) {
+            setStatus("Select an item first.", "warn");
+            return;
+          }
           openDetailsEditorForSelectedNode();
           return;
         }
-        if (!state.selectedId) return;
+        if (!state.selectedId) {
+          setStatus("Select an item first.", "warn");
+          return;
+        }
         if (ev.key !== "Tab") return;
         ev.preventDefault();
         if (ev.shiftKey) outdentNodeById(state.selectedId);
         else indentNodeById(state.selectedId);
+      }
+
+      function buildEmptyState(queryText = "", focusRoot = null) {
+        const li = document.createElement("li");
+        li.className = "treeEmptyHint";
+
+        const card = document.createElement("div");
+        card.className = "emptyState";
+
+        const title = document.createElement("div");
+        title.className = "emptyStateTitle";
+
+        const text = document.createElement("div");
+        text.className = "emptyStateText";
+
+        const actions = document.createElement("div");
+        actions.className = "emptyStateActions";
+
+        const addAction = (label, onClick, titleText = "") => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "emptyStateAction";
+          btn.textContent = label;
+          if (titleText) btn.title = titleText;
+          btn.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            onClick();
+          });
+          actions.appendChild(btn);
+          return btn;
+        };
+
+        const hasQuery = cleanText(queryText, 120).length > 0;
+        const hasNodes = Array.isArray(state.nodes) && state.nodes.length > 0;
+        const localSafety = readLocalSafetySnapshot();
+
+        if (hasQuery) {
+          title.textContent = "Nothing matched.";
+          text.textContent = "Clear the filter to come back to your full pocket.";
+          addAction("Clear filter", () => clearFilterAndReturnHome("Filter cleared."));
+        } else if (focusRoot) {
+          title.textContent = "This branch is quiet.";
+          text.textContent = "Add something here, or step back to the full tree.";
+          addAction("Add here", () => addItemsFromPrimaryAction());
+          addAction("Full pocket", () => clearFocusAndReturnHome("Back to full pocket."));
+        } else if (!hasNodes) {
+          title.textContent = "Open a pocket file, or start fresh.";
+          text.textContent = "Your data stays in this browser unless you save.";
+          addAction("open", () => {
+            if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
+          }, "Open an existing pocket JSON file");
+          if (localSafety) {
+            addAction("Restore local copy", () => restoreLocalSafetySnapshot(localSafety), "Restore the browser safety copy on this device");
+          }
+          addAction("start new", () => addItemsFromPrimaryAction());
+        } else {
+          title.textContent = "Nothing here yet.";
+          text.textContent = "Add a thought here, or return to the full tree.";
+          addAction("Add item", () => addItemsFromPrimaryAction());
+          if (state.focusRootId) addAction("Full pocket", () => clearFocusAndReturnHome("Back to full pocket."));
+        }
+
+        card.appendChild(title);
+        card.appendChild(text);
+        if (actions.childNodes.length > 0) card.appendChild(actions);
+        li.appendChild(card);
+        return li;
       }
 
       function renderTree() {
@@ -4746,13 +6596,15 @@ function clearFilterForCopyLoop() {
           const row = document.createElement("div");
           const attentionState = nodeAttentionState(node);
           const rowAttentionClass = attentionState === "manual_urgent" ? " urgent" : "";
-          row.className = `row${state.selectedId === node.id ? " selected" : ""}${rowAttentionClass}`;
+          row.className = `row${state.selectedId === node.id ? " selected" : ""}${state.rowMiniMenuOpen && state.rowMiniMenuNodeId === node.id ? " menuOpen" : ""}${rowAttentionClass}`;
           row.setAttribute("data-node-id", node.id);
           row.style.paddingLeft = `${depthIndentPx(depth)}px`;
           row.tabIndex = 0;
 
           const children = byParent.get(node.id) || [];
           const hasKids = children.length > 0;
+          const copyActionReady = shouldCopyOnSingleClick(node, hasKids);
+          if (copyActionReady) row.classList.add("copyReady");
           const isCollapsed = state.collapsed.has(node.id);
 
           const twisty = document.createElement("button");
@@ -4772,7 +6624,7 @@ function clearFilterForCopyLoop() {
             input.className = "labelEdit";
             input.type = "text";
             input.value = node.label || "";
-            input.placeholder = "New item";
+            input.placeholder = state.inlineEdit.isNew ? "What belongs here?" : "Rename item";
             input.setAttribute("data-edit-id", node.id);
             let finished = false;
             const finishCommitWith = (value, options = {}) => {
@@ -4844,38 +6696,11 @@ function clearFilterForCopyLoop() {
             row.appendChild(detailBadge);
           }
 
-          const rowActions = document.createElement("div");
-          rowActions.className = "rowActions";
-
-          const addBtn = document.createElement("button");
-          addBtn.className = "rowActionBtn add";
-          addBtn.type = "button";
-          addBtn.title = "Add below";
-          addBtn.textContent = "+";
-          addBtn.addEventListener("click", (ev) => {
-            ev.stopPropagation();
-            insertSiblingBelow(node.id);
-          });
-          rowActions.appendChild(addBtn);
-
-          const delBtn = document.createElement("button");
-          delBtn.className = "rowActionBtn delete";
-          delBtn.type = "button";
-          delBtn.title = "Delete";
-          delBtn.textContent = "−";
-          delBtn.addEventListener("click", (ev) => {
-            ev.stopPropagation();
-            deleteNodeById(node.id, { confirm: true });
-          });
-          rowActions.appendChild(delBtn);
-
-          row.appendChild(rowActions);
-
           row.addEventListener("click", () => {
             const copyOnClick = shouldCopyOnSingleClick(node, hasKids);
 
             state.selectedId = node.id;
-            row.focus();
+            row.focus({ preventScroll: true });
             refreshMeta();
             renderTree();
             focusRowByNodeId(node.id);
@@ -4896,6 +6721,14 @@ function clearFilterForCopyLoop() {
             focusRowByNodeId(node.id);
             openDetailsEditorForSelectedNode();
           });
+          row.addEventListener("contextmenu", (ev) => {
+            if (state.inlineEdit.id === node.id) return;
+            ev.preventDefault();
+            ev.stopPropagation();
+            cancelPendingCopyClick();
+            state.selectedId = node.id;
+            openRowMiniMenu(node.id, row, { x: ev.clientX, y: ev.clientY });
+          });
 
           li.appendChild(row);
 
@@ -4915,7 +6748,7 @@ function clearFilterForCopyLoop() {
           return li;
         }
 
-        const roots = focusRoot ? (byParent.get(focusRoot.id) || []).slice() : (byParent.get("root") || []).slice();
+        const roots = focusRoot ? [focusRoot] : (byParent.get("root") || []).slice();
         const rendered = [];
         for (const root of roots) {
           const node = build(root, 0);
@@ -4927,12 +6760,10 @@ function clearFilterForCopyLoop() {
         el.treeRoot.innerHTML = "";
         for (const n of rendered) el.treeRoot.appendChild(n);
         if (rendered.length === 0) {
-          const emptyHint = document.createElement("li");
-          emptyHint.className = "treeEmptyHint";
-          emptyHint.textContent = "Start with +";
-          el.treeRoot.appendChild(emptyHint);
+          el.treeRoot.appendChild(buildEmptyState(query, focusRoot));
         }
         refreshTreeLabelOverflowTitles();
+        repairVisibleSelectionAfterRender();
         requestAnimationFrame(() => refreshTreeLabelOverflowTitles());
 
         if (state.inlineEdit.id) {
@@ -4977,28 +6808,12 @@ function clearFilterForCopyLoop() {
         const focusId = cleanText(state.focusRootId, 80);
 
         if (selectedId && map.has(selectedId)) {
-          insertChildUnder(selectedId);
+          insertSiblingBelow(selectedId);
           return;
         }
 
         if (focusId && map.has(focusId)) {
-          const focusNode = map.get(focusId);
-          const newNode = {
-            id: makeId("node"),
-            parentId: focusNode.id,
-            label: "",
-            source: "manual",
-            order: maxSiblingOrder(focusNode.id) + 1,
-            updatedAt: nowIso(),
-          };
-          state.nodes.push(newNode);
-          beginInlineEdit(newNode.id, {
-            isNew: true,
-            originalLabel: "",
-            afterId: "",
-            parentId: focusNode.id,
-          });
-          setStatus(`New item in "${focusNode.label}". Type to name it.`, "ok");
+          insertChildUnder(focusId);
           return;
         }
 
@@ -5010,6 +6825,8 @@ function clearFilterForCopyLoop() {
           order: maxSiblingOrder("root") + 1,
           updatedAt: nowIso(),
         };
+        lastEditUndoSnapshot = createTreeUndoSnapshot("add");
+        lastTreeUndoKind = "edit";
         state.nodes.push(newTopNode);
         beginInlineEdit(newTopNode.id, {
           isNew: true,
@@ -5017,7 +6834,7 @@ function clearFilterForCopyLoop() {
           afterId: "",
           parentId: "root",
         });
-        setStatus("New top-level item. Type to name it.", "ok");
+        setStatus("Caught. Type, then Enter.", "ok");
       }
 
       function renameSelected() {
@@ -5042,7 +6859,7 @@ function clearFilterForCopyLoop() {
           afterId: "",
           parentId: node.parentId || "root",
         });
-        setStatus(`Renaming "${node.label}". Enter saves, Esc cancels.`, "ok");
+        setStatus("Renaming. Enter saves, Esc cancels.", "ok");
       }
 
       function deleteSelected() {
@@ -5050,7 +6867,7 @@ function clearFilterForCopyLoop() {
           setStatus("Select a node first.", "warn");
           return;
         }
-        deleteNodeById(state.selectedId, { confirm: true });
+        deleteNodeById(state.selectedId, { confirm: false });
       }
 
       function buildPipUrl() {
@@ -5094,8 +6911,8 @@ function clearFilterForCopyLoop() {
           const safePipUrl = pipUrl.replace(/\"/g, "&quot;");
           pipWin.document.open();
           pipWin.document.write(
-            "<!doctype html><html><head><meta charset='utf-8'><title>Pocket Lite PiP</title>" +
-            "<style>html,body{margin:0;height:100%;background:#f7f8f7}iframe{border:0;width:100%;height:100%}</style>" +
+            "<!doctype html><html><head><meta charset='utf-8'><title>pocket popout</title>" +
+            "<style>html,body{margin:0;height:100%;background:#f7f8f7;overflow:hidden}body{display:grid;grid-template-rows:22px minmax(0,1fr)}.pipDragRail{height:22px;display:flex;align-items:center;padding:0 8px;border-bottom:1px solid rgba(148,163,184,.16);color:rgba(71,85,105,.72);font:600 12px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;letter-spacing:.08px;user-select:none;cursor:grab;background:rgba(249,250,248,.96)}.pipDragRail:active{cursor:grabbing}.pipFrameWrap{min-height:0}iframe{border:0;width:100%;height:100%;display:block}</style>" +
             "<script>" +
             "window.__pocketLitePipDirty=false;" +
             "window.__pocketLiteUnsavedCloseMessage=" + JSON.stringify(UNSAVED_CLOSE_MESSAGE) + ";" +
@@ -5105,7 +6922,7 @@ function clearFilterForCopyLoop() {
             "window.addEventListener('beforeunload',__pocketLiteBeforeUnload);" +
             "window.onbeforeunload=__pocketLiteBeforeUnload;" +
             "</" + "script>" +
-            "</head><body><iframe id=\"pocketLitePipFrame\" src=\"" + safePipUrl + "\"></iframe></body></html>"
+            "</head><body><div class='pipDragRail' title='Drag this strip to move the popout'>pocket</div><div class='pipFrameWrap'><iframe id=\"pocketLitePipFrame\" src=\"" + safePipUrl + "\"></iframe></div></body></html>"
           );
           pipWin.document.close();
           pipWin.__pocketLiteSaveFromPip = async (snapshot) => {
@@ -5115,7 +6932,7 @@ function clearFilterForCopyLoop() {
             const saved = await exportTree({ downloadFallback: false });
             return {
               ok: !!saved,
-              error: saved ? "" : "Could not write the truth file from PiP. Use Save in the main Pocket Lite window.",
+              error: saved ? "" : "Could not write the truth file from PiP. Use Save in the main pocket window.",
             };
           };
           pipWin.addEventListener("pagehide", (event) => {
@@ -5131,7 +6948,7 @@ function clearFilterForCopyLoop() {
               if (snapshot && snapshot.dirty) adoptPocketLiteSessionState(snapshot);
             } catch {}
           });
-          setStatus("Opened PiP window.", "ok");
+          setStatus("Opened popout window.", "ok");
         } catch (err) {
           setStatus(`PiP unavailable: ${err && err.message ? err.message : "not supported"}`, "warn");
           openPopupFallback();
@@ -5220,50 +7037,72 @@ function clearFilterForCopyLoop() {
         return queued;
       }
 
+      function downloadPocketBackupCopy(payload = buildPocketPayload(nowIso()), reason = "copy") {
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+        const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = href;
+        a.download = `pocket-data-${stamp}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
+        markSavedNow(payload);
+        if (reason !== "silent") {
+          setStatus(`${backupProofLabel()} saved as a separate copy.`, "ok", { durationMs: 6200 });
+        }
+        return true;
+      }
+
+      function shouldPauseForStaleExportGuard(options = {}) {
+        if (options.ignoreStaleGuard) return false;
+        const guard = state.conflictGuard || {};
+        if (!guard.active) return false;
+        if (Date.now() <= pendingStaleExportConfirmExpiresAt) return false;
+        pendingStaleExportConfirmExpiresAt = Date.now() + 15000;
+        const payload = buildPocketPayload(nowIso());
+        setStatus("This file looks older than another local/saved copy. Save again to overwrite, or download a separate copy.", "warn", {
+          durationMs: 15000,
+          action: {
+            label: "Download copy",
+            onClick: () => downloadPocketBackupCopy(payload),
+          },
+        });
+        flashSaveChip("Check first");
+        refocusTreeNavigation(state.selectedId);
+        return true;
+      }
+
       async function exportTree(options = {}) {
         return enqueueTreeSave(async () => {
           if (state.nodes.length === 0) return false;
+          if (shouldPauseForStaleExportGuard(options)) return false;
           const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
           if (opsAtSaveStart === 0) {
-            setStatus("No changes.", "ok");
-            flashSaveChip("No changes");
+            clearLocalSafetySnapshot();
+            setStatus(backupProofLabel(readLastBackupMeta()) || "Already saved.", "ok", { durationMs: 4200 });
+            flashSaveChip("Safe");
             refocusTreeNavigation(state.selectedId);
             return false;
           }
           // Freeze a point-in-time snapshot so edits during save are not mixed
           // into this payload and their ops are preserved as unsaved.
-          const treeNodes = JSON.parse(JSON.stringify(state.nodes || []));
-          const treeTombstones = JSON.parse(JSON.stringify(state.tombstones || []));
-          const rootExtras = JSON.parse(JSON.stringify(state.rootExtras || {}));
-          const dataExtras = JSON.parse(JSON.stringify(state.dataExtras || {}));
-          const payload = {
-            ...rootExtras,
-            // Dual-shape export for clean cross-import:
-            // - portal.export.v1 (full app import path)
-            // - top-level mainThoughtTree fields (Pocket Lite compatibility path)
-            schema: "portal.export.v1",
-            exportedAt: nowIso(),
-            writtenAt: nowIso(),
-            mainThoughtTree: treeNodes,
-            mainThoughtTreeTombstones: treeTombstones,
-            data: {
-              ...dataExtras,
-              mainThoughtTree: treeNodes,
-              mainThoughtTreeTombstones: treeTombstones,
-            },
-          };
+          const payload = buildPocketPayload(nowIso());
           saveLastSaveSnapshot(payload);
           const writeResult = await writeTruthFile(payload);
           if (writeResult.ok) {
-            markSavedNow();
+            markSavedNow(payload);
             // Only clear ops that existed at save start.
             state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
             if (state.ops.length > 0) {
-              setStatus(`Saved snapshot at ${lastSavedLabel}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} pending.`, "ok");
+              setStatus(`${backupProofLabel()}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} still local.`, "ok", { durationMs: 5600 });
             } else {
-              setStatus(`Saved ${lastSavedLabel}.`, "ok");
+              setStatus(backupProofLabel(), "ok", { durationMs: 5200 });
             }
-            flashSaveChip("Saved");
+            flashSaveChip("Safe");
+            clearLocalSafetySnapshot();
+            clearConflictGuard();
             persistPipSnapshot();
             refocusTreeNavigation(state.selectedId);
             return true;
@@ -5274,20 +7113,13 @@ function clearFilterForCopyLoop() {
             return false;
           }
           if (options.downloadFallback === false) {
-            setStatus("Could not write the truth file here. Use Save in the main Pocket Lite window.", "warn");
+            setStatus("Could not write the truth file here. Use Save in the main pocket window.", "warn");
             refocusTreeNavigation(state.selectedId);
             return false;
           }
-          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-          const href = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = href;
-          a.download = "pocket-data.json";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(href);
-          setStatus("Could not overwrite truth file here, downloaded pocket-data.json instead.", "warn");
+          downloadPocketBackupCopy(payload, "silent");
+          clearConflictGuard();
+          setStatus(`${backupProofLabel()} saved as a separate copy.`, "warn", { durationMs: 6200 });
           refocusTreeNavigation(state.selectedId);
           return true;
         });
@@ -5336,7 +7168,7 @@ function clearFilterForCopyLoop() {
               fileName: cleanText(file.name, 120),
               writtenAt: latestChange.writtenAt || latestChange.norm.writtenAt || "",
             });
-            setStatus(`Loaded ${state.nodes.length} node${state.nodes.length === 1 ? "" : "s"} from change log.`, "ok");
+            setStatus(`pocket opened from change log.`, "ok");
             return;
           }
           const queued = queuePathImport(text, {
@@ -5377,7 +7209,7 @@ function clearFilterForCopyLoop() {
           fileName: cleanText(file.name, 120),
           writtenAt: norm.writtenAt || "",
         });
-        setStatus(`Loaded ${state.nodes.length} node${state.nodes.length === 1 ? "" : "s"}.`, "ok");
+        setStatus(`pocket opened.`, "ok");
       }
 
       function triggerStatusAction(event) {
@@ -5395,7 +7227,418 @@ function clearFilterForCopyLoop() {
         return true;
       }
 
+
+      function isControlsHelpOpen() {
+        return !!(el.controlsOverlay instanceof HTMLElement) && !el.controlsOverlay.hidden;
+      }
+
+      function openControlsHelp() {
+        if (!(el.controlsOverlay instanceof HTMLElement)) {
+          setStatus("Controls: + add below · Enter edit/copy · right-click actions · Esc back · Ctrl/Cmd+S save", "ok", { persist: true });
+          refocusTreeNavigation(state.selectedId);
+          return false;
+        }
+        el.controlsOverlay.hidden = false;
+        requestAnimationFrame(() => {
+          if (el.btnControlsClose instanceof HTMLElement) el.btnControlsClose.focus({ preventScroll: true });
+        });
+        return true;
+      }
+
+      function closeControlsHelp(options = {}) {
+        const opts = { restoreFocus: true, ...options };
+        if (!(el.controlsOverlay instanceof HTMLElement) || el.controlsOverlay.hidden) return false;
+        el.controlsOverlay.hidden = true;
+        if (opts.restoreFocus) refocusTreeNavigation(state.selectedId);
+        return true;
+      }
+
+      function showQuickKeys() {
+        openControlsHelp();
+      }
+
+
+      let rowMiniMenuEl = null;
+      let rowMiniMenuAnchor = null;
+      let rowMiniMenuPoint = null;
+
+      function isRowMiniMenuOpen() {
+        return !!state.rowMiniMenuOpen && rowMiniMenuEl instanceof HTMLElement && document.body.contains(rowMiniMenuEl);
+      }
+
+      function closeRowMiniMenu(options = {}) {
+        const opts = { restoreFocus: true, ...options };
+        if (rowMiniMenuEl instanceof HTMLElement) rowMiniMenuEl.remove();
+        rowMiniMenuEl = null;
+        rowMiniMenuAnchor = null;
+        rowMiniMenuPoint = null;
+        state.rowMiniMenuOpen = false;
+        const nodeId = cleanText(state.rowMiniMenuNodeId || state.selectedId, 80);
+        state.rowMiniMenuNodeId = "";
+        renderTree();
+        if (opts.restoreFocus && nodeId) refocusTreeNavigation(nodeId);
+        return true;
+      }
+
+      function positionRowMiniMenu() {
+        if (!(rowMiniMenuEl instanceof HTMLElement)) return false;
+        const gap = 6;
+        const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
+        const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
+        const coarsePointer = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+        const sheetMode = coarsePointer && vw <= 340 && !rowMiniMenuPoint;
+
+        rowMiniMenuEl.style.visibility = "hidden";
+        rowMiniMenuEl.classList.toggle("sheetMode", sheetMode);
+        rowMiniMenuEl.style.left = "";
+        rowMiniMenuEl.style.right = "";
+        rowMiniMenuEl.style.top = "";
+        rowMiniMenuEl.style.bottom = "";
+        rowMiniMenuEl.style.width = "";
+
+        if (sheetMode) {
+          rowMiniMenuEl.style.visibility = "";
+          return true;
+        }
+
+        rowMiniMenuEl.style.left = "0px";
+        rowMiniMenuEl.style.top = "0px";
+        const menuRect = rowMiniMenuEl.getBoundingClientRect();
+        const menuWidth = Math.min(menuRect.width || 138, Math.max(112, vw - gap * 2));
+        const menuHeight = Math.min(menuRect.height || 210, Math.max(80, vh - gap * 2));
+        let left = gap;
+        let top = gap;
+
+        if (rowMiniMenuPoint && Number.isFinite(rowMiniMenuPoint.x) && Number.isFinite(rowMiniMenuPoint.y)) {
+          left = rowMiniMenuPoint.x + 4;
+          top = rowMiniMenuPoint.y + 4;
+        } else if (rowMiniMenuAnchor instanceof HTMLElement) {
+          const rect = rowMiniMenuAnchor.getBoundingClientRect();
+          left = rect.right + 4;
+          if (left + menuWidth > vw - gap) left = rect.left - menuWidth - 4;
+          top = rect.top;
+        }
+
+        if (left + menuWidth > vw - gap) left = vw - menuWidth - gap;
+        if (top + menuHeight > vh - gap) top = vh - menuHeight - gap;
+        left = Math.max(gap, Math.min(left, vw - menuWidth - gap));
+        top = Math.max(gap, Math.min(top, vh - menuHeight - gap));
+        rowMiniMenuEl.style.left = `${Math.round(left)}px`;
+        rowMiniMenuEl.style.top = `${Math.round(top)}px`;
+        rowMiniMenuEl.style.visibility = "";
+        return true;
+      }
+
+      function openRowMiniMenu(nodeId, anchorEl, point = null) {
+        const id = cleanText(nodeId, 80);
+        const node = nodeMap().get(id) || null;
+        if (!id || !node || isDetailsEditorOpen()) return false;
+        if (isRowMiniMenuOpen() && state.rowMiniMenuNodeId === id) {
+          closeRowMiniMenu({ restoreFocus: true });
+          return true;
+        }
+        closeRowMiniMenu({ restoreFocus: false });
+        state.selectedId = id;
+        state.rowMiniMenuOpen = true;
+        state.rowMiniMenuNodeId = id;
+        rowMiniMenuAnchor = anchorEl instanceof HTMLElement ? anchorEl : null;
+        rowMiniMenuPoint = point && Number.isFinite(point.x) && Number.isFinite(point.y) ? { x: point.x, y: point.y } : null;
+        renderTree();
+        rowMiniMenuAnchor = document.querySelector(`[data-node-id="${CSS.escape(id)}"]`) || rowMiniMenuAnchor;
+
+        const menu = document.createElement("div");
+        menu.className = "rowMiniMenu";
+        menu.setAttribute("role", "menu");
+        menu.setAttribute("aria-label", "Row actions");
+        const title = document.createElement("div");
+        title.className = "rowMiniMenuTitle";
+        title.textContent = `Actions · ${cleanText(node.name || "Untitled", 80) || "Untitled"}`;
+        menu.appendChild(title);
+        menu.addEventListener("click", (ev) => ev.stopPropagation());
+        menu.addEventListener("pointerdown", (ev) => ev.stopPropagation());
+        menu.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape") {
+            ev.preventDefault();
+            ev.stopPropagation();
+            closeRowMiniMenu({ restoreFocus: true });
+            return;
+          }
+          if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+            ev.preventDefault();
+            const buttons = Array.from(menu.querySelectorAll(".rowMiniMenuBtn:not([disabled])"))
+              .filter((item) => item instanceof HTMLElement);
+            if (!buttons.length) return;
+            const currentIndex = buttons.indexOf(document.activeElement);
+            const delta = ev.key === "ArrowDown" ? 1 : -1;
+            const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + buttons.length) % buttons.length;
+            buttons[nextIndex].focus({ preventScroll: true });
+            return;
+          }
+          if (!ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+            const shortcut = cleanText(ev.key || "", 4).toLowerCase();
+            if (shortcut) {
+              const target = menu.querySelector(`.rowMiniMenuBtn[data-shortcut="${shortcut}"]:not([disabled])`);
+              if (target instanceof HTMLElement) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                target.click();
+              }
+            }
+          }
+        });
+
+        const addButton = (label, action, shortcut = "", disabled = false) => {
+          const btn = document.createElement("button");
+          btn.className = "rowMiniMenuBtn";
+          btn.type = "button";
+          btn.setAttribute("role", "menuitem");
+          const key = cleanText(shortcut, 4).toLowerCase();
+          if (key) {
+            btn.dataset.shortcut = key;
+            btn.setAttribute("aria-keyshortcuts", key.toUpperCase());
+            btn.title = `${label} (${key.toUpperCase()})`;
+          }
+          const labelSpan = document.createElement("span");
+          labelSpan.className = "rowMiniMenuLabel";
+          labelSpan.textContent = label;
+          btn.appendChild(labelSpan);
+          if (key) {
+            const keySpan = document.createElement("span");
+            keySpan.className = "rowMiniMenuShortcut";
+            keySpan.textContent = key.toUpperCase();
+            btn.appendChild(keySpan);
+          }
+          btn.disabled = !!disabled;
+          btn.addEventListener("click", () => {
+            closeRowMiniMenu({ restoreFocus: false });
+            state.selectedId = id;
+            runCommandPaletteAction(action);
+          });
+          menu.appendChild(btn);
+          return btn;
+        };
+        const addSeparator = () => {
+          const sep = document.createElement("div");
+          sep.className = "rowMiniMenuSep";
+          sep.setAttribute("role", "separator");
+          menu.appendChild(sep);
+        };
+
+        addButton("Edit", "edit", "e");
+        addButton("Add below", "add_sibling", "a");
+        addButton("Move", "move", "m");
+        addButton("Focus here", "focus", "f");
+        addSeparator();
+        addButton("Copy text", "copy_text", "c");
+        addSeparator();
+        addButton("Delete", "delete", "d");
+
+        document.body.appendChild(menu);
+        rowMiniMenuEl = menu;
+        positionRowMiniMenu();
+        requestAnimationFrame(() => {
+          positionRowMiniMenu();
+          const first = menu.querySelector(".rowMiniMenuBtn:not([disabled])");
+          if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+        });
+        return true;
+      }
+
+      function isCommandPaletteOpen() {
+        return !!state.commandPaletteOpen && !(el.commandOverlay?.hidden ?? true);
+      }
+
+      function refreshCommandPaletteState() {
+        const hasSelection = !!cleanText(state.selectedId, 80) && !!nodeMap().get(cleanText(state.selectedId, 80));
+        const setDisabled = (button, disabled) => {
+          if (button instanceof HTMLButtonElement) button.disabled = !!disabled;
+        };
+        setDisabled(el.cmdAddChild, false);
+        setDisabled(el.cmdAddSibling, !hasSelection);
+        setDisabled(el.cmdRename, !hasSelection);
+        setDisabled(el.cmdEdit, !hasSelection);
+        setDisabled(el.cmdMove, !hasSelection);
+        setDisabled(el.cmdFocus, !hasSelection);
+        const trail = readLocalSafetyTrail();
+        const latest = readLocalSafetySnapshot();
+        const latestMs = latest ? latest.capturedMs : 0;
+        const previousLocalVersion = trail.find((item) => item && item.capturedMs > 0 && (!latestMs || item.capturedMs < latestMs - 1000));
+        const hasPreviousLocalVersion = !!previousLocalVersion;
+        if (el.cmdRestoreRecent instanceof HTMLButtonElement) {
+          const hint = el.cmdRestoreRecent.querySelector(".commandHint");
+          if (hint) hint.textContent = previousLocalVersion
+            ? `${formatSaveClockLabel(new Date(previousLocalVersion.capturedMs))} · ${previousLocalVersion.norm.nodes.length} nodes`
+            : "safety";
+        }
+        setDisabled(el.cmdRestoreRecent, !hasPreviousLocalVersion);
+      }
+
+      function openCommandPalette() {
+        closeRowMiniMenu({ restoreFocus: false });
+        if (!(el.commandOverlay instanceof HTMLElement)) return false;
+        if (isDetailsEditorOpen()) return false;
+        refreshCommandPaletteState();
+        state.commandPaletteOpen = true;
+        el.commandOverlay.hidden = false;
+        requestAnimationFrame(() => {
+          const first = el.commandOverlay?.querySelector(".commandBtn:not([disabled])");
+          if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+        });
+        return true;
+      }
+
+      function closeCommandPalette(options = {}) {
+        const opts = { restoreFocus: true, ...options };
+        if (!(el.commandOverlay instanceof HTMLElement)) return false;
+        if (!isCommandPaletteOpen()) return false;
+        state.commandPaletteOpen = false;
+        el.commandOverlay.hidden = true;
+        if (opts.restoreFocus) refocusTreeNavigation(state.selectedId);
+        return true;
+      }
+
+      function runCommandPaletteAction(action) {
+        closeCommandPalette({ restoreFocus: false });
+        requestAnimationFrame(() => {
+          let shouldReturnToTree = true;
+          if (action === "add_child") {
+            shouldReturnToTree = false;
+            const id = cleanText(state.selectedId, 80);
+            if (id) insertChildUnder(id);
+            else addItemsFromPrimaryAction();
+          }
+          else if (action === "add_sibling") {
+            shouldReturnToTree = false;
+            const id = cleanText(state.selectedId, 80);
+            if (id) insertSiblingBelow(id);
+            else addItemsFromPrimaryAction();
+          } else if (action === "rename") {
+            shouldReturnToTree = false;
+            renameSelected();
+          }
+          else if (action === "edit") {
+            shouldReturnToTree = false;
+            openDetailsEditorForSelectedNode();
+          }
+          else if (action === "move") toggleMoveMode();
+          else if (action === "focus") toggleFocusHere();
+          else if (action === "search") {
+            shouldReturnToTree = false;
+            if (el.search instanceof HTMLInputElement) {
+              el.search.focus({ preventScroll: true });
+              el.search.select();
+            }
+          } else if (action === "save") saveCurrentContext();
+          else if (action === "delete") deleteSelected();
+          else if (action === "health") showPocketHealth();
+          else if (action === "restore_recent") restorePreviousLocalSafetyVersion();
+          else if (action === "copy_text") {
+            const selectedId = cleanText(state.selectedId, 80);
+            const selectedNode = nodeMap().get(selectedId) || null;
+            if (!selectedNode) setStatus("Select an item first.", "warn");
+            else {
+              const selectedHasKids = sortNodesForParent(selectedNode.id).length > 0;
+              if (shouldCopyOnSingleClick(selectedNode, selectedHasKids)) {
+                clearFilterForCopyLoop();
+                refreshMeta();
+                renderTree();
+                refocusTreeNavigation(selectedId);
+              }
+              void copyText(selectedNode.label).then((ok) => {
+                if (ok) showCopiedFeedback(selectedId);
+              });
+            }
+          }
+          else if (action === "help") showQuickKeys();
+          if (shouldReturnToTree) refocusTreeNavigation(state.selectedId);
+        });
+      }
+
+      function moveCommandPaletteFocus(delta) {
+        if (!isCommandPaletteOpen()) return false;
+        const buttons = Array.from(el.commandOverlay.querySelectorAll(".commandBtn:not([disabled])"))
+          .filter((item) => item instanceof HTMLElement);
+        if (buttons.length === 0) return false;
+        const active = document.activeElement;
+        const currentIndex = buttons.indexOf(active);
+        const nextIndex = currentIndex < 0
+          ? 0
+          : (currentIndex + delta + buttons.length) % buttons.length;
+        buttons[nextIndex].focus({ preventScroll: true });
+        return true;
+      }
+
       function bind() {
+        el.controlsOverlay?.addEventListener("click", (ev) => {
+          if (ev.target === el.controlsOverlay) {
+            closeControlsHelp({ restoreFocus: true });
+          }
+        });
+        el.controlsOverlay?.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape") {
+            ev.preventDefault();
+            ev.stopPropagation();
+            closeControlsHelp({ restoreFocus: true });
+          }
+        });
+        el.btnControlsClose?.addEventListener("click", () => closeControlsHelp({ restoreFocus: true }));
+
+        el.commandOverlay?.addEventListener("click", (ev) => {
+          if (ev.target === el.commandOverlay) {
+            closeCommandPalette({ restoreFocus: true });
+          }
+        });
+        el.commandOverlay?.addEventListener("keydown", (ev) => {
+          if (!isCommandPaletteOpen()) return;
+          if (ev.key === "Escape") {
+            ev.preventDefault();
+            ev.stopPropagation();
+            closeCommandPalette({ restoreFocus: true });
+            return;
+          }
+          if (ev.key === "ArrowDown") {
+            ev.preventDefault();
+            moveCommandPaletteFocus(1);
+            return;
+          }
+          if (ev.key === "ArrowUp") {
+            ev.preventDefault();
+            moveCommandPaletteFocus(-1);
+            return;
+          }
+        });
+        document.addEventListener("pointerdown", (ev) => {
+          if (!isRowMiniMenuOpen()) return;
+          if (rowMiniMenuEl instanceof HTMLElement && rowMiniMenuEl.contains(ev.target)) return;
+          if (rowMiniMenuAnchor instanceof HTMLElement && rowMiniMenuAnchor.contains(ev.target)) return;
+          closeRowMiniMenu({ restoreFocus: false });
+        }, true);
+        document.addEventListener("keydown", (ev) => {
+          if (!isRowMiniMenuOpen()) return;
+          if (ev.key === "Escape") {
+            ev.preventDefault();
+            ev.stopPropagation();
+            closeRowMiniMenu({ restoreFocus: true });
+          }
+        }, true);
+        window.addEventListener("resize", () => {
+          if (isRowMiniMenuOpen()) positionRowMiniMenu();
+        });
+        window.addEventListener("scroll", () => {
+          if (isRowMiniMenuOpen()) positionRowMiniMenu();
+        }, true);
+
+        el.cmdAddChild?.addEventListener("click", () => runCommandPaletteAction("add_child"));
+        el.cmdAddSibling?.addEventListener("click", () => runCommandPaletteAction("add_sibling"));
+        el.cmdRename?.addEventListener("click", () => runCommandPaletteAction("rename"));
+        el.cmdEdit?.addEventListener("click", () => runCommandPaletteAction("edit"));
+        el.cmdMove?.addEventListener("click", () => runCommandPaletteAction("move"));
+        el.cmdFocus?.addEventListener("click", () => runCommandPaletteAction("focus"));
+        el.cmdSearch?.addEventListener("click", () => runCommandPaletteAction("search"));
+        el.cmdSave?.addEventListener("click", () => runCommandPaletteAction("save"));
+        el.cmdHealth?.addEventListener("click", () => runCommandPaletteAction("health"));
+        el.cmdRestoreRecent?.addEventListener("click", () => runCommandPaletteAction("restore_recent"));
+        el.cmdHelp?.addEventListener("click", () => runCommandPaletteAction("help"));
         el.btnUnfoldAll?.addEventListener("click", toggleUnfoldAll);
         el.btnAddPrimary?.addEventListener("click", addItemsFromPrimaryAction);
         el.btnAddMobile?.addEventListener("click", addItemsFromPrimaryAction);
@@ -5441,8 +7684,12 @@ function clearFilterForCopyLoop() {
         });
 
         el.search.addEventListener("input", () => {
+          const hasFilter = cleanText(el.search.value, 120).length > 0;
+          if (hasFilter) rememberFilterOrigin();
+          else clearFilterMemory();
           resetTypeJump();
           renderTree();
+          if (!hasFilter) refocusTreeNavigation(state.selectedId);
         });
         el.search.addEventListener("keydown", (ev) => {
           if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
@@ -5480,18 +7727,22 @@ function clearFilterForCopyLoop() {
               if (hadFilter) {
                 el.search.value = "";
                 resetTypeJump();
+                clearFilterMemory();
               }
+              state.selectedId = targetId;
+              expandPathToNode(targetId);
               refreshMeta();
               renderTree();
               refocusTreeNavigation(targetId);
               void copyText(targetNode.label).then((ok) => {
-                if (ok) showCopiedFeedback(targetId, { advance: true });
+                if (ok) showCopiedFeedback(targetId);
               });
               return;
             }
             refreshMeta();
             renderTree();
             refocusTreeNavigation(targetId);
+            saveWorkspaceState();
             return;
           }
           if (ev.key === "Escape") {
@@ -5530,20 +7781,46 @@ function clearFilterForCopyLoop() {
           const target = ev.target instanceof HTMLElement ? ev.target : null;
           const tag = target ? String(target.tagName || "").toLowerCase() : "";
           const isEditableTarget = !!target && (target.isContentEditable || tag === "input" || tag === "textarea");
+          if (isControlsHelpOpen()) {
+            if (key === "escape") {
+              ev.preventDefault();
+              ev.stopPropagation();
+              closeControlsHelp({ restoreFocus: true });
+              return;
+            }
+            return;
+          }
+          if (isCommandPaletteOpen()) {
+            if (key === "escape") {
+              ev.preventDefault();
+              ev.stopPropagation();
+              closeCommandPalette({ restoreFocus: true });
+              return;
+            }
+            return;
+          }
           if (
-            key === "/"
+            ((key === "/" && !ev.shiftKey) || key === "?")
             && !ev.metaKey
             && !ev.ctrlKey
+            && !ev.altKey
+            && !isEditableTarget
+          ) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            openCommandPalette();
+            return;
+          }
+          if (
+            key === "k"
+            && (ev.metaKey || ev.ctrlKey)
             && !ev.altKey
             && !ev.shiftKey
             && !isEditableTarget
           ) {
             ev.preventDefault();
             ev.stopPropagation();
-            if (el.search instanceof HTMLInputElement) {
-              el.search.focus({ preventScroll: true });
-              el.search.select();
-            }
+            openCommandPalette();
             return;
           }
           if (key === "escape") {
@@ -5569,6 +7846,12 @@ function clearFilterForCopyLoop() {
               ev.preventDefault();
               ev.stopPropagation();
               clearFilterAndReturnHome("Filter cleared.");
+              return;
+            }
+            if (state.focusRootId) {
+              ev.preventDefault();
+              ev.stopPropagation();
+              clearFocusAndReturnHome("Back to full pocket.");
               return;
             }
           }
@@ -5614,7 +7897,7 @@ function clearFilterForCopyLoop() {
             }
             void copyText(selectedNode.label).then((ok) => {
               if (!ok) return;
-              showCopiedFeedback(selectedId, { advance: copyLoopMode });
+              showCopiedFeedback(selectedId);
             });
             return;
           }
@@ -5623,7 +7906,14 @@ function clearFilterForCopyLoop() {
         document.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
         const handleWindowFocusToTree = () => {
           if (isDetailsEditorOpen()) return;
-          refocusTreeNavigation(state.selectedId);
+          // When the popout/browser regains focus after the user has scrolled,
+          // do not pull the list back to the previously selected row.
+          // The next actual click/keyboard action will choose where focus belongs.
+          requestAnimationFrame(() => {
+            if (el.treeWrap instanceof HTMLElement) {
+              el.treeWrap.focus({ preventScroll: true });
+            }
+          });
         };
         window.addEventListener("focus", handleWindowFocusToTree);
         window.addEventListener("beforeunload", handlePocketLiteBeforeUnload);
