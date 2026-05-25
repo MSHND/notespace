@@ -1,0 +1,45 @@
+/* topbar polish: clearer utilities, no special phone pill. */
+
+body:not(.pipMode) .topbar .chip.utilityChip,
+body:not(.pipMode) .topbar #btnLoad,
+body:not(.pipMode) .topbar #btnPip,
+body:not(.pipMode) .topbar #btnPhoneMode {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  border-radius: 4px !important;
+  padding-inline: 5px !important;
+  min-width: 0 !important;
+  color: rgba(51, 65, 85, 0.82) !important;
+  font-style: normal !important;
+  font-weight: 500 !important;
+}
+
+body:not(.pipMode) .topbar .chip.utilityChip:hover,
+body:not(.pipMode) .topbar #btnLoad:hover,
+body:not(.pipMode) .topbar #btnPip:hover,
+body:not(.pipMode) .topbar #btnPhoneMode:hover {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(30, 41, 59, 0.98) !important;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+body:not(.pipMode) .topbar #btnPhoneMode.on,
+body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: rgba(30, 41, 59, 0.98) !important;
+  font-style: italic !important;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+body:not(.pipMode) .topbar .title {
+  color: rgba(51, 65, 85, 0.76) !important;
+}
