@@ -3,6 +3,7 @@
 body.phoneMode .row {
   min-height: 50px;
   padding-top: 9px;
+  padding-right: 46px;
   padding-bottom: 9px;
 }
 
@@ -22,6 +23,37 @@ body.phoneMode .chip {
 
 body.phoneMode #btnPhoneMode {
   font-style: italic;
+}
+
+.phoneRowMenuBtn {
+  display: none;
+}
+
+body.phoneMode .row.selected .phoneRowMenuBtn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  background: rgba(var(--panel-rgb), 0.82);
+  color: rgba(51, 65, 85, 0.72);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+body.phoneMode .row.selected .phoneRowMenuBtn:hover,
+body.phoneMode .row.selected .phoneRowMenuBtn:active {
+  background: rgba(var(--panel-rgb), 0.96);
+  color: rgba(30, 41, 59, 0.92);
+  border-color: rgba(148, 163, 184, 0.28);
 }
 
 body.phoneMode .detailOverlay {
