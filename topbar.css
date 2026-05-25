@@ -13,6 +13,7 @@ body:not(.pipMode) .topbar #btnPhoneMode {
   color: rgba(51, 65, 85, 0.82) !important;
   font-style: normal !important;
   font-weight: 500 !important;
+  text-decoration: none !important;
 }
 
 body:not(.pipMode) .topbar .chip.utilityChip:hover,
@@ -23,9 +24,7 @@ body:not(.pipMode) .topbar #btnPhoneMode:hover {
   border-color: transparent !important;
   box-shadow: none !important;
   color: rgba(30, 41, 59, 0.98) !important;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  text-decoration: none !important;
 }
 
 body:not(.pipMode) .topbar #btnPhoneMode.on,
@@ -35,9 +34,7 @@ body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
   box-shadow: none !important;
   color: rgba(30, 41, 59, 0.98) !important;
   font-style: italic !important;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  text-decoration: none !important;
 }
 
 body:not(.pipMode) .topbar .title {
