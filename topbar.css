@@ -5,7 +5,8 @@ body:not(.pipMode) .topbar .chip.utilityChip:disabled,
 body:not(.pipMode) .topbar #btnLoad,
 body:not(.pipMode) .topbar #btnExportTree,
 body:not(.pipMode) .topbar #btnPip,
-body:not(.pipMode) .topbar #btnPhoneMode {
+body:not(.pipMode) .topbar #btnPhoneMode,
+body:not(.pipMode) .topbar #btnMore {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -23,12 +24,17 @@ body:not(.pipMode) .topbar .chip.utilityChip:not(:disabled):hover,
 body:not(.pipMode) .topbar #btnLoad:hover,
 body:not(.pipMode) .topbar #btnExportTree:not(:disabled):hover,
 body:not(.pipMode) .topbar #btnPip:hover,
-body:not(.pipMode) .topbar #btnPhoneMode:hover {
+body:not(.pipMode) .topbar #btnPhoneMode:hover,
+body:not(.pipMode) .topbar #btnMore:hover {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
   color: rgba(30, 41, 59, 0.96) !important;
   text-decoration: none !important;
+}
+
+body:not(.pipMode) .topbar #btnMore {
+  display: inline-flex !important;
 }
 
 body:not(.pipMode) .topbar #btnExportTree.safetyNeed {
