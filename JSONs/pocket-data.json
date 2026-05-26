@@ -1,0 +1,129 @@
+{
+  "schema": "portal.export.v1",
+  "exportedAt": "2026-05-26T00:00:00.000Z",
+  "writtenAt": "2026-05-26T00:00:00.000Z",
+  "mainThoughtTree": [
+    {
+      "id": "starter_copy_root",
+      "parentId": "root",
+      "label": "copy",
+      "source": "starter",
+      "order": 1001,
+      "copyContext": true,
+      "details": "Example branch for reusable text snippets. Add your own templates under here.",
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    },
+    {
+      "id": "starter_copy_greetings",
+      "parentId": "starter_copy_root",
+      "label": "greetings",
+      "source": "starter",
+      "order": 1001,
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    },
+    {
+      "id": "starter_copy_please",
+      "parentId": "starter_copy_greetings",
+      "label": "Please let me know if you need anything else from me.",
+      "source": "starter",
+      "order": 1001,
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    },
+    {
+      "id": "starter_copy_thanks",
+      "parentId": "starter_copy_greetings",
+      "label": "Thanks so much — really appreciate it.",
+      "source": "starter",
+      "order": 1002,
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    },
+    {
+      "id": "starter_copy_followup",
+      "parentId": "starter_copy_root",
+      "label": "follow up",
+      "source": "starter",
+      "order": 1002,
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    },
+    {
+      "id": "starter_copy_checking_in",
+      "parentId": "starter_copy_followup",
+      "label": "Just checking in on this one when you get a chance.",
+      "source": "starter",
+      "order": 1001,
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    },
+    {
+      "id": "starter_copy_received",
+      "parentId": "starter_copy_followup",
+      "label": "Received, thank you — I’ll take a look and come back to you.",
+      "source": "starter",
+      "order": 1002,
+      "updatedAt": "2026-05-26T00:00:00.000Z"
+    }
+  ],
+  "mainThoughtTreeTombstones": [],
+  "data": {
+    "mainThoughtTree": [
+      {
+        "id": "starter_copy_root",
+        "parentId": "root",
+        "label": "copy",
+        "source": "starter",
+        "order": 1001,
+        "copyContext": true,
+        "details": "Example branch for reusable text snippets. Add your own templates under here.",
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      },
+      {
+        "id": "starter_copy_greetings",
+        "parentId": "starter_copy_root",
+        "label": "greetings",
+        "source": "starter",
+        "order": 1001,
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      },
+      {
+        "id": "starter_copy_please",
+        "parentId": "starter_copy_greetings",
+        "label": "Please let me know if you need anything else from me.",
+        "source": "starter",
+        "order": 1001,
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      },
+      {
+        "id": "starter_copy_thanks",
+        "parentId": "starter_copy_greetings",
+        "label": "Thanks so much — really appreciate it.",
+        "source": "starter",
+        "order": 1002,
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      },
+      {
+        "id": "starter_copy_followup",
+        "parentId": "starter_copy_root",
+        "label": "follow up",
+        "source": "starter",
+        "order": 1002,
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      },
+      {
+        "id": "starter_copy_checking_in",
+        "parentId": "starter_copy_followup",
+        "label": "Just checking in on this one when you get a chance.",
+        "source": "starter",
+        "order": 1001,
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      },
+      {
+        "id": "starter_copy_received",
+        "parentId": "starter_copy_followup",
+        "label": "Received, thank you — I’ll take a look and come back to you.",
+        "source": "starter",
+        "order": 1002,
+        "updatedAt": "2026-05-26T00:00:00.000Z"
+      }
+    ],
+    "mainThoughtTreeTombstones": []
+  }
+}
