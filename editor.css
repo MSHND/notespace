@@ -1,0 +1,60 @@
+.detailEditorTopbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--tree-panel-border);
+  padding-bottom: 8px;
+}
+
+.detailEditorTopbar .detailTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--muted);
+}
+
+.detailEditorTopbar .detailBtnRow {
+  flex: 0 0 auto;
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.detailEditorTopbar .chip {
+  height: 28px;
+  min-height: 28px;
+  padding-inline: 10px;
+}
+
+.detailCard {
+  gap: 10px;
+}
+
+.detailPath {
+  margin-top: -2px;
+}
+
+.detailBodyInput {
+  min-height: min(46vh, 340px);
+}
+
+body.phoneMode .detailEditorTopbar {
+  padding-bottom: 10px;
+}
+
+body.phoneMode .detailEditorTopbar .detailTitle {
+  font-size: 14px;
+}
+
+body.phoneMode .detailEditorTopbar .chip {
+  min-height: 32px;
+  height: 32px;
+  padding-inline: 12px;
+}
