@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="phone.css">
   <link rel="stylesheet" href="topbar.css">
+  <link rel="stylesheet" href="editor.css">
 </head>
 <body>
   <div class="app">
@@ -97,7 +98,14 @@
 
     <div id="detailOverlay" class="detailOverlay" hidden>
       <div class="detailCard" role="dialog" aria-modal="true" aria-labelledby="detailEditorTitle">
-        <div id="detailEditorTitle" class="detailTitle">Item details</div>
+        <div class="detailEditorTopbar">
+          <div id="detailEditorTitle" class="detailTitle">Item details</div>
+          <div class="detailBtnRow">
+            <button id="btnDetailPopout" class="chip" type="button">popout editor</button>
+            <button id="btnDetailCancel" class="chip">cancel</button>
+            <button id="btnDetailSave" class="chip">save</button>
+          </div>
+        </div>
         <div id="detailEditorPath" class="detailPath"></div>
         <input id="detailEditorLabel" class="detailLabelInput" type="text" placeholder="Item name">
         <textarea id="detailEditorBody" class="detailBodyInput" placeholder="Extra details (kept inside this item, not shown in tree rows)"></textarea>
@@ -110,11 +118,6 @@
             <input id="detailEditorCopyContext" class="detailCopyContextInput" type="checkbox" aria-label="Copy context for children">
             <span>Copy context for children</span>
           </label>
-        </div>
-        <div class="detailBtnRow">
-          <button id="btnDetailPopout" class="chip" type="button">popout editor</button>
-          <button id="btnDetailCancel" class="chip">Cancel</button>
-          <button id="btnDetailSave" class="chip">Save</button>
         </div>
       </div>
     </div>
