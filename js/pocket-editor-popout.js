@@ -12,9 +12,7 @@
       id,
       title: el.detailEditorLabel instanceof HTMLInputElement ? el.detailEditorLabel.value : cleanText(node?.label, 220),
       body: el.detailEditorBody instanceof HTMLTextAreaElement ? el.detailEditorBody.value : normaliseDetails(node?.details, 4000),
-      path: el.detailEditorPath instanceof HTMLElement ? el.detailEditorPath.textContent : "",
-      urgent: el.detailEditorUrgent instanceof HTMLInputElement ? !!el.detailEditorUrgent.checked : false,
-      copyContext: el.detailEditorCopyContext instanceof HTMLInputElement ? !!el.detailEditorCopyContext.checked : false
+      path: el.detailEditorPath instanceof HTMLElement ? el.detailEditorPath.textContent : ""
     };
   }
 
@@ -26,6 +24,7 @@
     const safeTitle = htmlEscape(payload.title || "item");
     const safePath = htmlEscape(payload.path || "");
     const safeBody = htmlEscape(payload.body || "");
+    const payloadId = JSON.stringify(payload.id || "");
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -41,16 +40,55 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     background: #f9faf8;
     color: rgba(20,25,30,.95);
+    overflow: hidden;
   }
   .wrap {
     min-height: 100vh;
-    padding: 16px;
     display: grid;
-    grid-template-rows: auto auto minmax(0,1fr) auto;
-    gap: 10px;
+    grid-template-rows: auto auto auto minmax(0,1fr);
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 4px 10px;
+    border-bottom: 1px solid rgba(119,127,140,.17);
+    background: rgba(249,250,248,.98);
+  }
+  .brand {
+    font-size: 14px;
+    font-weight: 650;
+    color: rgba(62,71,83,.76);
+    margin-right: 4px;
+    white-space: nowrap;
+  }
+  .grow { flex: 1 1 auto; }
+  button {
+    border: 1px solid rgba(148,163,184,.32);
+    border-radius: 999px;
+    min-height: 28px;
+    padding: 0 12px;
+    background: rgba(255,255,255,.96);
+    color: rgba(20,25,30,.9);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+  }
+  button:hover { background: white; }
+  .hint { color: rgba(62,71,83,.62); font-size: 12px; white-space: nowrap; }
+  .meta {
+    padding: 10px 14px 4px;
   }
   .title { font-size: 13px; font-weight: 650; color: rgba(62,71,83,.78); }
   .path { font-size: 12px; color: rgba(62,71,83,.68); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fields {
+    min-height: 0;
+    padding: 8px 14px 14px;
+    display: grid;
+    grid-template-rows: auto minmax(0,1fr);
+    gap: 10px;
+  }
   input, textarea {
     width: 100%;
     border: 1px solid rgba(119,127,140,.2);
@@ -61,69 +99,57 @@
     box-shadow: 0 8px 20px -18px rgba(17,24,39,.35);
   }
   input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 550; }
-  textarea { min-height: 54vh; resize: vertical; padding: 12px; font: inherit; font-size: 16px; line-height: 1.48; }
-  .meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: rgba(62,71,83,.76); font-size: 13px; }
-  label { display: inline-flex; align-items: center; gap: 6px; }
-  .buttons { display: flex; justify-content: flex-end; gap: 8px; }
-  button {
-    border: 1px solid rgba(148,163,184,.32);
-    border-radius: 999px;
-    min-height: 32px;
-    padding: 0 14px;
-    background: rgba(255,255,255,.96);
-    color: rgba(20,25,30,.9);
-    cursor: pointer;
-    font: inherit;
-    font-size: 13px;
-  }
-  button:hover { background: white; }
-  .hint { margin-right: auto; align-self: center; color: rgba(62,71,83,.62); font-size: 12px; }
+  textarea { min-height: 0; resize: none; padding: 12px; font: inherit; font-size: 16px; line-height: 1.48; }
 </style>
 </head>
 <body>
   <main class="wrap">
-    <div>
-      <div class="title">pocket editor</div>
+    <div class="topbar">
+      <div class="brand">pocket editor</div>
+      <button id="saveBtn" type="button">save</button>
+      <button id="cancelBtn" type="button">cancel</button>
+      <div class="grow"></div>
+      <div class="hint">Ctrl/Cmd+Enter saves</div>
+    </div>
+    <div class="meta">
+      <div class="title">editing</div>
       <div class="path" title="${safePath}">${safePath}</div>
     </div>
-    <input id="titleInput" value="${safeTitle}" aria-label="Item name">
-    <textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea>
-    <div class="meta">
-      <label><input id="urgentInput" type="checkbox" ${payload.urgent ? "checked" : ""}> urgent</label>
-      <label><input id="copyContextInput" type="checkbox" ${payload.copyContext ? "checked" : ""}> copy context</label>
-    </div>
-    <div class="buttons">
-      <span class="hint">Ctrl/Cmd+Enter saves</span>
-      <button id="cancelBtn" type="button">cancel</button>
-      <button id="saveBtn" type="button">save</button>
+    <div class="fields">
+      <input id="titleInput" value="${safeTitle}" aria-label="Item name">
+      <textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea>
     </div>
   </main>
 <script>
   let dirty = false;
   const titleInput = document.getElementById("titleInput");
   const bodyInput = document.getElementById("bodyInput");
-  const urgentInput = document.getElementById("urgentInput");
-  const copyContextInput = document.getElementById("copyContextInput");
-  [titleInput, bodyInput, urgentInput, copyContextInput].forEach((el) => el.addEventListener("input", () => dirty = true));
-  function payload() {
+  [titleInput, bodyInput].forEach((el) => el.addEventListener("input", () => dirty = true));
+  function buildPayload() {
     return {
-      id: ${JSON.stringify(payload.id)},
-      title: titleInput.value,
-      body: bodyInput.value,
-      urgent: urgentInput.checked,
-      copyContext: copyContextInput.checked
+      type: "pocketEditorPopout:save",
+      payload: {
+        id: ${payloadId},
+        title: titleInput.value,
+        body: bodyInput.value
+      }
     };
   }
   function save() {
-    if (!window.opener || !window.opener.PocketEditorPopout) return;
-    const ok = window.opener.PocketEditorPopout.apply(payload());
-    if (ok) { dirty = false; window.close(); }
+    if (!window.opener || window.opener.closed) return;
+    window.opener.postMessage(buildPayload(), window.location.origin);
   }
   document.getElementById("saveBtn").addEventListener("click", save);
   document.getElementById("cancelBtn").addEventListener("click", () => window.close());
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape") window.close();
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); }
+  });
+  window.addEventListener("message", (ev) => {
+    if (ev.origin !== window.location.origin) return;
+    if (!ev.data || ev.data.type !== "pocketEditorPopout:saved") return;
+    dirty = false;
+    window.close();
   });
   window.addEventListener("beforeunload", (ev) => {
     if (!dirty) return;
@@ -144,10 +170,16 @@
     }
     if (el.detailEditorLabel instanceof HTMLInputElement) el.detailEditorLabel.value = cleanText(payload.title, 220);
     if (el.detailEditorBody instanceof HTMLTextAreaElement) el.detailEditorBody.value = String(payload.body || "");
-    if (el.detailEditorUrgent instanceof HTMLInputElement) el.detailEditorUrgent.checked = !!payload.urgent;
-    if (el.detailEditorCopyContext instanceof HTMLInputElement) el.detailEditorCopyContext.checked = !!payload.copyContext;
     saveDetailsEditor();
     return true;
+  }
+
+  function notifyPopoutSaved() {
+    try {
+      if (editorWindow && !editorWindow.closed) {
+        editorWindow.postMessage({ type: "pocketEditorPopout:saved" }, global.location.origin);
+      }
+    } catch {}
   }
 
   function openEditorPopout() {
@@ -156,8 +188,8 @@
       if (!isDetailsEditorOpen()) return false;
     }
     const payload = currentPayload();
-    const width = Math.min(760, Math.max(560, Math.round(global.screen.availWidth * 0.46)));
-    const height = Math.min(760, Math.max(560, Math.round(global.screen.availHeight * 0.72)));
+    const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
+    const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
     const left = Math.round((global.screen.availWidth - width) / 2);
     const top = Math.round((global.screen.availHeight - height) / 2);
     editorWindow = global.open("", "pocketEditorPopout", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
@@ -172,9 +204,17 @@
     return true;
   }
 
+  function handlePopoutMessage(ev) {
+    if (ev.origin !== global.location.origin) return;
+    if (!ev.data || ev.data.type !== "pocketEditorPopout:save") return;
+    const ok = applyPopoutEdit(ev.data.payload);
+    if (ok) notifyPopoutSaved();
+  }
+
   function init() {
     const button = document.getElementById("btnDetailPopout");
     if (button) button.addEventListener("click", openEditorPopout);
+    global.addEventListener("message", handlePopoutMessage);
   }
 
   global.PocketEditorPopout = Object.freeze({ open: openEditorPopout, apply: applyPopoutEdit });
