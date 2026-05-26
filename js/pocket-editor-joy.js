@@ -18,6 +18,16 @@
     }, 80);
   }
 
+  function selectedLineRange(textarea) {
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || start;
+    const value = textarea.value || "";
+    const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+    const lineEndIndex = value.indexOf("\n", end);
+    const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+    return { value, start, end, lineStart, lineEnd };
+  }
+
   function wrapSelection(textarea, before, after = before) {
     const start = textarea.selectionStart || 0;
     const end = textarea.selectionEnd || start;
@@ -33,12 +43,7 @@
   }
 
   function bulletSelection(textarea) {
-    const start = textarea.selectionStart || 0;
-    const end = textarea.selectionEnd || start;
-    const value = textarea.value || "";
-    const lineStart = value.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
-    const lineEndIndex = value.indexOf("\n", end);
-    const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex;
+    const { value, lineStart, lineEnd } = selectedLineRange(textarea);
     const block = value.slice(lineStart, lineEnd);
     const bulleted = block
       .split("\n")
@@ -50,10 +55,52 @@
     textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
+  function indentSelection(textarea, direction) {
+    const { value, start, end, lineStart, lineEnd } = selectedLineRange(textarea);
+    const block = value.slice(lineStart, lineEnd);
+    let selectionStartShift = 0;
+    let selectionEndShift = 0;
+
+    const lines = block.split("\n");
+    const changedLines = lines.map((line, index) => {
+      if (direction > 0) {
+        selectionEndShift += 2;
+        if (index === 0 && start > lineStart) selectionStartShift += 2;
+        return `  ${line}`;
+      }
+      if (line.startsWith("  ")) {
+        selectionEndShift -= 2;
+        if (index === 0 && start > lineStart) selectionStartShift -= Math.min(2, start - lineStart);
+        return line.slice(2);
+      }
+      if (line.startsWith("\t")) {
+        selectionEndShift -= 1;
+        if (index === 0 && start > lineStart) selectionStartShift -= 1;
+        return line.slice(1);
+      }
+      return line;
+    });
+
+    const changed = changedLines.join("\n");
+    textarea.value = `${value.slice(0, lineStart)}${changed}${value.slice(lineEnd)}`;
+    textarea.focus({ preventScroll: true });
+    const nextStart = Math.max(lineStart, start + selectionStartShift);
+    const nextEnd = Math.max(nextStart, end + selectionEndShift);
+    textarea.setSelectionRange(nextStart, nextEnd);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   function handleEditorFormatShortcuts(ev) {
     const textarea = ev.target instanceof HTMLTextAreaElement ? ev.target : null;
     if (!textarea || textarea.id !== "detailEditorBody") return;
     const key = String(ev.key || "").toLowerCase();
+
+    if (key === "tab" && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+      ev.preventDefault();
+      indentSelection(textarea, ev.shiftKey ? -1 : 1);
+      return;
+    }
+
     const primary = ev.ctrlKey || ev.metaKey;
     if (!primary || ev.altKey) return;
 
