@@ -1,7 +1,7 @@
 .detailEditorTopbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-height: 34px;
   border-bottom: 1px solid var(--tree-panel-border);
   padding-bottom: 8px;
@@ -10,10 +10,11 @@
 .detailEditorTopbar .detailTitle {
   flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--muted);
 }
@@ -23,26 +24,35 @@
   display: inline-flex;
   justify-content: flex-end;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   margin-left: auto;
 }
 
 .detailEditorTopbar .chip {
   height: 28px;
   min-height: 28px;
-  padding-inline: 10px;
+  padding-inline: 8px;
+  white-space: nowrap;
 }
 
 .detailCard {
-  gap: 10px;
+  gap: 12px;
 }
 
 .detailPath {
   margin-top: -2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailLabelInput {
+  min-height: 32px;
 }
 
 .detailBodyInput {
-  min-height: min(46vh, 340px);
+  min-height: min(50vh, 380px);
+  line-height: 1.5;
 }
 
 body.phoneMode .detailEditorTopbar {
@@ -56,5 +66,5 @@ body.phoneMode .detailEditorTopbar .detailTitle {
 body.phoneMode .detailEditorTopbar .chip {
   min-height: 32px;
   height: 32px;
-  padding-inline: 12px;
+  padding-inline: 10px;
 }
