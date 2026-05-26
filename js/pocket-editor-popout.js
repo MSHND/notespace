@@ -34,18 +34,18 @@
 <style>
   :root { color-scheme: light; }
   * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
-    min-height: 100vh;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
     background: #f9faf8;
     color: rgba(20,25,30,.95);
     overflow: hidden;
   }
   .wrap {
-    min-height: 100vh;
+    height: 100vh;
     display: grid;
-    grid-template-rows: auto auto auto minmax(0,1fr);
+    grid-template-rows: auto auto minmax(0,1fr);
   }
   .topbar {
     display: flex;
@@ -99,7 +99,7 @@
     box-shadow: 0 8px 20px -18px rgba(17,24,39,.35);
   }
   input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 550; }
-  textarea { min-height: 0; resize: none; padding: 12px; font: inherit; font-size: 16px; line-height: 1.48; }
+  textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.5; }
 </style>
 </head>
 <body>
