@@ -1,5 +1,15 @@
 /* topbar polish: quiet utilities with one shared visual rhythm. */
 
+body:not(.pipMode) .topbar {
+  gap: 12px !important;
+  padding-inline: 10px !important;
+}
+
+body:not(.pipMode) .topbar .title {
+  margin-right: 16px !important;
+  color: rgba(51, 65, 85, 0.76) !important;
+}
+
 body:not(.pipMode) .topbar .chip.utilityChip,
 body:not(.pipMode) .topbar .chip.utilityChip:disabled,
 body:not(.pipMode) .topbar #btnLoad,
@@ -11,13 +21,26 @@ body:not(.pipMode) .topbar #btnMore {
   border-color: transparent !important;
   box-shadow: none !important;
   border-radius: 4px !important;
-  padding-inline: 5px !important;
-  min-width: 0 !important;
+  padding-inline: 2px !important;
+  min-width: max-content !important;
   opacity: 1 !important;
   color: rgba(51, 65, 85, 0.78) !important;
   font-style: normal !important;
   font-weight: 500 !important;
   text-decoration: none !important;
+}
+
+body:not(.pipMode) .topbar #btnExportTree {
+  margin-right: 4px !important;
+}
+
+body:not(.pipMode) .topbar #btnPip {
+  margin-left: 2px !important;
+}
+
+body:not(.pipMode) .topbar #btnMore {
+  display: inline-flex !important;
+  margin-left: 4px !important;
 }
 
 body:not(.pipMode) .topbar .chip.utilityChip:not(:disabled):hover,
@@ -31,10 +54,6 @@ body:not(.pipMode) .topbar #btnMore:hover {
   box-shadow: none !important;
   color: rgba(30, 41, 59, 0.96) !important;
   text-decoration: none !important;
-}
-
-body:not(.pipMode) .topbar #btnMore {
-  display: inline-flex !important;
 }
 
 body:not(.pipMode) .topbar #btnExportTree.safetyNeed {
@@ -51,6 +70,6 @@ body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
   text-decoration: none !important;
 }
 
-body:not(.pipMode) .topbar .title {
-  color: rgba(51, 65, 85, 0.76) !important;
+.pocketBuildLabel {
+  display: none !important;
 }
