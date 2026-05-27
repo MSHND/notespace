@@ -1,4 +1,4 @@
-/* Editor popout: gives the detail editor proper writing room outside the sidebar window. */
+/* Editor popout: minimal writing surface with safer drafts and first-pass outline mode. */
 
 (function initialisePocketEditorPopout(global) {
   "use strict";
@@ -60,11 +60,11 @@
       body: draftPayload.body || "",
       mode: draftPayload.mode || "text",
       outline: Array.isArray(draftPayload.outline) ? draftPayload.outline : null,
-      path: payload.path || "",
       openedAt: payload.openedAt || new Date().toISOString(),
       updatedAt: draftPayload.updatedAt || payload.updatedAt || new Date().toISOString(),
       dirty: !!storedDraft?.dirty
     });
+
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -78,65 +78,93 @@
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-    background: #f9faf8;
-    color: rgba(20,25,30,.95);
+    background: #fbfbf8;
+    color: rgba(15, 23, 42, .94);
     overflow: hidden;
   }
-  .wrap { height: 100vh; display: grid; grid-template-rows: auto auto minmax(0,1fr); }
+  .wrap { height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
   .topbar {
-    display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 10px;
-    border-bottom: 1px solid rgba(119,127,140,.17); background: rgba(249,250,248,.98);
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 38px;
+    padding: 6px 42px 5px 14px;
+    border-bottom: 1px solid rgba(148, 163, 184, .14);
+    background: rgba(251, 251, 248, .98);
   }
-  .brand { font-size: 14px; font-weight: 650; color: rgba(62,71,83,.76); margin-right: 4px; white-space: nowrap; }
+  .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
+  .quietBtn {
+    border: 0;
+    background: transparent;
+    padding: 2px 3px;
+    min-height: 24px;
+    color: rgba(51, 65, 85, .82);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 620;
+  }
+  .quietBtn:hover, .quietBtn:focus-visible { color: rgba(15, 23, 42, .98); outline: none; }
+  .modeSwitch { display: inline-flex; gap: 7px; margin-left: 2px; }
+  .modeBtn { color: rgba(100, 116, 139, .78); }
+  .modeBtn.on { color: rgba(15, 23, 42, .98); font-style: italic; }
+  .closeBtn {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    font-size: 20px;
+    line-height: 21px;
+  }
+  .closeBtn:hover, .closeBtn:focus-visible { background: rgba(148, 163, 184, .13); }
   .grow { flex: 1 1 auto; }
-  button {
-    border: 1px solid rgba(148,163,184,.32); border-radius: 999px; min-height: 28px; padding: 0 12px;
-    background: rgba(255,255,255,.96); color: rgba(20,25,30,.9); cursor: pointer; font: inherit; font-size: 12px;
-  }
-  button:hover { background: white; }
-  button.danger { color: rgba(127,29,29,.88); }
-  button.modeBtn.on { background: rgba(239,246,255,.96); border-color: rgba(147,197,253,.58); color: rgba(30,64,175,.96); }
-  .hint { color: rgba(62,71,83,.62); font-size: 12px; white-space: nowrap; }
-  .dirtyDot { color: rgba(37,99,235,.85); opacity: 0; transition: opacity .12s ease; }
+  .hint { color: rgba(100, 116, 139, .54); font-size: 11px; white-space: nowrap; }
+  .dirtyDot { color: rgba(37, 99, 235, .8); opacity: 0; transition: opacity .12s ease; }
   body.isDirty .dirtyDot { opacity: 1; }
-  .meta { padding: 10px 14px 4px; }
-  .title { font-size: 13px; font-weight: 650; color: rgba(62,71,83,.78); display: flex; gap: 6px; align-items: center; }
-  .path { font-size: 12px; color: rgba(62,71,83,.68); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .fields { min-height: 0; padding: 8px 14px 14px; display: grid; grid-template-rows: auto minmax(0,1fr); gap: 10px; }
-  input, textarea {
-    width: 100%; border: 1px solid rgba(119,127,140,.2); border-radius: 14px; background: rgba(255,255,255,.98);
-    color: rgba(20,25,30,.95); outline: none; box-shadow: 0 8px 20px -18px rgba(17,24,39,.35);
+  .meta { padding: 10px 14px 3px; }
+  .titleLine { font-size: 12px; font-weight: 650; color: rgba(71, 85, 105, .72); display: flex; gap: 6px; align-items: center; }
+  .path { margin-top: 1px; font-size: 11px; color: rgba(100, 116, 139, .58); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fields { min-height: 0; padding: 8px 14px 14px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
+  input, textarea, .outlinePane {
+    width: 100%;
+    border: 1px solid rgba(148, 163, 184, .18);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, .96);
+    color: rgba(15, 23, 42, .94);
+    outline: none;
+    box-shadow: 0 10px 24px -22px rgba(15, 23, 42, .38);
   }
-  input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 550; }
-  textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.5; }
-  .outlinePane {
-    min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; border: 1px solid rgba(119,127,140,.2);
-    border-radius: 14px; background: rgba(255,255,255,.98); box-shadow: 0 8px 20px -18px rgba(17,24,39,.35);
-  }
-  .outlineRow { display: grid; grid-template-columns: 24px minmax(0,1fr); align-items: start; gap: 2px; min-height: 32px; padding: 2px 4px; border-radius: 9px; }
-  .outlineRow:focus-within { background: rgba(239,246,255,.7); }
-  .outlineToggle { min-height: 24px; width: 24px; padding: 0; border: 0; background: transparent; color: rgba(71,85,105,.82); }
-  .outlineToggle.empty { opacity: .28; cursor: default; }
+  input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 560; }
+  textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
+  .outlinePane { min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; }
+  .outlineRow { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 2px; min-height: 30px; padding: 1px 4px; border-radius: 9px; }
+  .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
+  .outlineToggle { width: 20px; min-height: 24px; border: 0; padding: 0; background: transparent; color: rgba(100, 116, 139, .7); cursor: pointer; }
+  .outlineToggle.empty { opacity: .25; cursor: default; }
   .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .outlineText:empty::before { content: "note"; color: rgba(100,116,139,.42); }
-  .isTextMode .outlinePane { display: none; }
-  .isOutlineMode textarea { display: none; }
+  .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
+  body.isTextMode .outlinePane { display: none; }
+  body.isOutlineMode textarea { display: none; }
 </style>
 </head>
 <body class="isTextMode">
   <main class="wrap">
     <div class="topbar">
-      <div class="brand">pocket editor</div>
-      <button id="saveBtn" type="button">save</button>
-      <button id="textModeBtn" class="modeBtn" type="button">text</button>
-      <button id="outlineModeBtn" class="modeBtn" type="button">outline</button>
-      <button id="discardBtn" class="danger" type="button">discard</button>
-      <button id="closeBtn" type="button">close</button>
+      <div class="brand">pocket editor <span class="dirtyDot">*</span></div>
+      <button id="saveBtn" class="quietBtn" type="button">save</button>
+      <div class="modeSwitch" aria-label="Editor mode">
+        <button id="textModeBtn" class="quietBtn modeBtn" type="button">text</button>
+        <button id="outlineModeBtn" class="quietBtn modeBtn" type="button">outline</button>
+      </div>
       <div class="grow"></div>
-      <div class="hint">Enter new line · Tab indent · Ctrl/Cmd+Enter saves</div>
+      <div class="hint">Tab indents · Ctrl/Cmd+Enter saves</div>
+      <button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button>
     </div>
     <div class="meta">
-      <div class="title">editing <span class="dirtyDot">*</span></div>
+      <div class="titleLine">editing</div>
       <div class="path" title="${safePath}">${safePath}</div>
     </div>
     <div class="fields">
@@ -146,147 +174,273 @@
     </div>
   </main>
 <script>
+(function () {
   const DRAFT_KEY = ${draftKey};
+  const PAYLOAD_ID = ${payloadId};
   let draft = ${initialDraft};
   let dirty = !!draft.dirty;
   let allowedToClose = false;
   let mode = draft.mode === "outline" ? "outline" : "text";
   let outline = Array.isArray(draft.outline) ? draft.outline : null;
+
   const titleInput = document.getElementById("titleInput");
   const bodyInput = document.getElementById("bodyInput");
   const outlinePane = document.getElementById("outlinePane");
   const textModeBtn = document.getElementById("textModeBtn");
   const outlineModeBtn = document.getElementById("outlineModeBtn");
 
-  function makeBlock(text = "", depth = 0) {
-    return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7), text, depth: Math.max(0, Math.min(8, depth || 0)), collapsed: false };
+  function makeBlock(text, depth) {
+    return {
+      id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8),
+      text: String(text || ""),
+      depth: Math.max(0, Math.min(8, Number(depth) || 0)),
+      collapsed: false
+    };
   }
+
   function textToOutline(text) {
-    const lines = String(text || "").split("\n");
-    return (lines.length ? lines : [""]).map((line) => {
-      const indent = (line.match(/^\s*/) || [""])[0].replace(/\t/g, "  ").length;
-      return makeBlock(line.trimStart(), Math.floor(indent / 2));
+    const lines = String(text || "").split("\\n");
+    return (lines.length ? lines : [""]).map(function (line) {
+      const leading = (line.match(/^\\s*/) || [""])[0].replace(/\\t/g, "  ").length;
+      return makeBlock(line.trimStart(), Math.floor(leading / 2));
     });
   }
+
   function outlineToText(blocks) {
-    return (blocks || []).map((b) => "  ".repeat(Math.max(0, b.depth || 0)) + String(b.text || "")).join("\n");
+    return (blocks || []).map(function (block) {
+      return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || "");
+    }).join("\\n");
   }
+
   function hasChildren(index) {
-    const depth = outline[index]?.depth || 0;
-    return !!outline[index + 1] && (outline[index + 1].depth || 0) > depth;
+    const here = outline[index];
+    const next = outline[index + 1];
+    return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0);
   }
+
   function isHidden(index) {
+    const depth = Number(outline[index]?.depth) || 0;
     for (let i = index - 1; i >= 0; i -= 1) {
-      if ((outline[i].depth || 0) < (outline[index].depth || 0) && outline[i].collapsed) return true;
+      const parentDepth = Number(outline[i]?.depth) || 0;
+      if (parentDepth < depth && outline[i].collapsed) return true;
     }
     return false;
   }
-  function focusBlock(index, atEnd = true) {
-    requestAnimationFrame(() => {
-      const el = outlinePane.querySelector('[data-index="' + index + '"] .outlineText');
-      if (!el) return;
-      el.focus({ preventScroll: true });
+
+  function setDirty(next) {
+    dirty = !!next;
+    draft.dirty = dirty;
+    document.body.classList.toggle("isDirty", dirty);
+  }
+
+  function currentBody() {
+    return mode === "outline" ? outlineToText(outline) : bodyInput.value;
+  }
+
+  function buildDraft() {
+    return {
+      id: PAYLOAD_ID,
+      title: titleInput.value,
+      body: currentBody(),
+      mode: mode,
+      outline: outline,
+      openedAt: draft.openedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      dirty: dirty
+    };
+  }
+
+  function storeDraft() {
+    try {
+      draft = buildDraft();
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (_error) {}
+  }
+
+  function clearDraft() {
+    try { window.localStorage.removeItem(DRAFT_KEY); } catch (_error) {}
+  }
+
+  function markDirty() {
+    setDirty(true);
+    storeDraft();
+  }
+
+  function updateModeChrome() {
+    document.body.classList.toggle("isTextMode", mode === "text");
+    document.body.classList.toggle("isOutlineMode", mode === "outline");
+    textModeBtn.classList.toggle("on", mode === "text");
+    outlineModeBtn.classList.toggle("on", mode === "outline");
+  }
+
+  function focusBlock(index) {
+    requestAnimationFrame(function () {
+      const row = outlinePane.querySelector('[data-index="' + index + '"] .outlineText');
+      if (!row) return;
+      row.focus({ preventScroll: true });
       const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(!atEnd);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
+      range.selectNodeContents(row);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
     });
   }
-  function markDirty() { setDirty(true); storeDraft(); }
-  function renderOutline(focusIndex = null) {
-    if (!outline || outline.length === 0) outline = [makeBlock("")];
+
+  function renderOutline(focusIndex) {
+    if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)];
     outlinePane.innerHTML = "";
-    outline.forEach((block, index) => {
+    outline.forEach(function (block, index) {
       if (isHidden(index)) return;
       const row = document.createElement("div");
       row.className = "outlineRow";
       row.dataset.index = String(index);
-      row.style.paddingLeft = (4 + Math.max(0, block.depth || 0) * 22) + "px";
+      row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px";
+
       const toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
       toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•";
-      toggle.addEventListener("click", () => { if (!hasChildren(index)) return; block.collapsed = !block.collapsed; markDirty(); renderOutline(index); });
+      toggle.addEventListener("click", function () {
+        if (!hasChildren(index)) return;
+        block.collapsed = !block.collapsed;
+        markDirty();
+        renderOutline(index);
+      });
+
       const text = document.createElement("div");
       text.className = "outlineText";
       text.contentEditable = "true";
       text.spellcheck = true;
       text.textContent = block.text || "";
-      text.addEventListener("input", () => { block.text = text.textContent || ""; markDirty(); });
-      text.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); return; }
-        if (ev.key === "Tab") { ev.preventDefault(); block.depth = Math.max(0, Math.min(8, (block.depth || 0) + (ev.shiftKey ? -1 : 1))); markDirty(); renderOutline(index); return; }
-        if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); outline.splice(index, 1); markDirty(); renderOutline(Math.max(0, index - 1)); return; }
+      text.addEventListener("input", function () {
+        block.text = text.textContent || "";
+        markDirty();
       });
+      text.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && !ev.shiftKey) {
+          ev.preventDefault();
+          outline.splice(index + 1, 0, makeBlock("", block.depth || 0));
+          markDirty();
+          renderOutline(index + 1);
+          return;
+        }
+        if (ev.key === "Tab") {
+          ev.preventDefault();
+          block.depth = Math.max(0, Math.min(8, (Number(block.depth) || 0) + (ev.shiftKey ? -1 : 1)));
+          markDirty();
+          renderOutline(index);
+          return;
+        }
+        if (ev.key === "Backspace" && !text.textContent && outline.length > 1) {
+          ev.preventDefault();
+          outline.splice(index, 1);
+          markDirty();
+          renderOutline(Math.max(0, index - 1));
+        }
+      });
+
       row.appendChild(toggle);
       row.appendChild(text);
       outlinePane.appendChild(row);
     });
-    if (Number.isFinite(focusIndex)) focusBlock(focusIndex, true);
+    if (Number.isFinite(focusIndex)) focusBlock(focusIndex);
   }
+
   function setMode(nextMode) {
-    if (nextMode === mode) return;
-    if (nextMode === "outline") {
-      outline = textToOutline(bodyInput.value);
+    const target = nextMode === "outline" ? "outline" : "text";
+    if (target === "outline") {
+      if (mode !== "outline" || !outline) outline = textToOutline(bodyInput.value);
       mode = "outline";
+      updateModeChrome();
       renderOutline(0);
     } else {
-      if (outline) bodyInput.value = outlineToText(outline);
+      if (mode === "outline" && outline) bodyInput.value = outlineToText(outline);
       mode = "text";
+      updateModeChrome();
+      bodyInput.focus({ preventScroll: true });
     }
-    document.body.classList.toggle("isTextMode", mode === "text");
-    document.body.classList.toggle("isOutlineMode", mode === "outline");
-    textModeBtn.classList.toggle("on", mode === "text");
-    outlineModeBtn.classList.toggle("on", mode === "outline");
     markDirty();
   }
-  function currentBody() { return mode === "outline" ? outlineToText(outline) : bodyInput.value; }
-  function setDirty(next) { dirty = !!next; draft.dirty = dirty; document.body.classList.toggle("isDirty", dirty); }
-  function buildDraft() {
-    return { id: ${payloadId}, title: titleInput.value, body: currentBody(), mode, outline, openedAt: draft.openedAt || new Date().toISOString(), updatedAt: new Date().toISOString(), dirty };
+
+  function buildPayload() {
+    return {
+      type: "pocketEditorPopout:save",
+      payload: {
+        id: PAYLOAD_ID,
+        title: titleInput.value,
+        body: currentBody(),
+        mode: mode,
+        outline: outline,
+        updatedAt: new Date().toISOString()
+      }
+    };
   }
-  function storeDraft() { try { draft = buildDraft(); window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (_error) {} }
-  function clearDraft() { try { window.localStorage.removeItem(DRAFT_KEY); } catch (_error) {} }
-  [titleInput, bodyInput].forEach((el) => el.addEventListener("input", () => { setDirty(true); storeDraft(); }));
-  function buildPayload() { return { type: "pocketEditorPopout:save", payload: { id: ${payloadId}, title: titleInput.value, body: currentBody(), mode, outline, updatedAt: new Date().toISOString() } }; }
+
   function save() {
-    if (!window.opener || window.opener.closed) { alert("Pocket is not connected. This draft is still stored in this browser window."); storeDraft(); return; }
+    if (!window.opener || window.opener.closed) {
+      alert("Pocket is not connected. This draft is still stored here.");
+      storeDraft();
+      return;
+    }
     storeDraft();
     window.opener.postMessage(buildPayload(), window.location.origin);
   }
+
   function closeSafely() {
-    if (!dirty) { allowedToClose = true; window.close(); return; }
-    const shouldSave = confirm("Save changes before closing?");
-    if (shouldSave) { save(); return; }
-    const shouldDiscard = confirm("Discard this popout draft?");
-    if (shouldDiscard) { clearDraft(); allowedToClose = true; window.close(); }
+    if (!dirty) {
+      allowedToClose = true;
+      window.close();
+      return;
+    }
+    if (confirm("Save changes before closing?")) {
+      save();
+      return;
+    }
+    if (confirm("Close without saving?")) {
+      clearDraft();
+      allowedToClose = true;
+      window.close();
+    }
   }
+
+  titleInput.addEventListener("input", markDirty);
+  bodyInput.addEventListener("input", markDirty);
   document.getElementById("saveBtn").addEventListener("click", save);
-  document.getElementById("discardBtn").addEventListener("click", () => { if (!dirty || confirm("Discard this popout draft?")) { clearDraft(); allowedToClose = true; window.close(); } });
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
-  textModeBtn.addEventListener("click", () => setMode("text"));
-  outlineModeBtn.addEventListener("click", () => setMode("outline"));
-  document.addEventListener("keydown", (ev) => {
+  textModeBtn.addEventListener("click", function () { setMode("text"); });
+  outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
+
+  document.addEventListener("keydown", function (ev) {
     if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); }
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); }
   });
-  window.addEventListener("message", (ev) => {
+
+  window.addEventListener("message", function (ev) {
     if (ev.origin !== window.location.origin) return;
     if (!ev.data || ev.data.type !== "pocketEditorPopout:saved") return;
-    setDirty(false); clearDraft(); allowedToClose = true; window.close();
+    setDirty(false);
+    clearDraft();
+    allowedToClose = true;
+    window.close();
   });
-  window.addEventListener("beforeunload", (ev) => {
+
+  window.addEventListener("beforeunload", function (ev) {
     if (!dirty || allowedToClose) return;
-    storeDraft(); ev.preventDefault(); ev.returnValue = "Unsaved editor changes.";
+    storeDraft();
+    ev.preventDefault();
+    ev.returnValue = "Unsaved editor changes.";
   });
-  if (mode === "outline") { document.body.classList.remove("isTextMode"); document.body.classList.add("isOutlineMode"); if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
-  textModeBtn.classList.toggle("on", mode === "text");
-  outlineModeBtn.classList.toggle("on", mode === "outline");
+
+  updateModeChrome();
+  if (mode === "outline") {
+    if (!outline) outline = textToOutline(bodyInput.value);
+    renderOutline(0);
+  }
   setDirty(dirty);
   titleInput.focus();
   titleInput.select();
+})();
 </script>
 </body>
 </html>`;
