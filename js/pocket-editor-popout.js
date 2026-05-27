@@ -4,6 +4,11 @@
   "use strict";
 
   let editorWindow = null;
+  const DRAFT_KEY_PREFIX = "pocket.editorPopoutDraft.v1.";
+
+  function draftKeyFor(nodeId) {
+    return `${DRAFT_KEY_PREFIX}${cleanText(nodeId, 80) || "unknown"}`;
+  }
 
   function currentPayload() {
     const id = cleanText(global.state?.detailsEdit?.id, 80);
@@ -12,8 +17,29 @@
       id,
       title: el.detailEditorLabel instanceof HTMLInputElement ? el.detailEditorLabel.value : cleanText(node?.label, 220),
       body: el.detailEditorBody instanceof HTMLTextAreaElement ? el.detailEditorBody.value : normaliseDetails(node?.details, 4000),
-      path: el.detailEditorPath instanceof HTMLElement ? el.detailEditorPath.textContent : ""
+      path: el.detailEditorPath instanceof HTMLElement ? el.detailEditorPath.textContent : "",
+      openedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
+  }
+
+  function readStoredDraft(nodeId) {
+    try {
+      const raw = global.localStorage.getItem(draftKeyFor(nodeId));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      if (cleanText(parsed.id, 80) !== cleanText(nodeId, 80)) return null;
+      return parsed;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function clearStoredDraft(nodeId) {
+    try {
+      global.localStorage.removeItem(draftKeyFor(nodeId));
+    } catch (_error) {}
   }
 
   function htmlEscape(value) {
@@ -21,10 +47,22 @@
   }
 
   function popoutHtml(payload) {
-    const safeTitle = htmlEscape(payload.title || "item");
+    const storedDraft = readStoredDraft(payload.id);
+    const draftPayload = storedDraft && storedDraft.dirty ? { ...payload, ...storedDraft } : payload;
+    const safeTitle = htmlEscape(draftPayload.title || "item");
     const safePath = htmlEscape(payload.path || "");
-    const safeBody = htmlEscape(payload.body || "");
+    const safeBody = htmlEscape(draftPayload.body || "");
     const payloadId = JSON.stringify(payload.id || "");
+    const draftKey = JSON.stringify(draftKeyFor(payload.id));
+    const initialDraft = JSON.stringify({
+      id: payload.id || "",
+      title: draftPayload.title || "",
+      body: draftPayload.body || "",
+      path: payload.path || "",
+      openedAt: payload.openedAt || new Date().toISOString(),
+      updatedAt: draftPayload.updatedAt || payload.updatedAt || new Date().toISOString(),
+      dirty: !!storedDraft?.dirty
+    });
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -76,11 +114,12 @@
     font-size: 12px;
   }
   button:hover { background: white; }
+  button.danger { color: rgba(127,29,29,.88); }
   .hint { color: rgba(62,71,83,.62); font-size: 12px; white-space: nowrap; }
-  .meta {
-    padding: 10px 14px 4px;
-  }
-  .title { font-size: 13px; font-weight: 650; color: rgba(62,71,83,.78); }
+  .dirtyDot { color: rgba(37,99,235,.85); opacity: 0; transition: opacity .12s ease; }
+  body.isDirty .dirtyDot { opacity: 1; }
+  .meta { padding: 10px 14px 4px; }
+  .title { font-size: 13px; font-weight: 650; color: rgba(62,71,83,.78); display: flex; gap: 6px; align-items: center; }
   .path { font-size: 12px; color: rgba(62,71,83,.68); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fields {
     min-height: 0;
@@ -107,12 +146,13 @@
     <div class="topbar">
       <div class="brand">pocket editor</div>
       <button id="saveBtn" type="button">save</button>
-      <button id="cancelBtn" type="button">cancel</button>
+      <button id="discardBtn" class="danger" type="button">discard</button>
+      <button id="closeBtn" type="button">close</button>
       <div class="grow"></div>
       <div class="hint">Ctrl/Cmd+Enter saves</div>
     </div>
     <div class="meta">
-      <div class="title">editing</div>
+      <div class="title">editing <span class="dirtyDot">*</span></div>
       <div class="path" title="${safePath}">${safePath}</div>
     </div>
     <div class="fields">
@@ -121,41 +161,118 @@
     </div>
   </main>
 <script>
-  let dirty = false;
+  const DRAFT_KEY = ${draftKey};
+  let draft = ${initialDraft};
+  let dirty = !!draft.dirty;
+  let saveInFlight = false;
+  let allowedToClose = false;
   const titleInput = document.getElementById("titleInput");
   const bodyInput = document.getElementById("bodyInput");
-  [titleInput, bodyInput].forEach((el) => el.addEventListener("input", () => dirty = true));
+
+  function setDirty(next) {
+    dirty = !!next;
+    draft.dirty = dirty;
+    document.body.classList.toggle("isDirty", dirty);
+  }
+
+  function buildDraft() {
+    return {
+      id: ${payloadId},
+      title: titleInput.value,
+      body: bodyInput.value,
+      openedAt: draft.openedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      dirty
+    };
+  }
+
+  function storeDraft() {
+    try {
+      draft = buildDraft();
+      window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch (_error) {}
+  }
+
+  function clearDraft() {
+    try { window.localStorage.removeItem(DRAFT_KEY); } catch (_error) {}
+  }
+
+  [titleInput, bodyInput].forEach((el) => el.addEventListener("input", () => {
+    setDirty(true);
+    storeDraft();
+  }));
+
   function buildPayload() {
     return {
       type: "pocketEditorPopout:save",
       payload: {
         id: ${payloadId},
         title: titleInput.value,
-        body: bodyInput.value
+        body: bodyInput.value,
+        updatedAt: new Date().toISOString()
       }
     };
   }
+
   function save() {
-    if (!window.opener || window.opener.closed) return;
+    if (!window.opener || window.opener.closed) {
+      alert("Pocket is not connected. This draft is still stored in this browser window.");
+      storeDraft();
+      return;
+    }
+    saveInFlight = true;
+    storeDraft();
     window.opener.postMessage(buildPayload(), window.location.origin);
   }
+
+  function closeSafely() {
+    if (!dirty) {
+      allowedToClose = true;
+      window.close();
+      return;
+    }
+    const shouldSave = confirm("Save changes before closing?");
+    if (shouldSave) {
+      save();
+      return;
+    }
+    const shouldDiscard = confirm("Discard this popout draft?");
+    if (shouldDiscard) {
+      clearDraft();
+      allowedToClose = true;
+      window.close();
+    }
+  }
+
   document.getElementById("saveBtn").addEventListener("click", save);
-  document.getElementById("cancelBtn").addEventListener("click", () => window.close());
+  document.getElementById("discardBtn").addEventListener("click", () => {
+    if (!dirty || confirm("Discard this popout draft?")) {
+      clearDraft();
+      allowedToClose = true;
+      window.close();
+    }
+  });
+  document.getElementById("closeBtn").addEventListener("click", closeSafely);
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") window.close();
+    if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); }
     if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); }
   });
   window.addEventListener("message", (ev) => {
     if (ev.origin !== window.location.origin) return;
     if (!ev.data || ev.data.type !== "pocketEditorPopout:saved") return;
-    dirty = false;
+    saveInFlight = false;
+    setDirty(false);
+    clearDraft();
+    allowedToClose = true;
     window.close();
   });
   window.addEventListener("beforeunload", (ev) => {
-    if (!dirty) return;
+    if (!dirty || allowedToClose) return;
+    storeDraft();
     ev.preventDefault();
     ev.returnValue = "Unsaved editor changes.";
   });
+  setDirty(dirty);
   titleInput.focus();
   titleInput.select();
 </script>
@@ -170,6 +287,7 @@
     }
     if (el.detailEditorLabel instanceof HTMLInputElement) el.detailEditorLabel.value = cleanText(payload.title, 220);
     if (el.detailEditorBody instanceof HTMLTextAreaElement) el.detailEditorBody.value = String(payload.body || "");
+    clearStoredDraft(payload.id);
     saveDetailsEditor();
     return true;
   }
@@ -188,6 +306,10 @@
       if (!isDetailsEditorOpen()) return false;
     }
     const payload = currentPayload();
+    const storedDraft = readStoredDraft(payload.id);
+    if (storedDraft?.dirty) {
+      setStatus("Recovered popout draft for this item.", "ok", { durationMs: 4200 });
+    }
     const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
     const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
     const left = Math.round((global.screen.availWidth - width) / 2);
