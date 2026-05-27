@@ -101,105 +101,6 @@ function renderTree() {
     return 38 + ((d - 3) * 7);
   }
 
-  function buildUrgentCollectorNode() {
-    if (focusRoot) return null;
-    const entries = buildUrgentCollectorEntries().filter((entry) => {
-      if (tokens.length === 0) return true;
-      const haystack = cleanText(entry.path, 500).toLowerCase();
-      return tokens.every((token) => haystack.includes(token));
-    });
-    if (entries.length === 0) return null;
-
-    const li = document.createElement("li");
-    li.className = "treeNode";
-
-    const rootRow = document.createElement("div");
-    rootRow.className = "row";
-    rootRow.style.paddingLeft = `${depthIndentPx(0)}px`;
-    rootRow.tabIndex = 0;
-
-    const toggleUrgentCollector = () => {
-      state.urgentCollectorExpanded = !state.urgentCollectorExpanded;
-      refreshMeta();
-      renderTree();
-      refocusTreeNavigation(state.selectedId);
-    softlyEnsureSelectionVisible();
-    };
-
-    const twisty = document.createElement("button");
-    twisty.className = "twisty";
-    twisty.textContent = state.urgentCollectorExpanded ? "▾" : "▸";
-    twisty.title = state.urgentCollectorExpanded ? "Collapse urgent list" : "Expand urgent list";
-    twisty.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      toggleUrgentCollector();
-    });
-    rootRow.appendChild(twisty);
-
-    const label = document.createElement("div");
-    label.className = "label";
-    label.textContent = "Urgent";
-    label.title = "Virtual view: items marked urgent";
-    rootRow.appendChild(label);
-
-    const countBadge = document.createElement("span");
-    countBadge.className = "detailBadge";
-    countBadge.textContent = String(entries.length);
-    countBadge.title = "Virtual view: items marked urgent";
-    rootRow.appendChild(countBadge);
-
-    rootRow.addEventListener("click", () => toggleUrgentCollector());
-    li.appendChild(rootRow);
-
-    if (!state.urgentCollectorExpanded) return li;
-
-    const ul = document.createElement("ul");
-    ul.className = "children";
-    for (const entry of entries) {
-      const childLi = document.createElement("li");
-      childLi.className = "treeNode";
-
-      const row = document.createElement("div");
-      row.className = `row${state.selectedId === entry.id ? " selected" : ""}`;
-      row.style.paddingLeft = `${depthIndentPx(1)}px`;
-      row.tabIndex = 0;
-
-      const bullet = document.createElement("span");
-      bullet.className = "twisty empty";
-      bullet.textContent = "•";
-      row.appendChild(bullet);
-
-      const entryLabel = document.createElement("div");
-      entryLabel.className = "label urgent";
-      entryLabel.textContent = `/${entry.path}`;
-      entryLabel.setAttribute("data-full-label", `/${cleanText(entry.path, 500)}`);
-      row.appendChild(entryLabel);
-
-      row.addEventListener("click", () => {
-
-      requestAnimationFrame(() => {
-        if (el.treeWrap instanceof HTMLElement) {
-          el.treeWrap.focus({ preventScroll: true });
-        }
-      });
-
-        state.focusRootId = "";
-        state.selectedId = entry.id;
-        expandPathToNode(entry.id);
-        refreshMeta();
-        renderTree();
-        focusRowByNodeId(entry.id, { block: "nearest" });
-      });
-
-      childLi.appendChild(row);
-      ul.appendChild(childLi);
-    }
-
-    if (ul.childNodes.length > 0) li.appendChild(ul);
-    return li;
-  }
-
   function build(node, depth) {
     if (!matches(node) && !hasVisibleDesc(node.id)) return null;
     const li = document.createElement("li");
@@ -366,8 +267,6 @@ function renderTree() {
     const node = build(root, 0);
     if (node) rendered.push(node);
   }
-  const urgentCollectorNode = buildUrgentCollectorNode();
-  if (urgentCollectorNode) rendered.unshift(urgentCollectorNode);
 
   el.treeRoot.innerHTML = "";
   for (const n of rendered) el.treeRoot.appendChild(n);
