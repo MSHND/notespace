@@ -9,7 +9,7 @@
 
 .detailEditorTopbar .detailTitle {
   min-width: 0;
-  max-width: 100%;
+  max-width: calc(100% - 28px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -34,7 +34,34 @@
 }
 
 .detailCard {
+  position: relative;
   gap: 12px;
+}
+
+.detailCloseBtn {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: rgba(71, 85, 105, 0.72);
+  font-size: 19px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.detailCloseBtn:hover,
+.detailCloseBtn:focus-visible {
+  background: rgba(148, 163, 184, 0.14);
+  color: rgba(15, 23, 42, 0.92);
+  outline: none;
 }
 
 .detailPath {
@@ -66,4 +93,13 @@ body.phoneMode .detailEditorTopbar .chip {
   min-height: 32px;
   height: 32px;
   padding-inline: 10px;
+}
+
+body.phoneMode .detailCloseBtn {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  font-size: 22px;
+  line-height: 28px;
 }
