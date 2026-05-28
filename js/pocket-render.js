@@ -71,6 +71,7 @@ function buildEmptyState(queryText = "", focusRoot = null) {
 function renderTree() {
   const query = cleanText(el.search.value, 120).toLowerCase();
   const tokens = query.split(/\s+/).filter(Boolean);
+  const filtering = tokens.length > 0;
   const byId = nodeMap();
   const byParent = childrenMap();
   if (state.focusRootId && !byId.has(state.focusRootId)) {
@@ -81,10 +82,7 @@ function renderTree() {
   function nodeOutlineText(node) {
     const outline = Array.isArray(node?.editor?.outline) ? node.editor.outline : [];
     if (!outline.length) return "";
-    return outline
-      .map((block) => String(block?.text || ""))
-      .filter(Boolean)
-      .join("\n");
+    return outline.map((block) => String(block?.text || "")).filter(Boolean).join("\n");
   }
 
   function nodeSearchText(node) {
@@ -101,7 +99,7 @@ function renderTree() {
   }
 
   function matches(node) {
-    if (tokens.length === 0) return true;
+    if (!filtering) return true;
     const haystack = nodeSearchText(node);
     return tokens.every((t) => haystack.includes(t));
   }
@@ -140,7 +138,7 @@ function renderTree() {
     const hasKids = children.length > 0;
     const copyActionReady = shouldCopyOnSingleClick(node, hasKids);
     if (copyActionReady) row.classList.add("copyReady");
-    const isCollapsed = state.collapsed.has(node.id);
+    const isCollapsed = !filtering && state.collapsed.has(node.id);
 
     const twisty = document.createElement("button");
     twisty.className = `twisty${hasKids ? "" : " empty"}`;
@@ -167,9 +165,7 @@ function renderTree() {
         finished = true;
         commitInlineEdit(node.id, value, options);
       };
-      const finishCommit = () => {
-        finishCommitWith(input.value);
-      };
+      const finishCommit = () => finishCommitWith(input.value);
       const finishCancel = () => {
         if (finished) return;
         finished = true;
@@ -233,18 +229,13 @@ function renderTree() {
 
     row.addEventListener("click", () => {
       const copyOnClick = shouldCopyOnSingleClick(node, hasKids);
-
       state.selectedId = node.id;
       row.focus({ preventScroll: true });
       refreshMeta();
       renderTree();
       focusRowByNodeId(node.id);
-
-      if (copyOnClick) {
-        scheduleCopyClick(node.id, node.label);
-      } else {
-        cancelPendingCopyClick();
-      }
+      if (copyOnClick) scheduleCopyClick(node.id, node.label);
+      else cancelPendingCopyClick();
     });
     row.addEventListener("dblclick", (ev) => {
       ev.preventDefault();
