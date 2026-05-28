@@ -78,10 +78,32 @@ function renderTree() {
   }
   const focusRoot = state.focusRootId ? byId.get(state.focusRootId) : null;
 
+  function nodeOutlineText(node) {
+    const outline = Array.isArray(node?.editor?.outline) ? node.editor.outline : [];
+    if (!outline.length) return "";
+    return outline
+      .map((block) => String(block?.text || ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  function nodeSearchText(node) {
+    return [
+      getPath(node.id),
+      node.label,
+      node.details,
+      nodeOutlineText(node),
+      node?.task?.notes,
+      node?.profile?.keywords?.join?.(" "),
+      node?.profile?.entities?.join?.(" "),
+      node?.profile?.people?.join?.(" ")
+    ].filter(Boolean).join("\n").toLowerCase();
+  }
+
   function matches(node) {
     if (tokens.length === 0) return true;
-    const path = getPath(node.id).toLowerCase();
-    return tokens.every((t) => path.includes(t));
+    const haystack = nodeSearchText(node);
+    return tokens.every((t) => haystack.includes(t));
   }
 
   function hasVisibleDesc(nodeId) {
