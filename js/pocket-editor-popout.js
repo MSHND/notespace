@@ -25,10 +25,11 @@
   function normalisePopoutEditorMeta(value = {}) {
     if (!value || typeof value !== "object") return null;
     const mode = cleanText(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
+    if (mode !== "outline") return null;
     const outline = Array.isArray(value.outline) ? value.outline.slice(0, 400).map(normalisePopoutOutlineBlock) : [];
-    const out = { schema: OUTLINE_EDITOR_SCHEMA, mode };
-    if (mode === "outline" || outline.length > 0) out.outline = outline;
-    return out.mode === "outline" || outline.length > 0 ? out : null;
+    const hasMeaningfulStructure = outline.some((block) => (Number(block.depth) || 0) > 0 || block.collapsed === true);
+    if (!hasMeaningfulStructure) return null;
+    return { schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline };
   }
 
   function currentPayload() {
@@ -192,9 +193,9 @@
         if (editorMeta) node.editor = editorMeta;
         else delete node.editor;
         node.updatedAt = nowIso();
-        recordOp({ type: "details_edit", id: node.id, path: getPath(node.id), changed: "outline" });
+        recordOp({ type: "details_edit", id: node.id, path: getPath(node.id), changed: editorMeta ? "outline" : "outline_pruned" });
         refreshMeta(); renderTree(); persistPipSnapshot();
-        setStatus(`Saved outline for "${cleanText(node.label, 80)}".`, "ok");
+        setStatus(editorMeta ? `Saved outline for "${cleanText(node.label, 80)}".` : `Saved details for "${cleanText(node.label, 80)}".`, "ok");
       }
     }
     clearStoredDraft(payload.id);
