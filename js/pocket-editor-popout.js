@@ -126,8 +126,12 @@
   .outlinePane { min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; }
   .outlineRow { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 2px; min-height: 30px; padding: 1px 4px; border-radius: 9px; }
   .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
-  .outlineToggle { width: 20px; min-height: 24px; border: 0; padding: 0; background: transparent; color: rgba(100, 116, 139, .7); cursor: pointer; }
-  .outlineToggle.empty { opacity: .25; cursor: default; }
+  .outlineRow.dragSource { opacity: .42; }
+  .outlineRow.dropBefore { box-shadow: inset 0 2px 0 rgba(37, 99, 235, .38); }
+  .outlineRow.dropAfter { box-shadow: inset 0 -2px 0 rgba(37, 99, 235, .38); }
+  .outlineToggle { width: 20px; min-height: 24px; border: 0; padding: 0; background: transparent; color: rgba(100, 116, 139, .7); cursor: grab; }
+  .outlineToggle:active { cursor: grabbing; }
+  .outlineToggle.empty { opacity: .25; }
   .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
   .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
   body.isTextMode .outlinePane { display: none; }
@@ -136,7 +140,7 @@
 </head>
 <body class="isTextMode">
   <main class="wrap">
-    <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn" class="quietBtn" type="button">save</button><span id="saveState" class="saveState" aria-live="polite"></span><div class="modeSwitch" aria-label="Editor mode"><button id="textModeBtn" class="quietBtn modeBtn" type="button">text</button><button id="outlineModeBtn" class="quietBtn modeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · Ctrl/Cmd+Enter saves</div><button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button></div>
+    <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn" class="quietBtn" type="button">save</button><span id="saveState" class="saveState" aria-live="polite"></span><div class="modeSwitch" aria-label="Editor mode"><button id="textModeBtn" class="quietBtn modeBtn" type="button">text</button><button id="outlineModeBtn" class="quietBtn modeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · drag dot reorders</div><button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
@@ -149,6 +153,7 @@
   let allowedToClose = false;
   let mode = draft.mode === "outline" ? "outline" : "text";
   let outline = Array.isArray(draft.outline) ? draft.outline : null;
+  let draggingIndex = null;
   const titleInput = document.getElementById("titleInput");
   const bodyInput = document.getElementById("bodyInput");
   const outlinePane = document.getElementById("outlinePane");
@@ -170,7 +175,46 @@
   function markDirty() { setDirty(true); setSaveState("", ""); storeDraft(); }
   function updateModeChrome() { document.body.classList.toggle("isTextMode", mode === "text"); document.body.classList.toggle("isOutlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function focusBlock(index) { requestAnimationFrame(function () { const row = outlinePane.querySelector('[data-index="' + index + '"] .outlineText'); if (!row) return; row.focus({ preventScroll: true }); const range = document.createRange(); range.selectNodeContents(row); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); }); }
-  function renderOutline(focusIndex) { if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)]; outlinePane.innerHTML = ""; outline.forEach(function (block, index) { if (isHidden(index)) return; const row = document.createElement("div"); row.className = "outlineRow"; row.dataset.index = String(index); row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px"; const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty"); toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•"; toggle.addEventListener("click", function () { if (!hasChildren(index)) return; block.collapsed = !block.collapsed; markDirty(); renderOutline(index); }); const text = document.createElement("div"); text.className = "outlineText"; text.contentEditable = "true"; text.spellcheck = true; text.textContent = block.text || ""; text.addEventListener("input", function () { block.text = text.textContent || ""; markDirty(); }); text.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); return; } if (ev.key === "Tab") { ev.preventDefault(); const delta = ev.shiftKey ? -1 : 1; const baseDepth = Number(block.depth) || 0; if (delta < 0 && baseDepth <= 0) return; const end = subtreeEnd(index); for (let i = index; i < end; i += 1) { outline[i].depth = Math.max(0, Math.min(8, (Number(outline[i].depth) || 0) + delta)); } markDirty(); renderOutline(index); return; } if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); outline.splice(index, 1); markDirty(); renderOutline(Math.max(0, index - 1)); } }); row.appendChild(toggle); row.appendChild(text); outlinePane.appendChild(row); }); if (Number.isFinite(focusIndex)) focusBlock(focusIndex); }
+  function clearDropMarkers() { outlinePane.querySelectorAll(".dropBefore,.dropAfter,.dragSource").forEach(function (row) { row.classList.remove("dropBefore", "dropAfter", "dragSource"); }); }
+  function getDropPosition(ev, row, index) { const box = row.getBoundingClientRect(); const after = ev.clientY > box.top + (box.height / 2); return { index: index + (after ? 1 : 0), after: after }; }
+  function moveBranch(fromIndex, toIndex) { if (!Array.isArray(outline)) return false; if (!Number.isFinite(fromIndex) || !Number.isFinite(toIndex)) return false; const end = subtreeEnd(fromIndex); if (toIndex >= fromIndex && toIndex <= end) return false; const branch = outline.slice(fromIndex, end); outline.splice(fromIndex, branch.length); let adjusted = toIndex > fromIndex ? toIndex - branch.length : toIndex; adjusted = Math.max(0, Math.min(outline.length, adjusted)); outline.splice(adjusted, 0, ...branch); markDirty(); renderOutline(adjusted); return true; }
+  function renderOutline(focusIndex) {
+    if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)];
+    outlinePane.innerHTML = "";
+    outline.forEach(function (block, index) {
+      if (isHidden(index)) return;
+      const row = document.createElement("div");
+      row.className = "outlineRow";
+      row.dataset.index = String(index);
+      row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.draggable = true;
+      toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
+      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•";
+      toggle.title = "Drag to reorder this branch";
+      toggle.addEventListener("click", function () { if (!hasChildren(index)) return; block.collapsed = !block.collapsed; markDirty(); renderOutline(index); });
+      toggle.addEventListener("dragstart", function (ev) { draggingIndex = index; row.classList.add("dragSource"); ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", String(index)); });
+      row.addEventListener("dragover", function (ev) { if (draggingIndex == null) return; ev.preventDefault(); clearDropMarkers(); const drop = getDropPosition(ev, row, index); row.classList.add(drop.after ? "dropAfter" : "dropBefore"); });
+      row.addEventListener("drop", function (ev) { if (draggingIndex == null) return; ev.preventDefault(); const drop = getDropPosition(ev, row, index); const from = draggingIndex; draggingIndex = null; clearDropMarkers(); moveBranch(from, drop.index); });
+      row.addEventListener("dragend", function () { draggingIndex = null; clearDropMarkers(); });
+      const text = document.createElement("div");
+      text.className = "outlineText";
+      text.contentEditable = "true";
+      text.spellcheck = true;
+      text.textContent = block.text || "";
+      text.addEventListener("input", function () { block.text = text.textContent || ""; markDirty(); });
+      text.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); return; }
+        if (ev.key === "Tab") { ev.preventDefault(); const delta = ev.shiftKey ? -1 : 1; const baseDepth = Number(block.depth) || 0; if (delta < 0 && baseDepth <= 0) return; const end = subtreeEnd(index); for (let i = index; i < end; i += 1) { outline[i].depth = Math.max(0, Math.min(8, (Number(outline[i].depth) || 0) + delta)); } markDirty(); renderOutline(index); return; }
+        if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); outline.splice(index, 1); markDirty(); renderOutline(Math.max(0, index - 1)); }
+      });
+      row.appendChild(toggle);
+      row.appendChild(text);
+      outlinePane.appendChild(row);
+    });
+    if (Number.isFinite(focusIndex)) focusBlock(focusIndex);
+  }
   function setMode(nextMode) { const target = nextMode === "outline" ? "outline" : "text"; if (target === "outline") { if (mode !== "outline" || !outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (mode === "outline" && outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } markDirty(); }
   function buildPayload() { return { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
   function closeAfterSaved() { allowedToClose = true; setDirty(false); clearDraft(); setSaveState("saved", "saved"); window.setTimeout(function () { allowedToClose = true; window.close(); }, 60); }
