@@ -50,13 +50,22 @@ body:not(.pipMode) .topbar #btnMore {
   cursor: pointer !important;
 }
 
+body:not(.pipMode) .topbar #btnExportTree,
+body:not(.pipMode) .topbar #btnExportTree:disabled,
+body:not(.pipMode) .topbar #btnExportTree.safetySafe,
+body:not(.pipMode) .topbar #btnExportTree.safetyNeed,
+body:not(.pipMode) .topbar #btnExportTree.safetyCheck,
+body:not(.pipMode) .topbar #btnExportTree.on {
+  color: rgba(15, 23, 42, 0.98) !important;
+  -webkit-text-fill-color: rgba(15, 23, 42, 0.98) !important;
+  font-weight: 700 !important;
+  opacity: 1 !important;
+}
+
 body:not(.pipMode) .topbar #btnExportTree:disabled {
   cursor: default !important;
   pointer-events: none !important;
   filter: none !important;
-  opacity: 1 !important;
-  color: rgba(30, 41, 59, 0.92) !important;
-  -webkit-text-fill-color: rgba(30, 41, 59, 0.92) !important;
 }
 
 body:not(.pipMode) .topbar #btnMore {
