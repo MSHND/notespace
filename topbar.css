@@ -32,6 +32,8 @@ body:not(.pipMode) .topbar #btnMore {
   width: auto !important;
   max-width: none !important;
   overflow: visible !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -40,6 +42,7 @@ body:not(.pipMode) .topbar #btnMore {
   min-width: max-content !important;
   opacity: 1 !important;
   color: rgba(30, 41, 59, 0.92) !important;
+  -webkit-text-fill-color: rgba(30, 41, 59, 0.92) !important;
   font-style: normal !important;
   font-weight: 650 !important;
   letter-spacing: 0.01em !important;
@@ -50,6 +53,10 @@ body:not(.pipMode) .topbar #btnMore {
 body:not(.pipMode) .topbar #btnExportTree:disabled {
   cursor: default !important;
   pointer-events: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+  color: rgba(30, 41, 59, 0.92) !important;
+  -webkit-text-fill-color: rgba(30, 41, 59, 0.92) !important;
 }
 
 body:not(.pipMode) .topbar #btnMore {
@@ -66,6 +73,7 @@ body:not(.pipMode) .topbar #btnMore:hover {
   border-color: transparent !important;
   box-shadow: none !important;
   color: rgba(15, 23, 42, 0.98) !important;
+  -webkit-text-fill-color: rgba(15, 23, 42, 0.98) !important;
   text-decoration: none !important;
 }
 
@@ -79,6 +87,7 @@ body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
   border-color: transparent !important;
   box-shadow: none !important;
   color: rgba(15, 23, 42, 0.98) !important;
+  -webkit-text-fill-color: rgba(15, 23, 42, 0.98) !important;
   font-style: italic !important;
   text-decoration: none !important;
 }
