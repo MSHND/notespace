@@ -24,6 +24,7 @@ body:not(.pipMode) .topbar .chip.utilityChip,
 body:not(.pipMode) .topbar .chip.utilityChip:disabled,
 body:not(.pipMode) .topbar #btnLoad,
 body:not(.pipMode) .topbar #btnExportTree,
+body:not(.pipMode) .topbar #btnExportTree:disabled,
 body:not(.pipMode) .topbar #btnPip,
 body:not(.pipMode) .topbar #btnPhoneMode,
 body:not(.pipMode) .topbar #btnMore {
@@ -43,6 +44,12 @@ body:not(.pipMode) .topbar #btnMore {
   font-weight: 650 !important;
   letter-spacing: 0.01em !important;
   text-decoration: none !important;
+  cursor: pointer !important;
+}
+
+body:not(.pipMode) .topbar #btnExportTree:disabled {
+  cursor: default !important;
+  pointer-events: none !important;
 }
 
 body:not(.pipMode) .topbar #btnMore {
