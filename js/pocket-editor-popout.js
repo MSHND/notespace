@@ -11,6 +11,10 @@
     return `${DRAFT_KEY_PREFIX}${cleanText(nodeId, 80) || "unknown"}`;
   }
 
+  function htmlEscape(value) {
+    return String(value || "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  }
+
   function normalisePopoutOutlineBlock(raw = {}, index = 0) {
     const depthRaw = Number(raw.depth);
     return {
@@ -27,13 +31,13 @@
     const mode = cleanText(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
     if (mode !== "outline") return null;
     const outline = Array.isArray(value.outline) ? value.outline.slice(0, 400).map(normalisePopoutOutlineBlock) : [];
-    const hasMeaningfulStructure = outline.some((block) => (Number(block.depth) || 0) > 0 || block.collapsed === true);
-    if (!hasMeaningfulStructure) return null;
+    const meaningful = outline.some((block) => (Number(block.depth) || 0) > 0 || block.collapsed === true);
+    if (!meaningful) return null;
     return { schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline };
   }
 
   function currentPayload() {
-    const id = cleanText(global.state?.detailsEdit?.id, 80);
+    const id = cleanText(global.state?.detailsEdit?.id || global.state?.selectedId, 80);
     const node = id && typeof nodeMap === "function" ? nodeMap().get(id) : null;
     const editor = normalisePopoutEditorMeta(node?.editor) || null;
     return {
@@ -42,7 +46,7 @@
       body: el.detailEditorBody instanceof HTMLTextAreaElement ? el.detailEditorBody.value : normaliseDetails(node?.details, 4000),
       mode: editor?.mode || "text",
       outline: Array.isArray(editor?.outline) ? editor.outline : null,
-      path: el.detailEditorPath instanceof HTMLElement ? el.detailEditorPath.textContent : "",
+      path: el.detailEditorPath instanceof HTMLElement ? el.detailEditorPath.textContent : (node ? getPath(node.id) : ""),
       openedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -63,10 +67,6 @@
 
   function clearStoredDraft(nodeId) {
     try { global.localStorage.removeItem(draftKeyFor(nodeId)); } catch (_error) {}
-  }
-
-  function htmlEscape(value) {
-    return String(value || "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   }
 
   function popoutHtml(payload) {
@@ -114,7 +114,7 @@
   .dirtyDot { color: rgba(37, 99, 235, .8); opacity: 0; transition: opacity .12s ease; }
   body.isDirty .dirtyDot { opacity: 1; }
   .meta { padding: 10px 14px 3px; }
-  .titleLine { font-size: 12px; font-weight: 650; color: rgba(71, 85, 105, .72); display: flex; gap: 6px; align-items: center; }
+  .titleLine { font-size: 12px; font-weight: 650; color: rgba(71, 85, 105, .72); }
   .path { margin-top: 1px; font-size: 11px; color: rgba(100, 116, 139, .58); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fields { min-height: 0; padding: 8px 14px 14px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
   input, textarea, .outlinePane { width: 100%; border: 1px solid rgba(148, 163, 184, .18); border-radius: 15px; background: rgba(255, 255, 255, .96); color: rgba(15, 23, 42, .94); outline: none; box-shadow: 0 10px 24px -22px rgba(15, 23, 42, .38); }
@@ -133,7 +133,7 @@
 </head>
 <body class="isTextMode">
   <main class="wrap">
-    <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn" class="quietBtn" type="button">save</button><div class="modeSwitch" aria-label="Editor mode"><button id="textModeBtn" class="quietBtn modeBtn" type="button">text</button><button id="outlineModeBtn" class="quietBtn modeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents · Ctrl/Cmd+Enter saves</div><button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button></div>
+    <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn" class="quietBtn" type="button">save</button><div class="modeSwitch" aria-label="Editor mode"><button id="textModeBtn" class="quietBtn modeBtn" type="button">text</button><button id="outlineModeBtn" class="quietBtn modeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · Ctrl/Cmd+Enter saves</div><button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
@@ -155,6 +155,7 @@
   function textToOutline(text) { return String(text || "").split("\\n").map(function (line) { const leading = (line.match(/^\\s*/) || [""])[0].replace(/\\t/g, "  ").length; return makeBlock(line.trimStart(), Math.floor(leading / 2)); }); }
   function outlineToText(blocks) { return (blocks || []).map(function (block) { return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || ""); }).join("\\n"); }
   function hasChildren(index) { const here = outline[index]; const next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
+  function subtreeEnd(index) { const base = Number(outline[index]?.depth) || 0; let end = index + 1; while (end < outline.length && (Number(outline[end]?.depth) || 0) > base) end += 1; return end; }
   function isHidden(index) { const depth = Number(outline[index]?.depth) || 0; for (let i = index - 1; i >= 0; i -= 1) { const parentDepth = Number(outline[i]?.depth) || 0; if (parentDepth < depth && outline[i].collapsed) return true; } return false; }
   function setDirty(next) { dirty = !!next; draft.dirty = dirty; document.body.classList.toggle("isDirty", dirty); }
   function currentBody() { return mode === "outline" ? outlineToText(outline) : bodyInput.value; }
@@ -164,13 +165,16 @@
   function markDirty() { setDirty(true); storeDraft(); }
   function updateModeChrome() { document.body.classList.toggle("isTextMode", mode === "text"); document.body.classList.toggle("isOutlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function focusBlock(index) { requestAnimationFrame(function () { const row = outlinePane.querySelector('[data-index="' + index + '"] .outlineText'); if (!row) return; row.focus({ preventScroll: true }); const range = document.createRange(); range.selectNodeContents(row); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); }); }
-  function renderOutline(focusIndex) { if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)]; outlinePane.innerHTML = ""; outline.forEach(function (block, index) { if (isHidden(index)) return; const row = document.createElement("div"); row.className = "outlineRow"; row.dataset.index = String(index); row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px"; const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty"); toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•"; toggle.addEventListener("click", function () { if (!hasChildren(index)) return; block.collapsed = !block.collapsed; markDirty(); renderOutline(index); }); const text = document.createElement("div"); text.className = "outlineText"; text.contentEditable = "true"; text.spellcheck = true; text.textContent = block.text || ""; text.addEventListener("input", function () { block.text = text.textContent || ""; markDirty(); }); text.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); return; } if (ev.key === "Tab") { ev.preventDefault(); block.depth = Math.max(0, Math.min(8, (Number(block.depth) || 0) + (ev.shiftKey ? -1 : 1))); markDirty(); renderOutline(index); return; } if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); outline.splice(index, 1); markDirty(); renderOutline(Math.max(0, index - 1)); } }); row.appendChild(toggle); row.appendChild(text); outlinePane.appendChild(row); }); if (Number.isFinite(focusIndex)) focusBlock(focusIndex); }
+  function renderOutline(focusIndex) { if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)]; outlinePane.innerHTML = ""; outline.forEach(function (block, index) { if (isHidden(index)) return; const row = document.createElement("div"); row.className = "outlineRow"; row.dataset.index = String(index); row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px"; const toggle = document.createElement("button"); toggle.type = "button"; toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty"); toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•"; toggle.addEventListener("click", function () { if (!hasChildren(index)) return; block.collapsed = !block.collapsed; markDirty(); renderOutline(index); }); const text = document.createElement("div"); text.className = "outlineText"; text.contentEditable = "true"; text.spellcheck = true; text.textContent = block.text || ""; text.addEventListener("input", function () { block.text = text.textContent || ""; markDirty(); }); text.addEventListener("keydown", function (ev) { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); return; } if (ev.key === "Tab") { ev.preventDefault(); const delta = ev.shiftKey ? -1 : 1; const baseDepth = Number(block.depth) || 0; if (delta < 0 && baseDepth <= 0) return; const end = subtreeEnd(index); for (let i = index; i < end; i += 1) { outline[i].depth = Math.max(0, Math.min(8, (Number(outline[i].depth) || 0) + delta)); } markDirty(); renderOutline(index); return; } if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); outline.splice(index, 1); markDirty(); renderOutline(Math.max(0, index - 1)); } }); row.appendChild(toggle); row.appendChild(text); outlinePane.appendChild(row); }); if (Number.isFinite(focusIndex)) focusBlock(focusIndex); }
   function setMode(nextMode) { const target = nextMode === "outline" ? "outline" : "text"; if (target === "outline") { if (mode !== "outline" || !outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (mode === "outline" && outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } markDirty(); }
-  function buildPayload() { return { type: "pocketEditorPopout:save", payload: { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() } }; }
-  function save() { if (!window.opener || window.opener.closed) { alert("Pocket is not connected. This draft is still stored here."); storeDraft(); return; } storeDraft(); window.opener.postMessage(buildPayload(), window.location.origin); }
+  function buildPayload() { return { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
+  function save() { const payload = buildPayload(); storeDraft(); try { if (window.opener && !window.opener.closed && window.opener.PocketEditorPopout && typeof window.opener.PocketEditorPopout.apply === "function") { const ok = window.opener.PocketEditorPopout.apply(payload); if (ok) { setDirty(false); clearDraft(); allowedToClose = true; window.close(); return; } } } catch (error) { console.error(error); } try { if (window.opener && !window.opener.closed) window.opener.postMessage({ type: "pocketEditorPopout:save", payload: payload }, "*"); } catch (error) { console.error(error); alert("Pocket is not connected. This draft is still stored here."); } }
   function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } if (confirm("Save changes before closing?")) { save(); return; } if (confirm("Close without saving?")) { clearDraft(); allowedToClose = true; window.close(); } }
   titleInput.addEventListener("input", markDirty); bodyInput.addEventListener("input", markDirty); document.getElementById("saveBtn").addEventListener("click", save); document.getElementById("closeBtn").addEventListener("click", closeSafely); textModeBtn.addEventListener("click", function () { setMode("text"); }); outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
-  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } }); window.addEventListener("message", function (ev) { if (ev.origin !== window.location.origin) return; if (!ev.data || ev.data.type !== "pocketEditorPopout:saved") return; setDirty(false); clearDraft(); allowedToClose = true; window.close(); }); window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; storeDraft(); ev.preventDefault(); ev.returnValue = "Unsaved editor changes."; }); updateModeChrome(); if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); } setDirty(dirty); titleInput.focus(); titleInput.select();
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } });
+  window.addEventListener("message", function (ev) { if (!ev.data || ev.data.type !== "pocketEditorPopout:saved") return; setDirty(false); clearDraft(); allowedToClose = true; window.close(); });
+  window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; storeDraft(); ev.preventDefault(); ev.returnValue = "Unsaved editor changes."; });
+  updateModeChrome(); if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); } setDirty(dirty); titleInput.focus(); titleInput.select();
 })();
 </script>
 </body>
@@ -178,34 +182,63 @@
   }
 
   function applyPopoutEdit(payload) {
-    if (!payload || payload.id !== cleanText(state.detailsEdit?.id, 80)) { setStatus("Editor popout no longer matches the open item.", "warn"); return false; }
-    const map = nodeMap();
-    const nodeBefore = map.get(payload.id) || null;
-    const beforeEditor = JSON.stringify(normalisePopoutEditorMeta(nodeBefore?.editor) || null);
-    const editorMeta = normalisePopoutEditorMeta(payload);
-    if (el.detailEditorLabel instanceof HTMLInputElement) el.detailEditorLabel.value = cleanText(payload.title, 220);
-    if (el.detailEditorBody instanceof HTMLTextAreaElement) el.detailEditorBody.value = String(payload.body || "");
-    saveDetailsEditor();
-    const node = nodeMap().get(payload.id) || null;
-    if (node) {
-      const afterEditor = JSON.stringify(editorMeta || null);
-      if (afterEditor !== beforeEditor) {
-        if (editorMeta) node.editor = editorMeta;
-        else delete node.editor;
-        node.updatedAt = nowIso();
-        recordOp({ type: "details_edit", id: node.id, path: getPath(node.id), changed: editorMeta ? "outline" : "outline_pruned" });
-        refreshMeta(); renderTree(); persistPipSnapshot();
-        setStatus(editorMeta ? `Saved outline for "${cleanText(node.label, 80)}".` : `Saved details for "${cleanText(node.label, 80)}".`, "ok");
-      }
+    if (!payload || !cleanText(payload.id, 80)) {
+      setStatus("Editor popout could not identify the item.", "warn");
+      return false;
     }
-    clearStoredDraft(payload.id);
+    const id = cleanText(payload.id, 80);
+    const node = nodeMap().get(id) || null;
+    if (!node) {
+      setStatus("Editor popout item no longer exists.", "warn");
+      return false;
+    }
+
+    const beforeEditor = JSON.stringify(normalisePopoutEditorMeta(node.editor) || null);
+    const beforeLabel = cleanText(node.label, 220);
+    const beforeDetails = normaliseDetails(node.details, 4000);
+    const nextLabel = cleanText(payload.title, 220) || beforeLabel || "Untitled";
+    const nextDetails = normaliseDetails(String(payload.body || ""), 4000);
+    const editorMeta = normalisePopoutEditorMeta(payload);
+    const afterEditor = JSON.stringify(editorMeta || null);
+    const changed = beforeLabel !== nextLabel || beforeDetails !== nextDetails || beforeEditor !== afterEditor;
+
+    if (!changed) {
+      clearStoredDraft(id);
+      setStatus("No editor changes to save.", "ok");
+      return true;
+    }
+
+    node.label = nextLabel;
+    if (nextDetails) node.details = nextDetails;
+    else delete node.details;
+    if (editorMeta) node.editor = editorMeta;
+    else delete node.editor;
+    node.updatedAt = nowIso();
+
+    if (el.detailEditorLabel instanceof HTMLInputElement && cleanText(state.detailsEdit?.id, 80) === id) el.detailEditorLabel.value = nextLabel;
+    if (el.detailEditorBody instanceof HTMLTextAreaElement && cleanText(state.detailsEdit?.id, 80) === id) el.detailEditorBody.value = nextDetails;
+
+    state.selectedId = id;
+    recordOp({ type: "details_edit", id, path: getPath(id), changed: editorMeta ? "outline" : "details" });
+    refreshMeta();
+    renderTree();
+    focusRowByNodeId(id, { instant: true });
+    saveWorkspaceState();
+    persistPipSnapshot();
+    clearStoredDraft(id);
+    setStatus(editorMeta ? `Saved outline for "${cleanText(node.label, 80)}".` : `Saved details for "${cleanText(node.label, 80)}".`, "ok");
     return true;
   }
 
-  function notifyPopoutSaved() { try { if (editorWindow && !editorWindow.closed) editorWindow.postMessage({ type: "pocketEditorPopout:saved" }, global.location.origin); } catch {} }
+  function notifyPopoutSaved() {
+    try { if (editorWindow && !editorWindow.closed) editorWindow.postMessage({ type: "pocketEditorPopout:saved" }, "*"); } catch {}
+  }
 
   function openEditorPopout() {
-    if (!isDetailsEditorOpen()) { openDetailsEditorForSelectedNode(); if (!isDetailsEditorOpen()) return false; }
+    if (!isDetailsEditorOpen()) {
+      openDetailsEditorForSelectedNode();
+      if (!isDetailsEditorOpen()) return false;
+    }
     const payload = currentPayload();
     const storedDraft = readStoredDraft(payload.id);
     if (storedDraft?.dirty) setStatus("Recovered popout draft for this item.", "ok", { durationMs: 4200 });
@@ -214,13 +247,28 @@
     const left = Math.round((global.screen.availWidth - width) / 2);
     const top = Math.round((global.screen.availHeight - height) / 2);
     editorWindow = global.open("", "pocketEditorPopout", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
-    if (!editorWindow) { setStatus("Popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 }); return false; }
-    editorWindow.document.open(); editorWindow.document.write(popoutHtml(payload)); editorWindow.document.close(); editorWindow.focus(); return true;
+    if (!editorWindow) {
+      setStatus("Popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
+      return false;
+    }
+    editorWindow.document.open();
+    editorWindow.document.write(popoutHtml(payload));
+    editorWindow.document.close();
+    editorWindow.focus();
+    return true;
   }
 
-  function handlePopoutMessage(ev) { if (ev.origin !== global.location.origin) return; if (!ev.data || ev.data.type !== "pocketEditorPopout:save") return; const ok = applyPopoutEdit(ev.data.payload); if (ok) notifyPopoutSaved(); }
+  function handlePopoutMessage(ev) {
+    if (!ev.data || ev.data.type !== "pocketEditorPopout:save") return;
+    const ok = applyPopoutEdit(ev.data.payload);
+    if (ok) notifyPopoutSaved();
+  }
 
-  function init() { const button = document.getElementById("btnDetailPopout"); if (button) button.addEventListener("click", openEditorPopout); global.addEventListener("message", handlePopoutMessage); }
+  function init() {
+    const button = document.getElementById("btnDetailPopout");
+    if (button) button.addEventListener("click", openEditorPopout);
+    global.addEventListener("message", handlePopoutMessage);
+  }
 
   global.PocketEditorPopout = Object.freeze({ open: openEditorPopout, apply: applyPopoutEdit });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
