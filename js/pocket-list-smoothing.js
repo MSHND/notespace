@@ -1,10 +1,9 @@
-/* List smoothing: calmer filter typing and keyboard scroll behaviour. */
+/* List smoothing: calmer filter typing and keyboard scroll/selection behaviour. */
 
 (function initialisePocketListSmoothing(global) {
   "use strict";
 
   let filterRenderTimer = null;
-  let lastFilterValue = "";
 
   function safeClean(value, max = 120) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
@@ -79,6 +78,33 @@
     return safeClean(state.selectedId, 80) === safeClean(id, 80);
   }
 
+  function getVisibleIds() {
+    if (typeof getVisibleNodeIdsInRenderOrder === "function") return getVisibleNodeIdsInRenderOrder();
+    if (!(el.treeRoot instanceof HTMLElement)) return [];
+    return Array.from(el.treeRoot.querySelectorAll(".row[data-node-id]"))
+      .map((row) => safeClean(row.getAttribute("data-node-id"), 80))
+      .filter(Boolean);
+  }
+
+  function paintSelectionOnly(nextId) {
+    const id = safeClean(nextId, 80);
+    if (!id || !state.nodes.some((node) => node.id === id)) return false;
+    const row = findRow(id);
+    if (!(row instanceof HTMLElement)) return false;
+
+    const previous = el.treeRoot instanceof HTMLElement
+      ? el.treeRoot.querySelectorAll(".row.selected")
+      : [];
+    previous.forEach((item) => item.classList.remove("selected"));
+
+    state.selectedId = id;
+    row.classList.add("selected");
+    row.focus({ preventScroll: true });
+    refreshMeta();
+    calmScrollRowIntoView(row);
+    return true;
+  }
+
   global.scrollRowComfortably = function scrollRowComfortably(row, options = {}) {
     return calmScrollRowIntoView(row, options);
   };
@@ -98,6 +124,28 @@
     });
   };
 
+  global.moveSelectionByVisibleDelta = function moveSelectionByVisibleDelta(delta) {
+    const visibleIds = getVisibleIds();
+    if (visibleIds.length === 0) return false;
+    if (!state.selectedId) return paintSelectionOnly(delta < 0 ? visibleIds[visibleIds.length - 1] : visibleIds[0]);
+    const currentIndex = visibleIds.indexOf(state.selectedId);
+    if (currentIndex < 0) return paintSelectionOnly(visibleIds[0]);
+    const nextIndex = currentIndex + delta;
+    if (nextIndex < 0 || nextIndex >= visibleIds.length) return false;
+    return paintSelectionOnly(visibleIds[nextIndex]);
+  };
+
+  global.moveSelectionToVisibleEdge = function moveSelectionToVisibleEdge(edge) {
+    const visibleIds = getVisibleIds();
+    if (visibleIds.length === 0) return false;
+    const toEnd = safeClean(edge, 16).toLowerCase() === "end";
+    const nextId = toEnd ? visibleIds[visibleIds.length - 1] : visibleIds[0];
+    if (!nextId || state.selectedId === nextId) return false;
+    const ok = paintSelectionOnly(nextId);
+    if (ok) saveWorkspaceState();
+    return ok;
+  };
+
   function handleFilterInputSmoothly(ev) {
     if (ev.target !== el.search) return;
     ev.stopImmediatePropagation();
@@ -115,7 +163,6 @@
     const delay = hasFilter ? 54 : 0;
     filterRenderTimer = window.setTimeout(() => {
       filterRenderTimer = null;
-      lastFilterValue = value;
       renderTree();
 
       if (scroller instanceof HTMLElement && hasFilter) {
@@ -133,7 +180,7 @@
     }
   }
 
-  global.PocketListSmoothing = Object.freeze({ calmScrollRowIntoView, softCenterRow });
+  global.PocketListSmoothing = Object.freeze({ calmScrollRowIntoView, softCenterRow, paintSelectionOnly });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
   else init();
 })(window);
