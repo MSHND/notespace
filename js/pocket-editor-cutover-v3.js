@@ -32,6 +32,7 @@
     if (typeof input === "string") id = clean(input, 80);
     else if (input && typeof input === "object") id = clean(input.id, 80);
     if (!id) id = clean(global.state?.selectedId, 80);
+    if (!id) id = clean(global.state?.detailsEdit?.id, 80);
     return mapNode(id);
   }
 
@@ -78,6 +79,7 @@
     console.info("[editor cutover v3] edit requested", {
       requested: clean(input?.id || input, 80),
       selectedId: clean(global.state?.selectedId, 80),
+      detailsEditId: clean(global.state?.detailsEdit?.id, 80),
       nodeId: clean(node?.id, 80),
       label: clean(node?.label, 80),
       hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
