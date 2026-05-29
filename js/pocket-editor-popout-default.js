@@ -1,5 +1,5 @@
 /* Popout-first editor path.
-   Edit actions now open the full popout editor directly and close the old inline detail layer. */
+   Edit actions now open the full popout editor directly. */
 
 (function initialisePocketEditorPopoutDefault(global) {
   "use strict";
@@ -36,12 +36,12 @@
       return false;
     }
 
-    if (typeof originalOpenDetails === "function") {
-      originalOpenDetails.call(global);
+    if (typeof isDetailsEditorOpen !== "function" || !isDetailsEditorOpen() || clean(global.state?.detailsEdit?.id, 80) !== node.id) {
+      if (typeof originalOpenDetails === "function") originalOpenDetails.call(global);
     }
 
     const ok = !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function" && global.PocketEditorPopout.open());
-    window.setTimeout(() => closeLegacyDetailLayer(node.id), 40);
+    if (ok) window.setTimeout(() => closeLegacyDetailLayer(node.id), 180);
     return ok;
   }
 
@@ -57,7 +57,20 @@
     ev.stopPropagation();
     ev.stopImmediatePropagation();
     if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-    window.requestAnimationFrame(openSelectedInPopout);
+    openSelectedInPopout();
+  }
+
+  function interceptRowMenuEdit(ev) {
+    const target = ev.target instanceof HTMLElement ? ev.target : null;
+    const button = target ? target.closest(".rowMiniMenuBtn") : null;
+    if (!(button instanceof HTMLElement)) return;
+    const text = clean(button.textContent, 40).toLowerCase();
+    if (!text.startsWith("edit")) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+    if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+    openSelectedInPopout();
   }
 
   function findRowFromEvent(ev) {
@@ -76,7 +89,7 @@
     global.state.selectedId = id;
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();
-    window.requestAnimationFrame(openSelectedInPopout);
+    openSelectedInPopout();
   }
 
   function interceptTreeEnter(ev) {
@@ -102,13 +115,13 @@
     const cmdEdit = document.getElementById("cmdEdit");
     if (cmdEdit) cmdEdit.addEventListener("click", interceptCommandEdit, true);
 
+    document.addEventListener("click", interceptRowMenuEdit, true);
+
     const treeWrap = document.getElementById("treeWrap");
     if (treeWrap) {
       treeWrap.addEventListener("dblclick", interceptTreeDoubleClick, true);
       treeWrap.addEventListener("keydown", interceptTreeEnter, true);
     }
-
-    global.openDetailsEditorForSelectedNode = openSelectedInPopout;
   }
 
   global.PocketEditorPopoutDefault = Object.freeze({ openSelected: openSelectedInPopout });
