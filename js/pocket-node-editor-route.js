@@ -29,12 +29,14 @@
   input, textarea, .outline { width: 100%; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); color: #0f172a; outline: none; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
   input { min-height: 42px; padding: 9px 12px; font-size: 17px; font-weight: 560; }
   textarea { height: 100%; min-height: 0; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
-  .outline { height: 100%; min-height: 0; overflow: auto; padding: 10px 8px; }
+  .outline { height: 100%; min-height: 0; overflow: auto; padding: 10px 8px; user-select: none; }
   .row { display: grid; grid-template-columns: 22px minmax(0,1fr); align-items: start; gap: 4px; min-height: 30px; padding: 1px 4px; border-radius: 9px; }
   .row:focus-within { background: rgba(241,245,249,.82); }
+  .row.selected { background: rgba(191,219,254,.72); }
+  .row.selected:focus-within { background: rgba(147,197,253,.56); }
   .toggle { width: 22px; min-height: 25px; color: rgba(100,116,139,.75); }
   .toggle.empty { opacity: .38; cursor: default; }
-  .text { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .text { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
   .text:empty::before { content: "note"; color: rgba(100,116,139,.34); }
   body.textMode .outline { display: none; }
   body.outlineMode textarea { display: none; }
@@ -49,7 +51,7 @@
       <button id="textBtn" type="button">text</button>
       <button id="outlineBtn" type="button">outline</button>
       <div class="grow"></div>
-      <div class="hint">Enter = new · Tab = indent · Shift+Tab = outdent</div>
+      <div class="hint">Drag rows to select · Ctrl+C copies range</div>
       <button id="closeBtn" type="button">×</button>
     </div>
     <section class="main">
@@ -66,6 +68,9 @@
     { id: "b", text: "Child point", depth: 1, collapsed: false },
     { id: "c", text: "Second outline point", depth: 0, collapsed: false }
   ];
+  var selected = new Set();
+  var anchorIndex = 0;
+  var dragSelecting = false;
   var body = document.getElementById("body");
   var outline = document.getElementById("outline");
   var textBtn = document.getElementById("textBtn");
@@ -74,10 +79,24 @@
   function block(text, depth) { return { id: "b" + Date.now().toString(36) + Math.random().toString(36).slice(2,6), text: text || "", depth: Math.max(0, Math.min(8, depth || 0)), collapsed: false }; }
   function hasChild(i) { return blocks[i + 1] && Number(blocks[i + 1].depth || 0) > Number(blocks[i].depth || 0); }
   function hidden(i) { var depth = Number(blocks[i].depth || 0); for (var x = i - 1; x >= 0; x -= 1) { if (Number(blocks[x].depth || 0) < depth) return blocks[x].collapsed === true || hidden(x); } return false; }
+  function visibleIndexes() { return blocks.map(function (_, i) { return i; }).filter(function (i) { return !hidden(i); }); }
   function outlineToText() { return blocks.map(function (b) { return "  ".repeat(Math.max(0, Number(b.depth || 0))) + String(b.text || ""); }).join("\\n"); }
-  function textToOutline() { blocks = body.value.split("\\n").map(function (line) { var lead = (line.match(/^\\s*/) || [""])[0].replace(/\\t/g, "  ").length; return block(line.trimStart(), Math.floor(lead / 2)); }); if (!blocks.length) blocks = [block("", 0)]; }
+  function textToOutline() { blocks = body.value.split("\\n").map(function (line) { var lead = (line.match(/^\\s*/) || [""])[0].replace(/\\t/g, "  ").length; return block(line.trimStart(), Math.floor(lead / 2)); }); if (!blocks.length) blocks = [block("", 0)]; selected.clear(); anchorIndex = 0; }
   function setStatus(text) { status.textContent = text || "not connected"; }
   function setMode(next) { if (next === mode) return; if (next === "outline") { textToOutline(); mode = "outline"; } else { body.value = outlineToText(); mode = "text"; } render(); }
+  function selectOne(i) { selected.clear(); selected.add(i); anchorIndex = i; setStatus("1 row selected"); render(i); }
+  function selectRange(from, to) { selected.clear(); var a = Math.min(from, to); var b = Math.max(from, to); for (var i = a; i <= b; i += 1) { if (!hidden(i)) selected.add(i); } setStatus(selected.size + " rows selected"); render(to); }
+  function copySelected() {
+    if (!selected.size) return false;
+    var indexes = Array.from(selected).sort(function (a, b) { return a - b; });
+    var text = indexes.map(function (i) { var b = blocks[i]; return "  ".repeat(Math.max(0, Number(b.depth || 0))) + String(b.text || ""); }).join("\\n");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { setStatus("copied " + indexes.length + " rows"); }).catch(function () { setStatus("copy failed"); });
+    } else {
+      var ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); setStatus("copied " + indexes.length + " rows");
+    }
+    return true;
+  }
   function render(focusIndex) {
     document.body.classList.toggle("textMode", mode === "text");
     document.body.classList.toggle("outlineMode", mode === "outline");
@@ -86,24 +105,31 @@
     outline.innerHTML = "";
     blocks.forEach(function (b, i) {
       if (hidden(i)) return;
-      var row = document.createElement("div"); row.className = "row"; row.style.paddingLeft = (4 + Math.max(0, b.depth || 0) * 24) + "px";
+      var row = document.createElement("div"); row.className = "row" + (selected.has(i) ? " selected" : ""); row.style.paddingLeft = (4 + Math.max(0, b.depth || 0) * 24) + "px"; row.dataset.index = String(i);
+      row.addEventListener("mousedown", function (ev) { if (ev.button !== 0) return; if (ev.shiftKey) selectRange(anchorIndex, i); else { selected.clear(); selected.add(i); anchorIndex = i; setStatus("1 row selected"); render(i); } dragSelecting = true; ev.preventDefault(); });
+      row.addEventListener("mouseenter", function () { if (!dragSelecting) return; selectRange(anchorIndex, i); });
       var t = document.createElement("button"); t.type = "button"; t.className = "toggle" + (hasChild(i) ? "" : " empty"); t.textContent = hasChild(i) ? (b.collapsed ? "▸" : "▾") : "•";
-      t.addEventListener("click", function () { if (!hasChild(i)) return; b.collapsed = !b.collapsed; render(i); });
+      t.addEventListener("click", function (ev) { ev.stopPropagation(); if (!hasChild(i)) return; b.collapsed = !b.collapsed; render(i); });
       var text = document.createElement("div"); text.className = "text"; text.contentEditable = "true"; text.spellcheck = true; text.textContent = b.text || "";
+      text.addEventListener("focus", function () { if (!selected.has(i)) { selected.clear(); selected.add(i); anchorIndex = i; render(i); } });
       text.addEventListener("input", function () { b.text = text.textContent || ""; setStatus("editing"); });
       text.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); blocks.splice(i + 1, 0, block("", b.depth || 0)); setStatus("new point"); render(i + 1); return; }
+        if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "c" && selected.size > 1) { ev.preventDefault(); copySelected(); return; }
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); blocks.splice(i + 1, 0, block("", b.depth || 0)); selected.clear(); selected.add(i + 1); anchorIndex = i + 1; setStatus("new point"); render(i + 1); return; }
         if (ev.key === "Tab") { ev.preventDefault(); b.depth = Math.max(0, Math.min(8, (b.depth || 0) + (ev.shiftKey ? -1 : 1))); setStatus("outline moved"); render(i); return; }
-        if (ev.key === "Backspace" && !text.textContent && blocks.length > 1) { ev.preventDefault(); blocks.splice(i, 1); setStatus("removed point"); render(Math.max(0, i - 1)); }
+        if (ev.key === "Backspace" && !text.textContent && blocks.length > 1) { ev.preventDefault(); blocks.splice(i, 1); selected.clear(); selected.add(Math.max(0, i - 1)); anchorIndex = Math.max(0, i - 1); setStatus("removed point"); render(Math.max(0, i - 1)); }
       });
       row.appendChild(t); row.appendChild(text); outline.appendChild(row);
       if (i === focusIndex) requestAnimationFrame(function () { text.focus(); });
     });
   }
+  document.addEventListener("mouseup", function () { dragSelecting = false; });
+  document.addEventListener("keydown", function (ev) { if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "c" && selected.size > 1) { ev.preventDefault(); copySelected(); } });
   textBtn.addEventListener("click", function () { setMode("text"); });
   outlineBtn.addEventListener("click", function () { setMode("outline"); });
   document.getElementById("saveBtn").addEventListener("click", function () { setStatus("save not connected yet"); });
   document.getElementById("closeBtn").addEventListener("click", function () { window.close(); });
+  selected.add(0);
   render(0);
 })();
 </script>
