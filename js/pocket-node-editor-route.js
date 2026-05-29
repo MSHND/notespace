@@ -38,7 +38,10 @@
       if (typeof setStatus === "function") setStatus("Node editor is not available yet. Refresh and try again.", "warn");
       return false;
     }
-    if (global.state) global.state.selectedId = node.id;
+    if (global.state) {
+      global.state.selectedId = node.id;
+      if (global.state.detailsEdit) global.state.detailsEdit.id = "";
+    }
     hideOldEditor();
     const ok = global.PocketNodePopoutEditor.open(node.id);
     setTimeout(hideOldEditor, 0);
@@ -90,6 +93,8 @@
 
   global.openPocketNodeEditor = openNodeEditor;
   global.openPocketEditor = openNodeEditor;
+  global.openDetailsEditorForSelectedNode = function () { return openNodeEditor(global.state?.selectedId); };
+  global.openDetailsEditorForNode = function (nodeOrId) { return openNodeEditor(typeof nodeOrId === "object" ? nodeOrId?.id : nodeOrId); };
   hideOldEditor();
   console.info("[node editor route] installed", { hasStandalone: !!global.PocketNodePopoutEditor });
 })(window);
