@@ -1,14 +1,17 @@
 /* Editor cutover v3.
-   Final, small override: Edit opens node-bound popout only. Inline detail editor is retired. */
+   Small override: Edit opens the node-bound popout, while preserving the legacy
+   details bridge needed by the current popout implementation. */
 
 (function initialisePocketEditorCutoverV3(global) {
   "use strict";
 
-  const nodeBoundOpen = global.PocketEditorPopoutV2 && typeof global.PocketEditorPopoutV2.open === "function"
-    ? global.PocketEditorPopoutV2.open
-    : (global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function" ? global.PocketEditorPopout.open : null);
-  const nodeBoundApply = global.PocketEditorPopout && typeof global.PocketEditorPopout.apply === "function"
-    ? global.PocketEditorPopout.apply
+  console.info("[editor cutover v3] loaded");
+
+  const popoutOpen = global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function"
+    ? global.PocketEditorPopout.open.bind(global.PocketEditorPopout)
+    : null;
+  const popoutApply = global.PocketEditorPopout && typeof global.PocketEditorPopout.apply === "function"
+    ? global.PocketEditorPopout.apply.bind(global.PocketEditorPopout)
     : null;
 
   function clean(value, max = 80) {
@@ -45,16 +48,25 @@
 
   function openDirect() {
     const node = selectedNode();
+    console.info("[editor cutover v3] edit requested", { selectedId: clean(global.state?.selectedId, 80), label: clean(node?.label, 80), hasPopoutOpen: !!popoutOpen });
     if (!node) {
       if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
+      console.warn("[editor cutover v3] no selected node");
       return false;
     }
-    retireInlineEditor();
+    if (!popoutOpen) {
+      if (typeof setStatus === "function") setStatus("Editor popout is not available.", "warn");
+      console.warn("[editor cutover v3] popout open bridge missing");
+      return false;
+    }
+
+    global.state.selectedId = node.id;
     clearPopoutDrafts();
-    const ok = !!(nodeBoundOpen && nodeBoundOpen());
+    const ok = !!popoutOpen();
     window.setTimeout(retireInlineEditor, 0);
     window.setTimeout(retireInlineEditor, 80);
     window.setTimeout(retireInlineEditor, 240);
+    console.info("[editor cutover v3] popout open result", { ok, id: node.id });
     return ok;
   }
 
@@ -108,14 +120,19 @@
 
   function install() {
     retireInlineEditor();
-    global.openDetailsEditorForSelectedNode = openDirect;
-    if (nodeBoundApply) global.PocketEditorPopout = Object.freeze({ open: openDirect, apply: nodeBoundApply });
+    // Compatibility alias only. Do not replace openDetailsEditorForSelectedNode here:
+    // PocketEditorPopout.open currently calls the legacy details bridge internally
+    // before writing the popout window. Replacing it causes a recursive false return.
+    global.openPocketNodeEditor = openDirect;
+    global.openPocketEditor = openDirect;
+    if (popoutApply && global.PocketEditorPopout) global.PocketEditorPopout.apply = popoutApply;
     document.addEventListener("click", clickCapture, true);
     const treeWrap = document.getElementById("treeWrap");
     if (treeWrap) {
       treeWrap.addEventListener("dblclick", doubleClickCapture, true);
       treeWrap.addEventListener("keydown", keyCapture, true);
     }
+    console.info("[editor cutover v3] installed", { hasPopoutOpen: !!popoutOpen, hasLegacyDetailsBridge: typeof global.openDetailsEditorForSelectedNode === "function" });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", install, { once: true });
