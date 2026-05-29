@@ -9,6 +9,12 @@
 
   console.info("[editor cutover v3] loaded");
 
+  // Preserve the original details opener. PocketEditorPopout.open() currently
+  // calls this internally, so replacing it creates a recursion loop.
+  const legacyOpenDetailsForSelectedNode = typeof global.openDetailsEditorForSelectedNode === "function"
+    ? global.openDetailsEditorForSelectedNode.bind(global)
+    : null;
+
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
@@ -74,6 +80,7 @@
       selectedId: clean(global.state?.selectedId, 80),
       nodeId: clean(node?.id, 80),
       label: clean(node?.label, 80),
+      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
       hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
     });
 
@@ -88,11 +95,16 @@
     }
 
     clearDraftsFor(node.id);
-
-    // Compatibility: the existing popout builder still reads the legacy details
-    // fields. Force those fields from the selected node immediately before
-    // opening, so stale browser memory cannot win.
     forceInlineBridgeToNode(node);
+
+    // Ensure the legacy details bridge is open with the selected node before
+    // the existing popout builder reads from it. Then hide it immediately.
+    try {
+      if (legacyOpenDetailsForSelectedNode) legacyOpenDetailsForSelectedNode();
+      forceInlineBridgeToNode(node);
+    } catch (error) {
+      console.warn("[editor cutover v3] legacy details bridge failed", error);
+    }
 
     let ok = false;
     try {
@@ -170,14 +182,15 @@
     hideInlineEditor();
     global.openPocketNodeEditor = openDirect;
     global.openPocketEditor = openDirect;
-    global.openDetailsEditorForSelectedNode = openDirect;
-    global.openDetailsEditorForNode = openDirect;
+    // Do NOT replace openDetailsEditorForSelectedNode/openDetailsEditorForNode.
+    // The current popout opener depends on the original function internally.
     document.addEventListener("click", clickCapture, true);
     document.addEventListener("dblclick", doubleClickCapture, true);
     const treeWrap = document.getElementById("treeWrap");
     if (treeWrap) treeWrap.addEventListener("keydown", keyCapture, true);
     else document.addEventListener("keydown", keyCapture, true);
     console.info("[editor cutover v3] installed", {
+      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
       hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
     });
   }
