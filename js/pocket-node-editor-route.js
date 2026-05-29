@@ -1,6 +1,6 @@
 /* Standalone PE route.
-   Enter opens pe-editor.html for the selected node. PE stores data in node.pe and
-   does not read/write the old inline details editor fields. */
+   Enter opens PE for the selected node. PE stores data in node.pe and does not
+   read/write the old inline details editor fields. */
 (function initialisePocketPeRoute(global) {
   "use strict";
 
@@ -85,17 +85,32 @@
     const node = selectedNode();
     if (!node) {
       if (typeof setStatus === "function") setStatus("Select a node first.", "warn");
+      console.warn("[pe route] no selected node", { selectedId: global.state?.selectedId, detailsEditId: global.state?.detailsEdit?.id });
       return false;
     }
     const width = 760;
     const height = 600;
     const left = Math.max(0, Math.round((global.screen.availWidth - width) / 2));
     const top = Math.max(0, Math.round((global.screen.availHeight - height) / 2));
-    const url = `pe-editor.html#${encodeURIComponent(node.id)}`;
-    const win = global.open(url, "pocketStandalonePe", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
+
+    // Open about:blank synchronously from the key event first. This is the same
+    // popup-safe pattern that worked in the smoke test. Then navigate it to the
+    // standalone PE page once the window handle exists.
+    const win = global.open("", "pocketStandalonePe", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
     if (!win) {
       if (typeof setStatus === "function") setStatus("PE popout blocked. Allow popups for pocket, then try Enter again.", "warn", { durationMs: 5200 });
+      console.warn("[pe route] popup blocked");
       return false;
+    }
+
+    try {
+      win.document.title = "pocket PE loading";
+      win.document.body.style.margin = "24px";
+      win.document.body.style.fontFamily = "system-ui, sans-serif";
+      win.document.body.textContent = "Opening PE…";
+      win.location.replace(`pe-editor.html#${encodeURIComponent(node.id)}`);
+    } catch (error) {
+      console.error("[pe route] failed to navigate PE window", error);
     }
     win.focus();
     console.info("[pe route] opened", { id: node.id, label: clean(node.label, 80) });
