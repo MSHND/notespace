@@ -64,9 +64,13 @@
     const dirtyWin = existingDirtyPeWindow();
     if (!dirtyWin) return true;
     try { dirtyWin.focus(); } catch (_error) {}
-    const ok = global.confirm("PE has unsaved local edits. Open another node and lose those unsaved PE changes?");
+    const ok = global.confirm(
+      "This PE has unsaved changes.\n\n" +
+      "Switch to the new node and lose those changes?\n\n" +
+      "Choose Cancel to stay here and save first."
+    );
     if (!ok) {
-      if (typeof setStatus === "function") setStatus("PE still has unsaved edits.", "warn");
+      if (typeof setStatus === "function") setStatus("PE still has unsaved changes — save before switching nodes.", "warn");
       console.warn("[pe switch guard] blocked", { nextNodeId });
       return false;
     }
@@ -83,7 +87,7 @@
       const text = doc.getElementById("text");
       const saveBtn = doc.getElementById("saveBtn");
       if (!title || !text || !saveBtn) return false;
-      const message = "PE has unsaved local edits.";
+      const message = "This PE has unsaved changes.";
       peWin.__pocketPeDirty = false;
       const markDirty = () => { peWin.__pocketPeDirty = true; };
       const markCleanSoon = () => window.setTimeout(() => { peWin.__pocketPeDirty = false; }, 80);
