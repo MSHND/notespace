@@ -4,8 +4,8 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build item-details-edit-route",
-    stamp: "2026-05-30.1"
+    label: "build item-details-edit-route-2",
+    stamp: "2026-05-30.2"
   });
 
   function ensureBuildLabel() {
@@ -30,37 +30,55 @@
     return label;
   }
 
-  function installEditCommandRoute() {
-    if (global.__pocketEditCommandRouteWrapped) return;
-    if (typeof global.runCommandPaletteAction !== "function") return;
-    const original = global.runCommandPaletteAction.bind(global);
-    global.runCommandPaletteAction = function pocketRunCommandPaletteAction(action) {
-      if (action !== "edit") return original(action);
-      if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-      window.requestAnimationFrame(() => {
-        const id = typeof cleanText === "function"
-          ? cleanText(global.state?.selectedId, 80)
-          : String(global.state?.selectedId || "").trim().slice(0, 80);
-        if (id && global.state) global.state.selectedId = id;
-        if (typeof global.openPocketNodeEditor === "function") {
-          global.openPocketNodeEditor(id || null);
-          return;
-        }
-        if (typeof global.openPocketEditor === "function") {
-          global.openPocketEditor(id || null);
-          return;
-        }
-        if (typeof global.openDetailsEditorForSelectedNode === "function") global.openDetailsEditorForSelectedNode();
-      });
-    };
-    global.__pocketEditCommandRouteWrapped = true;
-    console.info("[item details edit command route] installed");
+  function clean(value, max = 80) {
+    return typeof cleanText === "function"
+      ? cleanText(value, max)
+      : String(value || "").trim().slice(0, max);
+  }
+
+  function openItemDetailsFromMenu(ev) {
+    const target = ev.target instanceof HTMLElement ? ev.target : null;
+    const button = target ? target.closest(".rowMiniMenuBtn") : null;
+    if (!(button instanceof HTMLElement)) return false;
+    if (!clean(button.textContent, 40).toLowerCase().startsWith("edit")) return false;
+
+    const id = clean(global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
+    if (!id) return false;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.stopImmediatePropagation();
+
+    if (global.state) global.state.selectedId = id;
+    if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+    if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
+
+    window.requestAnimationFrame(() => {
+      if (typeof global.openPocketNodeEditor === "function") {
+        global.openPocketNodeEditor(id);
+        return;
+      }
+      if (typeof global.openPocketEditor === "function") {
+        global.openPocketEditor(id);
+        return;
+      }
+      if (typeof global.openDetailsEditorForSelectedNode === "function") global.openDetailsEditorForSelectedNode();
+    });
+    return true;
+  }
+
+  function installEditRoutes() {
+    if (global.__pocketEditRoutesInstalled) return;
+    document.addEventListener("pointerdown", openItemDetailsFromMenu, true);
+    document.addEventListener("click", openItemDetailsFromMenu, true);
+    global.__pocketEditRoutesInstalled = true;
+    console.info("[item details edit routes] installed");
   }
 
   function init() {
     global.PocketBuild = BUILD;
     ensureBuildLabel();
-    installEditCommandRoute();
+    installEditRoutes();
   }
 
   if (document.readyState === "loading") {
