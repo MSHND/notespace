@@ -1,7 +1,7 @@
 /* PE save dirty cue + old-details migration helper.
    PE already records an op through PocketPeEditor.apply(). This wrapper makes
    the main save/export chip visibly dirty after a PE local save, adds a small
-   bridge button for old inline details, and makes Enter open PE only. */
+   node-bound bridge button for old inline details, and makes Enter open PE only. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -23,9 +23,18 @@
     return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
   }
 
-  function openOldDetailsForCurrentNode() {
-    const id = clean(global.state?.selectedId || global.state?.detailsEdit?.id, 80);
-    if (id && global.state) global.state.selectedId = id;
+  function nodeById(id) {
+    return id && typeof nodeMap === "function" ? nodeMap().get(id) || null : null;
+  }
+
+  function openOldDetailsForNode(nodeId) {
+    const id = clean(nodeId || global.state?.selectedId || global.state?.detailsEdit?.id, 80);
+    const node = nodeById(id);
+    if (!node) {
+      if (typeof setStatus === "function") setStatus("Could not find that node for old details.", "warn");
+      return false;
+    }
+    if (global.state) global.state.selectedId = node.id;
     try {
       if (typeof global.openDetailsEditorForSelectedNode === "function") {
         global.openDetailsEditorForSelectedNode();
@@ -33,6 +42,7 @@
       if (global.el?.detailOverlay instanceof HTMLElement) {
         global.el.detailOverlay.hidden = false;
       }
+      if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id, { instant: true });
       if (typeof setStatus === "function") setStatus("Old inline details opened for copying.", "ok");
       return true;
     } catch (error) {
@@ -42,7 +52,7 @@
     }
   }
 
-  function injectOldDetailsButton(peWin) {
+  function injectOldDetailsButton(peWin, nodeId) {
     try {
       if (!peWin || peWin.closed || !peWin.document) return false;
       const doc = peWin.document;
@@ -50,21 +60,23 @@
       const bar = doc.querySelector(".bar");
       const saveBtn = doc.getElementById("saveBtn");
       if (!bar || !saveBtn) return false;
+      const boundNodeId = clean(nodeId, 80);
       const btn = doc.createElement("button");
       btn.id = "peOldDetailsBtn";
       btn.type = "button";
       btn.textContent = "old details";
-      btn.title = "Open the old inline details editor for manual copying";
+      btn.title = "Open this node's old inline details for manual copying";
       btn.addEventListener("click", () => {
         try {
           if (peWin.opener && !peWin.opener.closed && peWin.opener.PocketPeOldDetailsBridge) {
-            peWin.opener.PocketPeOldDetailsBridge.open();
+            peWin.opener.PocketPeOldDetailsBridge.open(boundNodeId);
           }
         } catch (error) {
           console.warn("[pe old details] popup button failed", error);
         }
       });
       saveBtn.insertAdjacentElement("afterend", btn);
+      console.info("[pe old details] button bound", { id: boundNodeId });
       return true;
     } catch (_error) {
       return false;
@@ -78,9 +90,10 @@
       const win = originalOpen(...args);
       const name = String(args[1] || "");
       if (name === "pocketStandalonePe" && win) {
-        window.setTimeout(() => injectOldDetailsButton(win), 0);
-        window.setTimeout(() => injectOldDetailsButton(win), 80);
-        window.setTimeout(() => injectOldDetailsButton(win), 240);
+        const boundNodeId = clean(global.__pocketPeOpeningNodeId || global.state?.selectedId || domSelectedNodeId(), 80);
+        window.setTimeout(() => injectOldDetailsButton(win, boundNodeId), 0);
+        window.setTimeout(() => injectOldDetailsButton(win, boundNodeId), 80);
+        window.setTimeout(() => injectOldDetailsButton(win, boundNodeId), 240);
       }
       return win;
     };
@@ -97,8 +110,10 @@
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation();
+      global.__pocketPeOpeningNodeId = capturedId;
       window.setTimeout(() => {
         if (typeof global.openPocketPeEditor === "function") global.openPocketPeEditor(capturedId);
+        window.setTimeout(() => { if (global.__pocketPeOpeningNodeId === capturedId) global.__pocketPeOpeningNodeId = ""; }, 500);
       }, 0);
     }, true);
     global.__pocketPeEnterOnlyInstalled = true;
@@ -109,7 +124,8 @@
     const pe = global.PocketPeEditor;
     if (!pe || typeof pe.apply !== "function" || pe.__dirtyCueWrapped) return false;
     const originalApply = pe.apply.bind(pe);
-    const wrapped = function applyPeWithDirtyCue(payload) {
+    const originalOpen = typeof pe.open === "function" ? pe.open.bind(pe) : null;
+    const wrappedApply = function applyPeWithDirtyCue(payload) {
       const ok = originalApply(payload);
       if (ok) {
         if (typeof refreshMeta === "function") refreshMeta();
@@ -120,12 +136,20 @@
       }
       return ok;
     };
-    global.PocketPeEditor = Object.freeze({ ...pe, apply: wrapped, __dirtyCueWrapped: true });
+    const wrappedOpen = originalOpen ? function openPeWithNodeBinding(nodeId) {
+      const id = clean(nodeId || global.state?.selectedId || domSelectedNodeId(), 80);
+      global.__pocketPeOpeningNodeId = id;
+      const result = originalOpen(id);
+      window.setTimeout(() => { if (global.__pocketPeOpeningNodeId === id) global.__pocketPeOpeningNodeId = ""; }, 500);
+      return result;
+    } : pe.open;
+    global.PocketPeEditor = Object.freeze({ ...pe, open: wrappedOpen, apply: wrappedApply, __dirtyCueWrapped: true });
+    if (typeof wrappedOpen === "function") global.openPocketPeEditor = wrappedOpen;
     console.info("[pe dirty cue] installed");
     return true;
   }
 
-  global.PocketPeOldDetailsBridge = Object.freeze({ open: openOldDetailsForCurrentNode });
+  global.PocketPeOldDetailsBridge = Object.freeze({ open: openOldDetailsForNode });
   installOpenInterceptor();
   installEnterPeOnly();
   if (!installDirtyCue()) {
