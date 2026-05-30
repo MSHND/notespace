@@ -55,5 +55,55 @@
     console.info("[editor human close] window.open interceptor installed");
   }
 
+  function installEditRouteInterceptor() {
+    if (global.__pocketItemDetailsEditRouteInstalled) return;
+    const clean = (value, max = 80) => typeof cleanText === "function"
+      ? cleanText(value, max)
+      : String(value || "").trim().slice(0, max);
+
+    const selectedIdFromEvent = (ev) => {
+      const target = ev.target instanceof HTMLElement ? ev.target : null;
+      const row = target ? target.closest("[data-node-id]") : null;
+      const rowId = row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
+      return rowId
+        || clean(global.state?.rowMiniMenuNodeId, 80)
+        || clean(global.state?.selectedId, 80);
+    };
+
+    const isEditAction = (target) => {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.closest("#cmdEdit") || target.closest("#btnOpenPrimary")) return true;
+      const menuButton = target.closest(".rowMiniMenuBtn");
+      if (!(menuButton instanceof HTMLElement)) return false;
+      return clean(menuButton.textContent, 40).toLowerCase().startsWith("edit");
+    };
+
+    document.addEventListener("click", (ev) => {
+      const target = ev.target instanceof HTMLElement ? ev.target : null;
+      if (!isEditAction(target)) return;
+      const id = selectedIdFromEvent(ev);
+      if (!id) return;
+      if (global.state) global.state.selectedId = id;
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+      if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
+      if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+      if (typeof global.openPocketNodeEditor === "function") {
+        global.openPocketNodeEditor(id);
+        return;
+      }
+      if (typeof global.openPocketEditor === "function") {
+        global.openPocketEditor(id);
+        return;
+      }
+      if (typeof openDetailsEditorForSelectedNode === "function") openDetailsEditorForSelectedNode();
+    }, true);
+
+    global.__pocketItemDetailsEditRouteInstalled = true;
+    console.info("[item details edit route] installed");
+  }
+
   installOpenInterceptor();
+  installEditRouteInterceptor();
 })(window);
