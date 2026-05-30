@@ -2,8 +2,8 @@
    PE already records an op through PocketPeEditor.apply(). This wrapper makes
    the main save/export chip visibly dirty after a PE local save, adds a small
    node-bound bridge button for old inline details, makes Enter open PE only,
-   adds a browser close/refresh guard for unsaved PE edits, and blocks node
-   switching while PE has unsaved local edits. */
+   adds a browser close/refresh guard for unsaved editor changes, and blocks
+   node switching while the editor has unsaved local edits. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -45,11 +45,11 @@
         global.el.detailOverlay.hidden = false;
       }
       if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id, { instant: true });
-      if (typeof setStatus === "function") setStatus("Old inline details opened for copying.", "ok");
+      if (typeof setStatus === "function") setStatus("Old details opened for copying.", "ok");
       return true;
     } catch (error) {
       console.warn("[pe old details] failed", error);
-      if (typeof setStatus === "function") setStatus("Could not open old inline details.", "warn");
+      if (typeof setStatus === "function") setStatus("Could not open old details.", "warn");
       return false;
     }
   }
@@ -65,17 +65,17 @@
     if (!dirtyWin) return true;
     try { dirtyWin.focus(); } catch (_error) {}
     const ok = global.confirm(
-      "This PE has unsaved changes.\n\n" +
-      "Switch to the new node and lose those changes?\n\n" +
-      "Choose Cancel to stay here and save first."
+      "You have unsaved changes.\n\n" +
+      "OK leaves without saving.\n" +
+      "Cancel returns to your unsaved work."
     );
     if (!ok) {
-      if (typeof setStatus === "function") setStatus("PE still has unsaved changes — save before switching nodes.", "warn");
+      if (typeof setStatus === "function") setStatus("Still unsaved — save before switching items.", "warn");
       console.warn("[pe switch guard] blocked", { nextNodeId });
       return false;
     }
     dirtyWin.__pocketPeDirty = false;
-    console.warn("[pe switch guard] user discarded unsaved PE edits", { nextNodeId });
+    console.warn("[pe switch guard] user discarded unsaved editor edits", { nextNodeId });
     return true;
   }
 
@@ -87,7 +87,7 @@
       const text = doc.getElementById("text");
       const saveBtn = doc.getElementById("saveBtn");
       if (!title || !text || !saveBtn) return false;
-      const message = "This PE has unsaved changes.";
+      const message = "You have unsaved changes.";
       peWin.__pocketPeDirty = false;
       const markDirty = () => { peWin.__pocketPeDirty = true; };
       const markCleanSoon = () => window.setTimeout(() => { peWin.__pocketPeDirty = false; }, 80);
@@ -101,7 +101,7 @@
         return message;
       });
       peWin.__pocketPeUnsavedGuardInstalled = true;
-      console.info("[pe unsaved guard] installed");
+      console.info("[editor unsaved guard] installed");
       return true;
     } catch (_error) {
       return false;
@@ -122,7 +122,7 @@
       btn.id = "peOldDetailsBtn";
       btn.type = "button";
       btn.textContent = "old details";
-      btn.title = "Open this node's old inline details for manual copying";
+      btn.title = "Open this item's old details for manual copying";
       btn.addEventListener("click", () => {
         try {
           if (peWin.opener && !peWin.opener.closed && peWin.opener.PocketPeOldDetailsBridge) {
@@ -191,7 +191,7 @@
         if (typeof refreshMeta === "function") refreshMeta();
         if (typeof flashSaveChip === "function") flashSaveChip("save*");
         if (typeof setStatus === "function") {
-          setStatus("PE saved locally — use main save to update pocket file.", "ok", { durationMs: 5200 });
+          setStatus("Saved locally — use main save to update pocket file.", "ok", { durationMs: 5200 });
         }
       }
       return ok;
