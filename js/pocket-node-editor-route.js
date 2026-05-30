@@ -92,10 +92,6 @@
     const height = 600;
     const left = Math.max(0, Math.round((global.screen.availWidth - width) / 2));
     const top = Math.max(0, Math.round((global.screen.availHeight - height) / 2));
-
-    // Open about:blank synchronously from the key event first. This is the same
-    // popup-safe pattern that worked in the smoke test. Then navigate it to the
-    // standalone PE page once the window handle exists.
     const win = global.open("", "pocketStandalonePe", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
     if (!win) {
       if (typeof setStatus === "function") setStatus("PE popout blocked. Allow popups for pocket, then try Enter again.", "warn", { durationMs: 5200 });
@@ -120,9 +116,10 @@
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
     if (global.state?.moveMode || global.state?.inlineEdit?.id || global.pendingPathImport) return;
-    // Deliberately do not preventDefault/stopPropagation yet. The old inline
-    // editor may open too while PE proves itself separately.
-    openPeForSelectedNode();
+    // Let the legacy inline path finish selecting/opening first, then PE reads
+    // state.selectedId/detailsEdit.id on the next tick. This keeps the current
+    // troubleshooting setup where both editors may open.
+    window.setTimeout(openPeForSelectedNode, 0);
   }, true);
 
   global.PocketPeEditor = Object.freeze({ open: openPeForSelectedNode, getPayload, apply: applyPe });
