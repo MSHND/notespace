@@ -4,8 +4,8 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build item-details-edit-route-2",
-    stamp: "2026-05-30.2"
+    label: "build item-details-edit-route-3",
+    stamp: "2026-05-30.3"
   });
 
   function ensureBuildLabel() {
@@ -53,18 +53,19 @@
     if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
     if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
 
-    window.requestAnimationFrame(() => {
-      if (typeof global.openPocketNodeEditor === "function") {
-        global.openPocketNodeEditor(id);
-        return;
-      }
-      if (typeof global.openPocketEditor === "function") {
-        global.openPocketEditor(id);
-        return;
-      }
-      if (typeof global.openDetailsEditorForSelectedNode === "function") global.openDetailsEditorForSelectedNode();
-    });
-    return true;
+    if (typeof global.openPocketNodeEditor === "function") {
+      global.openPocketNodeEditor(id);
+      return true;
+    }
+    if (typeof global.openPocketEditor === "function") {
+      global.openPocketEditor(id);
+      return true;
+    }
+    if (typeof global.openDetailsEditorForSelectedNode === "function") {
+      global.openDetailsEditorForSelectedNode();
+      return true;
+    }
+    return false;
   }
 
   function installEditRoutes() {
