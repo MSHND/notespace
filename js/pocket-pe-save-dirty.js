@@ -1,7 +1,8 @@
 /* PE save dirty cue + old-details migration helper.
    PE already records an op through PocketPeEditor.apply(). This wrapper makes
    the main save/export chip visibly dirty after a PE local save, adds a small
-   node-bound bridge button for old inline details, and makes Enter open PE only. */
+   node-bound bridge button for old inline details, makes Enter open PE only,
+   and adds a browser close/refresh guard for unsaved PE edits. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -52,10 +53,40 @@
     }
   }
 
+  function installPeUnsavedGuard(peWin) {
+    try {
+      if (!peWin || peWin.closed || !peWin.document || peWin.__pocketPeUnsavedGuardInstalled) return false;
+      const doc = peWin.document;
+      const title = doc.getElementById("title");
+      const text = doc.getElementById("text");
+      const saveBtn = doc.getElementById("saveBtn");
+      if (!title || !text || !saveBtn) return false;
+      const message = "PE has unsaved local edits.";
+      peWin.__pocketPeDirty = false;
+      const markDirty = () => { peWin.__pocketPeDirty = true; };
+      const markCleanSoon = () => window.setTimeout(() => { peWin.__pocketPeDirty = false; }, 80);
+      title.addEventListener("input", markDirty);
+      text.addEventListener("input", markDirty);
+      saveBtn.addEventListener("click", markCleanSoon);
+      peWin.addEventListener("beforeunload", (ev) => {
+        if (!peWin.__pocketPeDirty) return undefined;
+        ev.preventDefault();
+        ev.returnValue = message;
+        return message;
+      });
+      peWin.__pocketPeUnsavedGuardInstalled = true;
+      console.info("[pe unsaved guard] installed");
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function injectOldDetailsButton(peWin, nodeId) {
     try {
       if (!peWin || peWin.closed || !peWin.document) return false;
       const doc = peWin.document;
+      installPeUnsavedGuard(peWin);
       if (doc.getElementById("peOldDetailsBtn")) return true;
       const bar = doc.querySelector(".bar");
       const saveBtn = doc.getElementById("saveBtn");
