@@ -4,8 +4,8 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build item-details-edit-route-3",
-    stamp: "2026-05-30.3"
+    label: "build item-details-edit-route-4",
+    stamp: "2026-05-30.4"
   });
 
   function ensureBuildLabel() {
@@ -36,50 +36,62 @@
       : String(value || "").trim().slice(0, max);
   }
 
-  function openItemDetailsFromMenu(ev) {
-    const target = ev.target instanceof HTMLElement ? ev.target : null;
-    const button = target ? target.closest(".rowMiniMenuBtn") : null;
-    if (!(button instanceof HTMLElement)) return false;
-    if (!clean(button.textContent, 40).toLowerCase().startsWith("edit")) return false;
-
-    const id = clean(global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
-    if (!id) return false;
-
-    ev.preventDefault();
-    ev.stopPropagation();
-    ev.stopImmediatePropagation();
-
-    if (global.state) global.state.selectedId = id;
+  function openItemDetails(id) {
+    const nodeId = clean(id || global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
+    if (!nodeId) return false;
+    if (global.state) global.state.selectedId = nodeId;
     if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
     if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-
-    if (typeof global.openPocketNodeEditor === "function") {
-      global.openPocketNodeEditor(id);
-      return true;
-    }
-    if (typeof global.openPocketEditor === "function") {
-      global.openPocketEditor(id);
-      return true;
-    }
-    if (typeof global.openDetailsEditorForSelectedNode === "function") {
-      global.openDetailsEditorForSelectedNode();
-      return true;
-    }
+    console.info("[item details edit routes] opening", nodeId);
+    if (typeof global.openPocketNodeEditor === "function") return !!global.openPocketNodeEditor(nodeId);
+    if (typeof global.openPocketEditor === "function") return !!global.openPocketEditor(nodeId);
+    if (typeof global.openDetailsEditorForSelectedNode === "function") return !!global.openDetailsEditorForSelectedNode();
     return false;
   }
 
-  function installEditRoutes() {
-    if (global.__pocketEditRoutesInstalled) return;
-    document.addEventListener("pointerdown", openItemDetailsFromMenu, true);
-    document.addEventListener("click", openItemDetailsFromMenu, true);
-    global.__pocketEditRoutesInstalled = true;
-    console.info("[item details edit routes] installed");
+  function replaceRowMenuEditButton(nodeId) {
+    const buttons = Array.from(document.querySelectorAll(".rowMiniMenuBtn"));
+    const editButton = buttons.find((button) => button instanceof HTMLElement
+      && clean(button.textContent, 40).toLowerCase().startsWith("edit"));
+    if (!(editButton instanceof HTMLElement) || editButton.__pocketItemDetailsEditButton) return;
+
+    const replacement = editButton.cloneNode(true);
+    replacement.__pocketItemDetailsEditButton = true;
+    replacement.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+      openItemDetails(nodeId);
+    }, true);
+    replacement.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter" && ev.key !== " ") return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+      openItemDetails(nodeId);
+    }, true);
+    editButton.replaceWith(replacement);
+    console.info("[item details edit routes] row menu Edit replaced", clean(nodeId, 80));
+  }
+
+  function installRowMenuWrapper() {
+    if (global.__pocketRowMenuEditReplaced) return;
+    if (typeof global.openRowMiniMenu !== "function") return;
+    const originalOpenRowMiniMenu = global.openRowMiniMenu.bind(global);
+    global.openRowMiniMenu = function pocketOpenRowMiniMenuWithItemDetails(nodeId, anchorEl, point) {
+      const ok = originalOpenRowMiniMenu(nodeId, anchorEl, point);
+      window.requestAnimationFrame(() => replaceRowMenuEditButton(nodeId));
+      window.setTimeout(() => replaceRowMenuEditButton(nodeId), 0);
+      return ok;
+    };
+    global.__pocketRowMenuEditReplaced = true;
+    console.info("[item details edit routes] row menu wrapper installed");
   }
 
   function init() {
     global.PocketBuild = BUILD;
     ensureBuildLabel();
-    installEditRoutes();
+    installRowMenuWrapper();
   }
 
   if (document.readyState === "loading") {
