@@ -2,7 +2,8 @@
    PE already records an op through PocketPeEditor.apply(). This wrapper makes
    the main save/export chip visibly dirty after a PE local save, adds a small
    node-bound bridge button for old inline details, makes Enter open PE only,
-   and adds a browser close/refresh guard for unsaved PE edits. */
+   adds a browser close/refresh guard for unsaved PE edits, and blocks node
+   switching while PE has unsaved local edits. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -51,6 +52,27 @@
       if (typeof setStatus === "function") setStatus("Could not open old inline details.", "warn");
       return false;
     }
+  }
+
+  function existingDirtyPeWindow() {
+    const win = global.__pocketPeWindow;
+    if (!win || win.closed) return null;
+    return win.__pocketPeDirty ? win : null;
+  }
+
+  function confirmPeSwitch(nextNodeId) {
+    const dirtyWin = existingDirtyPeWindow();
+    if (!dirtyWin) return true;
+    try { dirtyWin.focus(); } catch (_error) {}
+    const ok = global.confirm("PE has unsaved local edits. Open another node and lose those unsaved PE changes?");
+    if (!ok) {
+      if (typeof setStatus === "function") setStatus("PE still has unsaved edits.", "warn");
+      console.warn("[pe switch guard] blocked", { nextNodeId });
+      return false;
+    }
+    dirtyWin.__pocketPeDirty = false;
+    console.warn("[pe switch guard] user discarded unsaved PE edits", { nextNodeId });
+    return true;
   }
 
   function installPeUnsavedGuard(peWin) {
@@ -121,6 +143,7 @@
       const win = originalOpen(...args);
       const name = String(args[1] || "");
       if (name === "pocketStandalonePe" && win) {
+        global.__pocketPeWindow = win;
         const boundNodeId = clean(global.__pocketPeOpeningNodeId || global.state?.selectedId || domSelectedNodeId(), 80);
         window.setTimeout(() => injectOldDetailsButton(win, boundNodeId), 0);
         window.setTimeout(() => injectOldDetailsButton(win, boundNodeId), 80);
@@ -141,6 +164,7 @@
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation();
+      if (!confirmPeSwitch(capturedId)) return;
       global.__pocketPeOpeningNodeId = capturedId;
       window.setTimeout(() => {
         if (typeof global.openPocketPeEditor === "function") global.openPocketPeEditor(capturedId);
@@ -159,6 +183,7 @@
     const wrappedApply = function applyPeWithDirtyCue(payload) {
       const ok = originalApply(payload);
       if (ok) {
+        if (global.__pocketPeWindow && !global.__pocketPeWindow.closed) global.__pocketPeWindow.__pocketPeDirty = false;
         if (typeof refreshMeta === "function") refreshMeta();
         if (typeof flashSaveChip === "function") flashSaveChip("save*");
         if (typeof setStatus === "function") {
@@ -169,6 +194,7 @@
     };
     const wrappedOpen = originalOpen ? function openPeWithNodeBinding(nodeId) {
       const id = clean(nodeId || global.state?.selectedId || domSelectedNodeId(), 80);
+      if (!confirmPeSwitch(id)) return false;
       global.__pocketPeOpeningNodeId = id;
       const result = originalOpen(id);
       window.setTimeout(() => { if (global.__pocketPeOpeningNodeId === id) global.__pocketPeOpeningNodeId = ""; }, 500);
