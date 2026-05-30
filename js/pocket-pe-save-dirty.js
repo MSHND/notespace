@@ -2,8 +2,7 @@
    PE already records an op through PocketPeEditor.apply(). This wrapper makes
    the main save/export chip visibly dirty after a PE local save, adds a small
    node-bound bridge button for old inline details, makes Enter open PE only,
-   adds a browser close/refresh guard for unsaved PE edits, and offers a best-
-   effort stay-front toggle. */
+   and adds a browser close/refresh guard for unsaved PE edits. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -83,54 +82,11 @@
     }
   }
 
-  function installStayFrontToggle(peWin) {
-    try {
-      if (!peWin || peWin.closed || !peWin.document || peWin.__pocketPeStayFrontInstalled) return false;
-      const doc = peWin.document;
-      const saveBtn = doc.getElementById("saveBtn");
-      if (!saveBtn) return false;
-      const btn = doc.createElement("button");
-      btn.id = "peStayFrontBtn";
-      btn.type = "button";
-      btn.textContent = "stay front";
-      btn.title = "Best-effort keep PE in front. Browser/OS may still refuse true always-on-top.";
-      btn.style.opacity = "0.72";
-      let enabled = false;
-      let timer = null;
-      const stop = () => {
-        enabled = false;
-        btn.textContent = "stay front";
-        btn.style.opacity = "0.72";
-        if (timer) window.clearInterval(timer);
-        timer = null;
-      };
-      const start = () => {
-        enabled = true;
-        btn.textContent = "stay front ✓";
-        btn.style.opacity = "1";
-        try { peWin.focus(); } catch {}
-        timer = window.setInterval(() => {
-          if (!enabled || peWin.closed) { stop(); return; }
-          try { peWin.focus(); } catch {}
-        }, 1400);
-      };
-      btn.addEventListener("click", () => { if (enabled) stop(); else start(); });
-      peWin.addEventListener("beforeunload", stop);
-      saveBtn.insertAdjacentElement("afterend", btn);
-      peWin.__pocketPeStayFrontInstalled = true;
-      console.info("[pe stay front] installed");
-      return true;
-    } catch (_error) {
-      return false;
-    }
-  }
-
   function injectOldDetailsButton(peWin, nodeId) {
     try {
       if (!peWin || peWin.closed || !peWin.document) return false;
       const doc = peWin.document;
       installPeUnsavedGuard(peWin);
-      installStayFrontToggle(peWin);
       if (doc.getElementById("peOldDetailsBtn")) return true;
       const bar = doc.querySelector(".bar");
       const saveBtn = doc.getElementById("saveBtn");
