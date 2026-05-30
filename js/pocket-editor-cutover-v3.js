@@ -128,15 +128,25 @@
     return ok;
   }
 
+  function currentEditorOpener() {
+    return typeof global.openPocketNodeEditor === "function" && global.openPocketNodeEditor !== openDirect
+      ? global.openPocketNodeEditor
+      : null;
+  }
+
   function eatAndOpen(ev, nodeId) {
     if (ev) {
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation();
     }
+    const id = clean(nodeId || global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
+    if (id && global.state) global.state.selectedId = id;
     if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
     if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
-    return openDirect(nodeId || null);
+    const opener = currentEditorOpener();
+    if (opener) return opener(id || null);
+    return openDirect(id || null);
   }
 
   function rowFromEvent(ev) {
@@ -157,8 +167,9 @@
     const menuButton = target.closest(".rowMiniMenuBtn");
     const isRowEdit = menuButton && clean(menuButton.textContent, 40).toLowerCase().startsWith("edit");
     if (!isPrimaryEdit && !isRowEdit) return;
-    if (rowId && global.state) global.state.selectedId = rowId;
-    eatAndOpen(ev, rowId);
+    const targetId = rowId || clean(global.state?.rowMiniMenuNodeId, 80) || clean(global.state?.selectedId, 80);
+    if (targetId && global.state) global.state.selectedId = targetId;
+    eatAndOpen(ev, targetId);
   }
 
   function doubleClickCapture(ev) {
