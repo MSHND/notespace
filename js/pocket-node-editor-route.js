@@ -95,6 +95,10 @@
     return true;
   }
 
+  function peEditorUrl(nodeId) {
+    return new URL(`pe-editor.html#${encodeURIComponent(nodeId)}`, global.location.href).href;
+  }
+
   function openPeForNode(nodeId = "") {
     const node = selectedNode(nodeId);
     if (!node) {
@@ -118,12 +122,12 @@
       win.document.body.style.margin = "24px";
       win.document.body.style.fontFamily = "system-ui, sans-serif";
       win.document.body.textContent = "Opening PE…";
-      win.location.replace(`pe-editor.html#${encodeURIComponent(node.id)}`);
+      win.location.href = peEditorUrl(node.id);
     } catch (error) {
       console.error("[pe route] failed to navigate PE window", error);
     }
     win.focus();
-    console.info("[pe route] opened", { id: node.id, label: clean(node.label, 80) });
+    console.info("[pe route] opened", { id: node.id, label: clean(node.label, 80), url: peEditorUrl(node.id) });
     return true;
   }
 
