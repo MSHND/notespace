@@ -14,8 +14,22 @@
     return id && typeof nodeMap === "function" ? nodeMap().get(id) || null : null;
   }
 
-  function selectedNode() {
-    const id = clean(global.state?.selectedId || global.state?.detailsEdit?.id, 80);
+  function domSelectedNodeId() {
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const activeRow = active ? active.closest("[data-node-id]") : null;
+    const selectedRow = document.querySelector(".row.selected[data-node-id], .row:focus[data-node-id], [aria-selected='true'][data-node-id]");
+    const row = activeRow || selectedRow;
+    return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
+  }
+
+  function nodeIdFromEvent(ev) {
+    const target = ev?.target instanceof HTMLElement ? ev.target : null;
+    const row = target ? target.closest("[data-node-id]") : null;
+    return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
+  }
+
+  function selectedNode(preferredId = "") {
+    const id = clean(preferredId || global.state?.selectedId || global.state?.detailsEdit?.id || domSelectedNodeId(), 80);
     return nodeById(id);
   }
 
@@ -81,11 +95,11 @@
     return true;
   }
 
-  function openPeForSelectedNode() {
-    const node = selectedNode();
+  function openPeForNode(nodeId = "") {
+    const node = selectedNode(nodeId);
     if (!node) {
       if (typeof setStatus === "function") setStatus("Select a node first.", "warn");
-      console.warn("[pe route] no selected node", { selectedId: global.state?.selectedId, detailsEditId: global.state?.detailsEdit?.id });
+      console.warn("[pe route] no selected node", { requestedId: nodeId, selectedId: global.state?.selectedId, detailsEditId: global.state?.detailsEdit?.id, domId: domSelectedNodeId() });
       return false;
     }
     const width = 760;
@@ -116,13 +130,11 @@
   document.addEventListener("keydown", function (ev) {
     if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
     if (global.state?.moveMode || global.state?.inlineEdit?.id || global.pendingPathImport) return;
-    // Let the legacy inline path finish selecting/opening first, then PE reads
-    // state.selectedId/detailsEdit.id on the next tick. This keeps the current
-    // troubleshooting setup where both editors may open.
-    window.setTimeout(openPeForSelectedNode, 0);
+    const capturedId = nodeIdFromEvent(ev) || domSelectedNodeId() || clean(global.state?.selectedId, 80);
+    window.setTimeout(() => openPeForNode(capturedId), 0);
   }, true);
 
-  global.PocketPeEditor = Object.freeze({ open: openPeForSelectedNode, getPayload, apply: applyPe });
-  global.openPocketPeEditor = openPeForSelectedNode;
+  global.PocketPeEditor = Object.freeze({ open: openPeForNode, getPayload, apply: applyPe });
+  global.openPocketPeEditor = openPeForNode;
   console.info("[pe route] installed");
 })(window);
