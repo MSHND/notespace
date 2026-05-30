@@ -1,6 +1,6 @@
-/* Standalone PE route.
-   Enter opens a simple free-text PE for the selected node. PE stores data in
-   node.pe and does not read/write the old inline details editor fields. */
+/* Standalone item details route.
+   Enter opens a simple free-text editor for the selected node. The editor stores
+   data in node.pe and does not read/write the old inline details editor fields. */
 (function initialisePocketPeRoute(global) {
   "use strict";
 
@@ -59,7 +59,7 @@
     const id = clean(payload && payload.nodeId, 80);
     const node = nodeById(id);
     if (!node) {
-      if (typeof setStatus === "function") setStatus("PE node no longer exists.", "warn");
+      if (typeof setStatus === "function") setStatus("This item no longer exists.", "warn");
       return false;
     }
     const updatedAt = typeof nowIso === "function" ? nowIso() : new Date().toISOString();
@@ -78,8 +78,8 @@
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id, { instant: true });
     if (typeof saveWorkspaceState === "function") saveWorkspaceState();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
-    if (typeof setStatus === "function") setStatus(`Saved PE for "${clean(node.label, 80)}".`, "ok");
-    console.info("[pe route] saved text", { id: node.id });
+    if (typeof setStatus === "function") setStatus(`Saved details for "${clean(node.label, 80)}".`, "ok");
+    console.info("[item details route] saved text", { id: node.id });
     return true;
   }
 
@@ -89,7 +89,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>pocket PE</title>
+<title>item details</title>
 <style>
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -109,8 +109,8 @@
 </head>
 <body>
 <main>
-  <div class="bar"><div class="brand">PE · ${escapeHtml(nodeLabel)}</div><button id="saveBtn" type="button">save</button><span id="status" class="status">connected</span><div class="grow"></div><button id="closeBtn" type="button">×</button></div>
-  <section class="body"><input id="title" value="${escapeHtml(payload.title)}" aria-label="PE title"><textarea id="text" aria-label="PE text">${escapeTextarea(payload.text)}</textarea></section>
+  <div class="bar"><div class="brand">details · ${escapeHtml(nodeLabel)}</div><button id="saveBtn" type="button">save</button><span id="status" class="status">connected</span><div class="grow"></div><button id="closeBtn" type="button">×</button></div>
+  <section class="body"><input id="title" value="${escapeHtml(payload.title)}" aria-label="Item details title"><textarea id="text" aria-label="Item details text">${escapeTextarea(payload.text)}</textarea></section>
 </main>
 <script>
 (function () {
@@ -147,8 +147,8 @@
   function openPeForNode(nodeId = "") {
     const node = selectedNode(nodeId);
     if (!node) {
-      if (typeof setStatus === "function") setStatus("Select a node first.", "warn");
-      console.warn("[pe route] no selected node", { requestedId: nodeId, selectedId: global.state?.selectedId, detailsEditId: global.state?.detailsEdit?.id, domId: domSelectedNodeId() });
+      if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
+      console.warn("[item details route] no selected node", { requestedId: nodeId, selectedId: global.state?.selectedId, detailsEditId: global.state?.detailsEdit?.id, domId: domSelectedNodeId() });
       return false;
     }
     const width = 760;
@@ -157,13 +157,13 @@
     const top = Math.max(0, Math.round((global.screen.availHeight - height) / 2));
     const win = global.open("", "pocketStandalonePe", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
     if (!win) {
-      if (typeof setStatus === "function") setStatus("PE popout blocked. Allow popups for pocket, then try Enter again.", "warn", { durationMs: 5200 });
-      console.warn("[pe route] popup blocked");
+      if (typeof setStatus === "function") setStatus("Details popout blocked. Allow popups for pocket, then try Enter again.", "warn", { durationMs: 5200 });
+      console.warn("[item details route] popup blocked");
       return false;
     }
     writeTextEditor(win, pePayloadForNode(node), clean(node.label, 220));
     win.focus();
-    console.info("[pe route] opened text", { id: node.id, label: clean(node.label, 80) });
+    console.info("[item details route] opened text", { id: node.id, label: clean(node.label, 80) });
     return true;
   }
 
@@ -176,5 +176,5 @@
 
   global.PocketPeEditor = Object.freeze({ open: openPeForNode, getPayload, apply: applyPe });
   global.openPocketPeEditor = openPeForNode;
-  console.info("[pe route] installed text mode");
+  console.info("[item details route] installed text mode");
 })(window);
