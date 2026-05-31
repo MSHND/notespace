@@ -162,6 +162,7 @@
   function setStatus(value) { status.textContent = value || "connected"; }
   function markDirty() { dirty = true; window.__pocketPeDirty = true; setStatus("editing"); }
   function markClean() { dirty = false; window.__pocketPeDirty = false; setStatus("saved"); }
+  function setCaretStart(input) { try { input.setSelectionRange(0, 0); } catch (_error) {} }
   function lineDepth(line) { return Math.max(0, Math.min(8, Number(line.depth) || 0)); }
   function hasChild(index) { return !!outline[index + 1] && lineDepth(outline[index + 1]) > lineDepth(outline[index]); }
   function isHidden(index) {
@@ -183,7 +184,7 @@
   function focusLine(id) {
     window.requestAnimationFrame(function () {
       var input = outlinePane.querySelector('[data-line-id="' + id + '"]');
-      if (input) { input.focus({ preventScroll: true }); input.select(); input.scrollIntoView({ block: "nearest" }); }
+      if (input) { input.focus({ preventScroll: true }); setCaretStart(input); input.scrollIntoView({ block: "nearest" }); }
     });
   }
   function focusVisibleDelta(lineId, delta) {
@@ -193,7 +194,7 @@
     var currentIndex = Math.max(0, inputs.indexOf(current));
     var nextIndex = Math.max(0, Math.min(inputs.length - 1, currentIndex + delta));
     var next = inputs[nextIndex];
-    if (next) { next.focus({ preventScroll: true }); next.select(); next.scrollIntoView({ block: "nearest" }); }
+    if (next) { next.focus({ preventScroll: true }); setCaretStart(next); next.scrollIntoView({ block: "nearest" }); }
   }
   function setMode(nextMode) {
     mode = nextMode === "outline" ? "outline" : "text";
@@ -213,7 +214,7 @@
       var twist = document.createElement("button");
       twist.type = "button";
       twist.className = "twist" + (hasChild(index) ? " hasKids" : "");
-      twist.textContent = hasChild(index) ? (line.collapsed ? "▸" : "▾") : "";
+      twist.textContent = hasChild(index) ? (line.collapsed ? "▸" : "▾") : "·";
       twist.addEventListener("click", function (ev) {
         ev.preventDefault();
         if (!hasChild(index)) return;
