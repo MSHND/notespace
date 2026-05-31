@@ -4,8 +4,8 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build replacement-row-menu-2",
-    stamp: "2026-05-30.6"
+    label: "build replacement-row-menu-3",
+    stamp: "2026-05-30.7"
   });
 
   let replacementMenu = null;
@@ -51,6 +51,8 @@
     if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
     if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
     console.info("[replacement row menu] opening item details", nodeId);
+    if (typeof global.openPocketPeEditor === "function") return !!global.openPocketPeEditor(nodeId);
+    if (global.PocketPeEditor && typeof global.PocketPeEditor.open === "function") return !!global.PocketPeEditor.open(nodeId);
     if (typeof global.openPocketNodeEditor === "function") return !!global.openPocketNodeEditor(nodeId);
     if (typeof global.openPocketEditor === "function") return !!global.openPocketEditor(nodeId);
     if (typeof global.openDetailsEditorForSelectedNode === "function") return !!global.openDetailsEditorForSelectedNode();
