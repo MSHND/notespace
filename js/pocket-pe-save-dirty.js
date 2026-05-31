@@ -108,11 +108,39 @@
     }
   }
 
+  function installOutlineArrowPolish(peWin) {
+    try {
+      if (!peWin || peWin.closed || !peWin.document || peWin.__pocketOutlineArrowPolishInstalled) return false;
+      const doc = peWin.document;
+      const outlinePane = doc.getElementById("outlinePane");
+      if (!outlinePane) return false;
+      doc.addEventListener("keydown", (ev) => {
+        if (ev.key !== "ArrowLeft" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
+        const input = ev.target instanceof peWin.HTMLInputElement ? ev.target : null;
+        if (!input || !input.classList.contains("outlineInput")) return;
+        const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
+        if (!atStart) return;
+        const row = input.closest(".outlineRow");
+        const twist = row ? row.querySelector(".twist.hasKids") : null;
+        if (!(twist instanceof peWin.HTMLElement) || twist.textContent !== "▾") return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        twist.click();
+      }, true);
+      peWin.__pocketOutlineArrowPolishInstalled = true;
+      console.info("[outline arrow polish] installed");
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function injectOldDetailsButton(peWin, nodeId) {
     try {
       if (!peWin || peWin.closed || !peWin.document) return false;
       const doc = peWin.document;
       installPeUnsavedGuard(peWin);
+      installOutlineArrowPolish(peWin);
       if (doc.getElementById("peOldDetailsBtn")) return true;
       const bar = doc.querySelector(".bar");
       const saveBtn = doc.getElementById("saveBtn");
