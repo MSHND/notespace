@@ -125,7 +125,7 @@
   .editorPane.active { display: block; }
   #textPane.active { display: grid; }
   #outlinePane { height: 100%; overflow: auto; border: 1px solid rgba(148,163,184,.18); border-radius: 15px; background: rgba(255,255,255,.88); padding: 10px 8px; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
-  .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; border-radius: 10px; }
+  .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; border-radius: 10px; transition: background .08s ease; }
   .outlineRow:hover, .outlineRow:focus-within { background: rgba(148,163,184,.10); }
   .twist { width: 22px; height: 24px; display: grid; place-items: center; border-radius: 8px; color: rgba(71,85,105,.72); user-select: none; }
   .twist.hasKids { cursor: pointer; }
@@ -181,8 +181,17 @@
   function focusLine(id) {
     window.requestAnimationFrame(function () {
       var input = outlinePane.querySelector('[data-line-id="' + id + '"]');
-      if (input) { input.focus({ preventScroll: true }); input.select(); }
+      if (input) { input.focus({ preventScroll: true }); input.select(); input.scrollIntoView({ block: "nearest" }); }
     });
+  }
+  function focusVisibleDelta(lineId, delta) {
+    var inputs = visibleInputs();
+    if (!inputs.length) return;
+    var current = outlinePane.querySelector('[data-line-id="' + lineId + '"]');
+    var currentIndex = Math.max(0, inputs.indexOf(current));
+    var nextIndex = Math.max(0, Math.min(inputs.length - 1, currentIndex + delta));
+    var next = inputs[nextIndex];
+    if (next) { next.focus({ preventScroll: true }); next.select(); next.scrollIntoView({ block: "nearest" }); }
   }
   function setMode(nextMode) {
     mode = nextMode === "outline" ? "outline" : "text";
@@ -218,6 +227,16 @@
       input.setAttribute("data-line-id", line.id);
       input.addEventListener("input", function () { line.text = input.value; markDirty(); });
       input.addEventListener("keydown", function (ev) {
+        if (ev.key === "ArrowUp") {
+          ev.preventDefault();
+          focusVisibleDelta(line.id, -1);
+          return;
+        }
+        if (ev.key === "ArrowDown") {
+          ev.preventDefault();
+          focusVisibleDelta(line.id, 1);
+          return;
+        }
         if (ev.key === "Enter") {
           ev.preventDefault();
           var newLine = { id: makeId(), text: "", depth: lineDepth(line), collapsed: false, order: 0 };
