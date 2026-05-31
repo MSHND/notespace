@@ -1,5 +1,5 @@
 /* Standalone item details route.
-   Enter opens a simple free-text editor for the selected node. The editor stores
+   Enter opens a simple item details editor for the selected node. The editor stores
    data in node.pe and does not read/write the old inline details editor fields. */
 (function initialisePocketPeRoute(global) {
   "use strict";
@@ -11,11 +11,7 @@
   }
 
   function escapeHtml(value) {
-    return String(value || "").replace(/[&<>\"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
-  }
-
-  function escapeTextarea(value) {
-    return String(value || "").replace(/[&<]/g, (ch) => ({ "&": "&amp;", "<": "&lt;" }[ch]));
+    return String(value || "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
   }
 
   function nodeById(id) {
@@ -41,12 +37,30 @@
     return nodeById(id);
   }
 
+  function makeOutlineId() {
+    return `line_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  function normaliseOutline(value) {
+    const source = Array.isArray(value) ? value : [];
+    return source.map((item, index) => ({
+      id: clean(item?.id, 80) || makeOutlineId(),
+      text: String(item?.text || "").replace(/\r/g, "").slice(0, 1200),
+      depth: Math.max(0, Math.min(8, Number(item?.depth) || 0)),
+      collapsed: item?.collapsed === true,
+      order: Number.isFinite(item?.order) ? item.order : (index + 1) * 1000
+    }));
+  }
+
   function pePayloadForNode(node) {
     const pe = node.pe && typeof node.pe === "object" && node.pe.schema === PE_SCHEMA ? node.pe : null;
+    const outline = normaliseOutline(pe?.outline);
     return {
       nodeId: clean(node.id, 80),
       title: pe ? clean(pe.title, 220) : clean(node.label, 220),
-      text: pe ? String(pe.text || "").replace(/\r/g, "").slice(0, 12000) : ""
+      mode: pe?.mode === "outline" ? "outline" : "text",
+      text: pe ? String(pe.text || "").replace(/\r/g, "").slice(0, 12000) : "",
+      outline: outline.length ? outline : [{ id: makeOutlineId(), text: "", depth: 0, collapsed: false, order: 1000 }]
     };
   }
 
@@ -62,28 +76,30 @@
       if (typeof setStatus === "function") setStatus("This item no longer exists.", "warn");
       return false;
     }
+    const mode = payload?.mode === "outline" ? "outline" : "text";
     const updatedAt = typeof nowIso === "function" ? nowIso() : new Date().toISOString();
     node.pe = {
       schema: PE_SCHEMA,
       title: clean(payload.title, 220) || clean(node.label, 220),
-      mode: "text",
+      mode,
       text: String(payload.text || "").replace(/\r/g, "").slice(0, 12000),
+      outline: normaliseOutline(payload.outline),
       updatedAt
     };
     node.updatedAt = updatedAt;
     if (global.state) global.state.selectedId = node.id;
-    if (typeof recordOp === "function") recordOp({ type: "pe_edit", id: node.id, path: typeof getPath === "function" ? getPath(node.id) : "", changed: "pe_text" });
+    if (typeof recordOp === "function") recordOp({ type: "pe_edit", id: node.id, path: typeof getPath === "function" ? getPath(node.id) : "", changed: mode === "outline" ? "pe_outline" : "pe_text" });
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id, { instant: true });
     if (typeof saveWorkspaceState === "function") saveWorkspaceState();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
     if (typeof setStatus === "function") setStatus(`Saved details for "${clean(node.label, 80)}".`, "ok");
-    console.info("[item details route] saved text", { id: node.id });
+    console.info("[item details route] saved", { id: node.id, mode });
     return true;
   }
 
-  function writeTextEditor(win, payload, nodeLabel) {
+  function writeEditor(win, payload, nodeLabel) {
     win.document.open();
     win.document.write(`<!doctype html>
 <html lang="en">
@@ -98,45 +114,161 @@
   .bar { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.78); }
   .brand { font-size: 13px; font-weight: 700; color: rgba(51,65,85,.82); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button { border: 0; background: transparent; border-radius: 999px; padding: 4px 8px; font: inherit; font-size: 12px; color: rgba(51,65,85,.82); cursor: pointer; }
-  button:hover, button:focus-visible { background: rgba(148,163,184,.16); outline: none; color: #0f172a; }
+  button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.16); outline: none; color: #0f172a; }
   .status { min-width: 72px; font-size: 11px; color: rgba(100,116,139,.74); }
   .grow { flex: 1 1 auto; }
   .body { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; padding: 14px; }
   input, textarea { width: 100%; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); color: #0f172a; outline: none; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
   input { min-height: 42px; padding: 9px 12px; font-size: 17px; font-weight: 560; }
   textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
+  .editorPane { min-height: 0; display: none; }
+  .editorPane.active { display: block; }
+  #textPane.active { display: grid; }
+  #outlinePane { height: 100%; overflow: auto; border: 1px solid rgba(148,163,184,.18); border-radius: 15px; background: rgba(255,255,255,.88); padding: 10px 8px; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
+  .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; border-radius: 10px; }
+  .outlineRow:hover, .outlineRow:focus-within { background: rgba(148,163,184,.10); }
+  .twist { width: 22px; height: 24px; display: grid; place-items: center; border-radius: 8px; color: rgba(71,85,105,.72); user-select: none; }
+  .twist.hasKids { cursor: pointer; }
+  .outlineInput { border: 0; box-shadow: none; border-radius: 8px; min-height: 30px; padding: 4px 6px; font-size: 15px; font-weight: 400; background: transparent; }
+  .outlineInput:focus { background: rgba(255,255,255,.7); }
 </style>
 </head>
 <body>
 <main>
-  <div class="bar"><div class="brand">details · ${escapeHtml(nodeLabel)}</div><button id="saveBtn" type="button">save</button><span id="status" class="status">connected</span><div class="grow"></div><button id="closeBtn" type="button">×</button></div>
-  <section class="body"><input id="title" value="${escapeHtml(payload.title)}" aria-label="Item details title"><textarea id="text" aria-label="Item details text">${escapeTextarea(payload.text)}</textarea></section>
+  <div class="bar"><div class="brand">details · ${escapeHtml(nodeLabel)}</div><button id="modeText" type="button">text</button><button id="modeOutline" type="button">outline</button><button id="saveBtn" type="button">save</button><span id="status" class="status">connected</span><div class="grow"></div><button id="closeBtn" type="button">×</button></div>
+  <section class="body"><input id="title" aria-label="Item details title"><div id="textPane" class="editorPane"><textarea id="text" aria-label="Item details text"></textarea></div><div id="outlinePane" class="editorPane" aria-label="Item details outline"></div></section>
 </main>
 <script>
 (function () {
-  var nodeId = ${JSON.stringify(payload.nodeId)};
+  var initialPayload = ${JSON.stringify(payload)};
+  var nodeId = initialPayload.nodeId;
   var title = document.getElementById("title");
   var text = document.getElementById("text");
   var status = document.getElementById("status");
+  var textPane = document.getElementById("textPane");
+  var outlinePane = document.getElementById("outlinePane");
+  var modeText = document.getElementById("modeText");
+  var modeOutline = document.getElementById("modeOutline");
+  var mode = initialPayload.mode === "outline" ? "outline" : "text";
+  var outline = Array.isArray(initialPayload.outline) && initialPayload.outline.length ? initialPayload.outline : [{ id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 }];
   var dirty = false;
+
+  title.value = initialPayload.title || "";
+  text.value = initialPayload.text || "";
+
+  function makeId() { return "line_" + Math.random().toString(36).slice(2, 9); }
   function setStatus(value) { status.textContent = value || "connected"; }
-  function markDirty() { dirty = true; setStatus("editing"); }
+  function markDirty() { dirty = true; window.__pocketPeDirty = true; setStatus("editing"); }
+  function markClean() { dirty = false; window.__pocketPeDirty = false; setStatus("saved"); }
+  function lineDepth(line) { return Math.max(0, Math.min(8, Number(line.depth) || 0)); }
+  function hasChild(index) { return !!outline[index + 1] && lineDepth(outline[index + 1]) > lineDepth(outline[index]); }
+  function isHidden(index) {
+    var depth = lineDepth(outline[index]);
+    for (var i = index - 1; i >= 0; i--) {
+      var candidateDepth = lineDepth(outline[i]);
+      if (candidateDepth < depth) {
+        if (outline[i].collapsed) return true;
+        depth = candidateDepth;
+      }
+    }
+    return false;
+  }
+  function normaliseLine(line, index) {
+    return { id: line.id || makeId(), text: String(line.text || "").slice(0, 1200), depth: lineDepth(line), collapsed: line.collapsed === true, order: (index + 1) * 1000 };
+  }
+  function serialiseOutline() { return outline.map(normaliseLine); }
+  function visibleInputs() { return Array.prototype.slice.call(outlinePane.querySelectorAll(".outlineInput")); }
+  function focusLine(id) {
+    window.requestAnimationFrame(function () {
+      var input = outlinePane.querySelector('[data-line-id="' + id + '"]');
+      if (input) { input.focus({ preventScroll: true }); input.select(); }
+    });
+  }
+  function setMode(nextMode) {
+    mode = nextMode === "outline" ? "outline" : "text";
+    modeText.classList.toggle("active", mode === "text");
+    modeOutline.classList.toggle("active", mode === "outline");
+    textPane.classList.toggle("active", mode === "text");
+    outlinePane.classList.toggle("active", mode === "outline");
+    if (mode === "outline") renderOutline();
+  }
+  function renderOutline() {
+    outlinePane.innerHTML = "";
+    outline.forEach(function (line, index) {
+      if (isHidden(index)) return;
+      var row = document.createElement("div");
+      row.className = "outlineRow";
+      row.style.paddingLeft = (lineDepth(line) * 22) + "px";
+      var twist = document.createElement("button");
+      twist.type = "button";
+      twist.className = "twist" + (hasChild(index) ? " hasKids" : "");
+      twist.textContent = hasChild(index) ? (line.collapsed ? "▸" : "▾") : "·";
+      twist.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        if (!hasChild(index)) return;
+        line.collapsed = !line.collapsed;
+        markDirty();
+        renderOutline();
+        focusLine(line.id);
+      });
+      var input = document.createElement("input");
+      input.className = "outlineInput";
+      input.type = "text";
+      input.value = line.text || "";
+      input.setAttribute("data-line-id", line.id);
+      input.addEventListener("input", function () { line.text = input.value; markDirty(); });
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          var newLine = { id: makeId(), text: "", depth: lineDepth(line), collapsed: false, order: 0 };
+          outline.splice(index + 1, 0, newLine);
+          markDirty();
+          renderOutline();
+          focusLine(newLine.id);
+          return;
+        }
+        if (ev.key === "Tab") {
+          ev.preventDefault();
+          if (ev.shiftKey) line.depth = Math.max(0, lineDepth(line) - 1);
+          else line.depth = Math.min(8, lineDepth(line) + 1);
+          markDirty();
+          renderOutline();
+          focusLine(line.id);
+          return;
+        }
+        if (ev.key === "Backspace" && !input.value && outline.length > 1) {
+          ev.preventDefault();
+          var previous = outline[Math.max(0, index - 1)];
+          outline.splice(index, 1);
+          markDirty();
+          renderOutline();
+          focusLine(previous.id);
+        }
+      });
+      row.appendChild(twist);
+      row.appendChild(input);
+      outlinePane.appendChild(row);
+    });
+  }
   function save() {
     setStatus("saving…");
     try {
       if (window.opener && !window.opener.closed && window.opener.PocketPeEditor && typeof window.opener.PocketPeEditor.apply === "function") {
-        var ok = window.opener.PocketPeEditor.apply({ nodeId: nodeId, title: title.value, text: text.value });
-        if (ok) { dirty = false; setStatus("saved"); return; }
+        var ok = window.opener.PocketPeEditor.apply({ nodeId: nodeId, title: title.value, mode: mode, text: text.value, outline: serialiseOutline() });
+        if (ok) { markClean(); return; }
       }
     } catch (error) { console.error(error); }
     setStatus("save failed");
   }
   title.addEventListener("input", markDirty);
   text.addEventListener("input", markDirty);
+  modeText.addEventListener("click", function () { setMode("text"); markDirty(); text.focus(); });
+  modeOutline.addEventListener("click", function () { setMode("outline"); markDirty(); focusLine(outline[0].id); });
   document.getElementById("saveBtn").addEventListener("click", save);
   document.getElementById("closeBtn").addEventListener("click", function () { if (!dirty || confirm("Close without saving?")) window.close(); });
   document.addEventListener("keydown", function (ev) { if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "s") { ev.preventDefault(); save(); } });
-  text.focus();
+  setMode(mode);
+  if (mode === "outline") focusLine(outline[0].id); else text.focus();
 })();
 </script>
 </body>
@@ -161,9 +293,9 @@
       console.warn("[item details route] popup blocked");
       return false;
     }
-    writeTextEditor(win, pePayloadForNode(node), clean(node.label, 220));
+    writeEditor(win, pePayloadForNode(node), clean(node.label, 220));
     win.focus();
-    console.info("[item details route] opened text", { id: node.id, label: clean(node.label, 80) });
+    console.info("[item details route] opened", { id: node.id, label: clean(node.label, 80) });
     return true;
   }
 
@@ -176,5 +308,5 @@
 
   global.PocketPeEditor = Object.freeze({ open: openPeForNode, getPayload, apply: applyPe });
   global.openPocketPeEditor = openPeForNode;
-  console.info("[item details route] installed text mode");
+  console.info("[item details route] installed text/outline mode");
 })(window);
