@@ -4,11 +4,9 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build replacement-row-menu-3",
-    stamp: "2026-05-30.7"
+    label: "build right-click-paused-1",
+    stamp: "2026-05-30.8"
   });
-
-  let replacementMenu = null;
 
   function ensureBuildLabel() {
     const topbar = document.querySelector(".topbar");
@@ -38,19 +36,13 @@
       : String(value || "").trim().slice(0, max);
   }
 
-  function closeReplacementMenu() {
-    if (replacementMenu instanceof HTMLElement) replacementMenu.remove();
-    replacementMenu = null;
-  }
-
   function openItemDetails(id) {
     const nodeId = clean(id || global.state?.selectedId, 80);
     if (!nodeId) return false;
     if (global.state) global.state.selectedId = nodeId;
-    closeReplacementMenu();
     if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
     if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-    console.info("[replacement row menu] opening item details", nodeId);
+    console.info("[item details route patch] opening", nodeId);
     if (typeof global.openPocketPeEditor === "function") return !!global.openPocketPeEditor(nodeId);
     if (global.PocketPeEditor && typeof global.PocketPeEditor.open === "function") return !!global.PocketPeEditor.open(nodeId);
     if (typeof global.openPocketNodeEditor === "function") return !!global.openPocketNodeEditor(nodeId);
@@ -59,112 +51,8 @@
     return false;
   }
 
-  function runAction(action, id) {
-    closeReplacementMenu();
-    if (global.state) state.selectedId = id;
-    if (action === "edit") return openItemDetails(id);
-    if (action === "add_sibling" && typeof insertSiblingBelow === "function") {
-      const previousBlock = global.__pocketSuppressNextEditOpen;
-      global.__pocketSuppressNextEditOpen = true;
-      insertSiblingBelow(id);
-      window.setTimeout(() => {
-        global.__pocketSuppressNextEditOpen = previousBlock || false;
-      }, 250);
-      return true;
-    }
-    if (action === "delete" && typeof deleteSelected === "function") {
-      deleteSelected();
-      return true;
-    }
-    return false;
-  }
-
-  function addButton(menu, label, action, id) {
-    const btn = document.createElement("button");
-    btn.className = "rowMiniMenuBtn";
-    btn.type = "button";
-    btn.setAttribute("role", "menuitem");
-    const span = document.createElement("span");
-    span.className = "rowMiniMenuLabel";
-    span.textContent = label;
-    btn.appendChild(span);
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      ev.stopImmediatePropagation();
-      runAction(action, id);
-    });
-    menu.appendChild(btn);
-    return btn;
-  }
-
-  function positionMenu(menu, point) {
-    const gap = 6;
-    const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
-    const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
-    menu.style.left = "0px";
-    menu.style.top = "0px";
-    menu.style.visibility = "hidden";
-    const rect = menu.getBoundingClientRect();
-    const width = Math.min(rect.width || 150, Math.max(120, vw - gap * 2));
-    const height = Math.min(rect.height || 160, Math.max(80, vh - gap * 2));
-    let left = Number.isFinite(point?.x) ? point.x + 4 : gap;
-    let top = Number.isFinite(point?.y) ? point.y + 4 : gap;
-    if (left + width > vw - gap) left = vw - width - gap;
-    if (top + height > vh - gap) top = vh - height - gap;
-    menu.style.left = `${Math.max(gap, Math.round(left))}px`;
-    menu.style.top = `${Math.max(gap, Math.round(top))}px`;
-    menu.style.visibility = "";
-  }
-
-  function openReplacementMenu(id, point) {
-    const node = typeof nodeMap === "function" ? nodeMap().get(id) || null : null;
-    if (!node) return false;
-    closeReplacementMenu();
-    if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
-    if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-    if (global.state) global.state.selectedId = id;
-
-    const menu = document.createElement("div");
-    menu.className = "rowMiniMenu";
-    menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", "Row actions");
-
-    const title = document.createElement("div");
-    title.className = "rowMiniMenuTitle";
-    title.textContent = `Actions · ${clean(node.name || node.label || "Untitled", 80) || "Untitled"}`;
-    menu.appendChild(title);
-
-    addButton(menu, "Edit", "edit", id);
-    addButton(menu, "Add below", "add_sibling", id);
-    const sep = document.createElement("div");
-    sep.className = "rowMiniMenuSep";
-    sep.setAttribute("role", "separator");
-    menu.appendChild(sep);
-    addButton(menu, "Delete", "delete", id);
-
-    menu.addEventListener("click", (ev) => ev.stopPropagation());
-    menu.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-    menu.addEventListener("keydown", (ev) => {
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        ev.stopPropagation();
-        closeReplacementMenu();
-        if (typeof refocusTreeNavigation === "function") refocusTreeNavigation(id);
-      }
-    });
-
-    document.body.appendChild(menu);
-    replacementMenu = menu;
-    positionMenu(menu, point);
-    const first = menu.querySelector(".rowMiniMenuBtn");
-    if (first instanceof HTMLElement) first.focus({ preventScroll: true });
-    console.info("[replacement row menu] opened", id);
-    return true;
-  }
-
-  function installReplacementContextMenu() {
-    if (global.__pocketReplacementContextMenuInstalled) return;
+  function installRightClickPause() {
+    if (global.__pocketRightClickPaused) return;
     document.addEventListener("contextmenu", (ev) => {
       const target = ev.target instanceof HTMLElement ? ev.target : null;
       const row = target ? target.closest("[data-node-id]") : null;
@@ -173,21 +61,36 @@
       ev.preventDefault();
       ev.stopPropagation();
       ev.stopImmediatePropagation();
-      openReplacementMenu(id, { x: ev.clientX, y: ev.clientY });
+      if (global.state) global.state.selectedId = id;
+      if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+      if (typeof setStatus === "function") setStatus("Right-click menu paused while we rebuild it.", "warn", { durationMs: 2200 });
+      console.info("[right click menu] paused", id);
     }, true);
-    document.addEventListener("pointerdown", (ev) => {
-      if (!(replacementMenu instanceof HTMLElement)) return;
-      if (replacementMenu.contains(ev.target)) return;
-      closeReplacementMenu();
+    global.__pocketRightClickPaused = true;
+    console.info("[right click menu] paused installed");
+  }
+
+  function installDoubleClickRoute() {
+    if (global.__pocketDoubleClickItemDetailsInstalled) return;
+    document.addEventListener("dblclick", (ev) => {
+      const target = ev.target instanceof HTMLElement ? ev.target : null;
+      const row = target ? target.closest("[data-node-id]") : null;
+      const id = row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
+      if (!id) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+      openItemDetails(id);
     }, true);
-    global.__pocketReplacementContextMenuInstalled = true;
-    console.info("[replacement row menu] installed");
+    global.__pocketDoubleClickItemDetailsInstalled = true;
+    console.info("[double click item details] installed");
   }
 
   function init() {
     global.PocketBuild = BUILD;
     ensureBuildLabel();
-    installReplacementContextMenu();
+    installRightClickPause();
+    installDoubleClickRoute();
   }
 
   if (document.readyState === "loading") {
