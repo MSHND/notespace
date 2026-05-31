@@ -135,12 +135,53 @@
     }
   }
 
+  function installOutlineSurfacePolish(peWin) {
+    try {
+      if (!peWin || peWin.closed || !peWin.document || peWin.__pocketOutlineSurfacePolishInstalled) return false;
+      const doc = peWin.document;
+      const style = doc.createElement("style");
+      style.id = "pocketOutlineSurfacePolish";
+      style.textContent = `
+        #outlinePane {
+          border: 0 !important;
+          box-shadow: none !important;
+          background: transparent !important;
+          border-radius: 0 !important;
+          padding: 6px 0 !important;
+        }
+        #outlinePane .outlineRow {
+          border-radius: 9px !important;
+          background: transparent !important;
+        }
+        #outlinePane .outlineRow:hover,
+        #outlinePane .outlineRow:focus-within {
+          background: rgba(148,163,184,.075) !important;
+        }
+        #outlinePane .outlineInput {
+          border: 0 !important;
+          box-shadow: none !important;
+          background: transparent !important;
+        }
+        #outlinePane .outlineInput:focus {
+          background: transparent !important;
+        }
+      `;
+      doc.head.appendChild(style);
+      peWin.__pocketOutlineSurfacePolishInstalled = true;
+      console.info("[outline surface polish] installed");
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function injectOldDetailsButton(peWin, nodeId) {
     try {
       if (!peWin || peWin.closed || !peWin.document) return false;
       const doc = peWin.document;
       installPeUnsavedGuard(peWin);
       installOutlineArrowPolish(peWin);
+      installOutlineSurfacePolish(peWin);
       if (doc.getElementById("peOldDetailsBtn")) return true;
       const bar = doc.querySelector(".bar");
       const saveBtn = doc.getElementById("saveBtn");
