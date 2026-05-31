@@ -115,14 +115,17 @@
       const outlinePane = doc.getElementById("outlinePane");
       if (!outlinePane) return false;
       doc.addEventListener("keydown", (ev) => {
-        if (ev.key !== "ArrowLeft" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
+        if ((ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
         const input = ev.target instanceof peWin.HTMLInputElement ? ev.target : null;
         if (!input || !input.classList.contains("outlineInput")) return;
         const atStart = input.selectionStart === 0 && input.selectionEnd === 0;
         if (!atStart) return;
         const row = input.closest(".outlineRow");
         const twist = row ? row.querySelector(".twist.hasKids") : null;
-        if (!(twist instanceof peWin.HTMLElement) || twist.textContent !== "▾") return;
+        if (!(twist instanceof peWin.HTMLElement)) return;
+        const shouldCollapse = ev.key === "ArrowLeft" && twist.textContent === "▾";
+        const shouldExpand = ev.key === "ArrowRight" && twist.textContent === "▸";
+        if (!shouldCollapse && !shouldExpand) return;
         ev.preventDefault();
         ev.stopPropagation();
         twist.click();
