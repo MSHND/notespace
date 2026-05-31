@@ -164,6 +164,10 @@
   function markClean() { dirty = false; window.__pocketPeDirty = false; setStatus("saved"); }
   function setCaretStart(input) { try { input.setSelectionRange(0, 0); } catch (_error) {} }
   function lineDepth(line) { return Math.max(0, Math.min(8, Number(line.depth) || 0)); }
+  function maxDepthForIndex(index) {
+    if (index <= 0) return 0;
+    return Math.max(0, Math.min(8, lineDepth(outline[index - 1]) + 1));
+  }
   function hasChild(index) { return !!outline[index + 1] && lineDepth(outline[index + 1]) > lineDepth(outline[index]); }
   function isHidden(index) {
     var depth = lineDepth(outline[index]);
@@ -177,7 +181,7 @@
     return false;
   }
   function normaliseLine(line, index) {
-    return { id: line.id || makeId(), text: String(line.text || "").slice(0, 1200), depth: lineDepth(line), collapsed: line.collapsed === true, order: (index + 1) * 1000 };
+    return { id: line.id || makeId(), text: String(line.text || "").slice(0, 1200), depth: Math.min(lineDepth(line), maxDepthForIndex(index)), collapsed: line.collapsed === true, order: (index + 1) * 1000 };
   }
   function serialiseOutline() { return outline.map(normaliseLine); }
   function visibleInputs() { return Array.prototype.slice.call(outlinePane.querySelectorAll(".outlineInput")); }
@@ -252,7 +256,7 @@
         if (ev.key === "Tab") {
           ev.preventDefault();
           if (ev.shiftKey) line.depth = Math.max(0, lineDepth(line) - 1);
-          else line.depth = Math.min(8, lineDepth(line) + 1);
+          else line.depth = Math.min(lineDepth(line) + 1, maxDepthForIndex(index));
           markDirty();
           renderOutline();
           focusLine(line.id);
