@@ -68,6 +68,19 @@ function buildEmptyState(queryText = "", focusRoot = null) {
   return li;
 }
 
+function openItemDetailsForNode(nodeId) {
+  const id = cleanText(nodeId || state.selectedId, 80);
+  if (!id) return false;
+  state.selectedId = id;
+  if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+  if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
+  if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
+  if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") return !!window.PocketPeEditor.open(id);
+  if (typeof window.openPocketNodeEditor === "function") return !!window.openPocketNodeEditor(id);
+  if (typeof window.openPocketEditor === "function") return !!window.openPocketEditor(id);
+  return false;
+}
+
 function renderTree() {
   const query = cleanText(el.search.value, 120).toLowerCase();
   const tokens = query.split(/\s+/).filter(Boolean);
@@ -245,7 +258,7 @@ function renderTree() {
       refreshMeta();
       renderTree();
       focusRowByNodeId(node.id);
-      openDetailsEditorForSelectedNode();
+      openItemDetailsForNode(node.id);
     });
     row.addEventListener("contextmenu", (ev) => {
       if (state.inlineEdit.id === node.id) return;
@@ -253,7 +266,8 @@ function renderTree() {
       ev.stopPropagation();
       cancelPendingCopyClick();
       state.selectedId = node.id;
-      openRowMiniMenu(node.id, row, { x: ev.clientX, y: ev.clientY });
+      if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+      if (typeof setStatus === "function") setStatus("Right-click menu paused while we rebuild it.", "warn", { durationMs: 2200 });
     });
 
     li.appendChild(row);
