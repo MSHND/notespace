@@ -117,11 +117,18 @@ function addRowActionButton(menu, label, action) {
   span.className = "rowMiniMenuLabel";
   span.textContent = label;
   btn.appendChild(span);
-  btn.addEventListener("click", (ev) => {
-    ev.preventDefault();
-    ev.stopPropagation();
+  let fired = false;
+  const fire = (ev) => {
+    if (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+    }
+    if (fired) return;
+    fired = true;
     action();
-  });
+  };
+  btn.addEventListener("pointerdown", fire);
+  btn.addEventListener("click", fire);
   menu.appendChild(btn);
   return btn;
 }
