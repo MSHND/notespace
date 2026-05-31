@@ -124,13 +124,13 @@
   .editorPane { min-height: 0; display: none; }
   .editorPane.active { display: block; }
   #textPane.active { display: grid; }
-  #outlinePane { height: 100%; overflow: auto; border: 1px solid rgba(148,163,184,.18); border-radius: 15px; background: rgba(255,255,255,.88); padding: 10px 8px; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
+  #outlinePane { height: 100%; overflow: auto; border: 0; border-radius: 0; background: transparent; padding: 6px 0; box-shadow: none; }
   .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; border-radius: 10px; transition: background .08s ease; }
-  .outlineRow:hover, .outlineRow:focus-within { background: rgba(148,163,184,.10); }
+  .outlineRow:hover, .outlineRow:focus-within { background: rgba(148,163,184,.075); }
   .twist { width: 22px; height: 24px; display: grid; place-items: center; border-radius: 8px; color: rgba(71,85,105,.72); user-select: none; }
   .twist.hasKids { cursor: pointer; }
   .outlineInput { border: 0; box-shadow: none; border-radius: 8px; min-height: 30px; padding: 4px 6px; font-size: 15px; font-weight: 400; background: transparent; }
-  .outlineInput:focus { background: rgba(255,255,255,.7); }
+  .outlineInput:focus { background: transparent; }
 </style>
 </head>
 <body>
