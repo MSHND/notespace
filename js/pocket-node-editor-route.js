@@ -120,6 +120,8 @@
   .body { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; padding: 14px; }
   input, textarea { width: 100%; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); color: #0f172a; outline: none; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
   input { min-height: 42px; padding: 9px 12px; font-size: 17px; font-weight: 560; }
+  #title { border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 38px; padding: 4px 0 8px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+  #title:focus { background: transparent; box-shadow: none; }
   textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
   .editorPane { min-height: 0; display: none; }
   .editorPane.active { display: block; }
