@@ -149,20 +149,16 @@
           border-radius: 0 !important;
           padding: 6px 0 !important;
         }
-        #outlinePane .outlineRow {
-          border-radius: 9px !important;
-          background: transparent !important;
-        }
+        #outlinePane .outlineRow,
         #outlinePane .outlineRow:hover,
         #outlinePane .outlineRow:focus-within {
-          background: rgba(148,163,184,.075) !important;
-        }
-        #outlinePane .outlineInput {
-          border: 0 !important;
-          box-shadow: none !important;
+          border-radius: 0 !important;
           background: transparent !important;
         }
+        #outlinePane .outlineInput,
         #outlinePane .outlineInput:focus {
+          border: 0 !important;
+          box-shadow: none !important;
           background: transparent !important;
         }
       `;
