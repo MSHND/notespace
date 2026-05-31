@@ -233,6 +233,25 @@
       input.value = line.text || "";
       input.setAttribute("data-line-id", line.id);
       input.addEventListener("input", function () { line.text = input.value; markDirty(); });
+      input.addEventListener("paste", function (ev) {
+        var pasted = String(ev.clipboardData && ev.clipboardData.getData("text/plain") || "").replace(/\r/g, "");
+        if (!pasted || pasted.indexOf("\n") === -1) return;
+        ev.preventDefault();
+        var parts = pasted.split("\n").map(function (part) { return part.trim(); }).filter(Boolean);
+        if (!parts.length) return;
+        var start = input.selectionStart || 0;
+        var end = input.selectionEnd || start;
+        var currentText = String(input.value || "");
+        line.text = (currentText.slice(0, start) + parts[0] + currentText.slice(end)).slice(0, 1200);
+        input.value = line.text;
+        var pastedRows = parts.slice(1).map(function (part, offset) {
+          return { id: makeId(), text: part.slice(0, 1200), depth: Math.min(lineDepth(line), maxDepthForIndex(index + 1 + offset)), collapsed: false, order: 0 };
+        });
+        if (pastedRows.length) outline.splice.apply(outline, [index + 1, 0].concat(pastedRows));
+        markDirty();
+        renderOutline();
+        focusLine(pastedRows.length ? pastedRows[pastedRows.length - 1].id : line.id);
+      });
       input.addEventListener("keydown", function (ev) {
         if (ev.key === "ArrowUp") {
           ev.preventDefault();
