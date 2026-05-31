@@ -213,7 +213,7 @@
       var twist = document.createElement("button");
       twist.type = "button";
       twist.className = "twist" + (hasChild(index) ? " hasKids" : "");
-      twist.textContent = hasChild(index) ? (line.collapsed ? "▸" : "▾") : "·";
+      twist.textContent = hasChild(index) ? (line.collapsed ? "▸" : "▾") : "";
       twist.addEventListener("click", function (ev) {
         ev.preventDefault();
         if (!hasChild(index)) return;
