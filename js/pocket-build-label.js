@@ -4,8 +4,8 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build replacement-row-menu-1",
-    stamp: "2026-05-30.5"
+    label: "build replacement-row-menu-2",
+    stamp: "2026-05-30.6"
   });
 
   let replacementMenu = null;
@@ -59,10 +59,15 @@
 
   function runAction(action, id) {
     closeReplacementMenu();
-    if (global.state) global.state.selectedId = id;
+    if (global.state) state.selectedId = id;
     if (action === "edit") return openItemDetails(id);
     if (action === "add_sibling" && typeof insertSiblingBelow === "function") {
+      const previousBlock = global.__pocketSuppressNextEditOpen;
+      global.__pocketSuppressNextEditOpen = true;
       insertSiblingBelow(id);
+      window.setTimeout(() => {
+        global.__pocketSuppressNextEditOpen = previousBlock || false;
+      }, 250);
       return true;
     }
     if (action === "delete" && typeof deleteSelected === "function") {
