@@ -183,7 +183,13 @@
   function normaliseLine(line, index) {
     return { id: line.id || makeId(), text: String(line.text || "").slice(0, 1200), depth: Math.min(lineDepth(line), maxDepthForIndex(index)), collapsed: line.collapsed === true, order: (index + 1) * 1000 };
   }
-  function serialiseOutline() { return outline.map(normaliseLine); }
+  function cleanedOutlineForSave() {
+    var cleaned = outline.map(normaliseLine);
+    while (cleaned.length > 1 && !String(cleaned[cleaned.length - 1].text || "").trim()) cleaned.pop();
+    if (!cleaned.length) cleaned.push({ id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 });
+    return cleaned;
+  }
+  function serialiseOutline() { return cleanedOutlineForSave(); }
   function visibleInputs() { return Array.prototype.slice.call(outlinePane.querySelectorAll(".outlineInput")); }
   function focusLine(id) {
     window.requestAnimationFrame(function () {
