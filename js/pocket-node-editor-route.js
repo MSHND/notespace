@@ -159,9 +159,14 @@
   text.value = initialPayload.text || "";
 
   function makeId() { return "line_" + Math.random().toString(36).slice(2, 9); }
+  function makeBlankLine() { return { id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 }; }
   function setStatus(value) { status.textContent = value || "connected"; }
   function markDirty() { dirty = true; window.__pocketPeDirty = true; setStatus("editing"); }
   function markClean() { dirty = false; window.__pocketPeDirty = false; setStatus("saved"); }
+  function ensureOutlineStarter() {
+    if (!Array.isArray(outline)) outline = [];
+    if (!outline.length) outline.push(makeBlankLine());
+  }
   function setCaretStart(input) { try { input.setSelectionRange(0, 0); } catch (_error) {} }
   function lineDepth(line) { return Math.max(0, Math.min(8, Number(line.depth) || 0)); }
   function maxDepthForIndex(index) {
@@ -186,7 +191,7 @@
   function cleanedOutlineForSave() {
     var cleaned = outline.map(normaliseLine);
     while (cleaned.length > 1 && !String(cleaned[cleaned.length - 1].text || "").trim()) cleaned.pop();
-    if (!cleaned.length) cleaned.push({ id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 });
+    if (!cleaned.length) cleaned.push(makeBlankLine());
     return cleaned;
   }
   function serialiseOutline() { return cleanedOutlineForSave(); }
@@ -208,6 +213,7 @@
   }
   function setMode(nextMode) {
     mode = nextMode === "outline" ? "outline" : "text";
+    if (mode === "outline") ensureOutlineStarter();
     modeText.classList.toggle("active", mode === "text");
     modeOutline.classList.toggle("active", mode === "outline");
     textPane.classList.toggle("active", mode === "text");
@@ -215,6 +221,7 @@
     if (mode === "outline") renderOutline();
   }
   function renderOutline() {
+    ensureOutlineStarter();
     outlinePane.innerHTML = "";
     outline.forEach(function (line, index) {
       if (isHidden(index)) return;
