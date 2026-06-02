@@ -1,0 +1,245 @@
+/* Simple standalone PE editor override.
+   Uses the existing PocketPeEditor get/apply data path, but writes a plain fresh
+   editor window so body text and outline inputs are ordinary editable fields. */
+(function initialisePocketPeSimpleStandalone(global) {
+  "use strict";
+
+  function clean(value, max = 80) {
+    return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
+  }
+
+  function escapeHtml(value) {
+    return String(value || "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch]));
+  }
+
+  function getSelectedNodeId(preferredId = "") {
+    const direct = clean(preferredId, 80);
+    if (direct) return direct;
+    const stateId = clean(global.state?.selectedId, 80);
+    if (stateId) return stateId;
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const row = active ? active.closest("[data-node-id]") : document.querySelector(".row.selected[data-node-id]");
+    return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
+  }
+
+  function makeId() {
+    return "line_" + Math.random().toString(36).slice(2, 9);
+  }
+
+  function normaliseOutline(items) {
+    const source = Array.isArray(items) && items.length ? items : [{ id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 }];
+    return source.map((line, index) => ({
+      id: clean(line && line.id, 80) || makeId(),
+      text: String(line && line.text || "").replace(/\r/g, "").slice(0, 1200),
+      depth: Math.max(0, Math.min(8, Number(line && line.depth) || 0)),
+      collapsed: line && line.collapsed === true,
+      order: (index + 1) * 1000
+    }));
+  }
+
+  function writeSimpleEditor(win, payload, applyPayload) {
+    const safePayload = {
+      nodeId: clean(payload && payload.nodeId, 80),
+      title: clean(payload && payload.title, 220),
+      mode: payload && payload.mode === "outline" ? "outline" : "text",
+      text: String(payload && payload.text || "").replace(/\r/g, "").slice(0, 12000),
+      outline: normaliseOutline(payload && payload.outline)
+    };
+
+    win.document.open();
+    win.document.write(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>item details</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fbfbf8; color: #0f172a; }
+  .bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.94); }
+  .brand { font-size: 12px; font-weight: 700; color: rgba(71,85,105,.82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .status { font-size: 11px; color: rgba(100,116,139,.82); min-width: 80px; }
+  .grow { flex: 1 1 auto; }
+  button { border: 0; border-radius: 999px; background: transparent; padding: 5px 9px; font: inherit; font-size: 12px; color: rgba(51,65,85,.88); cursor: pointer; }
+  button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.18); color: #0f172a; outline: none; }
+  main { padding: 14px; }
+  #title { width: 100%; border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 42px; padding: 4px 0 10px; font: inherit; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: #0f172a; outline: none; }
+  #text { width: 100%; min-height: 390px; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); padding: 14px; resize: vertical; font: inherit; font-size: 16px; line-height: 1.52; color: #0f172a; outline: none; pointer-events: auto; user-select: text; }
+  #outline { display: none; min-height: 390px; padding: 4px 0; pointer-events: auto; user-select: text; }
+  body.outlineMode #text { display: none; }
+  body.outlineMode #outline { display: block; }
+  .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; }
+  .outlineTwist { width: 22px; color: rgba(71,85,105,.72); user-select: none; }
+  .outlineInput { width: 100%; min-height: 30px; border: 0; border-radius: 0; background: transparent; padding: 4px 6px; font: inherit; font-size: 15px; color: #0f172a; outline: none; box-shadow: none; pointer-events: auto; user-select: text; }
+  .outlineInput:focus { background: rgba(255,255,255,.52); }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <div class="brand">details · simple PE · ${escapeHtml(safePayload.nodeId)}</div>
+    <button id="modeText" type="button">text</button>
+    <button id="modeOutline" type="button">outline</button>
+    <button id="saveBtn" type="button">save</button>
+    <span id="status" class="status">ready</span>
+    <div class="grow"></div>
+    <button id="closeBtn" type="button">×</button>
+  </div>
+  <main>
+    <input id="title" aria-label="Item details title">
+    <textarea id="text" aria-label="Item details text" spellcheck="true"></textarea>
+    <div id="outline" aria-label="Item details outline"></div>
+  </main>
+<script>
+(function () {
+  var nodeId = ${JSON.stringify(safePayload.nodeId)};
+  var mode = ${JSON.stringify(safePayload.mode)};
+  var outline = ${JSON.stringify(safePayload.outline)};
+  var dirty = false;
+  var title = document.getElementById("title");
+  var text = document.getElementById("text");
+  var outlineEl = document.getElementById("outline");
+  var status = document.getElementById("status");
+  var modeText = document.getElementById("modeText");
+  var modeOutline = document.getElementById("modeOutline");
+
+  title.value = ${JSON.stringify(safePayload.title)};
+  text.value = ${JSON.stringify(safePayload.text)};
+
+  function makeId() { return "line_" + Math.random().toString(36).slice(2, 9); }
+  function setStatus(value) { status.textContent = value || "ready"; }
+  function markDirty() { dirty = true; window.__pocketPeDirty = true; setStatus("editing"); }
+  function markClean() { dirty = false; window.__pocketPeDirty = false; setStatus("saved"); }
+  function lineDepth(line) { return Math.max(0, Math.min(8, Number(line && line.depth) || 0)); }
+  function normaliseLine(line, index) {
+    return { id: line.id || makeId(), text: String(line.text || "").slice(0, 1200), depth: lineDepth(line), collapsed: false, order: (index + 1) * 1000 };
+  }
+  function cleanedOutline() {
+    var cleaned = outline.map(normaliseLine);
+    while (cleaned.length > 1 && !String(cleaned[cleaned.length - 1].text || "").trim()) cleaned.pop();
+    if (!cleaned.length) cleaned.push({ id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 });
+    return cleaned;
+  }
+  function renderOutline(focusId) {
+    outlineEl.innerHTML = "";
+    outline = cleanedOutline();
+    outline.forEach(function (line, index) {
+      var row = document.createElement("div");
+      row.className = "outlineRow";
+      row.style.paddingLeft = (lineDepth(line) * 22) + "px";
+      var twist = document.createElement("div");
+      twist.className = "outlineTwist";
+      twist.textContent = "·";
+      var input = document.createElement("input");
+      input.className = "outlineInput";
+      input.type = "text";
+      input.value = line.text || "";
+      input.dataset.lineId = line.id;
+      input.addEventListener("input", function () { line.text = input.value; markDirty(); });
+      input.addEventListener("keydown", function (ev) {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          var newLine = { id: makeId(), text: "", depth: lineDepth(line), collapsed: false, order: 0 };
+          outline.splice(index + 1, 0, newLine);
+          markDirty();
+          renderOutline(newLine.id);
+          return;
+        }
+        if (ev.key === "Tab") {
+          ev.preventDefault();
+          line.depth = ev.shiftKey ? Math.max(0, lineDepth(line) - 1) : Math.min(8, lineDepth(line) + 1);
+          markDirty();
+          renderOutline(line.id);
+          return;
+        }
+        if (ev.key === "Backspace" && !input.value && outline.length > 1) {
+          ev.preventDefault();
+          var previous = outline[Math.max(0, index - 1)];
+          outline.splice(index, 1);
+          markDirty();
+          renderOutline(previous.id);
+        }
+      });
+      row.appendChild(twist);
+      row.appendChild(input);
+      outlineEl.appendChild(row);
+    });
+    if (focusId) {
+      requestAnimationFrame(function () {
+        var next = outlineEl.querySelector('[data-line-id="' + focusId + '"]');
+        if (next) next.focus({ preventScroll: true });
+      });
+    }
+  }
+  function setMode(nextMode) {
+    mode = nextMode === "outline" ? "outline" : "text";
+    document.body.classList.toggle("outlineMode", mode === "outline");
+    modeText.classList.toggle("active", mode === "text");
+    modeOutline.classList.toggle("active", mode === "outline");
+    if (mode === "outline") renderOutline();
+  }
+  function save() {
+    setStatus("saving…");
+    try {
+      if (window.opener && !window.opener.closed && typeof window.opener.__pocketPeSimpleApply === "function") {
+        var ok = window.opener.__pocketPeSimpleApply({ nodeId: nodeId, title: title.value, mode: mode, text: text.value, outline: cleanedOutline() });
+        if (ok) { markClean(); return; }
+      }
+    } catch (error) { console.error(error); }
+    setStatus("save failed");
+  }
+
+  title.addEventListener("input", markDirty);
+  text.addEventListener("input", markDirty);
+  modeText.addEventListener("click", function () { setMode("text"); text.focus(); });
+  modeOutline.addEventListener("click", function () { setMode("outline"); var first = outlineEl.querySelector(".outlineInput"); if (first) first.focus(); });
+  document.getElementById("saveBtn").addEventListener("click", save);
+  document.getElementById("closeBtn").addEventListener("click", function () { if (!dirty || confirm("Close without saving?")) window.close(); });
+  document.addEventListener("keydown", function (ev) { if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "s") { ev.preventDefault(); save(); } });
+  setMode(mode);
+  requestAnimationFrame(function () { if (mode === "outline") { var first = outlineEl.querySelector(".outlineInput"); if (first) first.focus(); } else text.focus(); });
+})();
+</script>
+</body>
+</html>`);
+    win.document.close();
+  }
+
+  function openSimple(nodeId = "") {
+    const base = global.PocketPeEditor;
+    const id = getSelectedNodeId(nodeId);
+    const payload = base && typeof base.getPayload === "function" ? base.getPayload(id) : null;
+    if (!payload) {
+      if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
+      return false;
+    }
+    global.__pocketPeSimpleApply = function applyFromSimpleEditor(nextPayload) {
+      return !!(global.PocketPeEditor && typeof global.PocketPeEditor.apply === "function" && global.PocketPeEditor.apply(nextPayload));
+    };
+    const width = 760;
+    const height = 620;
+    const left = Math.max(0, Math.round((global.screen.availWidth - width) / 2));
+    const top = Math.max(0, Math.round((global.screen.availHeight - height) / 2));
+    const win = global.open("", `pocketSimplePe_${clean(payload.nodeId, 40)}_${Date.now()}`, `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
+    if (!win) {
+      if (typeof setStatus === "function") setStatus("Details popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
+      return false;
+    }
+    writeSimpleEditor(win, payload, global.__pocketPeSimpleApply);
+    win.focus();
+    console.info("[simple standalone PE] opened", { id: payload.nodeId });
+    return true;
+  }
+
+  function install() {
+    const base = global.PocketPeEditor;
+    if (!base || typeof base.getPayload !== "function" || typeof base.apply !== "function") {
+      window.setTimeout(install, 120);
+      return;
+    }
+    global.PocketPeEditor = Object.freeze({ ...base, open: openSimple, __simpleStandalone: true });
+    global.openPocketPeEditor = openSimple;
+    console.info("[simple standalone PE] installed");
+  }
+
+  install();
+})(window);
