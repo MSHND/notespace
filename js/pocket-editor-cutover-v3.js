@@ -1,5 +1,6 @@
 /* Editor cutover v3.
-   Route Edit/Enter/double-click/right-click Edit into the popout editor.
+   Route Edit/double-click/right-click Edit into the popout editor.
+   Enter is left available for copy/row behaviours and must not open editors.
    The old inline details editor may be used only as a temporary compatibility
    bridge for the existing popout code; it is immediately hidden and never
    trusted as stale source data. */
@@ -168,18 +169,6 @@
     eatAndOpen(ev, id);
   }
 
-  function keyCapture(ev) {
-    if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
-    if (global.state?.moveMode || global.state?.inlineEdit?.id || global.pendingPathImport) return;
-    const node = selectedNode();
-    if (!node) return;
-    if (typeof shouldCopyOnSingleClick === "function") {
-      const hasKids = typeof sortNodesForParent === "function" ? sortNodesForParent(node.id).length > 0 : false;
-      if (shouldCopyOnSingleClick(node, hasKids)) return;
-    }
-    eatAndOpen(ev, node.id);
-  }
-
   function install() {
     hideInlineEditor();
     global.openPocketNodeEditor = openDirect;
@@ -188,9 +177,6 @@
     // The current popout opener depends on the original function internally.
     document.addEventListener("click", clickCapture, true);
     document.addEventListener("dblclick", doubleClickCapture, true);
-    const treeWrap = document.getElementById("treeWrap");
-    if (treeWrap) treeWrap.addEventListener("keydown", keyCapture, true);
-    else document.addEventListener("keydown", keyCapture, true);
     console.info("[editor cutover v3] installed", {
       hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
       hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
