@@ -37,7 +37,7 @@
     }));
   }
 
-  function writeSimpleEditor(win, payload, applyPayload) {
+  function writeSimpleEditor(win, payload) {
     const safePayload = {
       nodeId: clean(payload && payload.nodeId, 80),
       title: clean(payload && payload.title, 220),
@@ -62,8 +62,11 @@
   .grow { flex: 1 1 auto; }
   button { border: 0; border-radius: 999px; background: transparent; padding: 5px 9px; font: inherit; font-size: 12px; color: rgba(51,65,85,.88); cursor: pointer; }
   button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.18); color: #0f172a; outline: none; }
-  main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 14px; }
-  #title { flex: 0 0 auto; width: 100%; border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 42px; padding: 4px 0 10px; font: inherit; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: #0f172a; outline: none; }
+  main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; }
+  .titlePanel { flex: 0 0 auto; border: 1px solid rgba(148,163,184,.24); border-radius: 15px; background: rgba(255,255,255,.74); padding: 10px 14px 11px; box-shadow: 0 10px 24px -24px rgba(15,23,42,.36); }
+  .titleLabel { display: block; margin: 0 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(100,116,139,.78); }
+  #title { width: 100%; border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 36px; padding: 0; font: inherit; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: #0f172a; outline: none; }
+  .bodyPanel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; border-top: 1px solid rgba(148,163,184,.28); padding-top: 12px; }
   #text { flex: 1 1 auto; width: 100%; min-height: 0; height: auto; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); padding: 14px; resize: none; font: inherit; font-size: 16px; line-height: 1.52; color: #0f172a; outline: none; pointer-events: auto; user-select: text; }
   #outline { display: none; flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); padding: 12px 14px; pointer-events: auto; user-select: text; }
   body.outlineMode #text { display: none; }
@@ -85,9 +88,14 @@
     <button id="closeBtn" type="button">×</button>
   </div>
   <main>
-    <input id="title" aria-label="Item details title">
-    <textarea id="text" aria-label="Item details text" spellcheck="true"></textarea>
-    <div id="outline" aria-label="Item details outline"></div>
+    <section class="titlePanel" aria-label="Item title">
+      <span class="titleLabel">title</span>
+      <input id="title" aria-label="Item details title">
+    </section>
+    <section class="bodyPanel" aria-label="Item body">
+      <textarea id="text" aria-label="Item details text" spellcheck="true"></textarea>
+      <div id="outline" aria-label="Item details outline"></div>
+    </section>
   </main>
 <script>
 (function () {
@@ -224,7 +232,7 @@
       if (typeof setStatus === "function") setStatus("Details popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
       return false;
     }
-    writeSimpleEditor(win, payload, global.__pocketPeSimpleApply);
+    writeSimpleEditor(win, payload);
     win.focus();
     console.info("[simple standalone PE] opened", { id: payload.nodeId });
     return true;
