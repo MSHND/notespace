@@ -1,6 +1,6 @@
 /* Standalone item details route.
-   Enter opens a simple item details editor for the selected node. The editor stores
-   data in node.pe and does not read/write the old inline details editor fields. */
+   Double-click or right-click Edit opens a simple item details editor for the selected node.
+   The editor stores data in node.pe and does not read/write the old inline details editor fields. */
 (function initialisePocketPeRoute(global) {
   "use strict";
 
@@ -23,12 +23,6 @@
     const activeRow = active ? active.closest("[data-node-id]") : null;
     const selectedRow = document.querySelector(".row.selected[data-node-id], .row:focus[data-node-id], [aria-selected='true'][data-node-id]");
     const row = activeRow || selectedRow;
-    return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
-  }
-
-  function nodeIdFromEvent(ev) {
-    const target = ev?.target instanceof HTMLElement ? ev.target : null;
-    const row = target ? target.closest("[data-node-id]") : null;
     return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
   }
 
@@ -110,23 +104,23 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fbfbf8; color: #0f172a; overflow: hidden; }
-  main { height: 100vh; display: grid; grid-template-rows: auto minmax(0, 1fr); }
-  .bar { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.78); }
+  main { height: 100vh; display: flex; flex-direction: column; min-height: 0; }
+  .bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.78); }
   .brand { font-size: 13px; font-weight: 700; color: rgba(51,65,85,.82); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button { border: 0; background: transparent; border-radius: 999px; padding: 4px 8px; font: inherit; font-size: 12px; color: rgba(51,65,85,.82); cursor: pointer; }
   button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.16); outline: none; color: #0f172a; }
   .status { min-width: 72px; font-size: 11px; color: rgba(100,116,139,.74); }
   .grow { flex: 1 1 auto; }
-  .body { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; padding: 14px; }
+  .body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; }
   input, textarea { width: 100%; border: 1px solid rgba(148,163,184,.22); border-radius: 15px; background: rgba(255,255,255,.96); color: #0f172a; outline: none; box-shadow: 0 10px 24px -22px rgba(15,23,42,.38); }
   input { min-height: 42px; padding: 9px 12px; font-size: 17px; font-weight: 560; }
-  #title { border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 38px; padding: 4px 0 8px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
+  #title { flex: 0 0 auto; border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 38px; padding: 4px 0 8px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
   #title:focus { background: transparent; box-shadow: none; }
-  textarea { display: block; min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
-  .editorPane { min-height: 0; height: 100%; display: none; }
+  textarea { display: block; min-height: 260px; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
+  .editorPane { flex: 1 1 auto; min-height: 260px; display: none; }
   .editorPane.active { display: block; }
-  #textPane.active { display: grid; grid-template-rows: minmax(0, 1fr); }
-  #outlinePane { height: 100%; overflow: auto; border: 0; border-radius: 0; background: transparent; padding: 6px 0; box-shadow: none; }
+  #textPane.active { display: block; }
+  #outlinePane { overflow: auto; border: 0; border-radius: 0; background: transparent; padding: 6px 0; box-shadow: none; }
   #outlinePane.active { display: block; }
   .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; border-radius: 0; transition: none; background: transparent; }
   .outlineRow:hover, .outlineRow:focus-within { background: transparent; }
@@ -352,7 +346,7 @@
     const top = Math.max(0, Math.round((global.screen.availHeight - height) / 2));
     const win = global.open("", "pocketStandalonePe", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
     if (!win) {
-      if (typeof setStatus === "function") setStatus("Details popout blocked. Allow popups for pocket, then try Enter again.", "warn", { durationMs: 5200 });
+      if (typeof setStatus === "function") setStatus("Details popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
       console.warn("[item details route] popup blocked");
       return false;
     }
@@ -361,13 +355,6 @@
     console.info("[item details route] opened", { id: node.id, label: clean(node.label, 80) });
     return true;
   }
-
-  document.addEventListener("keydown", function (ev) {
-    if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
-    if (global.state?.moveMode || global.state?.inlineEdit?.id || global.pendingPathImport) return;
-    const capturedId = nodeIdFromEvent(ev) || domSelectedNodeId() || clean(global.state?.selectedId, 80);
-    window.setTimeout(() => openPeForNode(capturedId), 0);
-  }, true);
 
   global.PocketPeEditor = Object.freeze({ open: openPeForNode, getPayload, apply: applyPe });
   global.openPocketPeEditor = openPeForNode;
