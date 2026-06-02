@@ -66,7 +66,7 @@
         <button id="cmdAddChild" class="commandBtn" type="button"><span>Add child</span><span class="commandHint">palette</span></button>
         <button id="cmdAddSibling" class="commandBtn" type="button"><span>Add sibling below</span><span class="commandHint">+</span></button>
         <button id="cmdRename" class="commandBtn" type="button"><span>Rename</span><span class="commandHint">R</span></button>
-        <button id="cmdEdit" class="commandBtn" type="button"><span>Edit details</span><span class="commandHint">Enter</span></button>
+        <button id="cmdEdit" class="commandBtn" type="button"><span>Edit details</span><span class="commandHint">Double-click</span></button>
         <button id="cmdMove" class="commandBtn" type="button"><span>Move mode</span><span class="commandHint">arrows</span></button>
         <button id="cmdFocus" class="commandBtn" type="button"><span>Focus here</span><span class="commandHint">Shift + F</span></button>
         <button id="cmdSearch" class="commandBtn" type="button"><span>Filter</span><span class="commandHint">Ctrl/Cmd + F</span></button>
@@ -85,12 +85,12 @@
         <div class="controlsIntro">These are the current rules. The toolbar stays quiet; row actions live on right-click / .; Ctrl/Cmd+F wakes the filter</div>
         <div class="controlsList">
           <div class="controlRow"><span class="controlKey">+</span><span class="controlMeaning">add a new item below the selected item</span></div>
-          <div class="controlRow"><span class="controlKey">Enter</span><span class="controlMeaning">edit details; in copy branches, copy the selected text</span></div>
+          <div class="controlRow"><span class="controlKey">Enter</span><span class="controlMeaning">copy in copy branches</span></div>
           <div class="controlRow"><span class="controlKey">Double-click</span><span class="controlMeaning">edit details, including in copy branches</span></div>
           <div class="controlRow"><span class="controlKey">Arrow keys</span><span class="controlMeaning">move through the tree; in Move mode, move the item</span></div>
           <div class="controlRow"><span class="controlKey">Space</span><span class="controlMeaning">fold or unfold children</span></div>
           <div class="controlRow"><span class="controlKey">Esc</span><span class="controlMeaning">close, clear, or return to the tree</span></div>
-          <div class="controlRow"><span class="controlKey">Right-click / .</span><span class="controlMeaning">open row actions, including Delete</span></div>
+          <div class="controlRow"><span class="controlKey">Right-click / .</span><span class="controlMeaning">open row actions, including Edit and Delete</span></div>
           <div class="controlRow"><span class="controlKey">Ctrl/Cmd + S</span><span class="controlMeaning">export backup</span></div>
         </div>
         <div class="controlsFooter">
@@ -167,5 +167,6 @@
   <script src="js/pocket-node-editor-route.js"></script>
   <script src="js/pocket-pe-save-dirty.js"></script>
   <script src="js/pocket-editor-human-close.js"></script>
+  <script src="js/pocket-enter-copy-only.js"></script>
 </body>
 </html>
