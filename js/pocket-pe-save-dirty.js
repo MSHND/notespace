@@ -1,10 +1,10 @@
 /* PE save dirty cue + old-details migration helper.
-   PE records an op through PocketPeEditor.apply(). This wrapper now treats the
-   editor Save button as a full save intention: apply editor content, then save
-   the truth JSON through the main export path. It also adds a small node-bound
-   bridge button for old inline details, adds a browser close/refresh guard for
-   unsaved editor changes, and blocks node switching while the editor has
-   unsaved local edits. */
+   PE records an op through PocketPeEditor.apply(). This wrapper treats the
+   editor Save button as a full save intention when the normal truth-file handle
+   is available, but it must not silently download fallback JSON copies from the
+   popout path. It also adds a small node-bound bridge button for old inline
+   details, adds a browser close/refresh guard for unsaved editor changes, and
+   blocks node switching while the editor has unsaved local edits. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -81,9 +81,12 @@
       return;
     }
     if (typeof setStatus === "function") setStatus("Saving editor content and truth file…", "ok", { durationMs: 3200 });
-    void exportTree().then((saved) => {
+    void exportTree({ downloadFallback: false }).then((saved) => {
       if (saved) return;
-      // exportTree handles its own cancelled / already-saved / stale-guard status.
+      if (typeof setStatus === "function") {
+        setStatus("Editor saved locally. Use main Save to reconnect the truth file — no download copy was made.", "warn", { durationMs: 7200 });
+      }
+      if (typeof flashSaveChip === "function") flashSaveChip("save*");
     }).catch((error) => {
       console.error("[pe full save] failed", error);
       if (typeof setStatus === "function") setStatus("Editor content saved locally, but the truth file save failed.", "warn", { durationMs: 6200 });
