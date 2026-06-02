@@ -1,17 +1,15 @@
 /* Editor cutover v3.
-   Route Edit/double-click/right-click Edit into the popout editor.
+   Route Edit/double-click/right-click Edit into the standalone item details editor.
    Enter is left available for copy/row behaviours and must not open editors.
-   The old inline details editor may be used only as a temporary compatibility
-   bridge for the existing popout code; it is immediately hidden and never
-   trusted as stale source data. */
+   The old inline/details popout path is kept only as a fallback. */
 
 (function initialisePocketEditorCutoverV3(global) {
   "use strict";
 
   console.info("[editor cutover v3] loaded");
 
-  // Preserve the original details opener. PocketEditorPopout.open() currently
-  // calls this internally, so replacing it creates a recursion loop.
+  // Preserve the original details opener for fallback only. The main route is now
+  // PocketPeEditor.open(node.id), which writes the standalone item details window.
   const legacyOpenDetailsForSelectedNode = typeof global.openDetailsEditorForSelectedNode === "function"
     ? global.openDetailsEditorForSelectedNode.bind(global)
     : null;
@@ -75,33 +73,17 @@
     return true;
   }
 
-  function openDirect(input) {
-    const node = selectedNode(input);
-    console.info("[editor cutover v3] edit requested", {
-      requested: clean(input?.id || input, 80),
-      selectedId: clean(global.state?.selectedId, 80),
-      detailsEditId: clean(global.state?.detailsEdit?.id, 80),
-      nodeId: clean(node?.id, 80),
-      label: clean(node?.label, 80),
-      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
-      hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
-    });
+  function openStandalone(node) {
+    if (!global.PocketPeEditor || typeof global.PocketPeEditor.open !== "function") return false;
+    clearDraftsFor(node.id);
+    hideInlineEditor();
+    return !!global.PocketPeEditor.open(node.id);
+  }
 
-    if (!node) {
-      setStatusSafe("Select an item first.", "warn");
-      return false;
-    }
-
-    if (!global.PocketEditorPopout || typeof global.PocketEditorPopout.open !== "function") {
-      setStatusSafe("Editor popout is not available yet. Refresh and try again.", "warn");
-      return false;
-    }
-
+  function openLegacyFallback(node) {
     clearDraftsFor(node.id);
     forceInlineBridgeToNode(node);
 
-    // Ensure the legacy details bridge is open with the selected node before
-    // the existing popout builder reads from it. Then hide it immediately.
     try {
       if (legacyOpenDetailsForSelectedNode) legacyOpenDetailsForSelectedNode();
       forceInlineBridgeToNode(node);
@@ -111,10 +93,9 @@
 
     let ok = false;
     try {
-      ok = !!global.PocketEditorPopout.open();
+      ok = !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function" && global.PocketEditorPopout.open());
     } catch (error) {
-      console.error("[editor cutover v3] popout open failed", error);
-      setStatusSafe("Editor failed to open. Check Console for details.", "warn");
+      console.error("[editor cutover v3] fallback popout open failed", error);
       ok = false;
     }
 
@@ -124,8 +105,38 @@
     }, 0);
     window.setTimeout(hideInlineEditor, 80);
     window.setTimeout(hideInlineEditor, 240);
+    return ok;
+  }
 
-    console.info("[editor cutover v3] popout open result", { ok, id: node.id });
+  function openDirect(input) {
+    const node = selectedNode(input);
+    console.info("[editor cutover v3] edit requested", {
+      requested: clean(input?.id || input, 80),
+      selectedId: clean(global.state?.selectedId, 80),
+      detailsEditId: clean(global.state?.detailsEdit?.id, 80),
+      nodeId: clean(node?.id, 80),
+      label: clean(node?.label, 80),
+      hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
+      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
+      hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
+    });
+
+    if (!node) {
+      setStatusSafe("Select an item first.", "warn");
+      return false;
+    }
+
+    let ok = false;
+    try {
+      ok = openStandalone(node);
+    } catch (error) {
+      console.warn("[editor cutover v3] standalone item details failed", error);
+      ok = false;
+    }
+
+    if (!ok) ok = openLegacyFallback(node);
+    if (!ok) setStatusSafe("Editor failed to open. Refresh and try again.", "warn");
+    console.info("[editor cutover v3] editor open result", { ok, id: node.id });
     return ok;
   }
 
@@ -173,11 +184,10 @@
     hideInlineEditor();
     global.openPocketNodeEditor = openDirect;
     global.openPocketEditor = openDirect;
-    // Do NOT replace openDetailsEditorForSelectedNode/openDetailsEditorForNode.
-    // The current popout opener depends on the original function internally.
     document.addEventListener("click", clickCapture, true);
     document.addEventListener("dblclick", doubleClickCapture, true);
     console.info("[editor cutover v3] installed", {
+      hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
       hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
       hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
     });
