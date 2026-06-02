@@ -122,11 +122,12 @@
   input { min-height: 42px; padding: 9px 12px; font-size: 17px; font-weight: 560; }
   #title { border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 38px; padding: 4px 0 8px; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; }
   #title:focus { background: transparent; box-shadow: none; }
-  textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
-  .editorPane { min-height: 0; display: none; }
+  textarea { display: block; min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
+  .editorPane { min-height: 0; height: 100%; display: none; }
   .editorPane.active { display: block; }
-  #textPane.active { display: grid; }
+  #textPane.active { display: grid; grid-template-rows: minmax(0, 1fr); }
   #outlinePane { height: 100%; overflow: auto; border: 0; border-radius: 0; background: transparent; padding: 6px 0; box-shadow: none; }
+  #outlinePane.active { display: block; }
   .outlineRow { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; min-height: 32px; border-radius: 0; transition: none; background: transparent; }
   .outlineRow:hover, .outlineRow:focus-within { background: transparent; }
   .twist { width: 22px; height: 24px; display: grid; place-items: center; border-radius: 8px; color: rgba(71,85,105,.72); user-select: none; }
@@ -138,7 +139,7 @@
 <body>
 <main>
   <div class="bar"><div class="brand">details · ${escapeHtml(nodeLabel)}</div><button id="modeText" type="button">text</button><button id="modeOutline" type="button">outline</button><button id="saveBtn" type="button">save</button><span id="status" class="status">connected</span><div class="grow"></div><button id="closeBtn" type="button">×</button></div>
-  <section class="body"><input id="title" aria-label="Item details title"><div id="textPane" class="editorPane"><textarea id="text" aria-label="Item details text"></textarea></div><div id="outlinePane" class="editorPane" aria-label="Item details outline"></div></section>
+  <section class="body"><input id="title" aria-label="Item details title"><div id="textPane" class="editorPane"><textarea id="text" aria-label="Item details text"></textarea></div><div id="outlinePane" class="editorPane" aria-label="Item details outline" tabindex="-1"></div></section>
 </main>
 <script>
 (function () {
@@ -320,6 +321,10 @@
   }
   title.addEventListener("input", markDirty);
   text.addEventListener("input", markDirty);
+  textPane.addEventListener("click", function () { text.focus(); });
+  outlinePane.addEventListener("click", function (ev) {
+    if (ev.target === outlinePane) focusLine((outline[0] && outline[0].id) || "");
+  });
   modeText.addEventListener("click", function () { setMode("text"); markDirty(); text.focus(); });
   modeOutline.addEventListener("click", function () { setMode("outline"); markDirty(); focusLine(outline[0].id); });
   document.getElementById("saveBtn").addEventListener("click", save);
