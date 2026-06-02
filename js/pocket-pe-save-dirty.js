@@ -1,9 +1,9 @@
 /* PE save dirty cue + old-details migration helper.
    PE already records an op through PocketPeEditor.apply(). This wrapper makes
    the main save/export chip visibly dirty after a PE local save, adds a small
-   node-bound bridge button for old inline details, makes Enter open PE only,
-   adds a browser close/refresh guard for unsaved editor changes, and blocks
-   node switching while the editor has unsaved local edits. */
+   node-bound bridge button for old inline details, adds a browser close/refresh
+   guard for unsaved editor changes, and blocks node switching while the editor
+   has unsaved local edits. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -16,12 +16,6 @@
     const activeRow = active ? active.closest("[data-node-id]") : null;
     const selectedRow = document.querySelector(".row.selected[data-node-id], .row:focus[data-node-id], [aria-selected='true'][data-node-id]");
     const row = activeRow || selectedRow;
-    return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
-  }
-
-  function nodeIdFromEvent(ev) {
-    const target = ev?.target instanceof HTMLElement ? ev.target : null;
-    const row = target ? target.closest("[data-node-id]") : null;
     return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
   }
 
@@ -227,26 +221,6 @@
     console.info("[pe old details] window.open interceptor installed");
   }
 
-  function installEnterPeOnly() {
-    if (global.__pocketPeEnterOnlyInstalled) return;
-    document.addEventListener("keydown", function peOnlyEnterCapture(ev) {
-      if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
-      if (global.state?.moveMode || global.state?.inlineEdit?.id || global.pendingPathImport) return;
-      const capturedId = nodeIdFromEvent(ev) || domSelectedNodeId() || clean(global.state?.selectedId, 80);
-      ev.preventDefault();
-      ev.stopPropagation();
-      ev.stopImmediatePropagation();
-      if (!confirmPeSwitch(capturedId)) return;
-      global.__pocketPeOpeningNodeId = capturedId;
-      window.setTimeout(() => {
-        if (typeof global.openPocketPeEditor === "function") global.openPocketPeEditor(capturedId);
-        window.setTimeout(() => { if (global.__pocketPeOpeningNodeId === capturedId) global.__pocketPeOpeningNodeId = ""; }, 500);
-      }, 0);
-    }, true);
-    global.__pocketPeEnterOnlyInstalled = true;
-    console.info("[pe enter only] installed");
-  }
-
   function installDirtyCue() {
     const pe = global.PocketPeEditor;
     if (!pe || typeof pe.apply !== "function" || pe.__dirtyCueWrapped) return false;
@@ -280,7 +254,6 @@
 
   global.PocketPeOldDetailsBridge = Object.freeze({ open: openOldDetailsForNode });
   installOpenInterceptor();
-  installEnterPeOnly();
   if (!installDirtyCue()) {
     window.setTimeout(installDirtyCue, 0);
     window.setTimeout(installDirtyCue, 250);
