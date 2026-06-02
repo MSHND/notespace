@@ -58,10 +58,11 @@
   body { height: 100vh; margin: 0; display: flex; flex-direction: column; overflow: hidden; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fbfbf8; color: #0f172a; }
   .bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.94); }
   .brand { font-size: 12px; font-weight: 700; color: rgba(71,85,105,.82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
-  .status { font-size: 11px; color: rgba(100,116,139,.82); min-width: 80px; }
+  .status { font-size: 11px; color: rgba(100,116,139,.82); min-width: 120px; }
   .grow { flex: 1 1 auto; }
   button { border: 0; border-radius: 999px; background: transparent; padding: 5px 9px; font: inherit; font-size: 12px; color: rgba(51,65,85,.88); cursor: pointer; }
   button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.18); color: #0f172a; outline: none; }
+  button:disabled { opacity: .56; cursor: default; }
   main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; }
   .titlePanel { flex: 0 0 auto; border: 1px solid rgba(148,163,184,.24); border-radius: 15px; background: rgba(255,255,255,.74); padding: 10px 14px 11px; box-shadow: 0 10px 24px -24px rgba(15,23,42,.36); }
   .titleLabel { display: block; margin: 0 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(100,116,139,.78); }
@@ -109,6 +110,7 @@
   var status = document.getElementById("status");
   var modeText = document.getElementById("modeText");
   var modeOutline = document.getElementById("modeOutline");
+  var saveBtn = document.getElementById("saveBtn");
 
   title.value = ${JSON.stringify(safePayload.title)};
   text.value = ${JSON.stringify(safePayload.text)};
@@ -116,7 +118,7 @@
   function makeId() { return "line_" + Math.random().toString(36).slice(2, 9); }
   function setStatus(value) { status.textContent = value || "ready"; }
   function markDirty() { dirty = true; window.__pocketPeDirty = true; setStatus("editing"); }
-  function markClean() { dirty = false; window.__pocketPeDirty = false; setStatus("saved"); }
+  function markClean(message) { dirty = false; window.__pocketPeDirty = false; setStatus(message || "saved"); }
   function lineDepth(line) { return Math.max(0, Math.min(8, Number(line && line.depth) || 0)); }
   function normaliseLine(line, index) {
     return { id: line.id || makeId(), text: String(line.text || "").slice(0, 1200), depth: lineDepth(line), collapsed: false, order: (index + 1) * 1000 };
@@ -187,12 +189,29 @@
   }
   function save() {
     setStatus("saving…");
+    saveBtn.disabled = true;
     try {
       if (window.opener && !window.opener.closed && typeof window.opener.__pocketPeSimpleApply === "function") {
-        var ok = window.opener.__pocketPeSimpleApply({ nodeId: nodeId, title: title.value, mode: mode, text: text.value, outline: cleanedOutline() });
-        if (ok) { markClean(); return; }
+        var result = window.opener.__pocketPeSimpleApply({ nodeId: nodeId, title: title.value, mode: mode, text: text.value, outline: cleanedOutline() });
+        Promise.resolve(result).then(function (ok) {
+          if (ok) {
+            markClean("saved");
+            window.setTimeout(function () { if (!dirty) setStatus("saved / check main"); }, 900);
+          } else {
+            setStatus("save failed");
+          }
+        }).catch(function (error) {
+          console.error(error);
+          setStatus("save failed");
+        }).finally(function () {
+          saveBtn.disabled = false;
+        });
+        return;
       }
-    } catch (error) { console.error(error); }
+    } catch (error) {
+      console.error(error);
+    }
+    saveBtn.disabled = false;
     setStatus("save failed");
   }
 
@@ -200,7 +219,7 @@
   text.addEventListener("input", markDirty);
   modeText.addEventListener("click", function () { setMode("text"); text.focus(); });
   modeOutline.addEventListener("click", function () { setMode("outline"); var first = outlineEl.querySelector(".outlineInput"); if (first) first.focus(); });
-  document.getElementById("saveBtn").addEventListener("click", save);
+  saveBtn.addEventListener("click", save);
   document.getElementById("closeBtn").addEventListener("click", function () { if (!dirty || confirm("Close without saving?")) window.close(); });
   document.addEventListener("keydown", function (ev) { if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "s") { ev.preventDefault(); save(); } });
   setMode(mode);
