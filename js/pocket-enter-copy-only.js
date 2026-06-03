@@ -1,6 +1,7 @@
-/* Enter copy-only guard.
+/* Enter copy-only guard + row-menu safety guard.
    Loaded last to keep Enter available for copy branches while preventing the
-   older tree handler from falling through to the inline details editor. */
+   older tree handler from falling through to the inline details editor. It also
+   keeps Move available in the right-click row menu if later menu trimming loses it. */
 (function initialisePocketEnterCopyOnly(global) {
   "use strict";
 
@@ -56,7 +57,66 @@
     if (typeof refocusTreeNavigation === "function") refocusTreeNavigation(global.state?.selectedId || "");
   }
 
+  function rowMenuHasMove(menu) {
+    return Array.from(menu.querySelectorAll(".rowMiniMenuBtn"))
+      .some((button) => clean(button.textContent, 80).toLowerCase().startsWith("move"));
+  }
+
+  function makeMoveButton() {
+    const btn = document.createElement("button");
+    btn.className = "rowMiniMenuBtn";
+    btn.type = "button";
+    btn.setAttribute("role", "menuitem");
+    btn.dataset.shortcut = "m";
+    btn.setAttribute("aria-keyshortcuts", "M");
+    btn.title = "Move (M)";
+
+    const labelSpan = document.createElement("span");
+    labelSpan.className = "rowMiniMenuLabel";
+    labelSpan.textContent = "Move";
+    btn.appendChild(labelSpan);
+
+    const keySpan = document.createElement("span");
+    keySpan.className = "rowMiniMenuShortcut";
+    keySpan.textContent = "M";
+    btn.appendChild(keySpan);
+
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const id = clean(global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
+      if (id && global.state) global.state.selectedId = id;
+      if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+      if (typeof toggleMoveMode === "function") toggleMoveMode(true);
+      else if (typeof runCommandPaletteAction === "function") runCommandPaletteAction("move");
+    });
+
+    return btn;
+  }
+
+  function ensureMoveInRowMenu() {
+    const menu = document.querySelector(".rowMiniMenu");
+    if (!(menu instanceof HTMLElement) || rowMenuHasMove(menu)) return;
+    const buttons = Array.from(menu.querySelectorAll(".rowMiniMenuBtn"));
+    const addBelow = buttons.find((button) => clean(button.textContent, 80).toLowerCase().startsWith("add below"));
+    const focusHere = buttons.find((button) => clean(button.textContent, 80).toLowerCase().startsWith("focus"));
+    const moveButton = makeMoveButton();
+    if (addBelow instanceof HTMLElement) addBelow.insertAdjacentElement("afterend", moveButton);
+    else if (focusHere instanceof HTMLElement) focusHere.insertAdjacentElement("beforebegin", moveButton);
+    else menu.appendChild(moveButton);
+    console.info("[row menu move guard] restored Move action");
+  }
+
   document.addEventListener("keydown", handleEnter, true);
   window.addEventListener("keydown", handleEnter, true);
+  document.addEventListener("click", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
+  document.addEventListener("contextmenu", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "." || ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) {
+      window.requestAnimationFrame(ensureMoveInRowMenu);
+    }
+  }, true);
+  const observer = new MutationObserver(() => window.requestAnimationFrame(ensureMoveInRowMenu));
+  observer.observe(document.body, { childList: true, subtree: true });
   console.info("[enter copy-only guard] installed");
 })(window);
