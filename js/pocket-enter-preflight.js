@@ -9,6 +9,10 @@
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
 
+  function getState() {
+    return typeof state !== "undefined" ? state : null;
+  }
+
   function isEditableTarget(target) {
     if (!(target instanceof HTMLElement)) return false;
     const tag = String(target.tagName || "").toLowerCase();
@@ -16,7 +20,8 @@
   }
 
   function selectedNodeWithKids() {
-    const selectedId = clean(global.state?.selectedId, 80);
+    const appState = getState();
+    const selectedId = clean(appState?.selectedId, 80);
     if (!selectedId || typeof nodeMap !== "function") return { node: null, hasKids: false };
     const node = nodeMap().get(selectedId) || null;
     const hasKids = node && typeof sortNodesForParent === "function" ? sortNodesForParent(node.id).length > 0 : false;
@@ -53,7 +58,8 @@
     if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
     const target = ev.target instanceof HTMLElement ? ev.target : null;
     if (isEditableTarget(target)) return;
-    if (global.state?.moveMode || global.pendingPathImport) return;
+    const appState = getState();
+    if (appState?.moveMode || global.pendingPathImport) return;
 
     const treeWrap = document.getElementById("treeWrap");
     if (!(treeWrap instanceof HTMLElement)) return;
