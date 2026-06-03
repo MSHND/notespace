@@ -1,4 +1,4 @@
-/* Enter behaviour + row-menu safety guard.
+/* Enter behaviour + row-menu safety guard + PE Esc close guard.
    Loaded last so Enter copies in copy branches, opens PE elsewhere, and never
    falls through to the old inline details editor. It also keeps Move available
    in the right-click row menu if later menu trimming loses it. */
@@ -24,6 +24,44 @@
       body.phoneMode.moveModeActive .mobileMovePad { display: block !important; }
     `;
     document.head.appendChild(style);
+  }
+
+  function installPeEscCloseGuard() {
+    if (global.__pocketPeEscCloseGuardInstalled) return;
+    const originalOpen = global.open.bind(global);
+    global.open = function pocketOpenWithPeEscClose(...args) {
+      const win = originalOpen(...args);
+      const name = String(args[1] || "");
+      if (win && name.startsWith("pocketSimplePe_")) {
+        const install = () => {
+          try {
+            if (!win || win.closed || !win.document || win.__pocketPeEscCloseInstalled) return;
+            win.__pocketPeEscCloseInstalled = true;
+            win.document.addEventListener("keydown", (ev) => {
+              if (ev.key !== "Escape" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (!win.__pocketPeDirty) {
+                win.close();
+                return;
+              }
+              const ok = win.confirm(
+                "You have unsaved changes.\n\n" +
+                "OK closes without saving.\n" +
+                "Cancel returns to your unsaved work."
+              );
+              if (ok) win.close();
+            }, true);
+            console.info("[pe esc close] installed");
+          } catch (_error) {}
+        };
+        window.setTimeout(install, 0);
+        window.setTimeout(install, 80);
+        window.setTimeout(install, 240);
+      }
+      return win;
+    };
+    global.__pocketPeEscCloseGuardInstalled = true;
   }
 
   function forceCloseRowMenus() {
@@ -157,6 +195,7 @@
   }
 
   installMoveDisplayGuard();
+  installPeEscCloseGuard();
   document.addEventListener("keydown", handleEnter, true);
   window.addEventListener("keydown", handleEnter, true);
   document.addEventListener("click", closeMenusAfterMoveClick, true);
