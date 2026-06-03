@@ -15,6 +15,26 @@
     return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
   }
 
+  function installMoveDisplayGuard() {
+    if (document.getElementById("pocketMoveDisplayGuard")) return;
+    const style = document.createElement("style");
+    style.id = "pocketMoveDisplayGuard";
+    style.textContent = `
+      body:not(.phoneMode) .mobileMovePad { display: none !important; }
+      body.phoneMode.moveModeActive .mobileMovePad { display: block !important; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function forceCloseRowMenus() {
+    if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+    document.querySelectorAll(".rowMiniMenu").forEach((menu) => menu.remove());
+    if (global.state) {
+      global.state.rowMiniMenuOpen = false;
+      global.state.rowMiniMenuNodeId = "";
+    }
+  }
+
   function copySelectedNodeIfAppropriate() {
     const selectedId = clean(global.state?.selectedId, 80);
     if (!selectedId || typeof nodeMap !== "function") return false;
@@ -86,9 +106,10 @@
       ev.stopPropagation();
       const id = clean(global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
       if (id && global.state) global.state.selectedId = id;
-      if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+      forceCloseRowMenus();
       if (typeof toggleMoveMode === "function") toggleMoveMode(true);
       else if (typeof runCommandPaletteAction === "function") runCommandPaletteAction("move");
+      window.setTimeout(forceCloseRowMenus, 0);
     });
 
     return btn;
@@ -107,8 +128,18 @@
     console.info("[row menu move guard] restored Move action");
   }
 
+  function closeMenusAfterMoveClick(ev) {
+    const target = ev.target instanceof HTMLElement ? ev.target.closest(".rowMiniMenuBtn") : null;
+    if (!(target instanceof HTMLElement)) return;
+    if (!clean(target.textContent, 80).toLowerCase().startsWith("move")) return;
+    window.setTimeout(forceCloseRowMenus, 0);
+    window.setTimeout(forceCloseRowMenus, 60);
+  }
+
+  installMoveDisplayGuard();
   document.addEventListener("keydown", handleEnter, true);
   window.addEventListener("keydown", handleEnter, true);
+  document.addEventListener("click", closeMenusAfterMoveClick, true);
   document.addEventListener("click", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
   document.addEventListener("contextmenu", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
   document.addEventListener("keydown", (ev) => {
