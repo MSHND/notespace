@@ -129,6 +129,51 @@
     if (!cleaned.length) cleaned.push({ id: makeId(), text: "", depth: 0, collapsed: false, order: 1000 });
     return cleaned;
   }
+  function outlineIndexFromInput(input) {
+    if (!input || !input.dataset) return -1;
+    var lineId = input.dataset.lineId || "";
+    return outline.findIndex(function (line) { return line && line.id === lineId; });
+  }
+  function focusOutlineLine(id) {
+    requestAnimationFrame(function () {
+      var next = outlineEl.querySelector('[data-line-id="' + id + '"]');
+      if (next) next.focus({ preventScroll: true });
+    });
+  }
+  function insertOutlineLineAfter(index) {
+    var current = outline[index] || { depth: 0 };
+    var newLine = { id: makeId(), text: "", depth: lineDepth(current), collapsed: false, order: 0 };
+    outline.splice(Math.max(0, index + 1), 0, newLine);
+    markDirty();
+    renderOutline(newLine.id);
+  }
+  function handleOutlineKey(ev, input, line, index) {
+    var key = ev.key || "";
+    if (key === "Enter" || ev.keyCode === 13) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      insertOutlineLineAfter(index);
+      return true;
+    }
+    if (key === "Tab" || ev.keyCode === 9) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      line.depth = ev.shiftKey ? Math.max(0, lineDepth(line) - 1) : Math.min(8, lineDepth(line) + 1);
+      markDirty();
+      renderOutline(line.id);
+      return true;
+    }
+    if ((key === "Backspace" || ev.keyCode === 8) && !input.value && outline.length > 1) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var previous = outline[Math.max(0, index - 1)];
+      outline.splice(index, 1);
+      markDirty();
+      renderOutline(previous.id);
+      return true;
+    }
+    return false;
+  }
   function renderOutline(focusId) {
     outlineEl.innerHTML = "";
     outline = cleanedOutline();
@@ -145,41 +190,20 @@
       input.value = line.text || "";
       input.dataset.lineId = line.id;
       input.addEventListener("input", function () { line.text = input.value; markDirty(); });
-      input.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          var newLine = { id: makeId(), text: "", depth: lineDepth(line), collapsed: false, order: 0 };
-          outline.splice(index + 1, 0, newLine);
-          markDirty();
-          renderOutline(newLine.id);
-          return;
-        }
-        if (ev.key === "Tab") {
-          ev.preventDefault();
-          line.depth = ev.shiftKey ? Math.max(0, lineDepth(line) - 1) : Math.min(8, lineDepth(line) + 1);
-          markDirty();
-          renderOutline(line.id);
-          return;
-        }
-        if (ev.key === "Backspace" && !input.value && outline.length > 1) {
-          ev.preventDefault();
-          var previous = outline[Math.max(0, index - 1)];
-          outline.splice(index, 1);
-          markDirty();
-          renderOutline(previous.id);
-        }
-      });
+      input.addEventListener("keydown", function (ev) { handleOutlineKey(ev, input, line, index); });
       row.appendChild(twist);
       row.appendChild(input);
       outlineEl.appendChild(row);
     });
-    if (focusId) {
-      requestAnimationFrame(function () {
-        var next = outlineEl.querySelector('[data-line-id="' + focusId + '"]');
-        if (next) next.focus({ preventScroll: true });
-      });
-    }
+    if (focusId) focusOutlineLine(focusId);
   }
+  outlineEl.addEventListener("keydown", function (ev) {
+    var input = ev.target instanceof HTMLInputElement && ev.target.classList.contains("outlineInput") ? ev.target : null;
+    if (!input) return;
+    var index = outlineIndexFromInput(input);
+    if (index < 0) return;
+    handleOutlineKey(ev, input, outline[index], index);
+  }, true);
   function setMode(nextMode) {
     mode = nextMode === "outline" ? "outline" : "text";
     document.body.classList.toggle("outlineMode", mode === "outline");
@@ -197,7 +221,7 @@
           if (result && result.ok && result.saved) {
             markClean("saved");
           } else if (result && result.ok && result.applied) {
-            markClean("saved locally / main save needed");
+            markClean("saved here · use main save once");
           } else {
             setStatus((result && result.message) || "save failed");
           }
