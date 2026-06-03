@@ -1,5 +1,5 @@
 /* Simple standalone PE editor override.
-   Uses the existing PocketPeEditor get/apply data path, but writes a plain fresh
+   Uses the main-window PE apply-and-save bridge, but writes a plain fresh
    editor window so body text and outline inputs are ordinary editable fields. */
 (function initialisePocketPeSimpleStandalone(global) {
   "use strict";
@@ -58,7 +58,7 @@
   body { height: 100vh; margin: 0; display: flex; flex-direction: column; overflow: hidden; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fbfbf8; color: #0f172a; }
   .bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.94); }
   .brand { font-size: 12px; font-weight: 700; color: rgba(71,85,105,.82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
-  .status { font-size: 11px; color: rgba(100,116,139,.82); min-width: 120px; }
+  .status { font-size: 11px; color: rgba(100,116,139,.82); min-width: 150px; }
   .grow { flex: 1 1 auto; }
   button { border: 0; border-radius: 999px; background: transparent; padding: 5px 9px; font: inherit; font-size: 12px; color: rgba(51,65,85,.88); cursor: pointer; }
   button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.18); color: #0f172a; outline: none; }
@@ -191,14 +191,15 @@
     setStatus("saving…");
     saveBtn.disabled = true;
     try {
-      if (window.opener && !window.opener.closed && typeof window.opener.__pocketPeSimpleApply === "function") {
-        var result = window.opener.__pocketPeSimpleApply({ nodeId: nodeId, title: title.value, mode: mode, text: text.value, outline: cleanedOutline() });
-        Promise.resolve(result).then(function (ok) {
-          if (ok) {
+      if (window.opener && !window.opener.closed && typeof window.opener.__pocketPeApplyAndSave === "function") {
+        var payload = { nodeId: nodeId, title: title.value, mode: mode, text: text.value, outline: cleanedOutline() };
+        Promise.resolve(window.opener.__pocketPeApplyAndSave(payload)).then(function (result) {
+          if (result && result.ok && result.saved) {
             markClean("saved");
-            window.setTimeout(function () { if (!dirty) setStatus("saved / check main"); }, 900);
+          } else if (result && result.ok && result.applied) {
+            markClean("saved locally / main save needed");
           } else {
-            setStatus("save failed");
+            setStatus((result && result.message) || "save failed");
           }
         }).catch(function (error) {
           console.error(error);
@@ -239,9 +240,6 @@
       if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
       return false;
     }
-    global.__pocketPeSimpleApply = function applyFromSimpleEditor(nextPayload) {
-      return !!(global.PocketPeEditor && typeof global.PocketPeEditor.apply === "function" && global.PocketPeEditor.apply(nextPayload));
-    };
     const width = 760;
     const height = 620;
     const left = Math.max(0, Math.round((global.screen.availWidth - width) / 2));
