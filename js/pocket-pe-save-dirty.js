@@ -1,10 +1,7 @@
 /* PE save dirty cue + old-details migration helper.
-   PE records an op through PocketPeEditor.apply(). This wrapper treats the
-   editor Save button as a full save intention when the normal truth-file handle
-   is available, but it must not silently download fallback JSON copies from the
-   popout path. It also adds a small node-bound bridge button for old inline
-   details, adds a browser close/refresh guard for unsaved editor changes, and
-   blocks node switching while the editor has unsaved local edits. */
+   The PE window does not save the truth file directly. It sends its payload to
+   this main-window bridge, which applies the editor content and then performs
+   the normal truth JSON save from the main window context. */
 (function initialisePocketPeSaveDirtyCue(global) {
   "use strict";
 
@@ -33,12 +30,8 @@
     }
     if (global.state) global.state.selectedId = node.id;
     try {
-      if (typeof global.openDetailsEditorForSelectedNode === "function") {
-        global.openDetailsEditorForSelectedNode();
-      }
-      if (global.el?.detailOverlay instanceof HTMLElement) {
-        global.el.detailOverlay.hidden = false;
-      }
+      if (typeof global.openDetailsEditorForSelectedNode === "function") global.openDetailsEditorForSelectedNode();
+      if (global.el?.detailOverlay instanceof HTMLElement) global.el.detailOverlay.hidden = false;
       if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id, { instant: true });
       if (typeof setStatus === "function") setStatus("Old details opened for copying.", "ok");
       return true;
@@ -72,26 +65,6 @@
     dirtyWin.__pocketPeDirty = false;
     console.warn("[pe switch guard] user discarded unsaved editor edits", { nextNodeId });
     return true;
-  }
-
-  function saveTruthAfterPeApply() {
-    if (typeof exportTree !== "function") {
-      if (typeof setStatus === "function") setStatus("Saved editor content locally. Main save is not available here.", "warn", { durationMs: 5200 });
-      if (typeof flashSaveChip === "function") flashSaveChip("save*");
-      return;
-    }
-    if (typeof setStatus === "function") setStatus("Saving editor content and truth file…", "ok", { durationMs: 3200 });
-    void exportTree({ downloadFallback: false }).then((saved) => {
-      if (saved) return;
-      if (typeof setStatus === "function") {
-        setStatus("Editor saved locally. Use main Save to reconnect the truth file — no download copy was made.", "warn", { durationMs: 7200 });
-      }
-      if (typeof flashSaveChip === "function") flashSaveChip("save*");
-    }).catch((error) => {
-      console.error("[pe full save] failed", error);
-      if (typeof setStatus === "function") setStatus("Editor content saved locally, but the truth file save failed.", "warn", { durationMs: 6200 });
-      if (typeof flashSaveChip === "function") flashSaveChip("save*");
-    });
   }
 
   function installPeUnsavedGuard(peWin) {
@@ -160,25 +133,12 @@
       const style = doc.createElement("style");
       style.id = "pocketOutlineSurfacePolish";
       style.textContent = `
-        #outlinePane {
-          border: 0 !important;
-          box-shadow: none !important;
-          background: transparent !important;
-          border-radius: 0 !important;
-          padding: 6px 0 !important;
-        }
+        #outlinePane { border: 0 !important; box-shadow: none !important; background: transparent !important; border-radius: 0 !important; padding: 6px 0 !important; }
         #outlinePane .outlineRow,
         #outlinePane .outlineRow:hover,
-        #outlinePane .outlineRow:focus-within {
-          border-radius: 0 !important;
-          background: transparent !important;
-        }
+        #outlinePane .outlineRow:focus-within { border-radius: 0 !important; background: transparent !important; }
         #outlinePane .outlineInput,
-        #outlinePane .outlineInput:focus {
-          border: 0 !important;
-          box-shadow: none !important;
-          background: transparent !important;
-        }
+        #outlinePane .outlineInput:focus { border: 0 !important; box-shadow: none !important; background: transparent !important; }
       `;
       doc.head.appendChild(style);
       peWin.__pocketOutlineSurfacePolishInstalled = true;
@@ -247,16 +207,49 @@
     if (!pe || typeof pe.apply !== "function" || pe.__dirtyCueWrapped) return false;
     const originalApply = pe.apply.bind(pe);
     const originalOpen = typeof pe.open === "function" ? pe.open.bind(pe) : null;
-    const wrappedApply = function applyPeWithFullSave(payload) {
+
+    async function applyAndSaveFromMain(payload) {
+      const applied = originalApply(payload);
+      if (!applied) return { ok: false, applied: false, saved: false, message: "apply failed" };
+
+      if (global.__pocketPeWindow && !global.__pocketPeWindow.closed) global.__pocketPeWindow.__pocketPeDirty = false;
+      if (typeof refreshMeta === "function") refreshMeta();
+      if (typeof flashSaveChip === "function") flashSaveChip("saving");
+
+      if (typeof exportTree !== "function") {
+        if (typeof setStatus === "function") setStatus("Editor saved locally. Main save is not available here.", "warn", { durationMs: 5200 });
+        if (typeof flashSaveChip === "function") flashSaveChip("save*");
+        return { ok: true, applied: true, saved: false, message: "applied locally" };
+      }
+
+      if (typeof setStatus === "function") setStatus("Saving editor content and truth file…", "ok", { durationMs: 3200 });
+      try {
+        const saved = await exportTree({ downloadFallback: false });
+        if (saved) return { ok: true, applied: true, saved: true, message: "saved" };
+        if (typeof setStatus === "function") {
+          setStatus("Editor saved locally. Use main Save to reconnect the truth file — no download copy was made.", "warn", { durationMs: 7200 });
+        }
+        if (typeof flashSaveChip === "function") flashSaveChip("save*");
+        return { ok: true, applied: true, saved: false, message: "applied locally; main save needed" };
+      } catch (error) {
+        console.error("[pe apply-and-save bridge] failed", error);
+        if (typeof setStatus === "function") setStatus("Editor content saved locally, but the truth file save failed.", "warn", { durationMs: 6200 });
+        if (typeof flashSaveChip === "function") flashSaveChip("save*");
+        return { ok: true, applied: true, saved: false, message: "truth save failed" };
+      }
+    }
+
+    const wrappedApply = function applyPeWithDirtyCue(payload) {
       const ok = originalApply(payload);
       if (ok) {
         if (global.__pocketPeWindow && !global.__pocketPeWindow.closed) global.__pocketPeWindow.__pocketPeDirty = false;
         if (typeof refreshMeta === "function") refreshMeta();
-        if (typeof flashSaveChip === "function") flashSaveChip("saving");
-        saveTruthAfterPeApply();
+        if (typeof flashSaveChip === "function") flashSaveChip("save*");
+        if (typeof setStatus === "function") setStatus("Editor content applied. Main save still needed.", "warn", { durationMs: 5200 });
       }
       return ok;
     };
+
     const wrappedOpen = originalOpen ? function openPeWithNodeBinding(nodeId) {
       const id = clean(nodeId || global.state?.selectedId || domSelectedNodeId(), 80);
       if (!confirmPeSwitch(id)) return false;
@@ -265,9 +258,11 @@
       window.setTimeout(() => { if (global.__pocketPeOpeningNodeId === id) global.__pocketPeOpeningNodeId = ""; }, 500);
       return result;
     } : pe.open;
+
+    global.__pocketPeApplyAndSave = applyAndSaveFromMain;
     global.PocketPeEditor = Object.freeze({ ...pe, open: wrappedOpen, apply: wrappedApply, __dirtyCueWrapped: true });
     if (typeof wrappedOpen === "function") global.openPocketPeEditor = wrappedOpen;
-    console.info("[pe full save cue] installed");
+    console.info("[pe apply-and-save bridge] installed");
     return true;
   }
 
