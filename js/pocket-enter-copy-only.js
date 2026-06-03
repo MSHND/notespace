@@ -1,7 +1,7 @@
-/* Enter copy-only guard + row-menu safety guard.
-   Loaded last to keep Enter available for copy branches while preventing the
-   older tree handler from falling through to the inline details editor. It also
-   keeps Move available in the right-click row menu if later menu trimming loses it. */
+/* Enter behaviour + row-menu safety guard.
+   Loaded last so Enter copies in copy branches, opens PE elsewhere, and never
+   falls through to the old inline details editor. It also keeps Move available
+   in the right-click row menu if later menu trimming loses it. */
 (function initialisePocketEnterCopyOnly(global) {
   "use strict";
 
@@ -35,12 +35,17 @@
     }
   }
 
-  function copySelectedNodeIfAppropriate() {
+  function selectedNodeWithKids() {
     const selectedId = clean(global.state?.selectedId, 80);
-    if (!selectedId || typeof nodeMap !== "function") return false;
+    if (!selectedId || typeof nodeMap !== "function") return { node: null, hasKids: false };
     const node = nodeMap().get(selectedId) || null;
+    const hasKids = node && typeof sortNodesForParent === "function" ? sortNodesForParent(node.id).length > 0 : false;
+    return { node, hasKids };
+  }
+
+  function copySelectedNodeIfAppropriate() {
+    const { node, hasKids } = selectedNodeWithKids();
     if (!node) return false;
-    const hasKids = typeof sortNodesForParent === "function" ? sortNodesForParent(node.id).length > 0 : false;
     if (typeof shouldCopyOnSingleClick !== "function" || !shouldCopyOnSingleClick(node, hasKids)) return false;
 
     if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
@@ -59,6 +64,22 @@
     return false;
   }
 
+  function openSelectedPe() {
+    const { node } = selectedNodeWithKids();
+    if (!node) {
+      if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
+      return false;
+    }
+    if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
+    if (typeof openItemDetailsForNode === "function") return !!openItemDetailsForNode(node.id);
+    if (typeof global.openPocketPeEditor === "function") return !!global.openPocketPeEditor(node.id);
+    if (global.PocketPeEditor && typeof global.PocketPeEditor.open === "function") return !!global.PocketPeEditor.open(node.id);
+    if (typeof global.openPocketNodeEditor === "function") return !!global.openPocketNodeEditor(node.id);
+    if (typeof global.openPocketEditor === "function") return !!global.openPocketEditor(node.id);
+    if (typeof setStatus === "function") setStatus("Editor is not available yet. Refresh and try again.", "warn");
+    return false;
+  }
+
   function handleEnter(ev) {
     if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
     const target = ev.target instanceof HTMLElement ? ev.target : null;
@@ -73,8 +94,7 @@
     ev.stopImmediatePropagation();
 
     if (copySelectedNodeIfAppropriate()) return;
-    if (typeof setStatus === "function") setStatus("Enter is reserved for copy. Use double-click or right-click → Edit for details.", "warn", { durationMs: 2600 });
-    if (typeof refocusTreeNavigation === "function") refocusTreeNavigation(global.state?.selectedId || "");
+    openSelectedPe();
   }
 
   function rowMenuHasMove(menu) {
@@ -149,5 +169,5 @@
   }, true);
   const observer = new MutationObserver(() => window.requestAnimationFrame(ensureMoveInRowMenu));
   observer.observe(document.body, { childList: true, subtree: true });
-  console.info("[enter copy-only guard] installed");
+  console.info("[enter PE/copy guard] installed");
 })(window);
