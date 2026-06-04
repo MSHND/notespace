@@ -4,6 +4,8 @@
 (function initialisePocketPeSimpleStandalone(global) {
   "use strict";
 
+  const PE_VERSION_LABEL = "PE · simple v0.4";
+
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
@@ -57,13 +59,13 @@
   html, body { height: 100%; }
   body { height: 100vh; margin: 0; display: flex; flex-direction: column; overflow: hidden; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #fbfbf8; color: #0f172a; }
   .bar { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 8px 12px; border-bottom: 1px solid rgba(148,163,184,.24); background: rgba(255,255,255,.94); }
-  .brand { font-size: 12px; font-weight: 700; color: rgba(71,85,105,.82); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+  .brand { font-size: 12px; font-weight: 750; color: rgba(15,23,42,.86); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   .status { font-size: 11px; color: rgba(100,116,139,.82); min-width: 150px; }
   .grow { flex: 1 1 auto; }
   button { border: 0; border-radius: 999px; background: transparent; padding: 5px 9px; font: inherit; font-size: 12px; color: rgba(51,65,85,.88); cursor: pointer; }
   button:hover, button:focus-visible, button.active { background: rgba(148,163,184,.18); color: #0f172a; outline: none; }
   button:disabled { opacity: .56; cursor: default; }
-  main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; }
+  main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 14px; gap: 12px; position: relative; }
   .titlePanel { flex: 0 0 auto; border: 1px solid rgba(148,163,184,.24); border-radius: 15px; background: rgba(255,255,255,.74); padding: 10px 14px 11px; box-shadow: 0 10px 24px -24px rgba(15,23,42,.36); }
   .titleLabel { display: block; margin: 0 0 4px; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: rgba(100,116,139,.78); }
   #title { width: 100%; border: 0; border-radius: 0; background: transparent; box-shadow: none; min-height: 36px; padding: 0; font: inherit; font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: #0f172a; outline: none; }
@@ -76,11 +78,12 @@
   .outlineTwist { width: 22px; color: rgba(71,85,105,.72); user-select: none; }
   .outlineInput { width: 100%; min-height: 30px; border: 0; border-radius: 0; background: transparent; padding: 4px 6px; font: inherit; font-size: 15px; color: #0f172a; outline: none; box-shadow: none; pointer-events: auto; user-select: text; }
   .outlineInput:focus { background: rgba(255,255,255,.52); }
+  .peVersion { position: fixed; right: 10px; bottom: 7px; z-index: 2; font-size: 9px; letter-spacing: .02em; color: rgba(100,116,139,.34); user-select: none; pointer-events: none; }
 </style>
 </head>
 <body>
   <div class="bar">
-    <div class="brand">details · simple PE · ${escapeHtml(safePayload.nodeId)}</div>
+    <div class="brand">item details</div>
     <button id="modeText" type="button">text</button>
     <button id="modeOutline" type="button">outline</button>
     <button id="saveBtn" type="button">save</button>
@@ -98,6 +101,7 @@
       <div id="outline" aria-label="Item details outline"></div>
     </section>
   </main>
+  <div class="peVersion" title="${escapeHtml(PE_VERSION_LABEL)} · ${escapeHtml(safePayload.nodeId)}">${escapeHtml(PE_VERSION_LABEL)}</div>
 <script>
 (function () {
   var nodeId = ${JSON.stringify(safePayload.nodeId)};
@@ -275,7 +279,7 @@
     }
     writeSimpleEditor(win, payload);
     win.focus();
-    console.info("[simple standalone PE] opened", { id: payload.nodeId });
+    console.info("[simple standalone PE] opened", { id: payload.nodeId, version: PE_VERSION_LABEL });
     return true;
   }
 
@@ -287,7 +291,7 @@
     }
     global.PocketPeEditor = Object.freeze({ ...base, open: openSimple, __simpleStandalone: true });
     global.openPocketPeEditor = openSimple;
-    console.info("[simple standalone PE] installed");
+    console.info("[simple standalone PE] installed", PE_VERSION_LABEL);
   }
 
   install();
