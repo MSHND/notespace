@@ -111,8 +111,8 @@
       if (system) payload.system = system;
       if (status) payload.status = status;
       if (editor) payload.editor = editor;
-      if (pe) payload.pe = pe;
       if (extras) Object.assign(payload, extras);
+      if (pe) payload.pe = pe;
       out.push(payload);
     }
     return out;
