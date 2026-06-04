@@ -73,10 +73,29 @@
       [0, 80, 240, 520].forEach((delay) => window.setTimeout(() => patchVersionLabel(win), delay));
     }
 
+    function allowSwitchFromExistingPe() {
+      const existing = global.__pocketPeWindow;
+      if (!existing || existing.closed) return true;
+      if (existing.__pocketPeDirty) {
+        try { existing.focus(); } catch (_error) {}
+        const ok = global.confirm("You have unsaved changes in the open editor.\n\nOK switches editor. Cancel keeps the current editor open.");
+        if (!ok) return false;
+        existing.__pocketPeDirty = false;
+      }
+      try { existing.close(); } catch (_error) {}
+      global.__pocketPeWindow = null;
+      return true;
+    }
+
     global.open = function pocketOpenWithPeVisibleVersion(...args) {
-      const win = originalOpen(...args);
       const name = String(args[1] || "");
-      if (win && name.startsWith("pocketSimplePe_")) patchSoon(win);
+      const isSimplePe = name.startsWith("pocketSimplePe_");
+      if (isSimplePe && !allowSwitchFromExistingPe()) return null;
+      const win = originalOpen(...args);
+      if (win && isSimplePe) {
+        global.__pocketPeWindow = win;
+        patchSoon(win);
+      }
       return win;
     };
 
