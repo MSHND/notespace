@@ -8,6 +8,7 @@
   if (global.__pocketPeImportPreserveInstalled) return;
 
   const PE_SCHEMA = "pocket.pe.v1";
+  const PE_VISIBLE_VERSION = "PE · simple v0.5";
 
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
@@ -51,7 +52,41 @@
     };
   }
 
+  function installPeVersionMarkerPatch() {
+    if (global.__pocketPeVisibleVersionPatchInstalled) return;
+    const originalOpen = global.open.bind(global);
+
+    function patchVersionLabel(win) {
+      try {
+        if (!win || win.closed || !win.document) return false;
+        const marker = win.document.querySelector(".peVersion");
+        if (!(marker instanceof win.HTMLElement)) return false;
+        marker.textContent = PE_VISIBLE_VERSION;
+        marker.title = String(marker.title || "").replace(/PE · simple v\d+\.\d+/g, PE_VISIBLE_VERSION) || PE_VISIBLE_VERSION;
+        return true;
+      } catch (_error) {
+        return false;
+      }
+    }
+
+    function patchSoon(win) {
+      [0, 80, 240, 520].forEach((delay) => window.setTimeout(() => patchVersionLabel(win), delay));
+    }
+
+    global.open = function pocketOpenWithPeVisibleVersion(...args) {
+      const win = originalOpen(...args);
+      const name = String(args[1] || "");
+      if (win && name.startsWith("pocketSimplePe_")) patchSoon(win);
+      return win;
+    };
+
+    global.__pocketPeVisibleVersionPatchInstalled = true;
+    console.info("[pe visible version] installed", PE_VISIBLE_VERSION);
+  }
+
   function install() {
+    installPeVersionMarkerPatch();
+
     if (typeof global.normaliseNodes !== "function") {
       window.setTimeout(install, 120);
       return;
