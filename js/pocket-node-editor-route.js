@@ -1,2 +1,6 @@
-/* Safe PE route repair: title=node.label; details=node.pe. */
-(function(g){"use strict";function L(){return g.state&&Array.isArray(g.state.nodes)?g.state.nodes:g.state&&Array.isArray(g.state.mainThoughtTree)?g.state.mainThoughtTree:[]}function N(id){if(!id)return null;if(typeof nodeMap=="function")return nodeMap().get(id)||null;return L().find(function(x){return x&&x.id===id})||null}function O(){var r=document.querySelector(".row
+/* Minimal PE route repair: keeps script valid and routes PE saves to node.pe. */
+(function(g){
+  "use strict";
+  function nodes(){return g.state&&Array.isArray(g.state.nodes)?g.state.nodes:[];}
+  function node(id){return nodes().find(function(n){return n&&n.id===id;})||null;}
+  function payload(id){var n=node(id||(g.state&&g.state.selectedId));var p=n&&n.pe||{};return n?{nodeId:n.id,title:n.label||p.title||"",
