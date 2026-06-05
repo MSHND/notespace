@@ -1,17 +1,13 @@
 # Pocket migration status
 
-Pocket is moving from layered patches to intentional owners.
+Phase: planning and stabilisation.
 
-## Current phase
-
-Planning and stabilisation.
-
-## Known state
+Known state:
 
 - `js/pocket-node-editor-route.js` is a minimal valid stub.
 - PE route functional rebuild is paused.
 - Older editor and PE scripts may still be loaded.
-- `node.label` is the intended item title source of truth.
-- `node.pe` is intended native metadata for item details.
+- `node.label` is the intended title source of truth.
+- `node.pe` is intended native item-details metadata.
 
-##
+Next move: rebuild the PE route as the canonical owner, then retire replaced wrappers after tests pass.
