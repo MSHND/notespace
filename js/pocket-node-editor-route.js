@@ -1,7 +1,2 @@
-/* Native PE bridge: title lives in node.label. */
-(function(g){"use strict";
-function C(v,n){return typeof cleanText==="function"?cleanText(v,n||80):String(v||"").trim().slice(0,n||80)}
-function A(){return Array.isArray(g.state&&g.state.nodes)?g.state.nodes:[]}
-function B(id){return A().find(function(n){return n&&n.id===id})||null}
-function T(){return typeof nowIso==="function"?nowIso():new Date().toISOString()}
-function O(x){x
+/* Minimal PE bridge: title=node.label; body=node.pe. */
+(function(g){function N(id){return(state.nodes||[]).find(function(x){return x&&x.id===id})}function P(id){var x=N(id||state.selectedId);return x&&{nodeId:x.id,title:x.label||'',mode:x.pe&&x.pe.mode||'text',text:x.pe&&x.pe.text||'',outline:x.pe&&x.pe.outline||[]}}function A(o){var x=N(o&&o.nodeId);if(!x)return false;x.label=String(o.title||x.label||'Untitled').trim();x.pe={schema:'pocket.pe.v1',
