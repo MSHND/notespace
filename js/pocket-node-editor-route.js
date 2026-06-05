@@ -1,6 +1,14 @@
-/* Native PE route: PE title is node.label; body remains node.pe. */
+/* Compact native PE bridge. Title source of truth: node.label. */
 (function (global) {
   "use strict";
-  const MAX_TEXT = 120000, MAX_LINES = 3000, MAX_LINE = 1200, SCHEMA = "pocket.pe.v1";
-  function clean(v, n = 80) { return typeof cleanText === "function" ? cleanText(v, n) : String(v || "").trim().slice(0, n); }
-  function esc(v) { return String(v || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"
+  const SCHEMA = "pocket.pe.v1";
+  const MAX_TEXT = 120000;
+  const MAX_LINES = 3000;
+  const MAX_LINE = 1200;
+
+  function clean(value, max) {
+    return typeof cleanText === "function" ? cleanText(value, max || 80) : String(value || "").trim().slice(0, max || 80);
+  }
+
+  function nodes() {
+    return Array.isArray(global.state && global.state.nodes) ?
