@@ -7,4 +7,4 @@
   if (global.__pocketPeNativeTitleInstalled) return;
 
   function clean(value, max = 80) {
-    return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
+    return typeof cleanText === "function" ? cleanText(value, max) : String(value
