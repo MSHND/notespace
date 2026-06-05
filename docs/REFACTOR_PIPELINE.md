@@ -20,4 +20,3 @@ Write the manual test before changing code.
 
 ## 5. Change narrowly
 
-Make
