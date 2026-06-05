@@ -1,13 +1,8 @@
-/* Canonical native PE route.
-   Owns item details open/apply/save without wrapper plumbing. */
-(function initialisePocketPeRoute(global) {
+/* Compact native PE route. Owns item details open/apply/save. */
+(function(g){
   "use strict";
-
-  const PE_ROUTE_VERSION = "PE route v1.0";
-  let peWindow = null;
-
-  function clean(value, max = 80) {
-    if (typeof cleanText === "function") return cleanText(value, max);
-    return String(value == null ? "" : value).trim().slice(0, max);
-  }
-  function now() { return typeof nowIso === "function" ? nowIso() : new Date().toISOString();
+  var VER="PE route v1.1 compact", peWin=null;
+  function clean(v,m){return String(v==null?"":v).trim().slice(0,m||80)}
+  function stamp(){return typeof nowIso==="function"?nowIso():new Date().toISOString()}
+  function nm(){return typeof nodeMap==="function"?nodeMap():new Map()}
+  function node(id){id
