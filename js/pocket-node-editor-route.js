@@ -1,8 +1,10 @@
-/* Tiny safe PE route. Restores valid JS and native PE apply/save. */
+/* PE route safety stub. Valid JS; functional route rebuild paused. */
 (function(g){
   "use strict";
-  var VER="PE route v1.2 tiny";
-  function s(v,m){return String(v==null?"":v).trim().slice(0,m||120)}
-  function now(){return typeof nowIso==="function"?nowIso():new Date().toISOString()}
-  function map(){return typeof nodeMap==="function"?nodeMap():new Map()}
-  function get(id){id=s(id||g.state&&g.state.selectedId,80);return id?
+  var api=g.PocketPeEditor||{};
+  api.version="PE route safety stub v1";
+  api.healthCheck=function(){
+    var nodes=(g.state&&Array.isArray(g.state.nodes))?g.state.nodes:[];
+    var report={nodes:nodes.length,peNodes:0,peOutlineLines:0,electricity:null};
+    nodes.forEach(function(n){
+      var lines=n
