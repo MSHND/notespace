@@ -1,19 +1,21 @@
 # Load Order Plan
 
-Pocket is moving from a large `index.html` script stack to a small shell plus a boot pipeline.
+Pocket will move from a large `index.html` script stack to a small shell plus a boot pipeline.
 
-## Target
-
-`index.html` should load CSS and one boot script:
+Target `index.html`:
 
 ```html
 <link rel="stylesheet" href="css/pocket.css">
 <script src="js/boot/pocket-boot.js" defer></script>
 ```
 
-## Phases
+Boot phases:
 
-1. core: state, metadata, storage.
-2. tree: render and selection.
-3. commands: keyboard, context menu, edit actions.
-4. pe: item details route, window, save,
+1. core
+2. tree
+3. commands
+4. pe
+5. health
+6. legacy-transition
+
+Rule: new work must belong to a named phase. Legacy files are temporary and should not gain
