@@ -1,2 +1,5 @@
 /* Minimal PE bridge: title=node.label; body=node.pe. */
-(function(g){function N(id){return(state.nodes||[]).find(function(x){return x&&x.id===id})}function P(id){var x=N(id||state.selectedId);return x&&{nodeId:x.id,title:x.label||'',mode:x.pe&&x.pe.mode||'text',text:x.pe&&x.pe.text||'',outline:x.pe&&x.pe.outline||[]}}function A(o){var x=N(o&&o.nodeId);if(!x)return false;x.label=String(o.title||x.label||'Untitled').trim();x.pe={schema:'pocket.pe.v1',
+(function(g){
+function N(id){return((g.state&&g.state.nodes)||[]).find(function(x){return x&&x.id===id})||null}
+function P(id){var x=N(id||(g.state&&g.state.selectedId));return x?{nodeId:x.id,title:x.label||'',mode:x.pe&&x.pe.mode||'text',text:x.pe&&x.pe.text||'',outline:x.pe&&x.pe.outline||[]}:null}
+function A(o){var x=N(o&&o.nodeId);if(!x)return false;var t=String(o.title||x.label||'Untitled').trim();x.label=t;x.pe={schema:'p
