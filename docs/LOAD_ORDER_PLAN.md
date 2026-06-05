@@ -18,4 +18,4 @@ Boot phases:
 5. health
 6. legacy-transition
 
-Rule: new work must belong to a named phase. Legacy files are temporary and should not gain
+Rule: new work must belong to a named phase. Legacy files are temporary.
