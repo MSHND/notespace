@@ -1,6 +1,7 @@
-/* Minimal PE route repair: keeps script valid and routes PE saves to node.pe. */
+/* Minimal PE route repair: valid hooks only. */
 (function(g){
-  "use strict";
-  function nodes(){return g.state&&Array.isArray(g.state.nodes)?g.state.nodes:[];}
-  function node(id){return nodes().find(function(n){return n&&n.id===id;})||null;}
-  function payload(id){var n=node(id||(g.state&&g.state.selectedId));var p=n&&n.pe||{};return n?{nodeId:n.id,title:n.label||p.title||"",
+"use strict";
+function A(){return g.state&&Array.isArray(g.state.nodes)?g.state.nodes:[]}
+function N(id){return A().find(function(x){return x&&x.id===id})||null}
+function P(id){var n=N(id||(g.state&&g.state.selectedId));var p=n&&n.pe||{};return n?{nodeId:n.id,title:n.label||p.title||"",mode:p.mode||"text",text:p.text||"",outline:Array.isArray(p.outline)?p.outline:[]}:null}
+function V
