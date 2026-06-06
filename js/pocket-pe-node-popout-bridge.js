@@ -42,5 +42,5 @@
     };
   }
 
-  global.PocketPeEditor = Object.freeze(next);
+  global.PocketPeEditor = next;
 })(window);
