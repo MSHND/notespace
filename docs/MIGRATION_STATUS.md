@@ -9,5 +9,6 @@ Known state:
 - Older editor and PE scripts may still be loaded.
 - `node.label` is the intended title source of truth.
 - `node.pe` is intended native item-details metadata.
+- `js/commands/pocket-command-router.js` exists as a dormant future owner for command behaviour.
 
-Next move: rebuild the PE route as the canonical owner, then retire replaced wrappers after tests pass.
+Next move: build new dormant owners first, then wire behaviour only after the replacement structure exists.
