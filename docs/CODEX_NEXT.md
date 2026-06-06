@@ -1,19 +1,26 @@
 # Next local action
 
-Read `AGENTS.md` first.
+Read the repo-level `AGENTS.md` first.
 
-Purpose: verify the first safe prune.
+Purpose: inspect editor and PE load-order bloat. Report only.
 
-Expected state:
-
-- `index.html` no longer loads `js/pocket-enter-preflight.js`.
-- `js/pocket-enter-preflight.js` still exists.
-- `npm run check` passes.
+Do not change app behaviour.
+Do not edit `index.html`.
+Do not delete files.
+Do not modify PE/editor scripts.
 
 Local steps:
 
-1. Check the git diff.
-2. Run `npm run check`.
-3. Update `docs/CODEX_REPORT.md` with results.
+1. Run `npm run check`.
+2. Inspect the editor and PE-related script tags currently loaded by `index.html`.
+3. Identify likely legacy, duplicate, wrapper, or transition files.
+4. Suggest one smallest safe next cleanup step.
+5. Update `docs/CODEX_REPORT.md` with results.
 
-Do not delete files or change PE/editor behaviour in this step.
+Report should include:
+
+- Check result.
+- Editor/PE-related scripts found.
+- Likely legacy or duplicate files.
+- Suggested next cleanup step.
+- Any concerns.
