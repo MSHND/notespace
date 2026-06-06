@@ -2,6 +2,7 @@
   "private": true,
   "scripts": {
     "check": "node tools/pocket-check.js",
+    "mod:dry-remove-enter-preflight": "node tools/pocket-mod-index.js remove-script js/pocket-enter-preflight.js --dry-run",
     "mod:remove-enter-preflight": "node tools/pocket-mod-index.js remove-script js/pocket-enter-preflight.js"
   }
 }
