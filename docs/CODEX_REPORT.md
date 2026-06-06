@@ -78,7 +78,7 @@ Diff summary:
 
 Concerns:
 
-- The declared local workspace path was not available in this environment, so verification was performed in a fresh temporary checkout at `/tmp/notespace-check-20260606-01`.
+- The declared local workspace path was not available in this environment, so verification was performed in a fresh temporary checkout at `/tmp/notespace-check-20260606-02`.
 
 Next recommendation:
 
