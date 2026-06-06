@@ -1,6 +1,6 @@
 # Pocket migration status
 
-Phase: planning, stabilisation, and first safe prune complete.
+Phase: planning, stabilisation, and two safe load-order prunes complete.
 
 Known state:
 
@@ -14,7 +14,8 @@ Known state:
 - `tools/pocket-mod-index.js` exists as a narrow index.html mod tool.
 - `AGENTS.md` gives agent/Codex instructions for safe repo work.
 - First safe prune passed: `index.html` no longer loads `js/pocket-enter-preflight.js`.
-- `js/pocket-enter-preflight.js` still exists in the repo and has not been deleted.
-- `npm run check` passes after the first safe prune.
+- Second safe prune passed: `index.html` no longer loads `js/pocket-pe-simple-standalone.js`.
+- Both pruned files still exist in the repo and have not been deleted.
+- `npm run check` passes after both safe prunes.
 
-Next move: name one small cleanup or dormant-owner step, write it into `docs/CODEX_NEXT.md`, let Codex act locally, then review `docs/CODEX_REPORT.md`.
+Next move: smoke test Pocket in the browser before deleting files or pruning further.
