@@ -17,6 +17,8 @@ Before changing behaviour:
 
 Useful tools:
 
+- `npm run check`
+- `npm run mod:remove-enter-preflight`
 - `node tools/pocket-check.js`
 - `node tools/pocket-mod-index.js remove-script js/pocket-enter-preflight.js`
 
