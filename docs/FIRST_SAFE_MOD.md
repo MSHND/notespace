@@ -2,9 +2,7 @@
 
 Purpose: remove the duplicate early Enter handler from `index.html` using repo-local tooling.
 
-Target script:
-
-`js/pocket-enter-preflight.js`
+Target script: `js/pocket-enter-preflight.js`
 
 Safe sequence:
 
@@ -15,9 +13,8 @@ npm run mod:remove-enter-preflight
 npm run check
 ```
 
-Expected before state:
+Expected before state: `npm run check` may fail because both Enter handlers are loaded.
 
-- `npm run check` may fail because both Enter handlers are loaded.
-- The dry run should say it would remove `js/pocket-enter-preflight.js`.
+Expected dry run: it should say it would remove `js/pocket-enter-preflight.js`.
 
-Expected
+Expected final
