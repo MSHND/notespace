@@ -11,4 +11,7 @@ Use this before behaviour changes.
 7. Run the manual test.
 8. Remove replaced wrappers only after the new owner passes.
 
-Rule: no new wrapper unless there is no safer option.
+Rules:
+
+- No new wrapper unless there is no safer option.
+- Follow docs/PIPEWORK_RULE.md for connector-safe changes.
