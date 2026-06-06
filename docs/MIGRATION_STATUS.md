@@ -10,5 +10,6 @@ Known state:
 - `node.label` is the intended title source of truth.
 - `node.pe` is intended native item-details metadata.
 - `js/commands/pocket-command-router.js` exists as a dormant future owner for command behaviour.
+- `tools/pocket-check.js` exists as a read-only repo health check.
 
 Next move: build new dormant owners first, then wire behaviour only after the replacement structure exists.
