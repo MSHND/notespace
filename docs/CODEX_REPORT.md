@@ -1,24 +1,30 @@
 # Codex report
 
-Status: local verification complete
+Status: local verification complete on latest `main`
 
 Commands run and outputs:
+
+`sed -n '1,240p' AGENTS.md`
+
+```text
+# Agent instructions
+
+This repo uses a cautious, intentional change pipeline.
+```
+
+`sed -n '1,220p' docs/CODEX_NEXT.md`
+
+```text
+Purpose: verify the first safe prune.
+Local steps:
+1. Check the git diff.
+2. Run npm run check.
+3. Update docs/CODEX_REPORT.md with results.
+```
 
 `git diff -- index.html`
 
 ```diff
-diff --git a/index.html b/index.html
-index 2b09844..6b4a4f1 100644
---- a/index.html
-+++ b/index.html
-@@ -134,7 +134,6 @@
-   <script src="js/pocket-editor-copy.js"></script>
-   <script src="js/pocket-editor-joy.js"></script>
-   <script src="js/pocket-history-status.js"></script>
--  <script src="js/pocket-enter-preflight.js"></script>
-   <script src="js/pocket-tree-actions.js"></script>
-   <script src="js/pocket-scroll-polish.js"></script>
-   <script src="js/pocket-render.js"></script>
 ```
 
 `npm run check`
@@ -39,30 +45,41 @@ ok   docs/PIPEWORK_RULE.md - exists
 Pocket check passed
 ```
 
+`grep -n "pocket-enter-preflight" index.html`
+
+```text
+(no output; command exited 1 because the script tag is absent)
+```
+
+`test -f js/pocket-enter-preflight.js`
+
+```text
+(no output; command exited 0)
+```
+
 Check result:
 
 - Passed.
 - `index.html` ends with `</html>`.
 - Script tag count is 46.
 - Duplicate Enter handler check reports: `ok   enter handlers - no duplicate known pair detected`.
+- `index.html` no longer contains `js/pocket-enter-preflight.js`.
+- `js/pocket-enter-preflight.js` still exists.
 
 Files changed:
 
-- `index.html`
 - `docs/CODEX_REPORT.md`
 
 Diff summary:
 
-- `index.html` only removes this live load-order entry:
-  `<script src="js/pocket-enter-preflight.js"></script>`
-- `js/pocket-enter-preflight.js` remains present.
+- No `index.html` working-tree diff on latest `main`; the first safe prune is already present.
+- This report was updated with the latest local verification result.
 - No PE/editor behaviour files were modified.
 
 Concerns:
 
-- The declared local workspace path was not available in this environment, so verification was performed in the fresh temporary checkout at `/tmp/notespace-first-safe-mod-20260606`.
-- This local checkout did not contain `docs/CODEX_NEXT.md` or `docs/CODEX_REPORT.md`; `docs/CODEX_NEXT.md` was read from GitHub `main` before creating this local report.
+- The declared local workspace path was not available in this environment, so verification was performed in a fresh temporary checkout at `/tmp/notespace-check-20260606-01`.
 
 Next recommendation:
 
-- Keep the prune as the current intentional change and do not delete `js/pocket-enter-preflight.js` until the next safe cleanup step is explicitly named.
+- Keep the prune as the current intentional change. Do not delete `js/pocket-enter-preflight.js` until the next safe cleanup step is explicitly named.
