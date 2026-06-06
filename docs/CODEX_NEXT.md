@@ -2,25 +2,29 @@
 
 Read the repo-level `AGENTS.md` first.
 
-Purpose: inspect editor and PE load-order bloat. Report only.
+Purpose: apply one safe load-order prune for the retired PE simple standalone loader.
 
-Do not change app behaviour.
-Do not edit `index.html`.
-Do not delete files.
-Do not modify PE/editor scripts.
+Target: `js/pocket-pe-simple-standalone.js`
+
+Important limits:
+
+- Do not delete the file.
+- Do not modify PE/editor scripts.
+- Do not make unrelated changes.
+- Use the repo-local mod tool. Do not manually rewrite `index.html`.
 
 Local steps:
 
 1. Run `npm run check`.
-2. Inspect the editor and PE-related script tags currently loaded by `index.html`.
-3. Identify likely legacy, duplicate, wrapper, or transition files.
-4. Suggest one smallest safe next cleanup step.
+2. Run `node tools/pocket-mod-index.js remove-script js/pocket-pe-simple-standalone.js --dry-run`.
+3. If the dry run is sensible, run `node tools/pocket-mod-index.js remove-script js/pocket-pe-simple-standalone.js`.
+4. Run `npm run check` again.
 5. Update `docs/CODEX_REPORT.md` with results.
 
-Report should include:
+Expected result:
 
-- Check result.
-- Editor/PE-related scripts found.
-- Likely legacy or duplicate files.
-- Suggested next cleanup step.
-- Any concerns.
+- `index.html` no longer loads `js/pocket-pe-simple-standalone.js`.
+- `js/pocket-pe-simple-standalone.js` still exists.
+- `npm run check` passes.
+
+Stop if anything looks wrong.
