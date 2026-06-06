@@ -2,29 +2,37 @@
 
 Read the repo-level `AGENTS.md` first.
 
-Purpose: apply one safe load-order prune for the retired PE simple standalone loader.
+Purpose: browser smoke test after two safe load-order prunes.
 
-Target: `js/pocket-pe-simple-standalone.js`
+Do not change files unless updating `docs/CODEX_REPORT.md`.
+Do not delete files.
+Do not prune more scripts.
+Do not modify PE/editor behaviour.
 
-Important limits:
+Local/manual steps:
 
-- Do not delete the file.
-- Do not modify PE/editor scripts.
-- Do not make unrelated changes.
-- Use the repo-local mod tool. Do not manually rewrite `index.html`.
+1. Pull latest `main`.
+2. Run `npm run check`.
+3. Open Pocket in a browser.
+4. Hard refresh.
+5. Open an existing Pocket JSON if needed.
+6. Select any normal node.
+7. Open item details / PE.
+8. Confirm the PE window opens.
+9. Edit the body text lightly or make a harmless temporary test note.
+10. Save or close according to current app behaviour.
+11. Confirm the app does not show obvious console errors.
+12. Confirm no unexpected file edits occurred, except this report.
+13. Update `docs/CODEX_REPORT.md` with results.
 
-Local steps:
+Report should include:
 
-1. Run `npm run check`.
-2. Run `node tools/pocket-mod-index.js remove-script js/pocket-pe-simple-standalone.js --dry-run`.
-3. If the dry run is sensible, run `node tools/pocket-mod-index.js remove-script js/pocket-pe-simple-standalone.js`.
-4. Run `npm run check` again.
-5. Update `docs/CODEX_REPORT.md` with results.
-
-Expected result:
-
-- `index.html` no longer loads `js/pocket-pe-simple-standalone.js`.
-- `js/pocket-pe-simple-standalone.js` still exists.
-- `npm run check` passes.
+- Browser used.
+- Check result.
+- Whether PE/item details opened.
+- Whether save/close behaved normally.
+- Any console errors.
+- Files changed.
+- Suggested next step.
 
 Stop if anything looks wrong.
