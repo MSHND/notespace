@@ -7,6 +7,7 @@ const root = path.resolve(__dirname, "..");
 const file = path.join(root, "index.html");
 const command = process.argv[2];
 const target = process.argv[3];
+const dryRun = process.argv.includes("--dry-run");
 
 function die(message) {
   console.error(`error: ${message}`);
@@ -21,6 +22,10 @@ function readIndex() {
 
 function writeIndex(text) {
   if (!text.trimEnd().endsWith("</html>")) die("refusing to write truncated index.html");
+  if (dryRun) {
+    console.log("dry run: no files changed");
+    return;
+  }
   fs.writeFileSync(file, text, "utf8");
 }
 
@@ -32,11 +37,11 @@ function removeScript(src) {
   if (count !== 1) die(`expected exactly one script tag for ${src}, found ${count}`);
   const next = text.replace(line + "\n", "");
   writeIndex(next);
-  console.log(`removed script: ${src}`);
+  console.log(`${dryRun ? "would remove" : "removed"} script: ${src}`);
 }
 
 if (command === "remove-script") {
   removeScript(target);
 } else {
-  die("usage: node tools/pocket-mod-index.js remove-script js/file.js");
+  die("usage: node tools/pocket-mod-index.js remove-script js/file.js [--dry-run]");
 }
