@@ -1,22 +1,35 @@
 # Codex report
 
-Status: PE route inspection only; no app behaviour changes made.
+Status: dormant PE bridge file created; not wired into `index.html`.
 
 Commands run:
 
-- `git pull --ff-only`
-  - Result: fast-forwarded local inspection clone to current `main`.
 - `sed -n '1,220p' AGENTS.md`
   - Result: repo instructions read.
-- Inspected PE/editor route files:
-  - `js/pocket-node-editor-route.js`
-  - `js/pocket-node-popout-editor.js`
-  - `js/pocket-editor-cutover-v3.js`
-  - `js/pocket-render.js`
-  - `js/pocket-pe-save-dirty.js`
-  - nearby legacy popout files: `js/pocket-editor-popout.js`, `js/pocket-editor-popout-v2.js`, `js/pocket-editor-popout-default.js`, `js/pocket-editor-conflict.js`
+- `git pull --ff-only`
+  - Result: fast-forwarded local inspection clone to current `main`.
+- Created and read back `js/pocket-pe-node-popout-bridge.js`.
+- `node --check js/pocket-pe-node-popout-bridge.js`
+  - Result: passed with no output.
 - `npm run check`
   - Result: passed.
+- `git status --short`
+  - Result before report update: only `?? js/pocket-pe-node-popout-bridge.js` in the local clone.
+
+File created:
+
+- `js/pocket-pe-node-popout-bridge.js`
+
+Bridge behaviour summary:
+
+- Dormant until loaded. It is not referenced from `index.html`, so it does not change app behaviour yet.
+- Sets `PocketPeEditor.version` to `PE node popout bridge v1`.
+- Preserves existing `PocketPeEditor` properties by copying the current object first, then adding/replacing the bridge version marker and any delegate-backed methods.
+- Defines `PocketPeEditor.open(input)` only when `PocketNodePopoutEditor.open` exists at load time.
+- Defines `PocketPeEditor.apply(payload)` only when `PocketNodePopoutEditor.apply` exists at load time.
+- Each delegated method re-checks the delegate before calling it and returns `false` if delegation is unavailable.
+- Delegation errors are caught and reported with a small console warning, then return `false`.
+- If `PocketNodePopoutEditor` is missing, the file does not throw.
 
 Check result:
 
@@ -36,60 +49,42 @@ ok   docs/PIPEWORK_RULE.md - exists
 Pocket check passed
 ```
 
-Likely cause of PE not opening:
-
-- `js/pocket-node-editor-route.js` is currently a minimal stub. It creates `window.PocketPeEditor` only if needed, sets `PocketPeEditor.version = "PE route minimal stub v1"`, and logs `[PE route] minimal stub loaded; rebuild paused`.
-- It does not define `PocketPeEditor.open` or `PocketPeEditor.apply`.
-- `js/pocket-editor-cutover-v3.js` treats `PocketPeEditor.open(node.id)` as the main standalone route. Its `openStandalone()` returns `false` when `PocketPeEditor.open` is missing.
-- `js/pocket-pe-save-dirty.js` only installs its dirty/save wrapper if `PocketPeEditor.apply` already exists. Because the stub route has no `apply`, it cannot create a useful `openPocketPeEditor` wrapper.
-- `js/pocket-node-popout-editor.js` does expose a plausible working owner, `PocketNodePopoutEditor.open/apply`, but that owner is not wired into the canonical `PocketPeEditor.open/apply` route.
-
-Current route/open/apply owners:
-
-- `js/pocket-render.js`
-  - `openItemDetailsForNode(nodeId)` is the front-door route used by rendered item details/edit actions.
-  - It tries, in order: `openPocketPeEditor`, `PocketPeEditor.open`, `openPocketNodeEditor`, then `openPocketEditor`.
-- `js/pocket-editor-cutover-v3.js`
-  - Installs `window.openPocketNodeEditor = openDirect` and `window.openPocketEditor = openDirect`.
-  - `openDirect()` resolves the selected node, tries `PocketPeEditor.open(node.id)` first, then tries the old `PocketEditorPopout.open()` fallback.
-- `js/pocket-node-editor-route.js`
-  - Current `PocketPeEditor` owner in name only.
-  - It is a stub and owns only `PocketPeEditor.version`, not `open` or `apply`.
-- `js/pocket-node-popout-editor.js`
-  - Owns `PocketNodePopoutEditor.open(input)` and `PocketNodePopoutEditor.apply(payload)`.
-  - Its save path applies directly to the selected node, records a `details_edit`, refreshes/render/focuses, saves workspace state, and persists the PIP snapshot.
-- Legacy popout family
-  - `js/pocket-editor-popout.js` and `js/pocket-editor-popout-v2.js` own/replace `PocketEditorPopout.open/apply`.
-  - `js/pocket-editor-conflict.js`, `js/pocket-editor-save-ack.js`, and related files wrap or listen around that legacy owner.
-- `js/pocket-pe-save-dirty.js`
-  - Intended as a wrapper around an existing `PocketPeEditor.open/apply` implementation.
-  - It does not currently create the missing PE implementation.
-
-Safest next implementation step:
-
-Add a small named bridge/owner file first, without touching large files: for example a dormant `js/pocket-pe-node-popout-bridge.js` that maps the canonical `PocketPeEditor.open/apply` surface to `PocketNodePopoutEditor.open/apply` only when the node popout owner is present. Then verify that bridge in isolation. After that, use repo-local tooling or a tiny exact load-order mod to load it in the intended position, and rerun `npm run check` plus the browser smoke test.
-
-A slightly stronger version is to make `js/pocket-node-editor-route.js` the canonical owner, but only after the replacement bridge is already present and verified. Avoid editing `index.html` manually.
-
-Risks:
-
-- If the bridge bypasses `js/pocket-pe-save-dirty.js`, save/dirty cues or truth-file save expectations may differ from the old PE route.
-- If `PocketNodePopoutEditor.apply` becomes canonical without checking import/persist behaviour, edits may apply locally but not meet the expected truth-file save flow in all contexts.
-- The legacy fallback remains broad and wrapped by several files, so fixing the canonical route should avoid accidental interactions with `PocketEditorPopout` wrappers.
-- Load order matters: the bridge must run after `PocketNodePopoutEditor` exists and before wrappers that expect `PocketPeEditor.apply` to exist.
-- The previous browser smoke used an in-browser temporary normal node because bundled `JSONs/pocket-data.json` normalised to copy-context sample nodes only. A future smoke should include or load a known normal-node fixture.
-
 Files changed:
 
-- `docs/CODEX_REPORT.md` only.
+- `js/pocket-pe-node-popout-bridge.js`
+- `docs/CODEX_REPORT.md`
 
-Diff summary:
+Existing app files changed:
 
-- Replaced the browser-smoke result report with this PE route inspection report.
-- No app behaviour files changed.
-- `index.html` was not edited.
-- No JS files were edited or deleted.
+- None. `index.html` was not edited.
+- No existing PE/editor scripts were modified.
+- No files were deleted.
 
-Next recommendation:
+Concerns:
 
-Stop further pruning. Prepare the small dormant PE bridge/owner file next, then wire it only after its surface is verified and the report names the exact load-order step.
+- The bridge is intentionally inert until loaded, so it has not fixed the PE open failure yet.
+- Load order matters: it should run after `js/pocket-node-popout-editor.js` so the delegate methods exist.
+- It should run before `js/pocket-pe-save-dirty.js` if that wrapper is expected to see and wrap `PocketPeEditor.apply`.
+- A browser smoke test is still needed after the file is wired into the live load order.
+
+Suggested next load-order step:
+
+Use a repo-local index modification tool, or create one first if needed, to insert:
+
+```html
+<script src="js/pocket-pe-node-popout-bridge.js"></script>
+```
+
+between:
+
+```html
+<script src="js/pocket-node-popout-editor.js"></script>
+```
+
+and:
+
+```html
+<script src="js/pocket-editor-cutover-v3.js"></script>
+```
+
+Then run `npm run check` and repeat the browser smoke test. Do not manually rewrite `index.html`.
