@@ -1,37 +1,51 @@
 # Codex report
 
-Status: dormant PE bridge file created; not wired into `index.html`.
+Status: dormant PE bridge revised; still not wired into `index.html`.
 
 Commands run:
 
 - `sed -n '1,220p' AGENTS.md`
   - Result: repo instructions read.
-- `git pull --ff-only`
-  - Result: fast-forwarded local inspection clone to current `main`.
-- Created and read back `js/pocket-pe-node-popout-bridge.js`.
+- Fresh clone of `MSHND/notespace` to inspect current `main`.
+- Read back `js/pocket-pe-node-popout-bridge.js` before and after the edit.
 - `node --check js/pocket-pe-node-popout-bridge.js`
   - Result: passed with no output.
 - `npm run check`
   - Result: passed.
-- `git status --short`
-  - Result before report update: only `?? js/pocket-pe-node-popout-bridge.js` in the local clone.
+- `git diff -- js/pocket-pe-node-popout-bridge.js`
+  - Result: only removed `Object.freeze(next)` from the final assignment.
 
-File created:
+File changed:
 
 - `js/pocket-pe-node-popout-bridge.js`
 
-Bridge behaviour summary:
+Summary of change:
 
-- Dormant until loaded. It is not referenced from `index.html`, so it does not change app behaviour yet.
-- Sets `PocketPeEditor.version` to `PE node popout bridge v1`.
-- Preserves existing `PocketPeEditor` properties by copying the current object first, then adding/replacing the bridge version marker and any delegate-backed methods.
-- Defines `PocketPeEditor.open(input)` only when `PocketNodePopoutEditor.open` exists at load time.
-- Defines `PocketPeEditor.apply(payload)` only when `PocketNodePopoutEditor.apply` exists at load time.
-- Each delegated method re-checks the delegate before calling it and returns `false` if delegation is unavailable.
-- Delegation errors are caught and reported with a small console warning, then return `false`.
-- If `PocketNodePopoutEditor` is missing, the file does not throw.
+- Replaced:
 
-Check result:
+```js
+global.PocketPeEditor = Object.freeze(next);
+```
+
+with:
+
+```js
+global.PocketPeEditor = next;
+```
+
+- Kept the bridge dormant. It is still not referenced from `index.html`.
+- Kept the version marker as `PE node popout bridge v1`.
+- Kept preservation of existing `PocketPeEditor` properties before adding bridge-backed methods.
+- Kept delegation to `PocketNodePopoutEditor.open/apply`.
+- Kept return-false-not-throw behaviour when delegation is unavailable or fails.
+- The purpose of the revision is to avoid blocking later wrappers, especially `js/pocket-pe-save-dirty.js`, from replacing or wrapping `PocketPeEditor.open/apply` after the bridge is loaded.
+
+Check results:
+
+```text
+$ node --check js/pocket-pe-node-popout-bridge.js
+# passed with no output
+```
 
 ```text
 > check
@@ -56,16 +70,16 @@ Files changed:
 
 Existing app files changed:
 
-- None. `index.html` was not edited.
+- `index.html` was not edited.
 - No existing PE/editor scripts were modified.
 - No files were deleted.
+- The bridge is still not wired into the app, so app behaviour is unchanged.
 
 Concerns:
 
-- The bridge is intentionally inert until loaded, so it has not fixed the PE open failure yet.
-- Load order matters: it should run after `js/pocket-node-popout-editor.js` so the delegate methods exist.
-- It should run before `js/pocket-pe-save-dirty.js` if that wrapper is expected to see and wrap `PocketPeEditor.apply`.
-- A browser smoke test is still needed after the file is wired into the live load order.
+- The bridge remains inert until loaded, so this does not yet fix the PE open failure.
+- Once wired, load order is important: the bridge should run after `js/pocket-node-popout-editor.js` and before `js/pocket-pe-save-dirty.js` if that wrapper should wrap the delegated `PocketPeEditor.apply`.
+- Because the bridge object is no longer frozen, later scripts can mutate/wrap it as intended, but accidental later mutation is also possible. That risk is acceptable for the wrapper compatibility goal.
 
 Suggested next load-order step:
 
