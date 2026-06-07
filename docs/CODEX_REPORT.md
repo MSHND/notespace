@@ -1,70 +1,73 @@
 # Codex report
 
-Status: PE unsaved dialog and in-popup close affordance polished.
+Status: Report-only decomposition plan for `js/pocket-node-popout-editor.js`.
+
+Files inspected:
+
+- `js/pocket-node-popout-editor.js`
+- `index.html` script order around the PE scripts only
 
 Files changed:
 
-- `js/pocket-node-popout-editor.js`
 - `docs/CODEX_REPORT.md`
 
-What changed:
+Major responsibilities currently in `js/pocket-node-popout-editor.js`:
 
-- Removed the visible unsaved-dialog heading.
-- Removed the visible explanatory body text.
-- Kept only the three dialog buttons:
-  - `Save`
-  - `Exit without saving`
-  - `Go back to editing`
-- Made the PE popup's own top-right close button larger and more visible.
-- Behaviour was left unchanged.
-- No save/apply plumbing changes.
-- No title/node label plumbing changes.
-- No `node.details`/`node.pe.text` migration.
-- No script pruning or file deletion.
+- Public owner: defines `window.PocketNodePopoutEditor` with `open()` and `apply()`.
+- Main-window lookup and payload building: selected-node lookup, text/detail normalisation, outline editor metadata normalisation, path/title/body payload creation.
+- Generated popup document: full HTML, CSS, toolbar, fields, unsaved dialog, and inline runtime script.
+- Popup runtime: dirty state, Save, Cmd+S/Ctrl+S, Escape/close handling, `beforeunload`, focus return, text/outline mode switching, and outline editing.
+- Main-window apply/save: compares payload to the live node, writes `node.label`, `node.details`, and `node.editor`, then records, refreshes, renders, persists, and reports status.
+- Bridge contract: `js/pocket-pe-node-popout-bridge.js` depends on `PocketNodePopoutEditor` existing before `js/pocket-editor-cutover-v3.js`.
 
-Checks run:
+Natural split boundaries:
 
-```text
-$ node --check js/pocket-node-popout-editor.js
-# passed with no output
-```
+- Main-window API shell and window opening should stay together until the end, because script order depends on the exported `PocketNodePopoutEditor` object.
+- Main-window data model helpers can split from popup rendering: `clean`, `normaliseDetailsSafe`, `getNode`, `normaliseOutlineBlock`, `normaliseEditorMeta`, and `payloadFromNode`.
+- Popup document template can split from main-window save/apply: HTML shell, CSS, toolbar/dialog markup, and popup script injection.
+- Popup runtime can split from the template once it has a single explicit payload/opener contract.
+- Main-window `apply()` should remain near the node write/persist side until title/data plumbing work is deliberately scheduled.
 
-```text
-$ node <generated popup script syntax probe>
-[node popout editor] opened { id: 'node_1', title: 'Probe' }
-{"generatedPopupScriptSyntax":"ok","hasOnlyButtons":true,"htmlLength":13763}
-```
+Suggested small file names and ownership:
 
-```text
-$ npm run check
+- `js/pocket-node-popout-editor.js`: public `PocketNodePopoutEditor.open/apply` owner and compatibility shell.
+- `js/pocket-node-popout-model.js`: node lookup, detail/title cleaning wrappers, outline metadata schema, payload creation, and payload normalisation.
+- `js/pocket-node-popout-template.js`: `editorHtml(payload)` and HTML/CSS assembly.
+- `js/pocket-node-popout-popup-runtime.js`: popup-window runtime script as a generated string or renderer-owned function.
+- `js/pocket-node-popout-outline-runtime.js`: outline-only popup behaviours if the runtime file becomes too dense.
+- `js/pocket-node-popout-apply.js`: later home for `apply()` only after title/data source-of-truth decisions are settled.
 
-> check
-> node tools/pocket-check.js
+Safest order of extraction:
 
-Pocket check v1
-ok   index.html - ends with </html>
-ok   script tags - 46
-ok   enter handlers - no duplicate known pair detected
-ok   js/pocket-node-editor-route.js - ends with })(window);
-ok   js/boot/pocket-load-manifest.js - exists
-ok   js/boot/pocket-boot.js - exists
-ok   js/commands/pocket-command-router.js - exists
-ok   docs/PIPEWORK_RULE.md - exists
-Pocket check passed
-```
+1. Extract the generated popup CSS/markup helper into `pocket-node-popout-template.js`, while keeping `editorHtml(payload)` callable from the current owner.
+2. Extract pure model helpers into `pocket-node-popout-model.js`, with no node writes and no UI side effects.
+3. Extract the popup runtime string into `pocket-node-popout-popup-runtime.js`, keeping the existing opener call to `window.opener.PocketNodePopoutEditor.apply(buildPayload())`.
+4. Only then consider extracting outline runtime helpers, because outline rendering, dirty state, and body serialisation are tightly coupled.
+5. Leave `apply()` in `pocket-node-popout-editor.js` until the title/data plumbing work is intentionally handled.
 
-Result:
+Functions/data that should remain together:
 
-- Passed.
+- `normaliseOutlineBlock`, `normaliseEditorMeta`, and `OUTLINE_EDITOR_SCHEMA`.
+- Popup `outline`, `textToOutline`, `outlineToText`, `renderOutline`, `setMode`, `currentBody`, and `buildPayload`.
+- Popup `dirty`, `allowedToClose`, unsaved-dialog handlers, `save()`, `closeSafely()`, and `beforeunload`.
+- Main-window node writes, `recordOp`, `refreshMeta`, `renderTree`, `saveWorkspaceState`, `persistPipSnapshot`, and status messaging inside `apply()`.
 
-Manual retest steps for Murray:
+Risks:
 
-1. Hard refresh Pocket.
-2. Open PE/item details for a normal node.
-3. Confirm the in-popup top-right close `X` is easy to notice.
-4. Type a harmless body edit.
-5. Press Escape and confirm the dialog shows only the three buttons.
-6. Choose `Go back to editing` and confirm the edit remains.
-7. Reopen the dialog and choose `Exit without saving`; reopen PE and confirm the edit was not applied.
-8. Make another edit, reopen the dialog, choose `Save`, and confirm the edit persists.
-9. Confirm Cmd+S/Ctrl+S and the normal Save button still work.
+- Script order is brittle. `pocket-node-popout-editor.js` currently loads at `index.html:167`, before the bridge and cutover scripts.
+- Moving popup runtime out of the generated document too early could break popup-window context access.
+- Splitting outline conversion separately from `buildPayload()` could cause saved text and saved outline metadata to drift.
+- Extracting `apply()` before title/data plumbing is settled could hide the current `node.label` and `node.details` source-of-truth behaviour.
+- Each new global helper adds a boot-order dependency unless wrapped under one namespace.
+
+First smallest extraction step:
+
+- Create `js/pocket-node-popout-template.js` with a single namespace function such as `window.PocketNodePopoutTemplate.render(payload, helpers)`.
+- Move only the HTML/CSS assembly out of `editorHtml(payload)`.
+- Keep `pocket-node-popout-editor.js` exporting `PocketNodePopoutEditor.open/apply`.
+- Add the new script immediately before `js/pocket-node-popout-editor.js` in `index.html`.
+- Verify with `node --check` on both files, `npm run check`, and the manual PE open/save/Cmd+S/unsaved-close smoke test.
+
+Checks:
+
+- Not run. Report-only change; no JavaScript or runtime behaviour changed.
