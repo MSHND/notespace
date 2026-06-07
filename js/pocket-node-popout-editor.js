@@ -118,6 +118,14 @@
   .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
   body.textMode .outlinePane { display: none; }
   body.outlineMode textarea { display: none; }
+  .unsavedDialog { position: fixed; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 23, 42, .22); z-index: 10; }
+  .unsavedDialog[hidden] { display: none; }
+  .unsavedPanel { width: min(360px, 100%); border: 1px solid rgba(148, 163, 184, .22); border-radius: 15px; background: rgba(255, 255, 255, .98); box-shadow: 0 24px 70px -34px rgba(15, 23, 42, .6); padding: 16px; }
+  .unsavedTitle { margin: 0; font-size: 17px; font-weight: 680; color: rgba(15, 23, 42, .94); }
+  .unsavedText { margin: 6px 0 14px; font-size: 13px; line-height: 1.45; color: rgba(71, 85, 105, .78); }
+  .unsavedActions { display: grid; gap: 6px; }
+  .unsavedActions button { width: 100%; min-height: 34px; border-radius: 10px; background: rgba(241, 245, 249, .75); text-align: left; padding: 7px 10px; }
+  .unsavedActions button.primary { background: rgba(37, 99, 235, .1); color: rgba(30, 64, 175, .94); }
 </style>
 </head>
 <body class="textMode">
@@ -126,6 +134,17 @@
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
+  <div id="unsavedDialog" class="unsavedDialog" role="dialog" aria-modal="true" aria-labelledby="unsavedTitle" hidden>
+    <div class="unsavedPanel">
+      <p id="unsavedTitle" class="unsavedTitle">Unsaved changes</p>
+      <p class="unsavedText">Save before closing, leave without saving, or keep editing.</p>
+      <div class="unsavedActions">
+        <button id="unsavedSaveBtn" class="primary" type="button">Save</button>
+        <button id="unsavedDiscardBtn" type="button">Exit without saving</button>
+        <button id="unsavedCancelBtn" type="button">Go back to editing</button>
+      </div>
+    </div>
+  </div>
 <script>
 (function () {
   var payload = ${initial};
@@ -139,7 +158,11 @@
   var textModeBtn = document.getElementById("textModeBtn");
   var outlineModeBtn = document.getElementById("outlineModeBtn");
   var saveState = document.getElementById("saveState");
-  var unsavedPrompt = "You have unsaved changes.\\n\\nOK leaves without saving.\\nCancel returns to your unsaved work.";
+  var unsavedDialog = document.getElementById("unsavedDialog");
+  var unsavedSaveBtn = document.getElementById("unsavedSaveBtn");
+  var unsavedDiscardBtn = document.getElementById("unsavedDiscardBtn");
+  var unsavedCancelBtn = document.getElementById("unsavedCancelBtn");
+  var returnFocus = null;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
@@ -181,7 +204,13 @@
   function setMode(nextMode) { if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); }
   function currentBody() { return mode === "outline" ? outlineToText(outline) : bodyInput.value; }
   function buildPayload() { return { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
+  function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
+  function hideUnsavedDialog() { unsavedDialog.hidden = true; }
+  function keepEditing() { hideUnsavedDialog(); focusEditor(); }
+  function showUnsavedDialog() { returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); }
+  function discardAndClose() { allowedToClose = true; dirty = false; window.close(); }
   function save() {
+    hideUnsavedDialog();
     setSaveState("saving…", "");
     try {
       if (window.opener && !window.opener.closed && window.opener.PocketNodePopoutEditor && typeof window.opener.PocketNodePopoutEditor.apply === "function") {
@@ -192,14 +221,17 @@
     setSaveState("failed", "failed");
     alert("Pocket is not connected. Copy your text before closing.");
   }
-  function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } if (confirm(unsavedPrompt)) { allowedToClose = true; window.close(); } }
+  function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
   titleInput.addEventListener("input", function () { setDirty(true); });
   bodyInput.addEventListener("input", function () { setDirty(true); });
   document.getElementById("saveBtn").addEventListener("click", save);
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
+  unsavedSaveBtn.addEventListener("click", save);
+  unsavedDiscardBtn.addEventListener("click", discardAndClose);
+  unsavedCancelBtn.addEventListener("click", keepEditing);
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
-  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } });
+  document.addEventListener("keydown", function (ev) { if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); return; } if (ev.key === "Escape") { ev.preventDefault(); if (!unsavedDialog.hidden) keepEditing(); else closeSafely(); } });
   window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   updateModeChrome();
   if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
