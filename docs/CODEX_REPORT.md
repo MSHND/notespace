@@ -1,78 +1,92 @@
 # Codex report
 
-Status: PE node popout bridge wired into `index.html` with the repo-local mod tool.
+Status: PE popup button/save wiring inspected; one tiny generated-script fix applied.
 
-Commands run:
+Likely cause:
 
-- `sed -n '1,260p' AGENTS.md`
-  - Result: repo instructions read.
-- `sed -n '1,260p' docs/PIPEWORK_RULE.md`
-  - Result: pipework rule read.
-- `sed -n '1,260p' docs/REFACTOR_PIPELINE.md`
-  - Result: refactor pipeline read.
-- `sed -n '1,260p' docs/MIGRATION_STATUS.md`
-  - Result: migration status read.
-- `sed -n '1,320p' docs/CODEX_REPORT.md`
-  - Result: previous report read.
-- `sed -n '1,260p' tools/pocket-mod-index.js`
-  - Result: existing narrow index mod tool read.
-- `sed -n '1,260p' js/pocket-pe-node-popout-bridge.js`
-  - Result: dormant bridge read.
-- `rg -n 'pocket-node-popout-editor|pocket-pe-node-popout-bridge|pocket-editor-cutover-v3|pocket-pe-save-dirty|pocket-node-editor-route|pocket-pe-simple-standalone|pocket-enter-preflight' index.html`
-  - Result: confirmed bridge was not loaded and current order was node popout editor, editor cutover, node editor route, PE save dirty.
-- `node --check tools/pocket-mod-index.js`
-  - Result: passed with no output.
-- `npm run check`
-  - Result: passed before the insert.
-- `node tools/pocket-mod-index.js insert-script-after js/pocket-node-popout-editor.js js/pocket-pe-node-popout-bridge.js --dry-run`
-  - Result: reported `dry run: no files changed` and `would insert script: js/pocket-pe-node-popout-bridge.js after js/pocket-node-popout-editor.js`.
-- `node tools/pocket-mod-index.js insert-script-after js/pocket-node-popout-editor.js js/pocket-pe-node-popout-bridge.js`
-  - Result: inserted the bridge script after `js/pocket-node-popout-editor.js`.
-- `sed -n '160,174p' index.html`
-  - Result: read-back confirmed the expected script order.
-- `tail -n 5 index.html`
-  - Result: confirmed `index.html` still ends with `</html>`.
-- `test -f js/pocket-pe-node-popout-bridge.js`
-  - Result: confirmed the bridge file still exists.
-- `git diff --name-status`
-  - Result: only `index.html` and `tools/pocket-mod-index.js` were changed before this report update.
-- `npm run check`
-  - Result: passed after the insert.
-- Temporary browser smoke setup: `python3 -m http.server 8765 --bind 127.0.0.1`
-  - Result: served Pocket locally for browser testing.
+- `js/pocket-node-popout-editor.js` creates the current PE/item-details popup DOM.
+- Its popup script is generated inside an outer template literal.
+- Inside that generated script, `textToOutline()` and `outlineToText()` used `"\n"` in string literals.
+- In an outer template literal, those become literal newlines in the popup script source, leaving invalid JavaScript like a quoted string split across lines.
+- Result: the popup opened visually, but its inline script failed before binding Save, close, mode, dirty, and `beforeunload` handlers. That matches the manual result: buttons did not work, typed body text was lost, and no unsaved warning appeared.
+
+Ownership findings:
+
+- Popup DOM creator: `js/pocket-node-popout-editor.js`.
+- Current popup Save / close / dirty / apply owner: `js/pocket-node-popout-editor.js`.
+- Bridge owner: `js/pocket-pe-node-popout-bridge.js`, which delegates `PocketPeEditor.open/apply` to `PocketNodePopoutEditor.open/apply`.
+- Dirty/save wrapper: `js/pocket-pe-save-dirty.js`, which wraps `PocketPeEditor.apply` after the bridge is loaded.
+- Inline detail dirty owner: `js/pocket-detail-dirty.js`, for the old inline detail overlay only.
+- Human-close helper: `js/pocket-editor-human-close.js`, still looks for the old `pocketStandalonePe` window name and does not attach to the new `pocketNodePopoutEditor` window.
+
+Other inspection notes:
+
+- `PocketNodePopoutEditor.apply(payload)` accepts the bridge payload shape `{ id, title, body, mode, outline, updatedAt }`.
+- `PocketNodePopoutEditor.apply()` currently writes body text to `node.details`, not `node.pe.text`.
+- The bridge does not appear to be sending the wrong payload shape.
+- The popup script calls `window.opener.PocketNodePopoutEditor.apply(...)`, so it should be able to reach the needed opener function once the inline script parses and binds.
+- Several older helper scripts still target old PE/window contracts:
+  - `pocketStandalonePe`
+  - `pocketSimplePe_*`
+  - `#title`
+  - `#text`
+  - `.bar`
+  - `.outlineInput`
+- Those old helper mismatches explain why extra helper warnings/guards may not attach, but the immediate "all buttons dead" symptom is best explained by the generated inline script parse failure.
+
+Files inspected:
+
+- `AGENTS.md`
+- `docs/PIPEWORK_RULE.md`
+- `docs/REFACTOR_PIPELINE.md`
+- `docs/MIGRATION_STATUS.md`
+- `js/pocket-node-popout-editor.js`
+- `js/pocket-pe-node-popout-bridge.js`
+- `js/pocket-pe-save-dirty.js`
+- `js/pocket-detail-dirty.js`
+- `js/pocket-editor-human-close.js`
+- `js/pocket-enter-copy-only.js`
+- `js/pocket-pe-esc-close.js`
+- `js/pocket-editor-popout.js`
+- `js/pocket-editor-popout-v2.js`
+- `js/pocket-editor-popout-default.js`
+- `js/pocket-editor-popout-fresh.js`
 
 Files changed:
 
-- `tools/pocket-mod-index.js`
-- `index.html`
+- `js/pocket-node-popout-editor.js`
 - `docs/CODEX_REPORT.md`
 
 Diff summary:
 
-- Extended `tools/pocket-mod-index.js` with `insert-script-after`.
-- The insert command:
-  - requires an anchor script and an inserted script;
-  - refuses if the inserted script is already present;
-  - refuses if the anchor script is not found exactly once;
-  - preserves the rest of `index.html`;
-  - refuses to write a truncated `index.html`;
-  - supports `--dry-run`;
-  - reports what it would insert or did insert.
-- Used the tool to insert:
+- Changed generated popup script newline literals from `"\n"` to `"\\n"` in:
+  - `textToOutline()`
+  - `outlineToText()`
+- No title-source change.
+- No file deletes.
+- No script pruning.
+- No wrapper patch.
+- No data model change.
 
-```html
-<script src="js/pocket-pe-node-popout-bridge.js"></script>
-```
-
-after:
-
-```html
-<script src="js/pocket-node-popout-editor.js"></script>
-```
-
-Check result:
+Check results:
 
 ```text
+$ node --check js/pocket-node-popout-editor.js
+# passed with no output
+```
+
+```text
+$ node <generated popup script syntax probe>
+[node popout editor] opened { id: 'node_1', title: 'Probe' }
+{
+  "generatedPopupScriptSyntax": "ok",
+  "htmlLength": 11145
+}
+```
+
+```text
+$ npm run check
+
 > check
 > node tools/pocket-check.js
 
@@ -88,65 +102,23 @@ ok   docs/PIPEWORK_RULE.md - exists
 Pocket check passed
 ```
 
-Script order confirmation:
+Manual test to repeat:
 
-```html
-<script src="js/pocket-node-popout-editor.js"></script>
-<script src="js/pocket-pe-node-popout-bridge.js"></script>
-<script src="js/pocket-editor-cutover-v3.js"></script>
-```
-
-Safety confirmation:
-
-- `index.html` still ends with `</html>`.
-- `js/pocket-pe-node-popout-bridge.js` still exists.
-- No files were deleted.
-- No existing PE/editor scripts were modified.
-- No unrelated files were changed.
-
-Browser smoke-test result:
-
-- Opened Pocket at `http://127.0.0.1:8765/index.html`.
-- Hard refreshed by reloading a cache-busting local URL.
-- Pocket loaded a 7-node local autosave in the in-app browser.
-- A visible tree node was selected.
-- Double-clicking the selected node produced this console signal:
-
-```text
-[node popout editor] opened Object
-```
-
-- No console `error` entries were observed in the captured browser log tail.
-- Expected warning observed:
-
-```text
-[PE route] minimal stub loaded; rebuild paused
-```
-
-- The temporary local server logged 404s for `JSONs/pocket-change-log.ndjson` and `pocket-change-log.ndjson`; the app catches those optional change-log loads and continued with Pocket data loaded.
-
-Browser smoke-test limitation:
-
-- The in-app browser represented the popup as a blank `about:blank` surface, so the popout document could not be inspected there.
-- A controlled Playwright fallback could not complete because the bundled Playwright browser executable was missing:
-
-```text
-browserType.launch: Executable doesn't exist at /Users/murrayhenderson/Library/Caches/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-mac-arm64/chrome-headless-shell
-```
-
-- A second fallback using installed Google Chrome also failed:
-
-```text
-browserType.launch: Target page, context or browser has been closed
-```
-
-- Because of those browser automation limits, a harmless body edit/save in the popup was not confirmed by automation in this pass.
+1. Hard refresh Pocket.
+2. Select a normal node.
+3. Open PE/item details.
+4. Type a harmless body edit.
+5. Confirm the dirty marker appears.
+6. Click Save.
+7. Reopen the same node and confirm the body edit persists.
+8. Repeat with an unsaved body edit, then close with the popup X or Escape and confirm the unsaved-change prompt appears.
 
 Concerns:
 
-- The bridge wiring fixes the missing `PocketPeEditor.open/apply` surface for later scripts, and the open route now reaches `PocketNodePopoutEditor.open`.
-- The popup edit/save loop still needs a manual Chrome/Safari check or a working Playwright browser install to confirm end-to-end save behaviour.
+- `PocketNodePopoutEditor.apply()` still writes to `node.details`, not `node.pe.text`. That is a data-model migration question and was not changed here.
+- Older PE helper scripts still target old popup names/DOM. They may be dead plumbing now, but should not be pruned until the new owner passes manual testing.
+- `js/pocket-editor-human-close.js` does not attach to the current `pocketNodePopoutEditor` window name. The node popout's own close and `beforeunload` handlers should now work after the parse fix, so this was left alone.
 
-Suggested next step:
+Next recommendation:
 
-Run one manual browser smoke in Chrome or Safari: open Pocket, select a normal node, open item details, make a harmless body edit, save, and confirm the tree/details update. After that, proceed to the `node.label` title-source fix as a separate small step.
+Repeat the manual PE save/dirty test. If it passes, the next small step should be to retire or adapt stale helper expectations only after deciding whether `PocketNodePopoutEditor` is the canonical PE owner.
