@@ -139,6 +139,7 @@
   var textModeBtn = document.getElementById("textModeBtn");
   var outlineModeBtn = document.getElementById("outlineModeBtn");
   var saveState = document.getElementById("saveState");
+  var unsavedPrompt = "You have unsaved changes.\\n\\nOK leaves without saving.\\nCancel returns to your unsaved work.";
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
@@ -191,15 +192,15 @@
     setSaveState("failed", "failed");
     alert("Pocket is not connected. Copy your text before closing.");
   }
-  function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } if (confirm("Close without saving?")) { allowedToClose = true; window.close(); } }
+  function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } if (confirm(unsavedPrompt)) { allowedToClose = true; window.close(); } }
   titleInput.addEventListener("input", function () { setDirty(true); });
   bodyInput.addEventListener("input", function () { setDirty(true); });
   document.getElementById("saveBtn").addEventListener("click", save);
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
-  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } });
-  window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = "Unsaved editor changes."; });
+  document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } });
+  window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   updateModeChrome();
   if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
   titleInput.focus();
