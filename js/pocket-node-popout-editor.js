@@ -73,78 +73,8 @@
     };
   }
 
-  function editorHtml(payload) {
-    const initial = safeJson(payload);
-    const safeTitle = htmlEscape(payload.title || "Untitled");
-    const safePath = htmlEscape(payload.path || "");
-    const safeBody = htmlEscape(payload.body || "");
-
-    return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pocket editor</title>
-<style>
-  * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #fbfbf8; color: rgba(15, 23, 42, .94); overflow: hidden; }
-  .wrap { height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
-  .topbar { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 12px; border-bottom: 1px solid rgba(148, 163, 184, .16); background: rgba(251, 251, 248, .98); }
-  .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
-  button { border: 0; background: transparent; padding: 2px 4px; min-height: 24px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
-  button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); border-radius: 999px; }
-  #closeBtn { width: 30px; min-height: 30px; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
-  #closeBtn:hover, #closeBtn:focus-visible { border-color: rgba(71, 85, 105, .36); background: rgba(241, 245, 249, .96); color: rgba(15, 23, 42, .98); }
-  .mode button.on { color: rgba(15, 23, 42, .98); font-style: italic; }
-  .status { min-width: 54px; color: rgba(100, 116, 139, .62); font-size: 11px; }
-  .status.failed { color: rgba(127, 29, 29, .82); }
-  .status.saved { color: rgba(22, 101, 52, .72); }
-  .grow { flex: 1 1 auto; }
-  .hint { color: rgba(100, 116, 139, .54); font-size: 11px; white-space: nowrap; }
-  .dirty { opacity: 0; color: rgba(37, 99, 235, .8); }
-  body.isDirty .dirty { opacity: 1; }
-  .meta { padding: 10px 14px 3px; min-width: 0; }
-  .titleLine { font-size: 12px; font-weight: 650; color: rgba(71, 85, 105, .72); }
-  .path { margin-top: 1px; font-size: 11px; color: rgba(100, 116, 139, .58); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .fields { min-height: 0; padding: 8px 14px 14px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
-  input, textarea, .outlinePane { width: 100%; border: 1px solid rgba(148, 163, 184, .18); border-radius: 15px; background: rgba(255, 255, 255, .96); color: rgba(15, 23, 42, .94); outline: none; box-shadow: 0 10px 24px -22px rgba(15, 23, 42, .38); }
-  input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 560; }
-  textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
-  .outlinePane { min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; }
-  .outlineRow { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 2px; min-height: 30px; padding: 1px 4px; border-radius: 9px; }
-  .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
-  .outlineToggle { width: 20px; min-height: 24px; border-radius: 9px; color: rgba(100, 116, 139, .7); cursor: grab; }
-  .outlineToggle.empty { opacity: .35; }
-  .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
-  body.textMode .outlinePane { display: none; }
-  body.outlineMode textarea { display: none; }
-  .unsavedDialog { position: fixed; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 23, 42, .22); z-index: 10; }
-  .unsavedDialog[hidden] { display: none; }
-  .unsavedPanel { width: min(320px, 100%); border: 1px solid rgba(148, 163, 184, .22); border-radius: 15px; background: rgba(255, 255, 255, .98); box-shadow: 0 24px 70px -34px rgba(15, 23, 42, .6); padding: 12px; }
-  .unsavedActions { display: grid; gap: 6px; }
-  .unsavedActions button { width: 100%; min-height: 34px; border-radius: 10px; background: rgba(241, 245, 249, .75); text-align: left; padding: 7px 10px; }
-  .unsavedActions button.primary { background: rgba(37, 99, 235, .1); color: rgba(30, 64, 175, .94); }
-</style>
-</head>
-<body class="textMode">
-  <main class="wrap">
-    <div class="topbar"><div class="brand">pocket editor <span class="dirty">*</span></div><button id="saveBtn" type="button">save</button><span id="saveState" class="status" aria-live="polite"></span><div class="mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · Ctrl+Enter saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
-    <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
-    <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
-  </main>
-  <div id="unsavedDialog" class="unsavedDialog" role="dialog" aria-modal="true" aria-label="Unsaved changes" hidden>
-    <div class="unsavedPanel">
-      <div class="unsavedActions">
-        <button id="unsavedSaveBtn" class="primary" type="button">Save</button>
-        <button id="unsavedDiscardBtn" type="button">Exit without saving</button>
-        <button id="unsavedCancelBtn" type="button">Go back to editing</button>
-      </div>
-    </div>
-  </div>
-<script>
-(function () {
+  function popupRuntimeScript(initial) {
+    return `(function () {
   var payload = ${initial};
   var dirty = false;
   var allowedToClose = false;
@@ -236,9 +166,17 @@
   titleInput.focus();
   titleInput.select();
 })();
-</script>
-</body>
-</html>`;
+`;
+  }
+
+  function editorHtml(payload) {
+    if (!global.PocketNodePopoutTemplate || typeof global.PocketNodePopoutTemplate.render !== "function") {
+      throw new Error("PocketNodePopoutTemplate is not loaded.");
+    }
+    return global.PocketNodePopoutTemplate.render(payload, {
+      htmlEscape: htmlEscape,
+      runtimeScript: popupRuntimeScript(safeJson(payload))
+    });
   }
 
   function open(input) {
