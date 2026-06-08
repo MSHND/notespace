@@ -137,7 +137,7 @@ function readLocalSafetyTrail() {
     const out = [];
     for (const item of arr) {
       if (!item || typeof item !== "object") continue;
-      const payload = item.payload && typeof item === "object" ? item.payload : null;
+      const payload = item.payload && typeof item.payload === "object" ? item.payload : null;
       if (!payload) continue;
       const norm = normaliseInput(payload);
       if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) continue;
