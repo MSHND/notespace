@@ -15,6 +15,7 @@
   var textModeBtn = document.getElementById("textModeBtn");
   var outlineModeBtn = document.getElementById("outlineModeBtn");
   var saveState = document.getElementById("saveState");
+  var saveCloseBtn = document.getElementById("saveCloseBtn");
   var unsavedDialog = document.getElementById("unsavedDialog");
   var unsavedSaveBtn = document.getElementById("unsavedSaveBtn");
   var unsavedDiscardBtn = document.getElementById("unsavedDiscardBtn");
@@ -66,29 +67,37 @@
   function keepEditing() { hideUnsavedDialog(); focusEditor(); }
   function showUnsavedDialog() { returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); }
   function discardAndClose() { allowedToClose = true; dirty = false; window.close(); }
-  function save() {
+  function save(closeAfter) {
+    closeAfter = closeAfter === true;
     hideUnsavedDialog();
     setSaveState("saving…", "");
     try {
       if (window.opener && !window.opener.closed && window.opener.PocketNodePopoutEditor && typeof window.opener.PocketNodePopoutEditor.apply === "function") {
         var ok = window.opener.PocketNodePopoutEditor.apply(buildPayload());
-        if (ok) { allowedToClose = true; dirty = false; setSaveState("saved", "saved"); window.setTimeout(function () { window.close(); }, 80); return; }
+        if (ok) {
+          setDirty(false);
+          setSaveState("saved", "saved");
+          if (closeAfter) { allowedToClose = true; window.setTimeout(function () { window.close(); }, 80); }
+          return true;
+        }
       }
     } catch (error) { console.error(error); }
     setSaveState("failed", "failed");
     alert("Pocket is not connected. Copy your text before closing.");
+    return false;
   }
   function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
   titleInput.addEventListener("input", function () { setDirty(true); });
   bodyInput.addEventListener("input", function () { setDirty(true); });
-  document.getElementById("saveBtn").addEventListener("click", save);
+  document.getElementById("saveBtn").addEventListener("click", function () { save(false); });
+  saveCloseBtn.addEventListener("click", function () { save(true); });
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
-  unsavedSaveBtn.addEventListener("click", save);
+  unsavedSaveBtn.addEventListener("click", function () { save(true); });
   unsavedDiscardBtn.addEventListener("click", discardAndClose);
   unsavedCancelBtn.addEventListener("click", keepEditing);
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
-  document.addEventListener("keydown", function (ev) { if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); return; } if (ev.key === "Escape") { ev.preventDefault(); if (!unsavedDialog.hidden) keepEditing(); else closeSafely(); } });
+  document.addEventListener("keydown", function (ev) { if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; } if (ev.key === "Escape") { ev.preventDefault(); if (!unsavedDialog.hidden) keepEditing(); else closeSafely(); } });
   window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   updateModeChrome();
   if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }

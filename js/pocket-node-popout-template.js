@@ -29,18 +29,23 @@
   html, body { height: 100%; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #fbfbf8; color: rgba(15, 23, 42, .94); overflow: hidden; }
   .wrap { height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
-  .topbar { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 6px 12px; border-bottom: 1px solid rgba(148, 163, 184, .16); background: rgba(251, 251, 248, .98); }
+  .topbar { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid rgba(148, 163, 184, .18); background: rgba(251, 251, 248, .98); }
+  .toolbarGroup { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 3px; border: 1px solid rgba(148, 163, 184, .2); border-radius: 12px; background: rgba(255, 255, 255, .74); }
+  .toolbarGroup.identity { min-width: 0; gap: 8px; padding: 3px 8px; border-color: transparent; background: transparent; }
+  .toolbarGroup.actions { gap: 5px; }
   .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
-  button { border: 0; background: transparent; padding: 2px 4px; min-height: 24px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
-  button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); border-radius: 999px; }
-  #closeBtn { width: 30px; min-height: 30px; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
+  button { border: 0; border-radius: 9px; background: transparent; padding: 4px 8px; min-height: 26px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
+  button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); }
+  .toolbarBtn.primary { background: rgba(37, 99, 235, .1); color: rgba(30, 64, 175, .94); }
+  .toolbarBtn.primary:hover, .toolbarBtn.primary:focus-visible { background: rgba(37, 99, 235, .16); }
+  #closeBtn { width: 30px; min-height: 30px; padding: 0; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
   #closeBtn:hover, #closeBtn:focus-visible { border-color: rgba(71, 85, 105, .36); background: rgba(241, 245, 249, .96); color: rgba(15, 23, 42, .98); }
-  .mode button.on { color: rgba(15, 23, 42, .98); font-style: italic; }
-  .status { min-width: 54px; color: rgba(100, 116, 139, .62); font-size: 11px; }
+  .mode button.on { color: rgba(15, 23, 42, .98); background: rgba(148, 163, 184, .14); font-style: italic; }
+  .status { min-width: 52px; color: rgba(100, 116, 139, .62); font-size: 11px; }
   .status.failed { color: rgba(127, 29, 29, .82); }
   .status.saved { color: rgba(22, 101, 52, .72); }
   .grow { flex: 1 1 auto; }
-  .hint { color: rgba(100, 116, 139, .54); font-size: 11px; white-space: nowrap; }
+  .toolbarHint { color: rgba(100, 116, 139, .58); font-size: 11px; white-space: nowrap; padding: 0 4px; }
   .dirty { opacity: 0; color: rgba(37, 99, 235, .8); }
   body.isDirty .dirty { opacity: 1; }
   .meta { padding: 10px 14px 3px; min-width: 0; }
@@ -69,7 +74,7 @@
 </head>
 <body class="textMode">
   <main class="wrap">
-    <div class="topbar"><div class="brand">pocket editor <span class="dirty">*</span></div><button id="saveBtn" type="button">save</button><span id="saveState" class="status" aria-live="polite"></span><div class="mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · Ctrl+Enter saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
+    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn primary" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
