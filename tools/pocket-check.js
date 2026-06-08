@@ -187,10 +187,12 @@ function fieldPresence(node) {
   const peOutline = hasPe(node) ? outlineCount(node.pe.outline) : null;
   const editorOutline = hasEditor(node) ? outlineCount(node.editor.outline) : null;
   const peTextState = hasPe(node) && hasOwn(node.pe, "text") ? (normaliseBodyText(node.pe.text) ? "present" : "empty") : "missing";
+  const peLegacyState = hasPe(node) && hasOwn(node.pe, "legacyDetails") ? (normaliseBodyText(node.pe.legacyDetails) ? "present" : "empty") : "missing";
   return [
     `details=${hasDetails(node) ? "yes" : "no"}`,
     `pe=${hasPe(node) ? "yes" : "no"}`,
     `pe.text=${peTextState}`,
+    `pe.legacyDetails=${peLegacyState}`,
     `pe.outline=${peOutline === null ? "none" : peOutline}`,
     `editor=${hasEditor(node) ? "yes" : "no"}`,
     `editor.outline=${editorOutline === null ? "none" : editorOutline}`
@@ -265,6 +267,54 @@ function applyDetailsOnlyPeMigrationForCheck(nodes) {
   return { migrated, upgraded, overwritten, retainedDetails };
 }
 
+function isMeaningfulPeDetailsConflict(node) {
+  const detailsText = normaliseBodyText(node && node.details);
+  const currentText = normaliseBodyText(peText(node));
+  return hasDetails(node) && hasPe(node) && detailsText && currentText && detailsText !== currentText;
+}
+
+function applyConflictPreservationPreviewForCheck(nodes) {
+  const beforeById = new Map(nodes.map(node => [node.id, node]));
+  const conflicts = nodes.filter(isMeaningfulPeDetailsConflict);
+  const migrated = nodes.map(node => {
+    const next = cloneNodeForCheck(node);
+    if (isMeaningfulPeDetailsConflict(node) && hasPe(next)) {
+      next.pe.legacyDetails = normaliseBodyText(node.details);
+    }
+    return next;
+  });
+  const migratedById = new Map(migrated.map(node => [node.id, node]));
+  let wouldReceiveLegacyDetails = 0;
+  let peTextUnchanged = 0;
+  let detailsRetained = 0;
+  let peTextOverwritten = 0;
+  let detailsDropped = 0;
+
+  conflicts.forEach(before => {
+    const after = migratedById.get(before.id);
+    if (!after) {
+      peTextOverwritten += 1;
+      detailsDropped += 1;
+      return;
+    }
+    if (hasPe(after) && normaliseBodyText(after.pe.legacyDetails)) wouldReceiveLegacyDetails += 1;
+    if (normaliseBodyText(peText(before)) === normaliseBodyText(peText(after))) peTextUnchanged += 1;
+    else peTextOverwritten += 1;
+    if (hasDetails(after) && normaliseBodyText(after.details) === normaliseBodyText(before.details)) detailsRetained += 1;
+    else detailsDropped += 1;
+  });
+
+  return {
+    migrated,
+    conflicts,
+    wouldReceiveLegacyDetails,
+    peTextUnchanged,
+    detailsRetained,
+    peTextOverwritten,
+    detailsDropped
+  };
+}
+
 function checkPeMigrationInventory() {
   const files = suppliedDataFiles();
   if (!files.length) return;
@@ -274,6 +324,10 @@ function checkPeMigrationInventory() {
     { id: "w", label: "Work (CoA)" },
     { id: "node_mpor798l_rxdyhx3", label: "Phone" },
     { id: "w4_68", label: "Electricity" }
+  ];
+  const conflictTargets = [
+    { id: "node_mpor798l_rxdyhx3", label: "Phone" },
+    { id: "w", label: "Work (CoA)" }
   ];
 
   files.forEach(file => {
@@ -333,8 +387,30 @@ function checkPeMigrationInventory() {
       ok("PE upgraded nodes retain details", `${migrationCheck.retainedDetails}/${migrationCheck.upgraded.length}`);
     }
 
+    const conflictPreview = applyConflictPreservationPreviewForCheck(nodes);
+    ok("PE conflict preservation count", String(conflictPreview.conflicts.length));
+    if (conflictPreview.conflicts.length) {
+      warn("PE conflict preservation nodes", conflictPreview.conflicts.map(nodeSummary).join("; "));
+    } else {
+      ok("PE conflict preservation nodes", "none");
+    }
+    ok("PE conflict would receive legacyDetails", String(conflictPreview.wouldReceiveLegacyDetails));
+    ok("PE conflict pe.text unchanged", String(conflictPreview.peTextUnchanged));
+    ok("PE conflict details retained", String(conflictPreview.detailsRetained));
+    if (conflictPreview.peTextOverwritten > 0) {
+      fail("PE conflict pe.text overwritten", String(conflictPreview.peTextOverwritten));
+    } else {
+      ok("PE conflict pe.text overwritten", "0");
+    }
+    if (conflictPreview.detailsDropped > 0) {
+      fail("PE conflict details dropped", String(conflictPreview.detailsDropped));
+    } else {
+      ok("PE conflict details dropped", "0");
+    }
+
     const byId = new Map(nodes.map(node => [node.id, node]));
     const migratedById = new Map(migrationCheck.migrated.map(node => [node.id, node]));
+    const conflictPreviewById = new Map(conflictPreview.migrated.map(node => [node.id, node]));
     targets.forEach(target => {
       const node = byId.get(target.id);
       if (!node) {
@@ -344,6 +420,16 @@ function checkPeMigrationInventory() {
       ok("PE migration target", `${nodeSummary(node)}: ${fieldPresence(node)}`);
       const after = migratedById.get(target.id);
       if (after) ok("PE migration target after path", `${nodeSummary(after)}: ${fieldPresence(after)}`);
+    });
+    conflictTargets.forEach(target => {
+      const node = byId.get(target.id);
+      if (!node) {
+        warn("PE conflict preservation target", `${target.id} / ${target.label} missing`);
+        return;
+      }
+      ok("PE conflict preservation target", `${nodeSummary(node)}: ${fieldPresence(node)}`);
+      const after = conflictPreviewById.get(target.id);
+      if (after) ok("PE conflict preservation target after preview", `${nodeSummary(after)}: ${fieldPresence(after)}`);
     });
     checkFileUnchanged(file, beforeStat);
   });
