@@ -36,8 +36,6 @@
   .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
   button { border: 0; border-radius: 9px; background: transparent; padding: 4px 8px; min-height: 26px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
   button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); }
-  .toolbarBtn.primary { background: rgba(37, 99, 235, .1); color: rgba(30, 64, 175, .94); }
-  .toolbarBtn.primary:hover, .toolbarBtn.primary:focus-visible { background: rgba(37, 99, 235, .16); }
   #closeBtn { width: 30px; min-height: 30px; padding: 0; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
   #closeBtn:hover, #closeBtn:focus-visible { border-color: rgba(71, 85, 105, .36); background: rgba(241, 245, 249, .96); color: rgba(15, 23, 42, .98); }
   .mode button.on { color: rgba(15, 23, 42, .98); background: rgba(148, 163, 184, .14); font-style: italic; }
@@ -74,14 +72,14 @@
 </head>
 <body class="textMode">
   <main class="wrap">
-    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn primary" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
+    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
   <div id="unsavedDialog" class="unsavedDialog" role="dialog" aria-modal="true" aria-label="Unsaved changes" hidden>
     <div class="unsavedPanel">
       <div class="unsavedActions">
-        <button id="unsavedSaveBtn" class="primary" type="button">Save</button>
+        <button id="unsavedSaveBtn" class="primary" type="button">Save &amp; close</button>
         <button id="unsavedDiscardBtn" type="button">Exit without saving</button>
         <button id="unsavedCancelBtn" type="button">Go back to editing</button>
       </div>
