@@ -36,9 +36,11 @@
   .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
   button { border: 0; border-radius: 9px; background: transparent; padding: 4px 8px; min-height: 26px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
   button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); }
+  .toolbarBtn, .mode button { border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .98); color: rgba(20, 25, 30, .95); height: 28px; min-height: 28px; padding: 0 12px; line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(15, 23, 42, .05); display: inline-flex; align-items: center; justify-content: center; font-weight: 500; }
+  .toolbarBtn:hover, .toolbarBtn:focus-visible, .mode button:hover, .mode button:focus-visible { background: rgba(255, 255, 255, 1); border-color: rgba(116, 124, 136, .26); color: rgba(13, 17, 22, .99); outline: none; }
   #closeBtn { width: 30px; min-height: 30px; padding: 0; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
   #closeBtn:hover, #closeBtn:focus-visible { border-color: rgba(71, 85, 105, .36); background: rgba(241, 245, 249, .96); color: rgba(15, 23, 42, .98); }
-  .mode button.on { color: rgba(15, 23, 42, .98); background: rgba(148, 163, 184, .14); font-style: italic; }
+  .mode button.on { color: rgba(29, 78, 216, .88); background: rgba(37, 99, 235, .1); border-color: rgba(37, 99, 235, .3); font-style: normal; }
   .status { min-width: 52px; color: rgba(100, 116, 139, .62); font-size: 11px; }
   .status.failed { color: rgba(127, 29, 29, .82); }
   .status.saved { color: rgba(22, 101, 52, .72); }
