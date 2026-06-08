@@ -1,6 +1,6 @@
 # Codex report
 
-Status: PE toolbar button appearance aligned closer to main tree header chips with CSS only.
+Status: PE toolbar chip groups flattened with CSS only.
 
 Files changed:
 
@@ -10,7 +10,7 @@ Files changed:
 CSS-only confirmation:
 
 - Only CSS inside `js/pocket-node-popout-template.js` changed.
-- No PE toolbar markup, status placement, runtime JS, script order, save/apply plumbing, or data plumbing changed.
+- No toolbar HTML, runtime JS, script order, status placement, save/apply plumbing, or data plumbing changed.
 
 Checks run:
 
@@ -21,12 +21,13 @@ Checks run:
 
 Result:
 
-- Available popup-targeted checks passed; Save and Save & close are styled as neutral chips, and selected styling remains limited to `.mode button.on`.
+- Available popup-targeted checks passed; toolbar group wrappers are visually flat/transparent while Save and Save & close remain neutral chips and selected styling remains limited to `.mode button.on`.
 
 Manual retest steps:
 
 1. Hard refresh Pocket.
 2. Confirm the main tree renders before opening PE.
-3. Open PE/item details and confirm `save`, `save & close`, `text`, and `outline` look more chip-like.
-4. Confirm only the active mode button looks selected.
-5. Confirm `save`, `save & close`, Cmd/Ctrl+S, Escape, and the unsaved dialog still behave as before.
+3. Open PE/item details and confirm the save/action and text/outline controls no longer sit inside larger capsule containers.
+4. Confirm `save`, `save & close`, `text`, and `outline` read as calm header-style chips.
+5. Confirm only the active mode button looks selected.
+6. Confirm `save`, `save & close`, Cmd/Ctrl+S, Escape, and the unsaved dialog still behave as before.

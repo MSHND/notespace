@@ -30,9 +30,9 @@
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #fbfbf8; color: rgba(15, 23, 42, .94); overflow: hidden; }
   .wrap { height: 100vh; display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
   .topbar { display: flex; align-items: center; gap: 7px; min-height: 44px; padding: 6px 10px; border-bottom: 1px solid rgba(148, 163, 184, .18); background: rgba(251, 251, 248, .98); }
-  .toolbarGroup { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 3px; border: 1px solid rgba(148, 163, 184, .2); border-radius: 12px; background: rgba(255, 255, 255, .74); }
+  .toolbarGroup { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0; border: 0; border-radius: 0; background: transparent; }
   .toolbarGroup.identity { min-width: 0; gap: 8px; padding: 3px 8px; border-color: transparent; background: transparent; }
-  .toolbarGroup.actions { gap: 5px; }
+  .toolbarGroup.actions { gap: 6px; }
   .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
   button { border: 0; border-radius: 9px; background: transparent; padding: 4px 8px; min-height: 26px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
   button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); }
