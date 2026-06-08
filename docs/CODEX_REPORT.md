@@ -1,6 +1,11 @@
 # Codex report
 
-Status: PE popup toolbar chips aligned with the main tree header chip style.
+Status: Rolled back the PE popup toolbar chip visual pass.
+
+Rollback performed:
+
+- Restored `js/pocket-node-popout-template.js` to the last known working toolbar layout/style from before the chip alignment change.
+- Preserved existing Save, Save & close, Cmd/Ctrl+S, Escape, and unsaved dialog behaviour.
 
 Files changed:
 
@@ -11,18 +16,19 @@ Checks run:
 
 - `node --check js/pocket-node-popout-template.js` - passed
 - generated popup syntax probe - passed
-- `node tools/pocket-check.js` - not run; it reads files outside this task's allowed inspection scope
+- `node tools/pocket-check.js` - not run; it reads files outside this task's allowed inspection scope, including docs other than `docs/CODEX_REPORT.md`
 - `npm run check` - not run; no `npm` executable is available in this environment
 
 Result:
 
-- Available popup-targeted checks passed; visual-only template change, no save/runtime behaviour changed.
+- Rollback restored the previous working popup template state; runtime/save/data plumbing was not changed.
 
 Manual retest steps:
 
 1. Hard refresh Pocket.
-2. Open PE/item details for a normal node.
-3. Confirm `save`, `save & close`, `text`, and `outline` match the main tree header chip style.
-4. Confirm only the active mode chip, `text` or `outline`, looks selected.
-5. Click `save` and confirm status appears without pushing chips apart.
-6. Spot-check `save & close`, Cmd/Ctrl+S, Escape, and the unsaved dialog still behave as before.
+2. Confirm the main tree renders again.
+3. Open PE/item details for a normal node.
+4. Confirm `save` saves and keeps the popup open.
+5. Confirm `save & close` saves and closes.
+6. Confirm Cmd/Ctrl+S saves and keeps the popup open.
+7. Make an unsaved edit, press Escape, and confirm the dialog still says `Save & close`.
