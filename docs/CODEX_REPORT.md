@@ -1,81 +1,55 @@
 # Codex report
 
-Status: First PE node popout template extraction completed.
+Status: Report only. No runtime extraction or save/apply plumbing change.
 
-Files changed:
+Inspected:
 
-- `js/pocket-node-popout-template.js`
 - `js/pocket-node-popout-editor.js`
-- `index.html`
-- `docs/CODEX_REPORT.md`
+- `js/pocket-node-popout-template.js`
+- `index.html` for script order only
 
-What changed:
+1. Runtime/event responsibilities still in `pocket-node-popout-editor.js`:
 
-- Added `window.PocketNodePopoutTemplate.render(payload, helpers)`.
-- Moved the PE popup document shell, markup, and CSS out of `js/pocket-node-popout-editor.js`.
-- Kept the popup runtime script in `js/pocket-node-popout-editor.js`.
-- Kept `PocketNodePopoutEditor.open/apply` owned by `js/pocket-node-popout-editor.js`.
-- Added `js/pocket-node-popout-template.js` immediately before `js/pocket-node-popout-editor.js` in `index.html`.
-- Did not change save/apply plumbing.
-- Did not change title/node label plumbing.
-- Did not migrate `node.details` or `node.pe.text`.
-- Did not extract popup runtime or outline runtime.
+- Builds node payload from `node.label`, `node.details`, and outline editor metadata.
+- Generates the inline popup runtime script string.
+- Runtime owns child-window state: `dirty`, `allowedToClose`, `mode`, `outline`, and focus return.
+- Runtime wires Save, Close, unsaved-dialog buttons, mode buttons, outline row events, Cmd/Ctrl+S, Cmd/Ctrl+Enter, Escape, and `beforeunload`.
+- Runtime serializes current text/outline state and calls `window.opener.PocketNodePopoutEditor.apply(...)`.
+- `open` still owns popup sizing, `window.open`, template rendering, `document.write`, focus, and blocked-popup status.
+- `apply` still owns node mutation, persistence, render refresh, focus restore, status, and snapshot/save calls.
 
-Checks run:
+2. Safest extraction boundary:
 
-```text
-$ node --check js/pocket-node-popout-template.js
-# passed with no output
-```
+- Extract only the runtime script factory, leaving `open`, `apply`, payload normalization, `safeJson`, and template rendering in `pocket-node-popout-editor.js`.
+- Keep the extracted helper pure: input is the already-safe JSON string; output is the inline child-window script text.
+- Do not make the popup depend on loading the helper file inside the popup window.
 
-```text
-$ node --check js/pocket-node-popout-editor.js
-# passed with no output
-```
+3. What must stay together for now:
 
-```text
-$ node <generated popup script syntax probe>
-[node popout editor] opened { id: 'node_1', title: 'Probe' }
-{"generatedPopupScriptSyntax":"ok","templateRender":"ok","inlineScripts":1,"htmlLength":13827}
-```
+- Save, dirty state, `allowedToClose`, unsaved dialog, Escape handling, and `beforeunload` should move as one runtime unit.
+- Outline state, outline rendering/edit events, text/outline conversion, and `buildPayload()` should stay with that runtime unit.
+- `PocketNodePopoutEditor.apply` and all node save/persistence plumbing should stay in `pocket-node-popout-editor.js`.
+- Title to `node.label`, body to `node.details`, and `node.editor` outline metadata should stay unchanged.
 
-```text
-$ node <old/new generated runtime comparison>
-[node popout editor] opened { id: 'node_1', title: 'Probe' }
-[node popout editor] opened { id: 'node_1', title: 'Probe' }
-{"runtimeSameAfterTimestampNeutralise":true}
-```
+4. Suggested helper file and API:
 
-```text
-$ npm run check
+- File: `js/pocket-node-popout-runtime.js`
+- Load order: after `js/pocket-node-popout-template.js`, before `js/pocket-node-popout-editor.js`.
+- API: `window.PocketNodePopoutRuntime.build(initialJson)` returns the complete inline runtime script string.
 
-> check
-> node tools/pocket-check.js
+5. First smallest extraction step:
 
-Pocket check v1
-ok   index.html - ends with </html>
-ok   script tags - 47
-ok   enter handlers - no duplicate known pair detected
-ok   js/pocket-node-editor-route.js - ends with })(window);
-ok   js/boot/pocket-load-manifest.js - exists
-ok   js/boot/pocket-boot.js - exists
-ok   js/commands/pocket-command-router.js - exists
-ok   docs/PIPEWORK_RULE.md - exists
-Pocket check passed
-```
+- Move the existing `popupRuntimeScript(initial)` body into `PocketNodePopoutRuntime.build(initialJson)` with no behavior edits.
+- In `editorHtml(payload)`, require `PocketNodePopoutRuntime.build`, then pass `runtimeScript: PocketNodePopoutRuntime.build(safeJson(payload))` to the template.
+- Add the new script tag between template and editor.
+- Run syntax checks only after the mechanical move.
 
-Result:
+6. Key risks:
 
-- Passed.
-
-Manual retest steps for Murray:
-
-1. Hard refresh Pocket.
-2. Open PE/item details for a normal node.
-3. Confirm the popup opens with the same layout and visible top-right close `X`.
-4. Type a harmless body edit and click `save`; reopen PE and confirm the edit persists.
-5. Type another edit and press Cmd+S/Ctrl+S; reopen PE and confirm the edit persists.
-6. Type another unsaved edit and press Escape; confirm the three-button in-app warning appears.
-7. Confirm `Go back to editing` keeps the popup open with edits intact.
-8. Confirm `Exit without saving` closes without applying the draft.
-9. Confirm `Save` in the warning saves and closes.
+- Save must keep calling opener `apply(...)` synchronously and only close when it returns truthy.
+- Failed Save must leave the popup open and dirty.
+- Cmd/Ctrl+S and Cmd/Ctrl+Enter must still `preventDefault()` and route to Save.
+- Escape must cancel the unsaved dialog when shown; otherwise it must use the safe close path.
+- Unsaved-dialog Save, Discard, and Cancel must preserve focus and dirty/close semantics.
+- `dirty` and `allowedToClose` must stay coupled so scripted closes do not trigger `beforeunload`, but manual dirty closes still warn.
+- The helper runs in the opener page; the returned script runs in the popup page, so no runtime logic can depend on helper closures.
