@@ -196,6 +196,74 @@ function fieldPresence(node) {
     `editor.outline=${editorOutline === null ? "none" : editorOutline}`
   ].join(", ");
 }
+function fileSnapshot(file) {
+  try {
+    const stat = fs.statSync(file);
+    return { size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+function checkFileUnchanged(file, before) {
+  const after = fileSnapshot(file);
+  if (!before || !after) {
+    fail("PE check data unchanged", `${repoRel(file)} could not be verified`);
+    return;
+  }
+  if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) {
+    fail("PE check data unchanged", `${repoRel(file)} changed during diagnostic`);
+    return;
+  }
+  ok("PE check data unchanged", repoRel(file));
+}
+
+function buildPeFromLegacyDetailsForCheck(node) {
+  const text = normaliseBodyText(node && node.details);
+  if (!text) return null;
+  return {
+    schema: "pocket.pe.v1",
+    title: cleanCheck(node && node.label, 220),
+    mode: "text",
+    text,
+    outline: [],
+    updatedAt: cleanCheck(node && node.updatedAt, 40) || "<current timestamp>"
+  };
+}
+
+function cloneNodeForCheck(node) {
+  return node && typeof node === "object" ? JSON.parse(JSON.stringify(node)) : node;
+}
+
+function applyDetailsOnlyPeMigrationForCheck(nodes) {
+  const beforeById = new Map(nodes.map(node => [node.id, node]));
+  const migrated = nodes.map(node => {
+    const next = cloneNodeForCheck(node);
+    if (!hasOwn(node, "pe") && normaliseBodyText(node.details)) {
+      const pe = buildPeFromLegacyDetailsForCheck(node);
+      if (pe) next.pe = pe;
+    }
+    return next;
+  });
+  const migratedById = new Map(migrated.map(node => [node.id, node]));
+  const upgraded = [];
+  let overwritten = 0;
+  let retainedDetails = 0;
+
+  beforeById.forEach((before, id) => {
+    const after = migratedById.get(id);
+    if (!after) return;
+    if (!hasOwn(before, "pe") && normaliseBodyText(before.details) && hasPe(after) && normaliseBodyText(after.pe.text)) {
+      upgraded.push(after);
+      if (hasDetails(after)) retainedDetails += 1;
+    }
+    if (hasOwn(before, "pe") && normaliseBodyText(peText(before)) !== normaliseBodyText(peText(after))) {
+      overwritten += 1;
+    }
+  });
+
+  return { migrated, upgraded, overwritten, retainedDetails };
+}
 
 function checkPeMigrationInventory() {
   const files = suppliedDataFiles();
@@ -209,6 +277,7 @@ function checkPeMigrationInventory() {
   ];
 
   files.forEach(file => {
+    const beforeStat = fileSnapshot(file);
     const data = parseJsonFile(file, true);
     if (!data) return;
     const nodes = nodesFromPocketExport(data);
@@ -244,7 +313,28 @@ function checkPeMigrationInventory() {
     if (conflicts.length) warn("PE details / pe.text conflict nodes", conflicts.map(nodeSummary).join("; "));
     else ok("PE details / pe.text conflict nodes", "none");
 
+    const migrationCheck = applyDetailsOnlyPeMigrationForCheck(nodes);
+    const afterDetailsOnly = migrationCheck.migrated.filter(node => hasDetails(node) && !hasPe(node));
+    ok("PE details-only nodes before migration path", String(detailsOnly.length));
+    ok("PE details-only nodes after migration path", String(afterDetailsOnly.length));
+    if (migrationCheck.upgraded.length) {
+      ok("PE details-only nodes upgraded", migrationCheck.upgraded.map(nodeSummary).join("; "));
+    } else {
+      ok("PE details-only nodes upgraded", "none");
+    }
+    if (migrationCheck.overwritten > 0) {
+      fail("PE existing pe.text overwritten", String(migrationCheck.overwritten));
+    } else {
+      ok("PE existing pe.text overwritten", "0");
+    }
+    if (migrationCheck.retainedDetails !== migrationCheck.upgraded.length) {
+      fail("PE upgraded nodes retain details", `${migrationCheck.retainedDetails}/${migrationCheck.upgraded.length}`);
+    } else {
+      ok("PE upgraded nodes retain details", `${migrationCheck.retainedDetails}/${migrationCheck.upgraded.length}`);
+    }
+
     const byId = new Map(nodes.map(node => [node.id, node]));
+    const migratedById = new Map(migrationCheck.migrated.map(node => [node.id, node]));
     targets.forEach(target => {
       const node = byId.get(target.id);
       if (!node) {
@@ -252,7 +342,10 @@ function checkPeMigrationInventory() {
         return;
       }
       ok("PE migration target", `${nodeSummary(node)}: ${fieldPresence(node)}`);
+      const after = migratedById.get(target.id);
+      if (after) ok("PE migration target after path", `${nodeSummary(after)}: ${fieldPresence(after)}`);
     });
+    checkFileUnchanged(file, beforeStat);
   });
 }
 
