@@ -137,7 +137,7 @@ function readLocalSafetyTrail() {
     const out = [];
     for (const item of arr) {
       if (!item || typeof item !== "object") continue;
-      const payload = item.payload && typeof item.payload === "object" ? item.payload : null;
+      const payload = item.payload && typeof item === "object" ? item.payload : null;
       if (!payload) continue;
       const norm = normaliseInput(payload);
       if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) continue;
@@ -429,9 +429,32 @@ function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
   return true;
 }
 
+function buildPeFromLegacyDetails(node) {
+  const text = normaliseDetails(node && node.details, 4000);
+  if (!text) return null;
+  return {
+    schema: "pocket.pe.v1",
+    title: cleanText(node && node.label, 220),
+    mode: "text",
+    text,
+    outline: [],
+    updatedAt: cleanText(node && node.updatedAt, 40) || nowIso(),
+  };
+}
+
+function ensurePeFromLegacyDetails(nodes) {
+  const safe = Array.isArray(nodes) ? nodes : [];
+  return safe.map((node) => {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+    if (Object.prototype.hasOwnProperty.call(node, "pe")) return node;
+    const pe = buildPeFromLegacyDetails(node);
+    if (pe) node.pe = pe;
+    return node;
+  });
+}
 function applyLoadedState(norm, sourceInfo = {}, options = {}) {
   const clearOps = options.clearOps !== false;
-  state.nodes = Array.isArray(norm.nodes) ? norm.nodes : [];
+  state.nodes = ensurePeFromLegacyDetails(Array.isArray(norm.nodes) ? norm.nodes : []);
   state.tombstones = Array.isArray(norm.tombstones) ? norm.tombstones : [];
   state.rootExtras = (norm.rootExtras && typeof norm.rootExtras === "object" && !Array.isArray(norm.rootExtras)) ? norm.rootExtras : {};
   state.dataExtras = (norm.dataExtras && typeof norm.dataExtras === "object" && !Array.isArray(norm.dataExtras)) ? norm.dataExtras : {};
