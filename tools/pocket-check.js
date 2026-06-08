@@ -65,9 +65,14 @@ function addCandidate(files, input) {
   files.push(path.normalize(file));
 }
 
-function candidateDataFiles() {
+function suppliedDataFiles() {
   const files = [];
   String(process.env.POCKET_CHECK_DATA || "").split(path.delimiter).forEach(input => addCandidate(files, input.trim()));
+  return Array.from(new Set(files));
+}
+
+function candidateDataFiles() {
+  const files = suppliedDataFiles();
   [
     "data",
     "fixtures",
@@ -141,6 +146,116 @@ function cleanCheck(value, max = 80) {
   return String(value || "").trim().slice(0, max);
 }
 
+function hasOwn(value, key) {
+  return !!value && Object.prototype.hasOwnProperty.call(value, key);
+}
+
+function hasPe(node) {
+  return !!node && !!node.pe && typeof node.pe === "object" && !Array.isArray(node.pe);
+}
+
+function hasDetails(node) {
+  return hasOwn(node, "details");
+}
+
+function hasEditor(node) {
+  return !!node && !!node.editor && typeof node.editor === "object" && !Array.isArray(node.editor);
+}
+
+function peText(node) {
+  return hasPe(node) && typeof node.pe.text === "string" ? node.pe.text : "";
+}
+
+function normaliseBodyText(value) {
+  return typeof value === "string" ? value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : "";
+}
+
+function nodeSummary(node) {
+  return `${cleanCheck(node && node.id, 80) || "(missing id)"} / ${cleanCheck(node && node.label, 120) || "(unlabelled)"}`;
+}
+
+function nodesFromPocketExport(data) {
+  if (Array.isArray(data)) return data.filter(node => node && typeof node === "object" && !Array.isArray(node));
+  if (!data || typeof data !== "object") return null;
+  if (Array.isArray(data.mainThoughtTree)) return data.mainThoughtTree.filter(node => node && typeof node === "object" && !Array.isArray(node));
+  if (data.data && Array.isArray(data.data.mainThoughtTree)) return data.data.mainThoughtTree.filter(node => node && typeof node === "object" && !Array.isArray(node));
+  if (Array.isArray(data.nodes)) return data.nodes.filter(node => node && typeof node === "object" && !Array.isArray(node));
+  return null;
+}
+
+function fieldPresence(node) {
+  const peOutline = hasPe(node) ? outlineCount(node.pe.outline) : null;
+  const editorOutline = hasEditor(node) ? outlineCount(node.editor.outline) : null;
+  const peTextState = hasPe(node) && hasOwn(node.pe, "text") ? (normaliseBodyText(node.pe.text) ? "present" : "empty") : "missing";
+  return [
+    `details=${hasDetails(node) ? "yes" : "no"}`,
+    `pe=${hasPe(node) ? "yes" : "no"}`,
+    `pe.text=${peTextState}`,
+    `pe.outline=${peOutline === null ? "none" : peOutline}`,
+    `editor=${hasEditor(node) ? "yes" : "no"}`,
+    `editor.outline=${editorOutline === null ? "none" : editorOutline}`
+  ].join(", ");
+}
+
+function checkPeMigrationInventory() {
+  const files = suppliedDataFiles();
+  if (!files.length) return;
+
+  const targets = [
+    { id: "node_mq4snlc7_t5ku2wm", label: "Francesca POs" },
+    { id: "w", label: "Work (CoA)" },
+    { id: "node_mpor798l_rxdyhx3", label: "Phone" },
+    { id: "w4_68", label: "Electricity" }
+  ];
+
+  files.forEach(file => {
+    const data = parseJsonFile(file, true);
+    if (!data) return;
+    const nodes = nodesFromPocketExport(data);
+    if (!nodes) {
+      fail(repoRel(file), "supplied PE check data has no node list");
+      return;
+    }
+
+    const withPe = nodes.filter(hasPe);
+    const withDetails = nodes.filter(hasDetails);
+    const withBoth = nodes.filter(node => hasPe(node) && hasDetails(node));
+    const detailsOnly = nodes.filter(node => hasDetails(node) && !hasPe(node));
+    const peOnly = nodes.filter(node => hasPe(node) && !hasDetails(node));
+    const withEditor = nodes.filter(hasEditor);
+    const matching = [];
+    const conflicts = [];
+
+    withBoth.forEach(node => {
+      if (normaliseBodyText(node.details) === normaliseBodyText(peText(node))) matching.push(node);
+      else conflicts.push(node);
+    });
+
+    ok("PE migration inventory", repoRel(file));
+    ok("PE total node count", String(nodes.length));
+    ok("PE nodes with node.pe", String(withPe.length));
+    ok("PE nodes with node.details", String(withDetails.length));
+    ok("PE nodes with both node.pe and node.details", String(withBoth.length));
+    ok("PE details-only nodes", String(detailsOnly.length));
+    ok("PE pe-only nodes", String(peOnly.length));
+    ok("PE nodes with node.editor", String(withEditor.length));
+    ok("PE details / pe.text matching pairs", String(matching.length));
+    ok("PE details / pe.text conflicting pairs", String(conflicts.length));
+    if (conflicts.length) warn("PE details / pe.text conflict nodes", conflicts.map(nodeSummary).join("; "));
+    else ok("PE details / pe.text conflict nodes", "none");
+
+    const byId = new Map(nodes.map(node => [node.id, node]));
+    targets.forEach(target => {
+      const node = byId.get(target.id);
+      if (!node) {
+        warn("PE migration target", `${target.id} / ${target.label} missing`);
+        return;
+      }
+      ok("PE migration target", `${nodeSummary(node)}: ${fieldPresence(node)}`);
+    });
+  });
+}
+
 function normaliseOutlineBlockForPeCheck(raw, index) {
   const depth = Number(raw && raw.depth);
   return {
@@ -167,7 +282,7 @@ function normaliseEditorMetaForPeCheck(value) {
 function checkPeOutlinePreservation() {
   const targetId = "w4_68";
   const files = candidateDataFiles();
-  const supplied = String(process.env.POCKET_CHECK_DATA || "").split(path.delimiter).filter(Boolean).length;
+  const supplied = suppliedDataFiles();
   if (!files.length) {
     warn("PE outline node", `${targetId} not checked; no sample/data fixture files found; set POCKET_CHECK_DATA=path/to/export.json`);
     return;
@@ -176,7 +291,7 @@ function checkPeOutlinePreservation() {
   let foundNode = null;
   let foundFile = "";
   for (const file of files) {
-    const required = supplied > 0 && String(process.env.POCKET_CHECK_DATA || "").split(path.delimiter).map(input => path.normalize(path.isAbsolute(input.trim()) ? input.trim() : path.join(root, input.trim()))).includes(file);
+    const required = supplied.includes(file);
     const data = parseJsonFile(file, required);
     if (!data) continue;
     const node = findNodeById(data, targetId);
@@ -240,6 +355,7 @@ checkExists("js/boot/pocket-load-manifest.js");
 checkExists("js/boot/pocket-boot.js");
 checkExists("js/commands/pocket-command-router.js");
 checkExists("docs/PIPEWORK_RULE.md");
+checkPeMigrationInventory();
 checkPeOutlinePreservation();
 
 if (failures) {
