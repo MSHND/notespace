@@ -145,7 +145,7 @@ function normaliseOutlineBlockForPeCheck(raw, index) {
   const depth = Number(raw && raw.depth);
   return {
     id: cleanCheck(raw && raw.id, 80) || "block_" + index,
-    text: String(raw && raw.text == null ? "" : raw.text).replace(/\r/g, "").slice(0, 4000),
+    text: String(!raw || raw.text == null ? "" : raw.text).replace(/\r/g, "").slice(0, 4000),
     depth: Number.isFinite(depth) ? Math.max(0, Math.min(8, Math.round(depth))) : 0,
     collapsed: raw && raw.collapsed === true,
     order: index + 1
