@@ -1,14 +1,21 @@
 # Codex report
 
-Status: PE migration plan updated with live-export inventory and legacy `node.details` protection. No migration implemented.
+Status: first PE migration diagnostic step implemented. No canonical migration writes were added.
 
 Files changed:
 
-- `docs/CODEX_REPORT.md` only
+- `tools/pocket-check.js`
+- `docs/CODEX_REPORT.md`
 
-Live export confirmation:
+What changed:
 
-- Source used locally for counts only: `pocket-data.json`; export file was not committed.
+- Extended `tools/pocket-check.js` so `POCKET_CHECK_DATA=path/to/export.json` reports PE/data shape inventory.
+- The diagnostic prints counts, node ids, labels, and field presence only.
+- It does not print private `details` or `pe.text` body content.
+- Conflicting `details` / `pe.text` pairs warn only; invalid input and shrinking outline checks still fail.
+
+Live export result:
+
 - Total nodes: 734
 - Nodes with `node.pe`: 195
 - Nodes with `node.details`: 191
@@ -18,37 +25,23 @@ Live export confirmation:
 - Nodes with `node.editor`: 0
 - Matching `details` / `pe.text` pairs: 188
 - Conflicting `details` / `pe.text` pairs: 2
+- Conflict nodes: `w` / `Work (CoA)`; `node_mpor798l_rxdyhx3` / `Phone`
 
-Required migration test cases:
+Required target checks:
 
-- Details-only: `node_mq4snlc7_t5ku2wm` / `Francesca POs`
-- Conflict: `w` / `Work (CoA)`
-- Conflict: `node_mpor798l_rxdyhx3` / `Phone`
-- Historical outline risk: `w4_68` / `Electricity`
+- `node_mq4snlc7_t5ku2wm` / `Francesca POs`: details yes, pe no, editor no
+- `w` / `Work (CoA)`: details yes, pe yes, editor no
+- `node_mpor798l_rxdyhx3` / `Phone`: details yes, pe yes, editor no
+- `w4_68` / `Electricity`: details no, pe no, editor no
 
-`w4_68` live-export shape:
+Checks run:
 
-- `w4_68` exists.
-- It has no `details`, no `pe`, and no `editor` in this export.
-- It has 15 direct children; 8 direct children have `details`, and 9 direct children have `pe`.
-- Treat `w4_68` as a historical large-outline preservation risk, but this export does not contain a large outline on `w4_68`.
-
-Compatibility rules:
-
-- Treat `node.details` as legacy body data requiring protection.
-- If `node.pe.text` is meaningful, prefer it as canonical PE body.
-- If `node.pe.text` is empty or missing and `node.details` exists, migrate `details` into `node.pe.text`.
-- If both exist and differ, preserve both; do not silently overwrite either field.
-- Add a pre-migration diagnostic/report for all `details` / `pe.text` conflicts before destructive cleanup.
-- Keep `node.details` during the initial migration; remove legacy fields only after round-trip tests pass.
-
-First implementation step:
-
-- Add diagnostics that count `pe` / `details` / `editor` shape and list conflict ids/labels.
-- Include the details-only node, both conflict nodes, and `w4_68` in migration checks.
-- Do not add canonical migration writes yet.
+- `node --check tools/pocket-check.js` using bundled Node - passed
+- `node tools/pocket-check.js` using bundled Node in scratch harness - passed with the existing no-fixture warning
+- `POCKET_CHECK_DATA=<local pocket-data.json> node tools/pocket-check.js` using bundled Node - passed; conflicts reported as warnings
 
 Result:
 
-- Report-only update completed.
-- App runtime behaviour, popup styling, script order, save/apply plumbing, and private export data were not changed.
+- Diagnostic-only change completed.
+- Private live export was not committed.
+- App runtime behaviour, popup styling, script order, save/apply plumbing, canonical `node.pe` writes, and `node.details` cleanup were not changed.
