@@ -1,34 +1,61 @@
 # Codex report
 
-Status: smallest PE popout model extraction implemented.
+Status: report-only next decomposition seam after successful PE popout model extraction.
 
 Files changed:
 
-- `js/pocket-node-popout-model.js`
-- `js/pocket-node-popout-editor.js`
-- `index.html`
-- `docs/CODEX_REPORT.md`
+- `docs/CODEX_REPORT.md` only
 
-What changed:
+Current remaining editor responsibilities:
 
-- Added `PocketNodePopoutModel.buildPayload(node)` and `PocketNodePopoutModel.normaliseEditorMeta(value)`.
-- Moved copied payload/outline model construction into `js/pocket-node-popout-model.js`.
-- Updated `pocket-node-popout-editor.js` to call the model for popup payloads and outline metadata normalisation.
-- Added `js/pocket-node-popout-model.js` after runtime and before editor in `index.html`.
+- Resolve target node from input, selected id, and `nodeMap()`.
+- Check that model, template, and runtime helpers are loaded.
+- Build popup HTML by combining template render, runtime script, HTML escaping, and safe JSON.
+- Calculate popup dimensions and screen position.
+- Open, write, close document, and focus the popup window.
+- Apply popup saves back to `node.label`, `node.details`, and `node.editor`.
+- Run save/persist side effects: op record, metadata refresh, render, focus, workspace state, PiP snapshot, status, and logging.
 
-Behaviour preserved:
+Recommended next safe seam:
 
-- Save/apply side effects stay in `pocket-node-popout-editor.js`.
-- Runtime, template markup/CSS, bridge/cutover routing, PE migration logic, legacy fields, and outline cap behaviour were not changed.
+- Extract popup window/HTML orchestration, not save/apply plumbing.
+- Proposed module: `js/pocket-node-popout-window.js`.
+- Proposed API: `window.PocketNodePopoutWindow.open(payload, helpers)` returning `true`/`false`.
+- Helper inputs should include `htmlEscape`, `safeJson`, and blocked-popup status handling only if needed to preserve exact messages.
 
-Checks run:
+Can popup orchestration be extracted safely?
 
-- `node --check js/pocket-node-popout-model.js` using bundled Node - passed
-- `node --check js/pocket-node-popout-editor.js` using bundled Node - passed
-- `node tools/pocket-check.js` using bundled Node in scratch harness - passed with expected no-fixture warning
-- Popup model syntax/shape probe using bundled Node - passed
+- Yes, if it is limited to the current `editorHtml(payload)` plus size/position/open/document-write/focus sequence.
+- Keep dimensions, window name, popup features, template/runtime dependency errors, document write order, focus call, and blocked-popup behaviour unchanged.
+- Do not move `getNode`, `buildPayload`, or `apply` in the same pass.
 
-Result:
+What should remain in editor for now:
 
-- Extraction completed as a behaviour-preserving model/helper split.
-- Manual retest recommended: popup open, Save, Save & close, Cmd/Ctrl+S, Escape, unsaved dialog, text mode, and outline mode.
+- Public API: `PocketNodePopoutEditor.open/apply`.
+- Target node resolution and selected-id fallback.
+- Calls into `PocketNodePopoutModel.buildPayload`.
+- All save/apply comparisons, node writes, persistence calls, status text, and logs.
+- PE migration/data compatibility behaviour and legacy field handling.
+
+Files likely to change next:
+
+- `js/pocket-node-popout-window.js` new helper.
+- `js/pocket-node-popout-editor.js` to delegate popup opening.
+- `index.html` to load the window helper before `pocket-node-popout-editor.js`.
+- `docs/CODEX_REPORT.md` for result notes.
+- `tools/pocket-check.js` only if script-order checking is added.
+
+Risks/checks:
+
+- Risk: popup blocked path or status message changes.
+- Risk: window size/position/name/features drift.
+- Risk: template/runtime dependency errors move or change.
+- Risk: document write/focus timing changes.
+- Checks: `node --check` new helper and editor, `node tools/pocket-check.js`, popup syntax probe if available, and manual hard-refresh/open/save/save-close/Cmd-Ctrl-S/Escape/unsaved/text/outline retest.
+
+Smallest implementation step:
+
+- Add `pocket-node-popout-window.js` with a copied `editorHtml` plus popup open/write/focus sequence.
+- Load it before `pocket-node-popout-editor.js`.
+- Replace only the popup open/write block in `PocketNodePopoutEditor.open` with a call to the new helper.
+- Leave `apply`, runtime, template, model, bridge/cutover, script pruning, and PE migration untouched.
