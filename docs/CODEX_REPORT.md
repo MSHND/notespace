@@ -1,32 +1,44 @@
 # Codex report
 
-Status: smallest Enter copy-node fix implemented.
+Status: report-only investigation of copy subnode still not copying on Enter.
 
 Files changed:
 
-- `js/pocket-enter-copy-only.js`
 - `docs/CODEX_REPORT.md`
 
-What changed:
+Findings:
 
-- Broadened the final Enter guard so a selected copy-ready node can copy from safe non-tree focus, such as `body` or another non-editing/non-modal area.
-- Preserved the tree-target requirement for opening PE; non-copy nodes still only open PE from tree context.
-- Added a small ignore guard for editable targets, open overlays/dialogs/menus, move mode, pending import, and inline-edit flows.
-- Left `shouldCopyOnSingleClick()`, `copyText()`, PE routing, save/apply, dirty-popup protection, pending-open behaviour, styling, and migration/data logic unchanged.
+- Enter handling still reaches copy through two paths:
+  - `js/pocket-enter-copy-only.js` capture guard calls `copySelectedNodeIfAppropriate()` before PE open.
+  - `js/pocket-tree-actions.js` older `handleTreeKeydown()` has the same copy-before-details branch when focus is in `#treeWrap`.
+- Both paths depend on `shouldCopyOnSingleClick(node, hasKids)` from `js/pocket-editor-copy.js`.
+- A node under a parent/root labelled exactly `copy` should be recognised as inside copy context, because `findCopyContextRootId()` walks ancestors and `isCopyContextLabelFallbackNode()` accepts `copy` and `copy templates`.
+- Copy context can also be marked by `copyContext`, role/copyRole, profile role/copyRole, or id `m1`.
+- The strict gate is `hasKids`: `shouldCopyOnSingleClick()` immediately returns `false` for any node with children.
+- Therefore a selected subnode under `copy` copies only if it is a leaf. If the selected “copy” subnode has children, it is not copy-ready by current rules.
+- `.copyReady` is applied in `js/pocket-render.js` from the same predicate. A copy-context subnode with children will not receive `.copyReady`.
+- `copyText()` in `js/pocket-import.js` is still available and unchanged; the clipboard path is not the likely failure point.
+- No PE bridge/cutover code is needed for this specific failure unless the row is incorrectly changing `state.selectedId`.
 
-Checks run:
+Likely reason Enter still does not copy:
 
-- `node --check js/pocket-enter-copy-only.js` using bundled Node in a scratch copy from GitHub `main` - passed.
-- `node tools/pocket-check.js` using bundled Node in a scratch repo harness from GitHub `main` - passed with expected no-fixture warning for `w4_68`.
+- The selected copy subnode is probably being treated as a container because it has children.
+- Current code defines “copy-ready” as a leaf under copy context, not any descendant under copy context.
+- If the row is visually a parent/folder row, Enter will skip copy and either fall through to PE/details from tree context or do nothing from safe non-tree focus.
 
-Manual retest steps for Murray:
+Smallest safe fix:
 
-- Selected copy leaf + Enter copies.
-- Selected copy leaf + Enter copies when focus is on `body` or a safe non-tree area.
-- Selected non-copy node + Enter still opens PE only from tree context.
-- Enter in search/details/PE fields is ignored by this copy guard.
-- Row click copy still works.
-- Ctrl/Cmd+C still works.
-- Dirty popup protection still works.
-- Pending-open flow still works.
-- Save, Save & close, Cmd/Ctrl+S, Escape, text mode, and outline mode still work.
+- Add a dedicated Enter-copy predicate in `js/pocket-enter-copy-only.js`, for example `shouldCopyOnEnter(node, hasKids)`.
+- Preserve existing click-copy behaviour by leaving `shouldCopyOnSingleClick()` unchanged.
+- For Enter only, allow descendants under a recognised copy context to copy even when they have children, while excluding the copy root itself if needed.
+- Keep PE open tree-only and keep all editable/modal/menu/move/import guards.
+- Add a tiny diagnostic log or temporary console check only if Murray needs to confirm `node.id`, `label`, `hasKids`, `copyRootId`, and `.copyReady`; do not print private body/details text.
+
+What should remain untouched:
+
+- `copyText()`, PE save/apply, dirty-popup protection, pending-open behaviour, PE routing, popup styling, migration/data logic, and legacy fields.
+
+Risks and checks:
+
+- Risks: copying a copy-branch container when the user expected Enter to open/edit it; copying the `copy` root itself; changing row-click behaviour accidentally.
+- Checks: selected leaf under `copy` + Enter copies; selected container under `copy` + Enter copies if that is the intended Murray case; selected `copy` root behaviour is deliberate; non-copy node + Enter opens PE only from tree context; Enter in search/details/PE fields is ignored; row-click copy, Ctrl/Cmd+C, dirty-popup protection, pending-open flow, Save, Save & close, Cmd/Ctrl+S, Escape, text mode, and outline mode still work.
