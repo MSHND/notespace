@@ -28,17 +28,15 @@
     return global.PocketNodePopoutWindow;
   }
 
-  function getNode(input) {
-    let id = "";
-    if (typeof input === "string") id = clean(input, 80);
-    else if (input && typeof input === "object") id = clean(input.id, 80);
-    if (!id) id = clean(global.state?.selectedId, 80);
-    if (!id || typeof nodeMap !== "function") return null;
-    return nodeMap().get(id) || null;
+  function popoutTarget() {
+    if (!global.PocketNodePopoutTarget || typeof global.PocketNodePopoutTarget.get !== "function") {
+      throw new Error("PocketNodePopoutTarget is not loaded.");
+    }
+    return global.PocketNodePopoutTarget;
   }
 
   function open(input) {
-    const node = getNode(input);
+    const node = popoutTarget().get(input);
     if (!node) {
       if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
       console.warn("[node popout editor] no node", { input, selectedId: global.state?.selectedId });
@@ -53,7 +51,7 @@
 
   function apply(payload) {
     const id = clean(payload?.id, 80);
-    const node = getNode(id);
+    const node = popoutTarget().get(id);
     if (!id || !node) {
       if (typeof setStatus === "function") setStatus("Editor item no longer exists.", "warn");
       return false;
