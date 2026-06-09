@@ -64,14 +64,17 @@
   function buildPayload() { return { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
   function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
   function hideUnsavedDialog() { unsavedDialog.hidden = true; }
-  function keepEditing() { hideUnsavedDialog(); focusEditor(); }
+  function openerPopoutWindow() { try { return window.opener && !window.opener.closed && window.opener.PocketNodePopoutWindow ? window.opener.PocketNodePopoutWindow : null; } catch (_error) { return null; } }
+  function resumePendingOpen() { var target = openerPopoutWindow(); try { return !!(target && typeof target.resumePendingOpen === "function" && target.resumePendingOpen()); } catch (error) { console.error(error); return false; } }
+  function cancelPendingOpen() { var target = openerPopoutWindow(); try { if (target && typeof target.cancelPendingOpen === "function") target.cancelPendingOpen(); } catch (error) { console.error(error); } }
+  function keepEditing() { cancelPendingOpen(); hideUnsavedDialog(); focusEditor(); }
   function showUnsavedDialog() { returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); }
   function requestUnsavedProtection() { if (!dirty) return false; showUnsavedDialog(); try { window.focus(); } catch (_error) {} return true; }
   window.PocketNodePopoutSession = Object.freeze({
     hasUnsavedChanges: function () { return dirty === true; },
     requestUnsavedProtection: requestUnsavedProtection
   });
-  function discardAndClose() { allowedToClose = true; dirty = false; window.close(); }
+  function discardAndClose() { allowedToClose = true; dirty = false; if (resumePendingOpen()) return; window.close(); }
   function save(closeAfter) {
     closeAfter = closeAfter === true;
     hideUnsavedDialog();
@@ -82,7 +85,8 @@
         if (ok) {
           setDirty(false);
           setSaveState("saved", "saved");
-          if (closeAfter) { allowedToClose = true; window.setTimeout(function () { window.close(); }, 80); }
+          if (closeAfter) { allowedToClose = true; if (resumePendingOpen()) return true; window.setTimeout(function () { window.close(); }, 80); }
+          else cancelPendingOpen();
           return true;
         }
       }
