@@ -6,8 +6,6 @@
 (function initialisePocketNodePopoutEditor(global) {
   "use strict";
 
-  let editorWindow = null;
-
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
@@ -16,21 +14,18 @@
     return typeof normaliseDetails === "function" ? normaliseDetails(value, max) : String(value || "").replace(/\r/g, "").trim().slice(0, max);
   }
 
-  function htmlEscape(value) {
-    return String(value || "").replace(/[&<>"]/g, function (ch) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch];
-    });
-  }
-
-  function safeJson(value) {
-    return JSON.stringify(value).replace(/</g, "\\u003c");
-  }
-
   function popoutModel() {
     if (!global.PocketNodePopoutModel || typeof global.PocketNodePopoutModel.buildPayload !== "function" || typeof global.PocketNodePopoutModel.normaliseEditorMeta !== "function") {
       throw new Error("PocketNodePopoutModel is not loaded.");
     }
     return global.PocketNodePopoutModel;
+  }
+
+  function popoutWindow() {
+    if (!global.PocketNodePopoutWindow || typeof global.PocketNodePopoutWindow.open !== "function") {
+      throw new Error("PocketNodePopoutWindow is not loaded.");
+    }
+    return global.PocketNodePopoutWindow;
   }
 
   function getNode(input) {
@@ -42,19 +37,6 @@
     return nodeMap().get(id) || null;
   }
 
-  function editorHtml(payload) {
-    if (!global.PocketNodePopoutTemplate || typeof global.PocketNodePopoutTemplate.render !== "function") {
-      throw new Error("PocketNodePopoutTemplate is not loaded.");
-    }
-    if (!global.PocketNodePopoutRuntime || typeof global.PocketNodePopoutRuntime.build !== "function") {
-      throw new Error("PocketNodePopoutRuntime is not loaded.");
-    }
-    return global.PocketNodePopoutTemplate.render(payload, {
-      htmlEscape: htmlEscape,
-      runtimeScript: global.PocketNodePopoutRuntime.build(safeJson(payload))
-    });
-  }
-
   function open(input) {
     const node = getNode(input);
     if (!node) {
@@ -64,19 +46,7 @@
     }
 
     const payload = popoutModel().buildPayload(node);
-    const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
-    const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
-    const left = Math.round((global.screen.availWidth - width) / 2);
-    const top = Math.round((global.screen.availHeight - height) / 2);
-    editorWindow = global.open("", "pocketNodePopoutEditor", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
-    if (!editorWindow) {
-      if (typeof setStatus === "function") setStatus("Popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
-      return false;
-    }
-    editorWindow.document.open();
-    editorWindow.document.write(editorHtml(payload));
-    editorWindow.document.close();
-    editorWindow.focus();
+    if (!popoutWindow().open(payload)) return false;
     console.info("[node popout editor] opened", { id: payload.id, title: payload.title });
     return true;
   }
