@@ -1,41 +1,73 @@
 # Codex report
 
-Status: PE conflict-preservation diagnostic/preview implemented. No `node.pe.legacyDetails` app writes yet.
+Status: report-only decomposition map for `js/pocket-node-popout-editor.js`. No code changes in this pass.
 
 Files changed:
 
-- `tools/pocket-check.js`
-- `docs/CODEX_REPORT.md`
+- `docs/CODEX_REPORT.md` only
 
-What changed:
+Current call flow:
 
-- Extended `tools/pocket-check.js` to preview conflict preservation when `POCKET_CHECK_DATA` points to an export JSON.
-- Conflict preview applies only when `node.details` and `node.pe.text` both exist, are meaningful, and differ.
-- The preview reports ids, labels, counts, field presence, and pass/fail/warn only.
-- It does not print private body/detail text and does not modify the supplied export file.
+- `pocket-editor-cutover-v3.js` routes Edit/double-click/right-click Edit to `PocketPeEditor.open`.
+- `pocket-pe-node-popout-bridge.js` delegates `PocketPeEditor.open/apply` to `PocketNodePopoutEditor.open/apply`.
+- `pocket-node-popout-editor.js` opens the popup and receives saves from `pocket-node-popout-runtime.js`.
+- `pocket-node-editor-route.js` is currently a minimal `PocketPeEditor` stub.
 
-Truth-file diagnostic result:
+Current editor responsibilities:
 
-- Conflict preservation count: 2
-- Conflict nodes: `w` / `Work (CoA)`; `node_mpor798l_rxdyhx3` / `Phone`
-- Would receive `node.pe.legacyDetails`: 2
-- `node.pe.text` unchanged: 2
-- `node.details` retained: 2
-- `node.pe.text` overwritten: 0
-- `node.details` dropped: 0
-- `Phone` target preview: `pe.legacyDetails` missing before, present after preview; `pe.text` present; `details` retained.
-- `Work (CoA)` target preview: `pe.legacyDetails` missing before, present after preview; `pe.text` present; `details` retained.
-- Details-only migration preview still reports `node_mq4snlc7_t5ku2wm` / `Francesca POs` upgrading from details-only to `pe.text`.
-- `w4_68` / `Electricity` outline diagnostic still runs; this export has no outline source on `w4_68`.
-- Local truth file was verified unchanged and was not committed.
+- Resolve target node from input, selected id, and `nodeMap()`.
+- Normalise legacy body and outline editor metadata.
+- Build popup payload from `node.label`, `node.details`, `node.editor`, path, and timestamps.
+- Require template/runtime modules and render popup HTML.
+- Open, size, write, and focus the popup window.
+- Apply popup saves back to node fields.
+- Drive save side effects: `recordOp`, `refreshMeta`, `renderTree`, focus, workspace state, PiP snapshot, status, and logs.
 
-Checks run:
+Public API:
 
-- `node --check tools/pocket-check.js` using bundled Node - passed
-- `node tools/pocket-check.js` using bundled Node in scratch harness - passed with expected no-fixture warning
-- `POCKET_CHECK_DATA=<local truth file> node tools/pocket-check.js` using bundled Node - passed
+- `window.PocketNodePopoutEditor.open(input)` returns `true` on popup open, `false` on blocked/missing node.
+- `window.PocketNodePopoutEditor.apply(payload)` returns `true` when save/no-op succeeds, `false` when target node is missing.
 
-Result:
+Safe to extract next:
 
-- Diagnostic-only conflict preview is complete.
-- App runtime behaviour, popup styling, script order, save/apply plumbing, `node.pe.legacyDetails` writes, `node.pe.text`, and `node.details` were not changed.
+- Pure-ish payload/model helpers: `clean`, `normaliseDetailsSafe`, `normaliseOutlineBlock`, `normaliseEditorMeta`, and `payloadFromNode`.
+- Rendering adapter helper: `editorHtml(payload)` once template/runtime dependency checks stay identical.
+- Keep extracted APIs behaviour-preserving, including current legacy `node.details` / `node.editor` reads and the existing outline cap.
+
+Do not touch yet:
+
+- `apply(payload)` save/apply side effects and persistence calls.
+- Bridge/cutover routing and fallback logic.
+- Runtime save/dirty/close behaviour.
+- Template markup/CSS/script order.
+- PE canonical migration, conflict preservation writes, legacy field cleanup, or outline cap changes.
+
+Recommended next seam:
+
+- Extract payload/model construction first.
+- Proposed module: `js/pocket-node-popout-model.js`.
+- Proposed API: `window.PocketNodePopoutModel.buildPayload(node)` and `window.PocketNodePopoutModel.normaliseEditorMeta(value)`.
+- Reason: this removes data-shape logic from the window/open/apply controller without touching save plumbing, popup behaviour, bridge routing, or visual code.
+
+Files likely to change next:
+
+- `js/pocket-node-popout-model.js` new helper.
+- `js/pocket-node-popout-editor.js` to call the helper.
+- `index.html` only for controlled script insertion before `pocket-node-popout-editor.js`.
+- `tools/pocket-check.js` only if a script-order/check entry is needed.
+- `docs/CODEX_REPORT.md` for result notes.
+
+Risks and checks:
+
+- Risk: script order break if model loads after editor.
+- Risk: payload drift in title/body/mode/outline/path/timestamps.
+- Risk: changing current legacy reads before PE migration is ready.
+- Risk: outline normalisation behaviour changing accidentally.
+- Checks: `node --check` new helper and editor, popup syntax probe if available, `node tools/pocket-check.js`, and manual open/save/save-close/Cmd-Ctrl-S/Escape/unsaved-dialog retest.
+
+Smallest implementation step:
+
+- Add `pocket-node-popout-model.js` with exact copied payload/outline normalisation helpers.
+- Add the script before `pocket-node-popout-editor.js`.
+- Replace only `payloadFromNode`/`normaliseEditorMeta` calls in the editor with the model API.
+- Do not change `apply`, runtime, bridge, cutover, template, migration, or styling in that pass.
