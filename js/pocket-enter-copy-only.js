@@ -252,10 +252,26 @@
     return { node, hasKids };
   }
 
+  function copyContextRootIdForEnter(node) {
+    if (!node || typeof findCopyContextRootId !== "function") return "";
+    try {
+      return clean(findCopyContextRootId(node.id), 80);
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function shouldCopyOnEnter(node, hasKids) {
+    if (!node) return false;
+    if (typeof shouldCopyOnSingleClick === "function" && shouldCopyOnSingleClick(node, hasKids)) return true;
+    const nodeId = clean(node.id, 80);
+    const copyRootId = copyContextRootIdForEnter(node);
+    return !!copyRootId && copyRootId !== nodeId;
+  }
+
   function copySelectedNodeIfAppropriate() {
     const { node, hasKids } = selectedNodeWithKids();
-    if (!node) return false;
-    if (typeof shouldCopyOnSingleClick !== "function" || !shouldCopyOnSingleClick(node, hasKids)) return false;
+    if (!node || !shouldCopyOnEnter(node, hasKids)) return false;
 
     if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
     if (typeof clearFilterForCopyLoop === "function") clearFilterForCopyLoop();
