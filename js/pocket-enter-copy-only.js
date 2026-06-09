@@ -388,8 +388,6 @@
 
   installMoveDisplayGuard();
   installPeEscCloseGuard();
-  document.addEventListener("keydown", handleEnter, true);
-  window.addEventListener("keydown", handleEnter, true);
   document.addEventListener("click", closeMenusAfterMoveClick, true);
   document.addEventListener("click", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
   document.addEventListener("contextmenu", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
@@ -400,5 +398,5 @@
   }, true);
   const observer = new MutationObserver(() => window.requestAnimationFrame(ensureMoveInRowMenu));
   observer.observe(document.body, { childList: true, subtree: true });
-  console.info("[enter PE/copy guard] installed");
+  console.info("[enter PE/copy guard] Enter capture disabled; row menu and PE Esc guards installed");
 })(window);
