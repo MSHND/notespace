@@ -7,7 +7,6 @@
   "use strict";
 
   let editorWindow = null;
-  const OUTLINE_EDITOR_SCHEMA = "pocket.nodeEditor.v1";
 
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
@@ -18,13 +17,20 @@
   }
 
   function htmlEscape(value) {
-    return String(value || "").replace(/[&<>\"]/g, function (ch) {
+    return String(value || "").replace(/[&<>"]/g, function (ch) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch];
     });
   }
 
   function safeJson(value) {
     return JSON.stringify(value).replace(/</g, "\\u003c");
+  }
+
+  function popoutModel() {
+    if (!global.PocketNodePopoutModel || typeof global.PocketNodePopoutModel.buildPayload !== "function" || typeof global.PocketNodePopoutModel.normaliseEditorMeta !== "function") {
+      throw new Error("PocketNodePopoutModel is not loaded.");
+    }
+    return global.PocketNodePopoutModel;
   }
 
   function getNode(input) {
@@ -34,43 +40,6 @@
     if (!id) id = clean(global.state?.selectedId, 80);
     if (!id || typeof nodeMap !== "function") return null;
     return nodeMap().get(id) || null;
-  }
-
-  function normaliseOutlineBlock(raw, index) {
-    const depth = Number(raw?.depth);
-    return {
-      id: clean(raw?.id, 80) || (typeof makeId === "function" ? makeId("block") : "block_" + index),
-      text: String(raw?.text == null ? "" : raw.text).replace(/\r/g, "").slice(0, 4000),
-      depth: Number.isFinite(depth) ? Math.max(0, Math.min(8, Math.round(depth))) : 0,
-      collapsed: raw?.collapsed === true,
-      order: index + 1
-    };
-  }
-
-  function normaliseEditorMeta(value) {
-    if (!value || typeof value !== "object") return null;
-    const mode = clean(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
-    if (mode !== "outline") return null;
-    const outline = Array.isArray(value.outline) ? value.outline.slice(0, 400).map(normaliseOutlineBlock) : [];
-    const meaningful = outline.some(function (block) {
-      return (Number(block.depth) || 0) > 0 || block.collapsed === true || clean(block.text, 4000);
-    });
-    if (!meaningful) return null;
-    return { schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline: outline };
-  }
-
-  function payloadFromNode(node) {
-    const editor = normaliseEditorMeta(node.editor) || null;
-    return {
-      id: clean(node.id, 80),
-      title: clean(node.label, 220) || "Untitled",
-      body: normaliseDetailsSafe(node.details, 4000),
-      mode: editor?.mode || "text",
-      outline: Array.isArray(editor?.outline) ? editor.outline : null,
-      path: typeof getPath === "function" ? getPath(node.id) : "",
-      openedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
   }
 
   function editorHtml(payload) {
@@ -94,7 +63,7 @@
       return false;
     }
 
-    const payload = payloadFromNode(node);
+    const payload = popoutModel().buildPayload(node);
     const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
     const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
     const left = Math.round((global.screen.availWidth - width) / 2);
@@ -120,12 +89,13 @@
       return false;
     }
 
+    const model = popoutModel();
     const beforeLabel = clean(node.label, 220);
     const beforeDetails = normaliseDetailsSafe(node.details, 4000);
-    const beforeEditor = JSON.stringify(normaliseEditorMeta(node.editor) || null);
+    const beforeEditor = JSON.stringify(model.normaliseEditorMeta(node.editor) || null);
     const nextLabel = clean(payload.title, 220) || beforeLabel || "Untitled";
     const nextDetails = normaliseDetailsSafe(payload.body, 4000);
-    const editorMeta = normaliseEditorMeta(payload);
+    const editorMeta = model.normaliseEditorMeta(payload);
     const afterEditor = JSON.stringify(editorMeta || null);
     const changed = beforeLabel !== nextLabel || beforeDetails !== nextDetails || beforeEditor !== afterEditor;
 
