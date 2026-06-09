@@ -252,10 +252,12 @@
     return { node, hasKids };
   }
 
-  function copyContextRootIdForEnter(node) {
+  function copyAncestorRootIdForEnter(node) {
     if (!node || typeof findCopyContextRootId !== "function") return "";
+    const parentId = clean(node.parentId, 80);
+    if (!parentId || parentId === "root") return "";
     try {
-      return clean(findCopyContextRootId(node.id), 80);
+      return clean(findCopyContextRootId(parentId), 80);
     } catch (_error) {
       return "";
     }
@@ -264,9 +266,7 @@
   function shouldCopyOnEnter(node, hasKids) {
     if (!node) return false;
     if (typeof shouldCopyOnSingleClick === "function" && shouldCopyOnSingleClick(node, hasKids)) return true;
-    const nodeId = clean(node.id, 80);
-    const copyRootId = copyContextRootIdForEnter(node);
-    return !!copyRootId && copyRootId !== nodeId;
+    return !!copyAncestorRootIdForEnter(node);
   }
 
   function copySelectedNodeIfAppropriate() {
