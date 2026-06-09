@@ -3,6 +3,7 @@
   "use strict";
 
   let editorWindow = null;
+  let pendingOpen = null;
 
   function htmlEscape(value) {
     return String(value || "").replace(/[&<>"]/g, function (ch) {
@@ -35,6 +36,17 @@
       ? helpers.setStatus
       : (typeof setStatus === "function" ? setStatus : null);
     if (status) status("Popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
+  }
+
+  function popupGeometry() {
+    const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
+    const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
+    return {
+      width: width,
+      height: height,
+      left: Math.round((global.screen.availWidth - width) / 2),
+      top: Math.round((global.screen.availHeight - height) / 2)
+    };
   }
 
   function isOpen(win) {
@@ -72,25 +84,18 @@
     } catch (_error) {}
   }
 
-  function blockIfDirty(win) {
+  function rememberPendingOpen(payload, helpers) {
+    pendingOpen = { payload: payload, helpers: helpers || {} };
+  }
+
+  function blockIfDirty(win, pending) {
     if (!isOpen(win) || !hasUnsavedChanges(win)) return false;
+    if (pending) rememberPendingOpen(pending.payload, pending.helpers);
     requestUnsavedProtection(win);
     return true;
   }
 
-  function open(payload, helpers) {
-    helpers = helpers || {};
-    const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
-    const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
-    const left = Math.round((global.screen.availWidth - width) / 2);
-    const top = Math.round((global.screen.availHeight - height) / 2);
-    if (blockIfDirty(editorWindow)) return false;
-    editorWindow = global.open("", "pocketNodePopoutEditor", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
-    if (!editorWindow) {
-      setBlockedPopupStatus(helpers);
-      return false;
-    }
-    if (blockIfDirty(editorWindow)) return false;
+  function writeToEditorWindow(payload, helpers) {
     editorWindow.document.open();
     editorWindow.document.write(editorHtml(payload, helpers));
     editorWindow.document.close();
@@ -98,5 +103,45 @@
     return true;
   }
 
-  global.PocketNodePopoutWindow = Object.freeze({ open: open });
+  function openNow(payload, helpers) {
+    helpers = helpers || {};
+    const bounds = popupGeometry();
+    editorWindow = global.open("", "pocketNodePopoutEditor", `popup=yes,width=${bounds.width},height=${bounds.height},left=${bounds.left},top=${bounds.top}`);
+    if (!editorWindow) {
+      setBlockedPopupStatus(helpers);
+      return false;
+    }
+    return writeToEditorWindow(payload, helpers);
+  }
+
+  function open(payload, helpers) {
+    helpers = helpers || {};
+    const pending = { payload: payload, helpers: helpers };
+    if (blockIfDirty(editorWindow, pending)) return false;
+    const bounds = popupGeometry();
+    editorWindow = global.open("", "pocketNodePopoutEditor", `popup=yes,width=${bounds.width},height=${bounds.height},left=${bounds.left},top=${bounds.top}`);
+    if (!editorWindow) {
+      setBlockedPopupStatus(helpers);
+      return false;
+    }
+    if (blockIfDirty(editorWindow, pending)) return false;
+    return writeToEditorWindow(payload, helpers);
+  }
+
+  function resumePendingOpen() {
+    const pending = pendingOpen;
+    if (!pending) return false;
+    pendingOpen = null;
+    return openNow(pending.payload, pending.helpers);
+  }
+
+  function cancelPendingOpen() {
+    pendingOpen = null;
+  }
+
+  global.PocketNodePopoutWindow = Object.freeze({
+    open: open,
+    resumePendingOpen: resumePendingOpen,
+    cancelPendingOpen: cancelPendingOpen
+  });
 })(window);
