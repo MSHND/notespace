@@ -37,17 +37,60 @@
     if (status) status("Popout blocked. Allow popups for pocket, then try again.", "warn", { durationMs: 5200 });
   }
 
+  function isOpen(win) {
+    try {
+      return !!win && win.closed !== true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function sessionFor(win) {
+    try {
+      return win && win.PocketNodePopoutSession ? win.PocketNodePopoutSession : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function hasUnsavedChanges(win) {
+    const session = sessionFor(win);
+    try {
+      return !!(session && typeof session.hasUnsavedChanges === "function" && session.hasUnsavedChanges());
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function requestUnsavedProtection(win) {
+    const session = sessionFor(win);
+    try {
+      if (win && typeof win.focus === "function") win.focus();
+    } catch (_error) {}
+    try {
+      if (session && typeof session.requestUnsavedProtection === "function") session.requestUnsavedProtection();
+    } catch (_error) {}
+  }
+
+  function blockIfDirty(win) {
+    if (!isOpen(win) || !hasUnsavedChanges(win)) return false;
+    requestUnsavedProtection(win);
+    return true;
+  }
+
   function open(payload, helpers) {
     helpers = helpers || {};
     const width = Math.min(820, Math.max(600, Math.round(global.screen.availWidth * 0.5)));
     const height = Math.min(820, Math.max(600, Math.round(global.screen.availHeight * 0.76)));
     const left = Math.round((global.screen.availWidth - width) / 2);
     const top = Math.round((global.screen.availHeight - height) / 2);
+    if (blockIfDirty(editorWindow)) return false;
     editorWindow = global.open("", "pocketNodePopoutEditor", `popup=yes,width=${width},height=${height},left=${left},top=${top}`);
     if (!editorWindow) {
       setBlockedPopupStatus(helpers);
       return false;
     }
+    if (blockIfDirty(editorWindow)) return false;
     editorWindow.document.open();
     editorWindow.document.write(editorHtml(payload, helpers));
     editorWindow.document.close();
