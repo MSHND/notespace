@@ -66,6 +66,11 @@
   function hideUnsavedDialog() { unsavedDialog.hidden = true; }
   function keepEditing() { hideUnsavedDialog(); focusEditor(); }
   function showUnsavedDialog() { returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); }
+  function requestUnsavedProtection() { if (!dirty) return false; showUnsavedDialog(); try { window.focus(); } catch (_error) {} return true; }
+  window.PocketNodePopoutSession = Object.freeze({
+    hasUnsavedChanges: function () { return dirty === true; },
+    requestUnsavedProtection: requestUnsavedProtection
+  });
   function discardAndClose() { allowedToClose = true; dirty = false; window.close(); }
   function save(closeAfter) {
     closeAfter = closeAfter === true;
