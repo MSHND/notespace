@@ -15,6 +15,24 @@
     return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
   }
 
+  function isOpenElement(element) {
+    return element instanceof HTMLElement && element.hidden !== true && element.getAttribute("aria-hidden") !== "true";
+  }
+
+  function hasOpenEnterOwningLayer() {
+    if (global.state?.commandPaletteOpen || global.state?.rowMiniMenuOpen) return true;
+    if (document.querySelector(".rowMiniMenu")) return true;
+    return ["commandOverlay", "controlsOverlay", "detailOverlay"].some((id) => isOpenElement(document.getElementById(id)));
+  }
+
+  function shouldIgnoreEnterTarget(target) {
+    if (isEditableTarget(target)) return true;
+    if (global.state?.moveMode || global.pendingPathImport || global.state?.inlineEdit?.id) return true;
+    if (hasOpenEnterOwningLayer()) return true;
+    if (!(target instanceof HTMLElement)) return false;
+    return !!target.closest(".rowMiniMenu, .commandOverlay, .controlsOverlay, .detailOverlay, [role='dialog'], [role='menu']");
+  }
+
   function installMoveDisplayGuard() {
     if (document.getElementById("pocketMoveDisplayGuard")) return;
     const style = document.createElement("style");
@@ -274,17 +292,22 @@
   function handleEnter(ev) {
     if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
     const target = ev.target instanceof HTMLElement ? ev.target : null;
-    if (isEditableTarget(target)) return;
-    if (global.state?.moveMode || global.pendingPathImport) return;
+    if (shouldIgnoreEnterTarget(target)) return;
     const treeWrap = document.getElementById("treeWrap");
     if (!(treeWrap instanceof HTMLElement)) return;
-    if (target && target !== treeWrap && !treeWrap.contains(target)) return;
+    const isTreeTarget = !target || target === treeWrap || treeWrap.contains(target);
+
+    if (copySelectedNodeIfAppropriate()) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      ev.stopImmediatePropagation();
+      return;
+    }
+    if (!isTreeTarget) return;
 
     ev.preventDefault();
     ev.stopPropagation();
     ev.stopImmediatePropagation();
-
-    if (copySelectedNodeIfAppropriate()) return;
     openSelectedPe();
   }
 
