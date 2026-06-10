@@ -1,72 +1,54 @@
 # Codex report
 
-Status: implemented a contained tree-only Enter route override because Codex tokens were exhausted before the planned direct handler edit.
+Status: rebuilt tree Enter ownership inside `handleTreeKeydown()`.
 
 Files changed:
 
+- `js/pocket-tree-actions.js`
 - `js/pocket-tree-enter-route.js`
-- `index.html`
 - `docs/CODEX_REPORT.md`
 
-What changed:
+Enter pipeline before:
 
-- Added `js/pocket-tree-enter-route.js` as a small purpose-built tree Enter router.
-- Loaded it last in `index.html`, after `pocket-enter-copy-only.js`.
-- The new route listens only on `#treeWrap` keydown, using capture on that element so it can stop the old tree Enter fallback before it opens the inline editor.
-- It does not add document/window Enter capture.
-- It does not change PE save/apply plumbing, dirty-popup protection, pending-open behaviour, row-click copy, Ctrl/Cmd+C copy, search-field Enter, migration/data logic, legacy fields, popup styling, or script order of existing scripts.
+- `js/pocket-tree-actions.js`: `handleTreeKeydown()` owned tree keydown and still fell back to `openDetailsEditorForSelectedNode()`.
+- `js/pocket-tree-enter-route.js`: late capture listener tried to intercept tree Enter before the old fallback.
+- `js/pocket-enter-copy-only.js`: document Enter capture code existed but was not installed; row-menu and PE Esc guards remained.
+- `js/pocket-overlays-init.js`: binds `#treeWrap` keydown to `handleTreeKeydown()`; search Enter is separate.
+- `js/pocket-editor-cutover-v3.js` and `js/pocket-pe-node-popout-bridge.js`: route Edit/double-click/PE opens through `PocketPeEditor.open` / `openPocketNodeEditor`.
+- Local owners kept Enter for search, dialogs/menus, move mode, import, and active inline edit.
 
-New Enter route behaviour:
+What was rebuilt:
 
-- Plain Enter only.
-- Ignores editable targets: input, textarea, select, button, contenteditable.
-- Ignores visible dialogs/menus/overlays.
-- Ignores inline edit, move mode, and pending import so existing local flows keep ownership.
-- If no node is selected, shows `Select an item first.` and does not open inline edit.
-- If the selected node is inside a recognised copy context, copies the selected node label.
-- Copy-context containers are included because the route uses copy-context ancestry, not `shouldCopyOnSingleClick(node, hasKids)`.
-- Otherwise opens the PE/item details popup via:
-  1. `window.openPocketPeEditor(id)`
-  2. `window.PocketPeEditor.open(id)`
-  3. `window.openPocketNodeEditor(id)`
+- Added tree Enter helpers beside `handleTreeKeydown()`.
+- Plain tree Enter now uses copy-context ancestry, not `shouldCopyOnSingleClick(node, hasKids)`.
+- Copy-context Enter includes leaves, children, descendants, containers, and the copy root.
+- Normal tree Enter opens PE via `window.openPocketPeEditor(id)`, then `window.PocketPeEditor.open(id)`, then `window.openPocketNodeEditor(id)`.
+- `handleTreeKeydown()` no longer calls `openDetailsEditorForSelectedNode()` for plain Enter.
 
-Important note:
+Removed/disabled:
 
-- `js/pocket-tree-actions.js` still contains the old plain Enter fallback to `openDetailsEditorForSelectedNode()`.
-- The new route is loaded last and intercepts plain Enter on `#treeWrap` before that fallback can run.
-- This is intentionally contained as an emergency route, not the final cleanest refactor.
-- After manual testing passes, the cleaner follow-up would be to move this logic directly into `handleTreeKeydown()` and remove the old fallback.
+- Neutralised the late `js/pocket-tree-enter-route.js` script as a no-op.
+- Left `index.html` script order unchanged; the no-op script does not capture Enter.
+- No document/window plain Enter capture was added.
 
 Checks run:
 
-- No automated browser checks run.
-- Static check only: confirmed original handler had the inline fallback and new route avoids document/window capture.
+- `node --check js/pocket-tree-actions.js` - passed.
+- `node --check js/pocket-tree-enter-route.js` - passed.
+- `node tools/pocket-check.js` - passed; existing `w4_68` fixture warning remains when `POCKET_CHECK_DATA` is not set.
 
 Manual test checklist:
 
-1. Hard refresh the app.
-2. Select a normal tree node and press Enter.
-   - Expected: PE/item details popup opens.
-   - Expected: old inline editor does not open.
-3. Select a copy-context leaf and press Enter.
-   - Expected: selected label copies.
-4. Select a copy-context container and press Enter.
-   - Expected: selected label copies.
-5. Select the copy root and press Enter.
-   - Expected: deliberate copy behaviour; report if this feels wrong.
-6. Press Enter in the search field.
-   - Expected: search-specific behaviour still works.
-7. Press Enter inside PE fields.
-   - Expected: tree route does not fire.
-8. Test move mode Enter.
-   - Expected: move confirm still works.
-9. Test pending import Enter if available.
-   - Expected: import confirm still works.
-10. Test row-click copy.
-    - Expected: unchanged.
-11. Test Ctrl/Cmd+C copy.
-    - Expected: unchanged.
-12. Test dirty-popup replacement and pending-open flow.
-    - Expected: unchanged.
-13. Test Save, Save & close, Cmd/Ctrl+S, Escape, text mode, and outline mode.
-    - Expected: unchanged.
+1. Normal existing tree node + Enter opens PE popup, not inline editor.
+2. Copy-context leaf + Enter copies selected label.
+3. Copy-context container + Enter copies selected label.
+4. Copy-context root + Enter copies selected label.
+5. Search field + Enter remains search-specific.
+6. PE field + Enter remains PE/local.
+7. Move mode + Enter confirms move.
+8. Pending import + Enter confirms import.
+9. New blank node inline edit + Enter commits new node.
+10. Rename inline edit + Enter commits rename.
+11. Row-click copy unchanged.
+12. Ctrl/Cmd+C copy unchanged.
+13. Dirty-popup protection and pending-open unchanged.

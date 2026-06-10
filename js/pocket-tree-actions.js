@@ -722,6 +722,73 @@ function openRowMiniMenuForSelected() {
   return openRowMiniMenu(id, anchor instanceof HTMLElement ? anchor : row);
 }
 
+function shouldCopyOnTreeEnter(node) {
+  if (!node) return false;
+  if (typeof findCopyContextRootId === "function") {
+    const rootId = cleanText(findCopyContextRootId(node.id), 80);
+    if (rootId) return true;
+  }
+  if (typeof isCopyFocusMode === "function" && isCopyFocusMode()) return true;
+  if (typeof isPipMode !== "undefined" && isPipMode) return true;
+  return false;
+}
+
+function copyNodeLabelFromTreeEnter(node) {
+  if (!node || typeof copyText !== "function") return false;
+  cancelPendingCopyClick();
+  const id = cleanText(node.id, 80);
+  const value = cleanText(node.label, 220);
+  if (!id || !value) {
+    setStatus("Nothing to copy from that item.", "warn");
+    return true;
+  }
+  clearFilterForCopyLoop();
+  refreshMeta();
+  renderTree();
+  focusRowByNodeId(id);
+  void copyText(value).then((ok) => {
+    if (ok) showCopiedFeedback(id);
+    else setStatus("Copy did not work.", "warn");
+  });
+  return true;
+}
+
+function openPeFromTreeEnter(node) {
+  const id = cleanText(node?.id, 80);
+  if (!id) return false;
+  cancelPendingCopyClick();
+  if (typeof window.openPocketPeEditor === "function") {
+    window.openPocketPeEditor(id);
+    return true;
+  }
+  if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") {
+    window.PocketPeEditor.open(id);
+    return true;
+  }
+  if (typeof window.openPocketNodeEditor === "function") {
+    window.openPocketNodeEditor(id);
+    return true;
+  }
+  return false;
+}
+
+function routeTreeEnterForSelectedNode() {
+  const id = cleanText(state.selectedId, 80);
+  if (!id) {
+    setStatus("Select an item first.", "warn");
+    return true;
+  }
+  const node = nodeMap().get(id) || null;
+  if (!node) {
+    setStatus("Selected node was not found.", "warn");
+    return true;
+  }
+  if (shouldCopyOnTreeEnter(node)) return copyNodeLabelFromTreeEnter(node);
+  if (openPeFromTreeEnter(node)) return true;
+  setStatus("Item details are not ready yet.", "warn");
+  return true;
+}
+
 function handleTreeKeydown(ev) {
   if (isDetailsEditorOpen()) return;
   if (state.inlineEdit.id) return;
@@ -1114,30 +1181,7 @@ function handleTreeKeydown(ev) {
     && ev.key === "Enter"
   ) {
     ev.preventDefault();
-    if (state.selectedId) {
-      const map = nodeMap();
-      const node = map.get(state.selectedId) || null;
-      const hasKids = node ? sortNodesForParent(node.id).length > 0 : false;
-      if (node && shouldCopyOnSingleClick(node, hasKids)) {
-        cancelPendingCopyClick();
-        const id = cleanText(node.id, 80);
-        const value = cleanText(node.label, 220);
-        clearFilterForCopyLoop();
-        refreshMeta();
-        renderTree();
-        focusRowByNodeId(id);
-        void copyText(value).then((ok) => {
-          if (ok) showCopiedFeedback(id);
-          else setStatus("Copy did not work.", "warn");
-        });
-        return;
-      }
-    }
-    if (!state.selectedId) {
-      setStatus("Select an item first.", "warn");
-      return;
-    }
-    openDetailsEditorForSelectedNode();
+    routeTreeEnterForSelectedNode();
     return;
   }
   if (!state.selectedId) {
