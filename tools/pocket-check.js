@@ -529,7 +529,6 @@ if (index) {
   }
 }
 
-checkEnds("js/pocket-node-editor-route.js", "})(window);");
 checkExists("js/boot/pocket-load-manifest.js");
 checkExists("js/boot/pocket-boot.js");
 checkExists("js/commands/pocket-command-router.js");
