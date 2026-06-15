@@ -141,6 +141,9 @@
 
   global.PocketNodePopoutWindow = Object.freeze({
     open: open,
+    hasUnsavedChanges: function () {
+      return hasUnsavedChanges(editorWindow);
+    },
     resumePendingOpen: resumePendingOpen,
     cancelPendingOpen: cancelPendingOpen
   });
