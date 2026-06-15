@@ -1,64 +1,40 @@
 # Codex report
 
-Status: sync-readiness/status layer added. No auto-sync was implemented.
+Status: visible sync-readiness added to Pocket Health. No auto-sync/write behaviour was added.
 
 Files changed:
 
-- `js/pocket-sync-status.js`
-- `js/pocket-node-popout-window.js`
+- `js/pocket-health-sync.js`
 - `index.html`
 - `docs/CODEX_REPORT.md`
 
-Added:
+Where displayed:
 
-- `getPocketSyncStatus()`
-- `window.__pocketLiteGetSyncStatus`
-- `PocketNodePopoutWindow.hasUnsavedChanges()`
-- Console/developer hook for manual readiness checks without changing workflow.
-
-Status meanings:
-
-- `clean`: no unsaved ops or open draft blockers detected.
-- `dirty`: unsaved operation count exists.
-- `saving`: main save/export is already running.
-- `conflict`: stale/conflict guard is active.
-- `pe_dirty`: standalone PE popup has unapplied edits.
-- `details_dirty`: old details overlay has unapplied edits.
-- `needs_file`: dirty state exists but no truth-file handle is available.
-- `unknown`: app state cannot be read.
-
-Detected blockers:
-
-- save in progress
-- stale/conflict guard
-- standalone PE draft
-- old details overlay draft
-- missing truth-file handle when dirty
+- Existing `showPocketHealth()` status output now appends a read-only sync summary.
+- The summary reads `window.__pocketLiteGetSyncStatus()` / `getPocketSyncStatus()` and shows clean, dirty, saving, blocked, warning, unsaved op count, and auto-write disabled states.
+- If the sync getter is unavailable or throws, Health shows `Sync: unavailable` instead of crashing.
 
 Safety confirmations:
 
-- `canAutoWrite` always returns `false`.
-- No file watching, timers, background saves, silent writes, or auto-sync were added.
-- `buildPocketPayload()`, `writeTruthFile()`, `enqueueTreeSave()`, and `exportTree()` were not changed.
-- PE save/apply, dirty-popup protection, and pending-open behaviour were not changed.
-- Enter/copy/tree behaviour and PE data/migration logic were not changed.
-- Health/status UI was left unchanged; use `__pocketLiteGetSyncStatus()` for this pass.
+- `canAutoWrite` remains display-only and false.
+- Health/status display does not call export, save, write, apply, close, clear, or migration functions.
+- No timers, file watching, background saves, silent writes, auto-sync, save/export changes, PE save/apply changes, Enter/copy/tree changes, or data-model changes were added.
 
 Checks run:
 
 - Bundled Node `--check js/pocket-sync-status.js` - passed.
-- Bundled Node `--check js/pocket-node-popout-window.js` - passed.
-- Bundled Node `--check js/pocket-io-browser.js` - passed.
+- Bundled Node `--check js/pocket-storage.js` - passed; this is the current `showPocketHealth()` owner.
+- Bundled Node `--check js/pocket-health-sync.js` - passed.
 - Bundled Node `tools/pocket-check.js` - passed; existing `w4_68` fixture warning remains when `POCKET_CHECK_DATA` is not set.
+- `js/pocket-health.js` was not run because that file is not present in this repo.
 
 Manual test checklist:
 
-1. Hard refresh.
-2. Console `__pocketLiteGetSyncStatus()` returns sync state without errors.
-3. PE edit + Save leaves normal dirty state until main Save.
-4. Main Save returns sync state to clean/safe.
-5. Unsaved standalone PE reports `pe_dirty` through `__pocketLiteGetSyncStatus()`.
-6. Dirty-popup and pending-open protection remain unchanged.
-7. Old details overlay dirty state still reports as details draft.
-8. Stale/conflict guard reports blocked/check state.
-9. Save/export, Enter/copy, and PiP save paths remain unchanged.
+1. Hard refresh Pocket.
+2. Open the existing Health/Status view; sync status should be visible without console.
+3. With no edits, Health should show clean or clean with harmless warnings such as no file handle.
+4. Edit PE and save/apply back to main; Health should show dirty/unsaved ops until main Save.
+5. Main Save should return Health toward clean.
+6. Open PE, type, and do not save/apply; Health should show blocked/PE draft open if detectable.
+7. Trigger stale/conflict guard if practical; Health should show blocked/stale risk.
+8. Enter/copy, PE Save, Save & Close, and main Save/export should remain unchanged.
