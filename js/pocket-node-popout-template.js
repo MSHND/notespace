@@ -25,6 +25,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pocket editor</title>
 <style>
+  :root { --pe-chip-shadow: 0 1px 2px rgba(15, 23, 42, .045); --pe-focus-ring: 0 0 0 2px rgba(37, 99, 235, .14); }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #fbfbf8; color: rgba(15, 23, 42, .94); overflow: hidden; }
@@ -36,17 +37,19 @@
   .brand { font-size: 13px; font-weight: 650; color: rgba(51, 65, 85, .72); white-space: nowrap; }
   button { border: 0; border-radius: 9px; background: transparent; padding: 4px 8px; min-height: 26px; color: rgba(51, 65, 85, .82); cursor: pointer; font: inherit; font-size: 12px; font-weight: 620; }
   button:hover, button:focus-visible { color: rgba(15, 23, 42, .98); outline: none; background: rgba(148, 163, 184, .12); }
-  .toolbarBtn, .mode button { border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .98); color: rgba(20, 25, 30, .95); height: 28px; min-height: 28px; padding: 0 12px; line-height: 1; white-space: nowrap; box-shadow: 0 1px 3px rgba(15, 23, 42, .05); display: inline-flex; align-items: center; justify-content: center; font-weight: 500; }
-  .toolbarBtn:hover, .toolbarBtn:focus-visible, .mode button:hover, .mode button:focus-visible { background: rgba(255, 255, 255, 1); border-color: rgba(116, 124, 136, .26); color: rgba(13, 17, 22, .99); outline: none; }
+  button:focus-visible { box-shadow: var(--pe-focus-ring); }
+  .toolbarBtn, .mode button { border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .98); color: rgba(20, 25, 30, .95); height: 28px; min-height: 28px; padding: 0 12px; line-height: 1; white-space: nowrap; box-shadow: var(--pe-chip-shadow); display: inline-flex; align-items: center; justify-content: center; font-weight: 500; }
+  .toolbarBtn:hover, .mode button:hover { background: rgba(255, 255, 255, 1); border-color: rgba(116, 124, 136, .26); color: rgba(13, 17, 22, .99); outline: none; box-shadow: var(--pe-chip-shadow); }
+  .toolbarBtn:focus-visible, .mode button:focus-visible { background: rgba(255, 255, 255, 1); border-color: rgba(116, 124, 136, .26); color: rgba(13, 17, 22, .99); outline: none; box-shadow: var(--pe-focus-ring), var(--pe-chip-shadow); }
   #closeBtn { width: 30px; min-height: 30px; padding: 0; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
   #closeBtn:hover, #closeBtn:focus-visible { border-color: rgba(71, 85, 105, .36); background: rgba(241, 245, 249, .96); color: rgba(15, 23, 42, .98); }
   .mode button.on { color: rgba(29, 78, 216, .88); background: rgba(37, 99, 235, .1); border-color: rgba(37, 99, 235, .3); font-style: normal; }
-  .status { min-width: 52px; color: rgba(100, 116, 139, .62); font-size: 11px; }
+  .status { display: inline-flex; align-items: center; min-width: 58px; min-height: 20px; color: rgba(100, 116, 139, .62); font-size: 11px; white-space: nowrap; }
   .status.failed { color: rgba(127, 29, 29, .82); }
   .status.saved { color: rgba(22, 101, 52, .72); }
   .grow { flex: 1 1 auto; }
   .toolbarHint { color: rgba(100, 116, 139, .58); font-size: 11px; white-space: nowrap; padding: 0 4px; }
-  .dirty { opacity: 0; color: rgba(37, 99, 235, .8); }
+  .dirty { opacity: 0; display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 999px; background: rgba(37, 99, 235, .72); color: transparent; overflow: hidden; transform: translateY(-1px); }
   body.isDirty .dirty { opacity: 1; }
   .meta { padding: 10px 14px 3px; min-width: 0; }
   .titleLine { font-size: 12px; font-weight: 650; color: rgba(71, 85, 105, .72); }
@@ -56,11 +59,12 @@
   input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 560; }
   textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
   .outlinePane { min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; }
-  .outlineRow { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 2px; min-height: 30px; padding: 1px 4px; border-radius: 9px; }
+  .outlineRow { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 9px; transition: background-color 120ms ease; }
   .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
-  .outlineToggle { width: 20px; min-height: 24px; border-radius: 9px; color: rgba(100, 116, 139, .7); cursor: grab; }
+  .outlineToggle { width: 20px; min-height: 24px; border-radius: 9px; color: rgba(100, 116, 139, .7); cursor: pointer; }
   .outlineToggle.empty { opacity: .35; }
-  .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: rgba(37, 99, 235, .86); }
+  .outlineToggle:focus-visible, .outlineText:focus-visible { box-shadow: var(--pe-focus-ring); }
   .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
   body.textMode .outlinePane { display: none; }
   body.outlineMode textarea { display: none; }
