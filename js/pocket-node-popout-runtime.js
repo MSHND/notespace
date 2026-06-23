@@ -24,34 +24,53 @@
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
+  function ensureBlockId(block) { if (block && !block.id) block.id = makeBlock("", 0).id; return block && block.id ? block.id : ""; }
   function textToOutline(text) { return String(text || "").split("\\n").map(function (line) { var leading = (line.match(/^\s*/) || [""])[0].replace(/\t/g, "  ").length; return makeBlock(line.trimStart(), Math.floor(leading / 2)); }); }
   function outlineToText(blocks) { return (blocks || []).map(function (block) { return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || ""); }).join("\\n"); }
   function hasChildren(index) { var here = outline[index]; var next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
   function isHidden(index) { var depth = Number(outline[index] && outline[index].depth) || 0; for (var i = index - 1; i >= 0; i -= 1) { var parentDepth = Number(outline[i] && outline[i].depth) || 0; if (parentDepth < depth && outline[i].collapsed) return true; } return false; }
+  function syncOutlineTextElement(textEl) {
+    if (!Array.isArray(outline) || !textEl) return;
+    var blockId = textEl.getAttribute("data-block-id") || "";
+    if (!blockId) return;
+    for (var i = 0; i < outline.length; i += 1) {
+      if (outline[i] && outline[i].id === blockId) { outline[i].text = textEl.textContent || ""; return; }
+    }
+  }
+  function syncOutlineFromDom() {
+    if (!Array.isArray(outline) || !outlinePane) return;
+    var active = document.activeElement;
+    if (active && active.classList && active.classList.contains("outlineText")) syncOutlineTextElement(active);
+    Array.prototype.forEach.call(outlinePane.querySelectorAll(".outlineText[data-block-id]"), syncOutlineTextElement);
+  }
   function updateModeChrome() { document.body.classList.toggle("textMode", mode === "text"); document.body.classList.toggle("outlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function renderOutline(focusIndex) {
+    syncOutlineFromDom();
     if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)];
     outlinePane.innerHTML = "";
     outline.forEach(function (block, index) {
       if (isHidden(index)) return;
+      ensureBlockId(block);
       var row = document.createElement("div");
       row.className = "outlineRow";
+      row.setAttribute("data-block-id", block.id);
       row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px";
       var toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
       toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•";
-      toggle.addEventListener("click", function () { if (!hasChildren(index)) return; block.collapsed = !block.collapsed; setDirty(true); renderOutline(index); });
+      toggle.addEventListener("click", function () { syncOutlineFromDom(); if (!hasChildren(index)) return; block.collapsed = !block.collapsed; setDirty(true); renderOutline(index); });
       var text = document.createElement("div");
       text.className = "outlineText";
+      text.setAttribute("data-block-id", block.id);
       text.contentEditable = "true";
       text.spellcheck = true;
       text.textContent = block.text || "";
       text.addEventListener("input", function () { block.text = text.textContent || ""; setDirty(true); });
       text.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); setDirty(true); renderOutline(index + 1); return; }
-        if (ev.key === "Tab") { ev.preventDefault(); var delta = ev.shiftKey ? -1 : 1; block.depth = Math.max(0, Math.min(8, (Number(block.depth) || 0) + delta)); setDirty(true); renderOutline(index); return; }
-        if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); outline.splice(index, 1); setDirty(true); renderOutline(Math.max(0, index - 1)); }
+        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); syncOutlineFromDom(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); setDirty(true); renderOutline(index + 1); return; }
+        if (ev.key === "Tab") { ev.preventDefault(); syncOutlineFromDom(); var delta = ev.shiftKey ? -1 : 1; block.depth = Math.max(0, Math.min(8, (Number(block.depth) || 0) + delta)); setDirty(true); renderOutline(index); return; }
+        if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); syncOutlineFromDom(); outline.splice(index, 1); setDirty(true); renderOutline(Math.max(0, index - 1)); }
       });
       row.appendChild(toggle);
       row.appendChild(text);
@@ -59,9 +78,9 @@
       if (index === focusIndex) requestAnimationFrame(function () { text.focus(); });
     });
   }
-  function setMode(nextMode) { if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); }
-  function currentBody() { return mode === "outline" ? outlineToText(outline) : bodyInput.value; }
-  function buildPayload() { return { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
+  function setMode(nextMode) { if (mode === "outline") syncOutlineFromDom(); if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); }
+  function currentBody() { if (mode === "outline") { syncOutlineFromDom(); return outlineToText(outline); } return bodyInput.value; }
+  function buildPayload() { if (Array.isArray(outline)) { syncOutlineFromDom(); outline.forEach(ensureBlockId); } return { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
   function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
   function hideUnsavedDialog() { unsavedDialog.hidden = true; }
   function openerPopoutWindow() { try { return window.opener && !window.opener.closed && window.opener.PocketNodePopoutWindow ? window.opener.PocketNodePopoutWindow : null; } catch (_error) { return null; } }
