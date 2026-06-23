@@ -28,7 +28,18 @@
   function textToOutline(text) { return String(text || "").split("\\n").map(function (line) { var leading = (line.match(/^\s*/) || [""])[0].replace(/\t/g, "  ").length; return makeBlock(line.trimStart(), Math.floor(leading / 2)); }); }
   function outlineToText(blocks) { return (blocks || []).map(function (block) { return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || ""); }).join("\\n"); }
   function hasChildren(index) { var here = outline[index]; var next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
-  function isHidden(index) { var depth = Number(outline[index] && outline[index].depth) || 0; for (var i = index - 1; i >= 0; i -= 1) { var parentDepth = Number(outline[i] && outline[i].depth) || 0; if (parentDepth < depth && outline[i].collapsed) return true; } return false; }
+  function isHidden(index) {
+    var searchDepth = Number(outline[index] && outline[index].depth) || 0;
+    if (searchDepth <= 0) return false;
+    for (var i = index - 1; i >= 0; i -= 1) {
+      var parentDepth = Number(outline[i] && outline[i].depth) || 0;
+      if (parentDepth >= searchDepth) continue;
+      if (outline[i] && outline[i].collapsed) return true;
+      searchDepth = parentDepth;
+      if (searchDepth <= 0) return false;
+    }
+    return false;
+  }
   function syncOutlineTextElement(textEl) {
     if (!Array.isArray(outline) || !textEl) return;
     var blockId = textEl.getAttribute("data-block-id") || "";
