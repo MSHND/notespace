@@ -59,12 +59,18 @@
   input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 560; }
   textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
   .outlinePane { min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; }
-  .outlineRow { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 9px; transition: background-color 120ms ease; }
+  .outlineRow { display: grid; grid-template-columns: 18px 20px minmax(0, 1fr); align-items: start; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 9px; transition: background-color 120ms ease; }
   .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
+  .outlineRow.isOutlineSelected { background: rgba(37, 99, 235, .08); }
+  .outlineRow.isOutlineSelected:focus-within { background: rgba(37, 99, 235, .11); }
+  .outlineSelect { width: 18px; min-height: 24px; padding: 0; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; }
+  .outlineSelect::before { content: ""; width: 8px; height: 8px; border: 1px solid rgba(100, 116, 139, .42); border-radius: 999px; background: rgba(255, 255, 255, .85); box-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
+  .outlineSelect:hover::before, .outlineSelect:focus-visible::before { border-color: rgba(37, 99, 235, .46); background: rgba(239, 246, 255, .9); }
+  .outlineSelect.on::before { border-color: rgba(37, 99, 235, .72); background: rgba(37, 99, 235, .72); }
   .outlineToggle { width: 20px; min-height: 24px; border-radius: 9px; color: rgba(100, 116, 139, .7); cursor: pointer; }
   .outlineToggle.empty { opacity: .35; }
   .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: rgba(37, 99, 235, .86); }
-  .outlineToggle:focus-visible, .outlineText:focus-visible { box-shadow: var(--pe-focus-ring); }
+  .outlineSelect:focus-visible, .outlineToggle:focus-visible, .outlineText:focus-visible { box-shadow: var(--pe-focus-ring); }
   .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
   body.textMode .outlinePane { display: none; }
   body.outlineMode textarea { display: none; }
