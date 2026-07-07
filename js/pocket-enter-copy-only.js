@@ -1,7 +1,6 @@
-/* Enter behaviour + row-menu safety guard + PE Esc close guard.
-   Loaded last so Enter copies in copy branches, opens PE elsewhere, and never
-   falls through to the old inline details editor. It also keeps Move available
-   in the right-click row menu if later menu trimming loses it. */
+/* Legacy Enter helper + row-menu safety guard + PE Esc close guard.
+   Enter routing now belongs to handleTreeKeydown(); this file keeps its
+   older Enter helper dormant while retaining Move menu and PE Esc guards. */
 (function initialisePocketEnterCopyOnly(global) {
   "use strict";
 
@@ -280,7 +279,14 @@
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id);
 
     if (typeof copyText === "function") {
-      void copyText(clean(node.label, 220)).then((ok) => {
+      const payload = typeof copyContextPayloadForNode === "function"
+        ? copyContextPayloadForNode(node)
+        : { text: clean(node.label, 220), preserveLines: false, max: 220 };
+      if (!payload.text) return false;
+      void copyText(payload.text, {
+        preserveLines: payload.preserveLines === true,
+        max: payload.max || (payload.preserveLines ? 4000 : 220),
+      }).then((ok) => {
         if (ok && typeof showCopiedFeedback === "function") showCopiedFeedback(node.id);
         else if (!ok && typeof setStatus === "function") setStatus("Copy did not work.", "warn");
       });

@@ -538,25 +538,54 @@ function shouldCopyOnSingleClick(node, hasKids) {
   return false;
 }
 
+function copyContextPayloadForNode(node) {
+  const details = normaliseDetails(node && node.details, 4000);
+  if (details) {
+    return {
+      text: details,
+      kind: "details",
+      preserveLines: true,
+      max: 4000,
+    };
+  }
+
+  const label = cleanText(node && node.label, 220);
+  return {
+    text: label,
+    kind: "label",
+    preserveLines: false,
+    max: 220,
+  };
+}
+
 function cancelPendingCopyClick() {
   if (!pendingCopyClickTimer) return;
   clearTimeout(pendingCopyClickTimer);
   pendingCopyClickTimer = null;
 }
 
-function scheduleCopyClick(nodeId, label) {
+function scheduleCopyClick(nodeId) {
   cancelPendingCopyClick();
   const id = cleanText(nodeId, 80);
-  const value = cleanText(label, 220);
-  if (!id || !value) return;
+  if (!id) return;
   pendingCopyClickTimer = window.setTimeout(() => {
     pendingCopyClickTimer = null;
+    const node = nodeMap().get(id) || null;
+    const payload = copyContextPayloadForNode(node);
+    if (!node || !payload.text) {
+      setStatus("Nothing to copy from that item.", "warn");
+      return;
+    }
     clearFilterForCopyLoop();
     refreshMeta();
     renderTree();
     focusRowByNodeId(id);
-    void copyText(value).then((ok) => {
+    void copyText(payload.text, {
+      preserveLines: payload.preserveLines === true,
+      max: payload.max || (payload.preserveLines ? 4000 : 220),
+    }).then((ok) => {
       if (ok) showCopiedFeedback(id);
+      else setStatus("Copy did not work.", "warn");
     });
   }, COPY_CLICK_DELAY_MS);
 }

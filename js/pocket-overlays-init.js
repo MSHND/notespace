@@ -316,7 +316,14 @@ function runCommandPaletteAction(action) {
           renderTree();
           refocusTreeNavigation(selectedId);
         }
-        void copyText(selectedNode.label).then((ok) => {
+        const useCopyContextPayload = shouldCopyOnSingleClick(selectedNode, selectedHasKids);
+        const payload = useCopyContextPayload && typeof copyContextPayloadForNode === "function"
+          ? copyContextPayloadForNode(selectedNode)
+          : { text: selectedNode.label, preserveLines: false, max: 220 };
+        void copyText(payload.text, {
+          preserveLines: payload.preserveLines === true,
+          max: payload.max || (payload.preserveLines ? 4000 : 220),
+        }).then((ok) => {
           if (ok) showCopiedFeedback(selectedId);
         });
       }
@@ -506,7 +513,13 @@ function bind() {
         refreshMeta();
         renderTree();
         refocusTreeNavigation(targetId);
-        void copyText(targetNode.label).then((ok) => {
+        const payload = typeof copyContextPayloadForNode === "function"
+          ? copyContextPayloadForNode(targetNode)
+          : { text: targetNode.label, preserveLines: false, max: 220 };
+        void copyText(payload.text, {
+          preserveLines: payload.preserveLines === true,
+          max: payload.max || (payload.preserveLines ? 4000 : 220),
+        }).then((ok) => {
           if (ok) showCopiedFeedback(targetId);
         });
         return;
@@ -667,7 +680,13 @@ function bind() {
         renderTree();
         refocusTreeNavigation(selectedId);
       }
-      void copyText(selectedNode.label).then((ok) => {
+      const payload = copyLoopMode && typeof copyContextPayloadForNode === "function"
+        ? copyContextPayloadForNode(selectedNode)
+        : { text: selectedNode.label, preserveLines: false, max: 220 };
+      void copyText(payload.text, {
+        preserveLines: payload.preserveLines === true,
+        max: payload.max || (payload.preserveLines ? 4000 : 220),
+      }).then((ok) => {
         if (!ok) return;
         showCopiedFeedback(selectedId);
       });

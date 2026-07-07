@@ -737,8 +737,10 @@ function copyNodeLabelFromTreeEnter(node) {
   if (!node || typeof copyText !== "function") return false;
   cancelPendingCopyClick();
   const id = cleanText(node.id, 80);
-  const value = cleanText(node.label, 220);
-  if (!id || !value) {
+  const payload = typeof copyContextPayloadForNode === "function"
+    ? copyContextPayloadForNode(node)
+    : { text: cleanText(node.label, 220), preserveLines: false, max: 220 };
+  if (!id || !payload.text) {
     setStatus("Nothing to copy from that item.", "warn");
     return true;
   }
@@ -746,7 +748,10 @@ function copyNodeLabelFromTreeEnter(node) {
   refreshMeta();
   renderTree();
   focusRowByNodeId(id);
-  void copyText(value).then((ok) => {
+  void copyText(payload.text, {
+    preserveLines: payload.preserveLines === true,
+    max: payload.max || (payload.preserveLines ? 4000 : 220),
+  }).then((ok) => {
     if (ok) showCopiedFeedback(id);
     else setStatus("Copy did not work.", "warn");
   });

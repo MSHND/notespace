@@ -365,7 +365,7 @@ function renderTree() {
       refreshMeta();
       renderTree();
       focusRowByNodeId(node.id);
-      if (copyOnClick) scheduleCopyClick(node.id, node.label);
+      if (copyOnClick) scheduleCopyClick(node.id);
       else cancelPendingCopyClick();
     });
     row.addEventListener("dblclick", (ev) => {

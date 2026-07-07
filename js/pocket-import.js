@@ -217,8 +217,14 @@ function restoreFromPipSnapshot() {
   }
 }
 
-async function copyText(text) {
-  const value = cleanText(text, 220);
+async function copyText(text, options = {}) {
+  const opts = options && typeof options === "object" ? options : {};
+  const preserveLines = opts.preserveLines === true;
+  const maxRaw = Number(opts.max);
+  const max = Number.isFinite(maxRaw) && maxRaw > 0
+    ? Math.round(maxRaw)
+    : (preserveLines ? 4000 : 220);
+  const value = preserveLines ? normaliseDetails(text, max) : cleanText(text, max);
   if (!value) return false;
   try {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
