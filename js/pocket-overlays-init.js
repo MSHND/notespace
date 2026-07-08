@@ -271,6 +271,10 @@ function closeCommandPalette(options = {}) {
 
 function runCommandPaletteAction(action) {
   closeCommandPalette({ restoreFocus: false });
+  if (action === "edit") {
+    openSelectedItemDetailsFromControls();
+    return;
+  }
   requestAnimationFrame(() => {
     let shouldReturnToTree = true;
     if (action === "add_child") {
@@ -287,10 +291,6 @@ function runCommandPaletteAction(action) {
     } else if (action === "rename") {
       shouldReturnToTree = false;
       renameSelected();
-    }
-    else if (action === "edit") {
-      shouldReturnToTree = false;
-      openDetailsEditorForSelectedNode();
     }
     else if (action === "move") toggleMoveMode();
     else if (action === "focus") toggleFocusHere();
@@ -345,6 +345,21 @@ function moveCommandPaletteFocus(delta) {
     : (currentIndex + delta + buttons.length) % buttons.length;
   buttons[nextIndex].focus({ preventScroll: true });
   return true;
+}
+
+function openSelectedItemDetailsFromControls() {
+  const id = cleanText(state.selectedId, 80);
+  if (!id || !nodeMap().get(id)) {
+    setStatus("Select an item first.", "warn");
+    return false;
+  }
+  if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
+  if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
+  if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") return !!window.PocketPeEditor.open(id);
+  if (typeof window.openPocketNodeEditor === "function") return !!window.openPocketNodeEditor(id);
+  if (typeof window.openPocketEditor === "function") return !!window.openPocketEditor(id);
+  setStatus("Editor is not available yet. Refresh and try again.", "warn");
+  return false;
 }
 
 function bind() {
@@ -448,7 +463,7 @@ function bind() {
   document.addEventListener("pointercancel", () => stopMovePadRepeat(), true);
   el.btnRenamePrimary?.addEventListener("click", renameSelected);
   el.btnDeletePrimary?.addEventListener("click", deleteSelected);
-  el.btnOpenPrimary?.addEventListener("click", openDetailsEditorForSelectedNode);
+  el.btnOpenPrimary?.addEventListener("click", openSelectedItemDetailsFromControls);
   el.btnLoad.addEventListener("click", () => el.fileInput.click());
   el.btnPip?.addEventListener("click", () => {
     void openPipWindow();
