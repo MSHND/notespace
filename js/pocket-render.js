@@ -48,7 +48,8 @@ function buildEmptyState(queryText = "", focusRoot = null) {
     title.textContent = "Open a pocket file, or start fresh.";
     text.textContent = "Your data stays in this browser unless you save.";
     addAction("open", () => {
-      if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
+      if (typeof openPocketFile === "function") void openPocketFile();
+      else if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
     }, "Open an existing pocket JSON file");
     if (localSafety) {
       addAction("Restore local copy", () => restoreLocalSafetySnapshot(localSafety), "Restore the browser safety copy on this device");

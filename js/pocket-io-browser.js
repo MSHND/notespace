@@ -85,6 +85,86 @@ async function openPipWindow() {
   }
 }
 
+function isFilePickerAbort(err) {
+  return !!err && (
+    err.name === "AbortError"
+    || /abort/i.test(String(err.message || ""))
+  );
+}
+
+function jsonFilePickerOptions() {
+  return {
+    types: [{ description: "Pocket JSON", accept: { "application/json": [".json"] } }],
+  };
+}
+
+async function ensureWritePermission(handle) {
+  if (!handle) return false;
+  const opts = { mode: "readwrite" };
+  try {
+    if (typeof handle.queryPermission === "function") {
+      const current = await handle.queryPermission(opts);
+      if (current === "granted") return true;
+    }
+    if (typeof handle.requestPermission === "function") {
+      const next = await handle.requestPermission(opts);
+      return next === "granted";
+    }
+    return true;
+  } catch (err) {
+    console.warn("[pocket-lite] write permission check failed", err);
+    return false;
+  }
+}
+
+async function loadFromFileHandle(handle) {
+  if (!handle || typeof handle.getFile !== "function") return false;
+  try {
+    const file = await handle.getFile();
+    const loaded = await loadFromFile(file);
+    if (!loaded) return false;
+    truthFileHandle = handle;
+    const canWrite = await ensureWritePermission(handle);
+    if (canWrite) setStatus("pocket opened with save access.", "ok", { durationMs: 5200 });
+    else setStatus("pocket opened read-only. Save may ask again or download a copy.", "warn", { durationMs: 7200 });
+    refreshMeta();
+    return true;
+  } catch (err) {
+    console.warn("[pocket-lite] open file handle failed", err);
+    setStatus(`Could not open file: ${err && err.message ? err.message : "open failed"}`, "warn");
+    return false;
+  }
+}
+
+async function openPocketFile() {
+  if (typeof window.showOpenFilePicker !== "function") {
+    if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
+    else setStatus("Open is not available here.", "warn");
+    return false;
+  }
+  try {
+    const handles = await window.showOpenFilePicker({
+      ...jsonFilePickerOptions(),
+      multiple: false,
+    });
+    const handle = Array.isArray(handles) ? handles[0] : null;
+    if (!handle) {
+      setStatus("Open cancelled.", "warn");
+      return false;
+    }
+    return await loadFromFileHandle(handle);
+  } catch (err) {
+    if (isFilePickerAbort(err)) {
+      setStatus("Open cancelled.", "warn");
+      return false;
+    }
+    console.warn("[pocket-lite] native file picker failed", err);
+    setStatus("Could not use the native file picker. Try the browser upload fallback.", "warn", { durationMs: 6200 });
+    if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
+    return false;
+  }
+}
+
 async function writeTruthFile(payload) {
   const data = `${JSON.stringify(payload, null, 2)}\n`;
   const resolveSavePicker = () => {
@@ -108,18 +188,16 @@ async function writeTruthFile(payload) {
     const picker = resolveSavePicker();
     if (!picker) return null;
     return picker({
+      ...jsonFilePickerOptions(),
       suggestedName: "pocket-data.json",
-      types: [{ description: "JSON", accept: { "application/json": [".json"] } }],
     });
   };
-  const isAbortError = (err) => !!err && (
-    err.name === "AbortError"
-    || /abort/i.test(String(err.message || ""))
-  );
   const writeWithHandle = async (handle) => {
     if (!handle || typeof handle.createWritable !== "function") {
       return { ok: false, reason: "unsupported" };
     }
+    const permitted = await ensureWritePermission(handle);
+    if (!permitted) return { ok: false, reason: "permission-denied", permissionDenied: true };
     const writable = await handle.createWritable();
     try {
       await writable.write(data);
@@ -132,18 +210,23 @@ async function writeTruthFile(payload) {
   };
 
   try {
-    if (!truthFileHandle) {
-      truthFileHandle = await pickHandle();
+    if (truthFileHandle) {
+      const existingAttempt = await writeWithHandle(truthFileHandle);
+      if (existingAttempt.ok) return { ...existingAttempt, target: "opened-file" };
+      if (existingAttempt.permissionDenied) return existingAttempt;
+      truthFileHandle = null;
     }
-    const firstAttempt = await writeWithHandle(truthFileHandle);
-    if (firstAttempt.ok) return firstAttempt;
-    // Retry once with a refreshed picker-selected handle.
-    truthFileHandle = await pickHandle();
-    const secondAttempt = await writeWithHandle(truthFileHandle);
-    if (secondAttempt.ok) return { ok: true, retried: true };
-    return secondAttempt;
+
+    const pickedHandle = await pickHandle();
+    if (!pickedHandle) return { ok: false, reason: "unsupported" };
+    const pickedAttempt = await writeWithHandle(pickedHandle);
+    if (pickedAttempt.ok) {
+      truthFileHandle = pickedHandle;
+      return { ...pickedAttempt, target: "picked-file" };
+    }
+    return pickedAttempt;
   } catch (err) {
-    if (isAbortError(err)) {
+    if (isFilePickerAbort(err)) {
       return { ok: false, aborted: true, error: err };
     }
     truthFileHandle = null;
@@ -204,17 +287,22 @@ function shouldPauseForStaleExportGuard(options = {}) {
   return true;
 }
 
+function exportTreeResult(options, ok, reason, extra = {}, legacyOk = ok) {
+  const result = { ok: !!ok, reason: cleanText(reason, 80), ...extra };
+  return options.returnDetails === true ? result : !!legacyOk;
+}
+
 async function exportTree(options = {}) {
   return enqueueTreeSave(async () => {
-    if (state.nodes.length === 0) return false;
-    if (shouldPauseForStaleExportGuard(options)) return false;
+    if (state.nodes.length === 0) return exportTreeResult(options, false, "empty");
+    if (shouldPauseForStaleExportGuard(options)) return exportTreeResult(options, false, "stale-guard");
     const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
     if (opsAtSaveStart === 0) {
       clearLocalSafetySnapshot();
       setStatus(backupProofLabel(readLastBackupMeta()) || "Already saved.", "ok", { durationMs: 4200 });
       flashSaveChip("Safe");
       refocusTreeNavigation(state.selectedId);
-      return false;
+      return exportTreeResult(options, false, "no-changes");
     }
     // Freeze a point-in-time snapshot so edits during save are not mixed
     // into this payload and their ops are preserved as unsaved.
@@ -227,6 +315,10 @@ async function exportTree(options = {}) {
       state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
       if (state.ops.length > 0) {
         setStatus(`${backupProofLabel()}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} still local.`, "ok", { durationMs: 5600 });
+      } else if (writeResult.target === "opened-file") {
+        setStatus("Saved to opened JSON.", "ok", { durationMs: 5200 });
+      } else if (writeResult.target === "picked-file") {
+        setStatus("Saved to chosen JSON.", "ok", { durationMs: 5200 });
       } else {
         setStatus(backupProofLabel(), "ok", { durationMs: 5200 });
       }
@@ -235,23 +327,30 @@ async function exportTree(options = {}) {
       clearConflictGuard();
       persistPipSnapshot();
       refocusTreeNavigation(state.selectedId);
-      return true;
+      return exportTreeResult(options, true, "truth-file", { target: writeResult.target || "truth-file" });
     }
     if (writeResult.aborted) {
       setStatus("Save cancelled.", "warn");
       refocusTreeNavigation(state.selectedId);
-      return false;
+      return exportTreeResult(options, false, "cancelled");
     }
     if (options.downloadFallback === false) {
-      setStatus("Could not write the truth file here. Use Save in the main pocket window.", "warn");
+      const message = writeResult.permissionDenied
+        ? "Save access denied. Use main Save to choose a writable file."
+        : "Could not write the truth file here. Use Save in the main pocket window.";
+      setStatus(message, "warn");
       refocusTreeNavigation(state.selectedId);
-      return false;
+      return exportTreeResult(options, false, writeResult.reason || "write-failed");
     }
     downloadPocketBackupCopy(payload, "silent");
     clearConflictGuard();
-    setStatus(`${backupProofLabel()} saved as a separate copy.`, "warn", { durationMs: 6200 });
+    if (writeResult.permissionDenied) {
+      setStatus("Save access denied. Downloaded a safe copy instead.", "warn", { durationMs: 7200 });
+    } else {
+      setStatus(`${backupProofLabel()} saved as a separate copy.`, "warn", { durationMs: 6200 });
+    }
     refocusTreeNavigation(state.selectedId);
-    return true;
+    return exportTreeResult(options, false, "downloaded-copy", { downloaded: true }, true);
   });
 }
 
@@ -272,13 +371,13 @@ function saveCurrentContext() {
 }
 
 async function loadFromFile(file) {
-  if (!file) return;
+  if (!file) return false;
   let text = "";
   try {
     text = await file.text();
   } catch (err) {
     setStatus(`Could not read file: ${err && err.message ? err.message : "read failed"}`, "warn");
-    return;
+    return false;
   }
   let parsed = null;
   try {
@@ -299,7 +398,7 @@ async function loadFromFile(file) {
         writtenAt: latestChange.writtenAt || latestChange.norm.writtenAt || "",
       });
       setStatus(`pocket opened from change log.`, "ok");
-      return;
+      return true;
     }
     const queued = queuePathImport(text, {
       requireAnchor: true,
@@ -309,9 +408,9 @@ async function loadFromFile(file) {
         writtenAt: "",
       },
     });
-    if (queued !== 0) return;
+    if (queued !== 0) return false;
     setStatus(`File is not valid JSON: ${err && err.message ? err.message : "parse failed"}`, "warn");
-    return;
+    return false;
   }
 
   const norm = normaliseInput(parsed);
@@ -324,9 +423,9 @@ async function loadFromFile(file) {
         writtenAt: "",
       },
     });
-    if (queued !== 0) return;
+    if (queued !== 0) return false;
     setStatus("No usable mainThoughtTree nodes were found in that file.", "warn");
-    return;
+    return false;
   }
   snapshotCurrentTreeForRestore();
   applyLoadedState(norm, {
@@ -340,6 +439,7 @@ async function loadFromFile(file) {
     writtenAt: norm.writtenAt || "",
   });
   setStatus(`pocket opened.`, "ok");
+  return true;
 }
 
 function triggerStatusAction(event) {

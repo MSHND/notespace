@@ -464,7 +464,10 @@ function bind() {
   el.btnRenamePrimary?.addEventListener("click", renameSelected);
   el.btnDeletePrimary?.addEventListener("click", deleteSelected);
   el.btnOpenPrimary?.addEventListener("click", openSelectedItemDetailsFromControls);
-  el.btnLoad.addEventListener("click", () => el.fileInput.click());
+  el.btnLoad.addEventListener("click", () => {
+    if (typeof openPocketFile === "function") void openPocketFile();
+    else el.fileInput.click();
+  });
   el.btnPip?.addEventListener("click", () => {
     void openPipWindow();
   });
@@ -473,7 +476,12 @@ function bind() {
   el.btnUndoImport?.addEventListener("click", undoLastImportBatch);
   el.fileInput.addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0] ? ev.target.files[0] : null;
-    await loadFromFile(file);
+    const loaded = await loadFromFile(file);
+    if (loaded) {
+      truthFileHandle = null;
+      setStatus("pocket opened in upload-only mode. Save will ask where to write or download a copy.", "warn", { durationMs: 7200 });
+      refreshMeta();
+    }
     ev.target.value = "";
   });
 

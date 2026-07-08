@@ -120,9 +120,12 @@
     if (typeof setStatus === "function") setStatus("Saving editor content and truth file...", "ok", { durationMs: 3200 });
 
     try {
-      const exported = await exportTree(options.exportOptions || {});
-      if (exported) {
+      const exported = await exportTree({ ...(options.exportOptions || {}), returnDetails: true });
+      if (exported && exported.ok === true) {
         return { ok: true, applied: true, changed: applied.changed, exported: true, reason: "exported" };
+      }
+      if (exported && exported.downloaded === true) {
+        return { ok: false, applied: true, changed: applied.changed, exported: false, downloaded: true, reason: "downloaded-copy" };
       }
       return { ok: false, applied: true, changed: applied.changed, exported: false, reason: "export-failed-or-cancelled" };
     } catch (error) {
