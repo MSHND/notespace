@@ -113,7 +113,7 @@
     if (typeof exportTree !== "function") {
       if (typeof setStatus === "function") setStatus("Editor saved locally. Main save is not available here.", "warn", { durationMs: 5200 });
       if (typeof flashSaveChip === "function") flashSaveChip("save*");
-      return { ok: true, applied: true, changed: applied.changed, exported: false, reason: "export-unavailable" };
+      return { ok: false, applied: true, changed: applied.changed, exported: false, reason: "export-unavailable" };
     }
 
     if (typeof flashSaveChip === "function") flashSaveChip("saving");
@@ -124,7 +124,7 @@
       if (exported) {
         return { ok: true, applied: true, changed: applied.changed, exported: true, reason: "exported" };
       }
-      return { ok: true, applied: true, changed: applied.changed, exported: false, reason: "cancelled-or-blocked" };
+      return { ok: false, applied: true, changed: applied.changed, exported: false, reason: "export-failed-or-cancelled" };
     } catch (error) {
       console.error("[node popout editor] apply and save failed", error);
       if (typeof setStatus === "function") setStatus("Editor content saved locally, but the truth file save failed.", "warn", { durationMs: 6200 });

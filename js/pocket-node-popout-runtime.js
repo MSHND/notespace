@@ -284,7 +284,7 @@
     if (result.ok && result.reason === "unchanged") return finishSuccessfulSave(closeAfter, "no changes");
     if (result.applied && !result.exported) {
       setDirty(true);
-      setSaveState("main save needed", "failed");
+      setSaveState("save not completed", "failed");
       return false;
     }
     setDirty(true);
@@ -322,7 +322,7 @@
           saveInFlight = false;
           if (ok) {
             setDirty(true);
-            setSaveState("main save needed", "failed");
+            setSaveState("save not completed", "failed");
             return false;
           }
         }
