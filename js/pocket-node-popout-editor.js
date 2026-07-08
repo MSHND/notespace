@@ -49,12 +49,16 @@
     return true;
   }
 
-  function apply(payload) {
+  function hasUnsavedOps() {
+    return !!(global.state && Array.isArray(global.state.ops) && global.state.ops.length > 0);
+  }
+
+  function applyPayload(payload, options = {}) {
     const id = clean(payload?.id, 80);
     const node = popoutTarget().get(id);
     if (!id || !node) {
       if (typeof setStatus === "function") setStatus("Editor item no longer exists.", "warn");
-      return false;
+      return { ok: false, changed: false, reason: "missing-node" };
     }
 
     const model = popoutModel();
@@ -68,8 +72,8 @@
     const changed = beforeLabel !== nextLabel || beforeDetails !== nextDetails || beforeEditor !== afterEditor;
 
     if (!changed) {
-      if (typeof setStatus === "function") setStatus("No editor changes to save.", "ok");
-      return true;
+      if (options.quiet !== true && typeof setStatus === "function") setStatus("No editor changes to save.", "ok");
+      return { ok: true, changed: false, id: id, label: beforeLabel, reason: "unchanged" };
     }
 
     node.label = nextLabel;
@@ -86,10 +90,48 @@
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(id, { instant: true });
     if (typeof saveWorkspaceState === "function") saveWorkspaceState();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
-    if (typeof setStatus === "function") setStatus(editorMeta ? `Saved outline for "${clean(node.label, 80)}".` : `Saved details for "${clean(node.label, 80)}".`, "ok");
+    if (options.quiet !== true && typeof setStatus === "function") setStatus(editorMeta ? `Saved outline for "${clean(node.label, 80)}".` : `Saved details for "${clean(node.label, 80)}".`, "ok");
     console.info("[node popout editor] saved", { id: id, changed: editorMeta ? "outline" : "details" });
-    return true;
+    return { ok: true, changed: true, id: id, label: clean(node.label, 220), reason: "changed" };
   }
 
-  global.PocketNodePopoutEditor = Object.freeze({ open: open, apply: apply });
+  function apply(payload) {
+    return applyPayload(payload).ok === true;
+  }
+
+  async function applyAndSave(payload, options = {}) {
+    const applied = applyPayload(payload, { quiet: true });
+    if (!applied.ok) {
+      return { ok: false, applied: false, changed: false, exported: false, reason: applied.reason || "apply-failed" };
+    }
+
+    if (!applied.changed && !hasUnsavedOps() && options.exportUnchanged !== true) {
+      if (typeof setStatus === "function") setStatus("No editor changes to save.", "ok");
+      return { ok: true, applied: false, changed: false, exported: false, reason: "unchanged" };
+    }
+
+    if (typeof exportTree !== "function") {
+      if (typeof setStatus === "function") setStatus("Editor saved locally. Main save is not available here.", "warn", { durationMs: 5200 });
+      if (typeof flashSaveChip === "function") flashSaveChip("save*");
+      return { ok: true, applied: true, changed: applied.changed, exported: false, reason: "export-unavailable" };
+    }
+
+    if (typeof flashSaveChip === "function") flashSaveChip("saving");
+    if (typeof setStatus === "function") setStatus("Saving editor content and truth file...", "ok", { durationMs: 3200 });
+
+    try {
+      const exported = await exportTree(options.exportOptions || {});
+      if (exported) {
+        return { ok: true, applied: true, changed: applied.changed, exported: true, reason: "exported" };
+      }
+      return { ok: true, applied: true, changed: applied.changed, exported: false, reason: "cancelled-or-blocked" };
+    } catch (error) {
+      console.error("[node popout editor] apply and save failed", error);
+      if (typeof setStatus === "function") setStatus("Editor content saved locally, but the truth file save failed.", "warn", { durationMs: 6200 });
+      if (typeof flashSaveChip === "function") flashSaveChip("save*");
+      return { ok: false, applied: true, changed: applied.changed, exported: false, reason: "export-failed" };
+    }
+  }
+
+  global.PocketNodePopoutEditor = Object.freeze({ open: open, apply: apply, applyAndSave: applyAndSave });
 })(window);

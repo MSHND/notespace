@@ -23,6 +23,7 @@
   var unsavedDiscardBtn = document.getElementById("unsavedDiscardBtn");
   var unsavedCancelBtn = document.getElementById("unsavedCancelBtn");
   var returnFocus = null;
+  var saveInFlight = false;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
@@ -265,22 +266,72 @@
     requestUnsavedProtection: requestUnsavedProtection
   });
   function discardAndClose() { allowedToClose = true; dirty = false; if (resumePendingOpen()) return; window.close(); }
+  function finishSuccessfulSave(closeAfter, label) {
+    setDirty(false);
+    setSaveState(label || "saved", "saved");
+    if (closeAfter) {
+      allowedToClose = true;
+      if (resumePendingOpen()) return true;
+      window.setTimeout(function () { window.close(); }, 80);
+    } else {
+      cancelPendingOpen();
+    }
+    return true;
+  }
+  function handleSaveResult(result, closeAfter) {
+    result = result || {};
+    if (result.ok && result.exported) return finishSuccessfulSave(closeAfter, "saved");
+    if (result.ok && result.reason === "unchanged") return finishSuccessfulSave(closeAfter, "no changes");
+    if (result.applied && !result.exported) {
+      setDirty(true);
+      setSaveState("main save needed", "failed");
+      return false;
+    }
+    setDirty(true);
+    setSaveState("failed", "failed");
+    alert("Pocket did not accept the save. Copy your text before closing.");
+    return false;
+  }
+  function handleSaveError(error) {
+    console.error(error);
+    setDirty(true);
+    setSaveState("failed", "failed");
+    alert("Pocket is not connected. Copy your text before closing.");
+    return false;
+  }
   function save(closeAfter) {
     closeAfter = closeAfter === true;
+    if (saveInFlight) return false;
     hideUnsavedDialog();
     setSaveState("saving…", "");
+    saveInFlight = true;
     try {
-      if (window.opener && !window.opener.closed && window.opener.PocketNodePopoutEditor && typeof window.opener.PocketNodePopoutEditor.apply === "function") {
-        var ok = window.opener.PocketNodePopoutEditor.apply(buildPayload());
-        if (ok) {
-          setDirty(false);
-          setSaveState("saved", "saved");
-          if (closeAfter) { allowedToClose = true; if (resumePendingOpen()) return true; window.setTimeout(function () { window.close(); }, 80); }
-          else cancelPendingOpen();
+      if (window.opener && !window.opener.closed && window.opener.PocketNodePopoutEditor) {
+        if (typeof window.opener.PocketNodePopoutEditor.applyAndSave === "function") {
+          Promise.resolve(window.opener.PocketNodePopoutEditor.applyAndSave(buildPayload())).then(function (result) {
+            saveInFlight = false;
+            handleSaveResult(result, closeAfter);
+          }, function (error) {
+            saveInFlight = false;
+            handleSaveError(error);
+          });
           return true;
         }
+        if (typeof window.opener.PocketNodePopoutEditor.apply === "function") {
+          var ok = window.opener.PocketNodePopoutEditor.apply(buildPayload());
+          saveInFlight = false;
+          if (ok) {
+            setDirty(true);
+            setSaveState("main save needed", "failed");
+            return false;
+          }
+        }
       }
-    } catch (error) { console.error(error); }
+    } catch (error) {
+      saveInFlight = false;
+      return handleSaveError(error);
+    }
+    saveInFlight = false;
     setSaveState("failed", "failed");
     alert("Pocket is not connected. Copy your text before closing.");
     return false;
