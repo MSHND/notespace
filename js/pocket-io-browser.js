@@ -62,7 +62,7 @@ async function openPipWindow() {
       const saved = await exportTree({ downloadFallback: false });
       return {
         ok: !!saved,
-        error: saved ? "" : "Could not write the truth file from PiP. Use Save in the main pocket window.",
+        error: saved ? "" : "Could not save from popout. Use Save in the main pocket window.",
       };
     };
     pipWin.addEventListener("pagehide", (event) => {
@@ -94,8 +94,134 @@ function isFilePickerAbort(err) {
 
 function jsonFilePickerOptions() {
   return {
-    types: [{ description: "Pocket JSON", accept: { "application/json": [".json"] } }],
+    types: [{ description: "Pocket file", accept: { "application/json": [".json"] } }],
   };
+}
+
+function pocketFileState() {
+  if (!state.pocketFile || typeof state.pocketFile !== "object") {
+    state.pocketFile = { writable: false, displayName: "", recentName: "", gateMode: "", pipSession: false };
+  }
+  return state.pocketFile;
+}
+
+function setPocketFileSession(handle, displayName, options = {}) {
+  truthFileHandle = handle || null;
+  const session = pocketFileState();
+  session.writable = !!handle || options.pipSession === true;
+  session.displayName = cleanText(displayName, 120);
+  session.gateMode = "";
+  session.pipSession = options.pipSession === true;
+  return session;
+}
+
+function clearPocketFileSession(options = {}) {
+  truthFileHandle = null;
+  const session = pocketFileState();
+  session.writable = false;
+  session.displayName = "";
+  session.gateMode = "";
+  session.pipSession = false;
+  if (options.keepRecent !== true) session.recentName = "";
+}
+
+function hasWritablePocketFile() {
+  return !!truthFileHandle && pocketFileState().writable === true;
+}
+
+function canShowPocketTree() {
+  const session = pocketFileState();
+  return hasWritablePocketFile() || (isPipMode && session.pipSession === true);
+}
+
+function canModifyPocket() {
+  return canShowPocketTree();
+}
+
+function showPocketFileGatePrompt() {
+  pocketFileState().gateMode = "blocked";
+  if (typeof renderTree === "function") renderTree();
+  if (typeof setStatus === "function") {
+    setStatus("Load your Pocket file to make changes.", "warn", { durationMs: 6200 });
+  }
+}
+
+function requirePocketFileForChanges() {
+  if (canModifyPocket()) return true;
+  showPocketFileGatePrompt();
+  return false;
+}
+
+function openRecentPocketFileDb() {
+  if (!window.indexedDB) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const request = window.indexedDB.open(RECENT_POCKET_FILE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (db && !db.objectStoreNames.contains(RECENT_POCKET_FILE_STORE)) {
+        db.createObjectStore(RECENT_POCKET_FILE_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => resolve(null);
+    request.onblocked = () => resolve(null);
+  });
+}
+
+async function readRecentPocketFileRecord() {
+  const db = await openRecentPocketFileDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    const tx = db.transaction(RECENT_POCKET_FILE_STORE, "readonly");
+    const store = tx.objectStore(RECENT_POCKET_FILE_STORE);
+    const request = store.get("current");
+    request.onsuccess = () => resolve(request.result && typeof request.result === "object" ? request.result : null);
+    request.onerror = () => resolve(null);
+    tx.oncomplete = () => db.close();
+    tx.onerror = () => {
+      try { db.close(); } catch {}
+      resolve(null);
+    };
+  });
+}
+
+async function storeRecentPocketFileHandle(handle, displayName = "") {
+  if (!handle) return false;
+  const db = await openRecentPocketFileDb();
+  if (!db) return false;
+  return new Promise((resolve) => {
+    const tx = db.transaction(RECENT_POCKET_FILE_STORE, "readwrite");
+    const store = tx.objectStore(RECENT_POCKET_FILE_STORE);
+    store.put({
+      handle,
+      displayName: cleanText(displayName || handle.name, 120),
+      updatedAt: nowIso(),
+    }, "current");
+    tx.oncomplete = () => {
+      db.close();
+      resolve(true);
+    };
+    tx.onerror = () => {
+      try { db.close(); } catch {}
+      resolve(false);
+    };
+  });
+}
+
+async function refreshRecentPocketFileHint() {
+  const record = await readRecentPocketFileRecord();
+  const name = cleanText(record?.displayName || record?.handle?.name, 120);
+  pocketFileState().recentName = name;
+  if (!canShowPocketTree() && typeof renderTree === "function") renderTree();
+  return record || null;
+}
+
+async function initialisePocketFileGate() {
+  clearPocketFileSession({ keepRecent: true });
+  await refreshRecentPocketFileHint();
+  if (typeof refreshMeta === "function") refreshMeta();
+  if (typeof renderTree === "function") renderTree();
+  return true;
 }
 
 async function ensureWritePermission(handle) {
@@ -120,27 +246,44 @@ async function ensureWritePermission(handle) {
 async function loadFromFileHandle(handle) {
   if (!handle || typeof handle.getFile !== "function") return false;
   try {
-    const file = await handle.getFile();
-    const loaded = await loadFromFile(file);
-    if (!loaded) return false;
-    truthFileHandle = handle;
     const canWrite = await ensureWritePermission(handle);
-    if (canWrite) setStatus("pocket opened with save access.", "ok", { durationMs: 5200 });
-    else setStatus("pocket opened read-only. Save may ask again or download a copy.", "warn", { durationMs: 7200 });
+    if (!canWrite) {
+      clearPocketFileSession({ keepRecent: true });
+      setStatus("Pocket could not save changes in that file. Choose another Pocket file.", "warn", { durationMs: 7200 });
+      if (typeof renderTree === "function") renderTree();
+      return false;
+    }
+    const file = await handle.getFile();
+    setPocketFileSession(handle, file.name || handle.name);
+    const loaded = await loadFromFile(file);
+    if (!loaded) {
+      clearPocketFileSession({ keepRecent: true });
+      if (typeof renderTree === "function") renderTree();
+      return false;
+    }
+    await storeRecentPocketFileHandle(handle, file.name || handle.name);
+    pocketFileState().recentName = cleanText(file.name || handle.name, 120);
+    setStatus("Pocket file loaded. Changes will save in the right place.", "ok", { durationMs: 5200 });
     refreshMeta();
     return true;
   } catch (err) {
     console.warn("[pocket-lite] open file handle failed", err);
-    setStatus(`Could not open file: ${err && err.message ? err.message : "open failed"}`, "warn");
+    clearPocketFileSession({ keepRecent: true });
+    setStatus("Could not open that Pocket file.", "warn");
+    if (typeof renderTree === "function") renderTree();
     return false;
   }
 }
 
 async function openPocketFile() {
   if (typeof window.showOpenFilePicker !== "function") {
-    if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
-    else setStatus("Open is not available here.", "warn");
+    setStatus("Pocket file loading is not available in this browser.", "warn", { durationMs: 6200 });
     return false;
+  }
+  const recent = await readRecentPocketFileRecord();
+  if (recent && recent.handle) {
+    const loadedRecent = await loadFromFileHandle(recent.handle);
+    if (loadedRecent) return true;
   }
   try {
     const handles = await window.showOpenFilePicker({
@@ -159,14 +302,30 @@ async function openPocketFile() {
       return false;
     }
     console.warn("[pocket-lite] native file picker failed", err);
-    setStatus("Could not use the native file picker. Try the browser upload fallback.", "warn", { durationMs: 6200 });
-    if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
+    setStatus("Could not open the Pocket file picker.", "warn", { durationMs: 6200 });
     return false;
   }
 }
 
-async function writeTruthFile(payload) {
+async function writePocketPayloadToHandle(payload, handle) {
   const data = `${JSON.stringify(payload, null, 2)}\n`;
+  if (!handle || typeof handle.createWritable !== "function") {
+    return { ok: false, reason: "unsupported" };
+  }
+  const permitted = await ensureWritePermission(handle);
+  if (!permitted) return { ok: false, reason: "permission-denied", permissionDenied: true };
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(data);
+    await writable.close();
+    return { ok: true };
+  } catch (err) {
+    try { await writable.abort?.(); } catch {}
+    throw err;
+  }
+}
+
+async function writeTruthFile(payload) {
   const resolveSavePicker = () => {
     const scopes = [window];
     try {
@@ -192,36 +351,27 @@ async function writeTruthFile(payload) {
       suggestedName: "pocket-data.json",
     });
   };
-  const writeWithHandle = async (handle) => {
-    if (!handle || typeof handle.createWritable !== "function") {
-      return { ok: false, reason: "unsupported" };
-    }
-    const permitted = await ensureWritePermission(handle);
-    if (!permitted) return { ok: false, reason: "permission-denied", permissionDenied: true };
-    const writable = await handle.createWritable();
-    try {
-      await writable.write(data);
-      await writable.close();
-      return { ok: true };
-    } catch (err) {
-      try { await writable.abort?.(); } catch {}
-      throw err;
-    }
-  };
 
   try {
     if (truthFileHandle) {
-      const existingAttempt = await writeWithHandle(truthFileHandle);
-      if (existingAttempt.ok) return { ...existingAttempt, target: "opened-file" };
+      const existingAttempt = await writePocketPayloadToHandle(payload, truthFileHandle);
+      if (existingAttempt.ok) {
+        const name = cleanText(truthFileHandle.name || state.source?.fileName, 120);
+        setPocketFileSession(truthFileHandle, name);
+        void storeRecentPocketFileHandle(truthFileHandle, name);
+        return { ...existingAttempt, target: "opened-file" };
+      }
       if (existingAttempt.permissionDenied) return existingAttempt;
-      truthFileHandle = null;
+      clearPocketFileSession({ keepRecent: true });
     }
 
     const pickedHandle = await pickHandle();
     if (!pickedHandle) return { ok: false, reason: "unsupported" };
-    const pickedAttempt = await writeWithHandle(pickedHandle);
+    const pickedAttempt = await writePocketPayloadToHandle(payload, pickedHandle);
     if (pickedAttempt.ok) {
-      truthFileHandle = pickedHandle;
+      const name = cleanText(pickedHandle.name || "pocket-data.json", 120);
+      setPocketFileSession(pickedHandle, name);
+      await storeRecentPocketFileHandle(pickedHandle, name);
       return { ...pickedAttempt, target: "picked-file" };
     }
     return pickedAttempt;
@@ -229,8 +379,88 @@ async function writeTruthFile(payload) {
     if (isFilePickerAbort(err)) {
       return { ok: false, aborted: true, error: err };
     }
-    truthFileHandle = null;
+    clearPocketFileSession({ keepRecent: true });
     return { ok: false, aborted: false, error: err };
+  }
+}
+
+function buildEmptyPocketPayload(writtenAt = nowIso()) {
+  return {
+    schema: "portal.export.v1",
+    exportedAt: writtenAt,
+    writtenAt,
+    mainThoughtTree: [],
+    mainThoughtTreeTombstones: [],
+    data: {
+      mainThoughtTree: [],
+      mainThoughtTreeTombstones: [],
+    },
+  };
+}
+
+function isPocketPayloadShape(parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+  if (Array.isArray(parsed.mainThoughtTree)) return true;
+  if (parsed.data && typeof parsed.data === "object" && Array.isArray(parsed.data.mainThoughtTree)) return true;
+  const schema = cleanText(parsed.schema, 80);
+  return schema === "portal.export.v1" || schema === "portal.mtt.web.v1" || schema === "portal.sync.v1";
+}
+
+function payloadForNewPocketFile() {
+  const recovery = typeof readLocalSafetySnapshot === "function" ? readLocalSafetySnapshot() : null;
+  const recoveredPayload = recovery?.parsed?.payload;
+  if (recoveredPayload && typeof recoveredPayload === "object") {
+    return safeJsonClone(recoveredPayload, 5000000) || recoveredPayload;
+  }
+  return buildEmptyPocketPayload(nowIso());
+}
+
+async function createNewPocketFile() {
+  if (typeof window.showSaveFilePicker !== "function") {
+    setStatus("Pocket file creation is not available in this browser.", "warn", { durationMs: 6200 });
+    return false;
+  }
+  try {
+    const handle = await window.showSaveFilePicker({
+      ...jsonFilePickerOptions(),
+      suggestedName: "pocket-data.json",
+    });
+    if (!handle) {
+      setStatus("Create cancelled.", "warn");
+      return false;
+    }
+    const payload = payloadForNewPocketFile();
+    const written = await writePocketPayloadToHandle(payload, handle);
+    if (!written.ok) {
+      setStatus("Pocket could not save changes in that file. Choose another Pocket file.", "warn", { durationMs: 7200 });
+      return false;
+    }
+    const name = cleanText(handle.name || "pocket-data.json", 120);
+    setPocketFileSession(handle, name);
+    await storeRecentPocketFileHandle(handle, name);
+    pocketFileState().recentName = name;
+    const norm = normaliseInput(payload);
+    applyLoadedState(norm, {
+      schema: norm.schema,
+      fileName: name,
+      writtenAt: norm.writtenAt || payload.writtenAt || "",
+    }, { skipLocalSafetyCheck: true });
+    state.ops = [];
+    clearLocalSafetySnapshot();
+    clearConflictGuard();
+    markSavedNow(payload);
+    refreshMeta();
+    renderTree();
+    setStatus("Pocket file created. Changes will save in the right place.", "ok", { durationMs: 5200 });
+    return true;
+  } catch (err) {
+    if (isFilePickerAbort(err)) {
+      setStatus("Create cancelled.", "warn");
+      return false;
+    }
+    console.warn("[pocket-lite] create pocket file failed", err);
+    setStatus("Could not create that Pocket file.", "warn");
+    return false;
   }
 }
 
@@ -294,6 +524,11 @@ function exportTreeResult(options, ok, reason, extra = {}, legacyOk = ok) {
 
 async function exportTree(options = {}) {
   return enqueueTreeSave(async () => {
+    if (!canModifyPocket()) {
+      showPocketFileGatePrompt();
+      refocusTreeNavigation(state.selectedId);
+      return exportTreeResult(options, false, "no-pocket-file");
+    }
     if (state.nodes.length === 0) return exportTreeResult(options, false, "empty");
     if (shouldPauseForStaleExportGuard(options)) return exportTreeResult(options, false, "stale-guard");
     const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
@@ -316,9 +551,9 @@ async function exportTree(options = {}) {
       if (state.ops.length > 0) {
         setStatus(`${backupProofLabel()}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} still local.`, "ok", { durationMs: 5600 });
       } else if (writeResult.target === "opened-file") {
-        setStatus("Saved to opened JSON.", "ok", { durationMs: 5200 });
+        setStatus("Saved to Pocket file.", "ok", { durationMs: 5200 });
       } else if (writeResult.target === "picked-file") {
-        setStatus("Saved to chosen JSON.", "ok", { durationMs: 5200 });
+        setStatus("Saved to Pocket file.", "ok", { durationMs: 5200 });
       } else {
         setStatus(backupProofLabel(), "ok", { durationMs: 5200 });
       }
@@ -337,7 +572,7 @@ async function exportTree(options = {}) {
     if (options.downloadFallback === false) {
       const message = writeResult.permissionDenied
         ? "Save access denied. Use main Save to choose a writable file."
-        : "Could not write the truth file here. Use Save in the main pocket window.";
+        : "Could not save from here. Use Save in the main pocket window.";
       setStatus(message, "warn");
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, writeResult.reason || "write-failed");
@@ -355,6 +590,10 @@ async function exportTree(options = {}) {
 }
 
 function saveCurrentContext() {
+  if (!canModifyPocket()) {
+    showPocketFileGatePrompt();
+    return;
+  }
   if (isDetailsEditorOpen()) {
     saveDetailsEditor();
     return;
@@ -370,8 +609,13 @@ function saveCurrentContext() {
   void exportTree();
 }
 
-async function loadFromFile(file) {
+async function loadFromFile(file, options = {}) {
   if (!file) return false;
+  const opts = { allowImportFallback: false, ...options };
+  if (!canShowPocketTree()) {
+    setStatus("Use Load Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
+    return false;
+  }
   let text = "";
   try {
     text = await file.text();
@@ -385,7 +629,7 @@ async function loadFromFile(file) {
   } catch (err) {
     const ndjsonEntries = parseNdjsonLines(text);
     const latestChange = pickLatestChangeSnapshot(ndjsonEntries);
-    if (latestChange && latestChange.norm && Array.isArray(latestChange.norm.nodes) && latestChange.norm.nodes.length > 0) {
+    if (opts.allowImportFallback && latestChange && latestChange.norm && Array.isArray(latestChange.norm.nodes) && latestChange.norm.nodes.length > 0) {
       snapshotCurrentTreeForRestore();
       applyLoadedState(latestChange.norm, {
         schema: latestChange.norm.schema || "pocket.change.v1",
@@ -400,6 +644,10 @@ async function loadFromFile(file) {
       setStatus(`pocket opened from change log.`, "ok");
       return true;
     }
+    if (!opts.allowImportFallback) {
+      setStatus("That does not look like a Pocket file.", "warn");
+      return false;
+    }
     const queued = queuePathImport(text, {
       requireAnchor: true,
       sourceInfo: {
@@ -409,12 +657,31 @@ async function loadFromFile(file) {
       },
     });
     if (queued !== 0) return false;
-    setStatus(`File is not valid JSON: ${err && err.message ? err.message : "parse failed"}`, "warn");
+    setStatus("That does not look like a Pocket file.", "warn");
     return false;
   }
 
   const norm = normaliseInput(parsed);
   if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) {
+    if (isPocketPayloadShape(parsed)) {
+      snapshotCurrentTreeForRestore();
+      applyLoadedState(norm, {
+        schema: norm.schema || "",
+        fileName: cleanText(file.name, 120),
+        writtenAt: norm.writtenAt || "",
+      }, { skipLocalSafetyCheck: true });
+      saveAutoCache(norm, {
+        schema: norm.schema || "",
+        fileName: cleanText(file.name, 120),
+        writtenAt: norm.writtenAt || "",
+      });
+      setStatus("Pocket file loaded.", "ok");
+      return true;
+    }
+    if (!opts.allowImportFallback) {
+      setStatus("That does not look like a Pocket file.", "warn");
+      return false;
+    }
     const queued = queuePathImport(text, {
       requireAnchor: true,
       sourceInfo: {
@@ -424,7 +691,7 @@ async function loadFromFile(file) {
       },
     });
     if (queued !== 0) return false;
-    setStatus("No usable mainThoughtTree nodes were found in that file.", "warn");
+    setStatus("That does not look like a Pocket file.", "warn");
     return false;
   }
   snapshotCurrentTreeForRestore();

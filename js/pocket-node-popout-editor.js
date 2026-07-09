@@ -36,6 +36,7 @@
   }
 
   function open(input) {
+    if (typeof global.requirePocketFileForChanges === "function" && !global.requirePocketFileForChanges()) return false;
     const node = popoutTarget().get(input);
     if (!node) {
       if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
@@ -54,6 +55,9 @@
   }
 
   function applyPayload(payload, options = {}) {
+    if (typeof global.requirePocketFileForChanges === "function" && !global.requirePocketFileForChanges()) {
+      return { ok: false, changed: false, reason: "no-pocket-file" };
+    }
     const id = clean(payload?.id, 80);
     const node = popoutTarget().get(id);
     if (!id || !node) {

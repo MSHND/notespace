@@ -11,6 +11,8 @@ const LOCAL_SAFETY_TRAIL_KEY = "pocketLite.localSafety.trail.v1";
 const LOCAL_SAFETY_TRAIL_MAX = 8;
 const LAST_BACKUP_META_KEY = "pocketLite.lastBackup.meta.v1";
 const LOCAL_INSTANCE_ID_KEY = "pocketLite.instanceId.v1";
+const RECENT_POCKET_FILE_DB_NAME = "pocketLite.recentFile.v1";
+const RECENT_POCKET_FILE_STORE = "recentFile";
 const UNSAVED_CLOSE_MESSAGE = "You have local changes not backed up yet.";
 const state = {
   nodes: [],
@@ -69,6 +71,13 @@ const state = {
     reason: "",
     loadedAt: "",
     newerAt: "",
+  },
+  pocketFile: {
+    writable: false,
+    displayName: "",
+    recentName: "",
+    gateMode: "",
+    pipSession: false,
   },
 };
 let titleToastTimer = null;

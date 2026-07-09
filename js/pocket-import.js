@@ -85,79 +85,6 @@ async function loadLatestSnapshotFromChangeLog() {
 }
 
 async function autoLoadAtStartup() {
-  if (isPipMode) return false;
-  if (state.nodes.length > 0) return true;
-  const sourceParam = cleanText(url.searchParams.get("source"), 260);
-  const sourcePaths = sourceParam
-    ? [sourceParam]
-    : ["JSONs/pocket-data.json"];
-
-  for (const sourcePath of sourcePaths) {
-    try {
-      const text = await readSourceText(sourcePath);
-      const parsed = JSON.parse(text);
-      const norm = normaliseInput(parsed);
-      if (Array.isArray(norm.nodes) && norm.nodes.length > 0) {
-        applyLoadedState(norm, {
-          schema: norm.schema,
-          fileName: sourcePath,
-          writtenAt: norm.writtenAt,
-        });
-        const baseWrittenAt = cleanText(norm.writtenAt, 40);
-        const baseMs = Number.isFinite(Date.parse(baseWrittenAt)) ? Date.parse(baseWrittenAt) : 0;
-        const overlay = await loadLatestSnapshotFromChangeLog();
-        if (overlay.ok) {
-          const shouldApplyOverlay = !(baseMs > 0 && overlay.ms > 0 && overlay.ms <= baseMs);
-          if (shouldApplyOverlay) {
-            applyLoadedState(overlay.norm, {
-              schema: overlay.norm.schema,
-              fileName: `${sourcePath} + ${overlay.sourcePath}`,
-              writtenAt: overlay.writtenAt || overlay.norm.writtenAt,
-            });
-            saveAutoCache(overlay.norm, {
-              schema: overlay.norm.schema,
-              fileName: `${sourcePath} + ${overlay.sourcePath}`,
-              writtenAt: overlay.writtenAt || overlay.norm.writtenAt,
-            });
-            setStatus(startupConfidenceText("Welcome back · latest change log"), startupConfidenceKind(), { durationMs: 5200 });
-            return true;
-          }
-        }
-        saveAutoCache(norm, {
-          schema: norm.schema,
-          fileName: sourcePath,
-          writtenAt: norm.writtenAt,
-        });
-        setStatus(startupConfidenceText("Welcome back"), startupConfidenceKind(), { durationMs: 5200 });
-        return true;
-      }
-    } catch {}
-  }
-
-  const overlayOnly = await loadLatestSnapshotFromChangeLog();
-  if (overlayOnly.ok) {
-    applyLoadedState(overlayOnly.norm, {
-      schema: overlayOnly.norm.schema,
-      fileName: overlayOnly.sourcePath,
-      writtenAt: overlayOnly.writtenAt || overlayOnly.norm.writtenAt,
-    });
-    saveAutoCache(overlayOnly.norm, {
-      schema: overlayOnly.norm.schema,
-      fileName: overlayOnly.sourcePath,
-      writtenAt: overlayOnly.writtenAt || overlayOnly.norm.writtenAt,
-    });
-    setStatus(startupConfidenceText("Welcome back · change log"), startupConfidenceKind(), { durationMs: 5200 });
-    return true;
-  }
-
-  const cached = restoreAutoCache();
-  if (cached && cached.norm) {
-    applyLoadedState(cached.norm, cached.source);
-    setStatus(startupConfidenceText("Welcome back · restored local copy"), startupConfidenceKind(), { durationMs: 6200 });
-    return true;
-  }
-  const sourceHint = sourceParam || "JSONs/pocket-data.json";
-  setStatus(`Open a pocket file, restore local copy, or press + to start.`, "warn", { durationMs: 6500 });
   return false;
 }
 
@@ -181,6 +108,7 @@ function persistPipSnapshot() {
 }
 
 function restoreFromPipSnapshot() {
+  if (!isPipMode) return false;
   if (state.nodes.length > 0) return false;
   try {
     const raw = localStorage.getItem(PIP_SNAPSHOT_KEY);
@@ -207,6 +135,9 @@ function restoreFromPipSnapshot() {
       fileName: cleanText(parsed.source && parsed.source.fileName, 120),
       writtenAt: cleanText(parsed.source && parsed.source.writtenAt, 40),
     };
+    if (typeof setPocketFileSession === "function") {
+      setPocketFileSession(null, state.source.fileName || "Pocket popout", { pipSession: true });
+    }
     refreshMeta();
     renderTree();
     const fromLabel = isPipMode ? "current session" : "local autosave";
@@ -971,6 +902,7 @@ function buildPathImportPlan(paths, anchorHead) {
 }
 
 function queuePathImport(rawText, options = {}) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return -1;
   const opts = {
     requireAnchor: false,
     sourceInfo: null,
@@ -1117,6 +1049,7 @@ function queuePathImport(rawText, options = {}) {
 }
 
 function commitPendingPathImport() {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return 0;
   if (!pendingPathImport) {
     setStatus("Nothing to import.", "warn");
     return 0;
@@ -1141,6 +1074,7 @@ function undoLastImportBatch() {
 }
 
 function commitPathImport(pending) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return 0;
   if (!pending || !Array.isArray(pending.entries) || pending.entries.length === 0) {
     setStatus("Nothing to import.", "warn");
     return 0;

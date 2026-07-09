@@ -33,8 +33,6 @@ function buildEmptyState(queryText = "", focusRoot = null) {
 
   const hasQuery = cleanText(queryText, 120).length > 0;
   const hasNodes = Array.isArray(state.nodes) && state.nodes.length > 0;
-  const localSafety = readLocalSafetySnapshot();
-
   if (hasQuery) {
     title.textContent = "Nothing matched.";
     text.textContent = "Clear the filter to come back to your full pocket.";
@@ -45,16 +43,9 @@ function buildEmptyState(queryText = "", focusRoot = null) {
     addAction("Add here", () => addItemsFromPrimaryAction());
     addAction("Full pocket", () => clearFocusAndReturnHome("Back to full pocket."));
   } else if (!hasNodes) {
-    title.textContent = "Open a pocket file, or start fresh.";
-    text.textContent = "Your data stays in this browser unless you save.";
-    addAction("open", () => {
-      if (typeof openPocketFile === "function") void openPocketFile();
-      else if (el.fileInput instanceof HTMLInputElement) el.fileInput.click();
-    }, "Open an existing pocket JSON file");
-    if (localSafety) {
-      addAction("Restore local copy", () => restoreLocalSafetySnapshot(localSafety), "Restore the browser safety copy on this device");
-    }
-    addAction("start new", () => addItemsFromPrimaryAction());
+    title.textContent = "Nothing here yet.";
+    text.textContent = "Add the first item when you're ready.";
+    addAction("Add item", () => addItemsFromPrimaryAction());
   } else {
     title.textContent = "Nothing here yet.";
     text.textContent = "Add a thought here, or return to the full tree.";
@@ -69,6 +60,72 @@ function buildEmptyState(queryText = "", focusRoot = null) {
   return li;
 }
 
+function buildPocketFileGateState() {
+  const session = state.pocketFile && typeof state.pocketFile === "object" ? state.pocketFile : {};
+  const recovery = typeof readLocalSafetySnapshot === "function" ? readLocalSafetySnapshot() : null;
+  const blocked = cleanText(session.gateMode, 20) === "blocked";
+  return {
+    blocked,
+    recovery: !!recovery,
+    recentName: cleanText(session.recentName, 120),
+  };
+}
+
+function buildPocketFileGate() {
+  const gate = buildPocketFileGateState();
+  const li = document.createElement("li");
+  li.className = "treeEmptyHint";
+
+  const card = document.createElement("div");
+  card.className = "emptyState";
+
+  const title = document.createElement("div");
+  title.className = "emptyStateTitle";
+  title.textContent = gate.blocked
+    ? "Load your Pocket file to make changes"
+    : (gate.recovery ? "Finish saving your Pocket changes" : "Load your Pocket file");
+
+  const text = document.createElement("div");
+  text.className = "emptyStateText";
+  text.textContent = gate.blocked
+    ? "Choose a Pocket file, or create a new one."
+    : (gate.recovery ? "Pocket found changes that may not have been saved." : "Choose a Pocket file to continue, or create a new one.");
+
+  const actions = document.createElement("div");
+  actions.className = "emptyStateActions";
+  const addAction = (label, onClick) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "emptyStateAction";
+    btn.textContent = label;
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (state.pocketFile && typeof state.pocketFile === "object") state.pocketFile.gateMode = "";
+      onClick();
+    });
+    actions.appendChild(btn);
+  };
+  addAction("Load Pocket file", () => {
+    if (typeof openPocketFile === "function") void openPocketFile();
+  });
+  addAction("Create new Pocket file", () => {
+    if (typeof createNewPocketFile === "function") void createNewPocketFile();
+  });
+
+  card.appendChild(title);
+  card.appendChild(text);
+  if (gate.recentName) {
+    const hint = document.createElement("div");
+    hint.className = "emptyStateText";
+    hint.textContent = `Last used: ${gate.recentName}`;
+    card.appendChild(hint);
+  }
+  card.appendChild(actions);
+  li.appendChild(card);
+  return li;
+}
+
 let rowActionMenuEl = null;
 
 function closeRowActionMenu() {
@@ -77,6 +134,7 @@ function closeRowActionMenu() {
 }
 
 function openItemDetailsForNode(nodeId) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const id = cleanText(nodeId || state.selectedId, 80);
   if (!id) return false;
   state.selectedId = id;
@@ -201,6 +259,14 @@ function openRowActionMenu(nodeId, point) {
 }
 
 function renderTree() {
+  if (typeof canShowPocketTree === "function" && !canShowPocketTree()) {
+    if (el.treeRoot instanceof HTMLElement) {
+      el.treeRoot.innerHTML = "";
+      el.treeRoot.appendChild(buildPocketFileGate());
+    }
+    if (typeof refreshTreeLabelOverflowTitles === "function") refreshTreeLabelOverflowTitles();
+    return;
+  }
   const query = cleanText(el.search.value, 120).toLowerCase();
   const tokens = query.split(/\s+/).filter(Boolean);
   const filtering = tokens.length > 0;
@@ -461,6 +527,7 @@ function maxSiblingOrder(parentId) {
 }
 
 function addItemsFromPrimaryAction() {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
   const selectedId = cleanText(state.selectedId, 80);
   const focusId = cleanText(state.focusRootId, 80);
@@ -496,6 +563,7 @@ function addItemsFromPrimaryAction() {
 }
 
 function renameSelected() {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   if (!state.selectedId) {
     setStatus("Select a node first.", "warn");
     return;
@@ -521,6 +589,7 @@ function renameSelected() {
 }
 
 function deleteSelected() {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   if (!state.selectedId) {
     setStatus("Select a node first.", "warn");
     return;

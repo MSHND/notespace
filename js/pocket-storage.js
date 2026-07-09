@@ -338,6 +338,7 @@ function clearLocalSafetySnapshot() {
 
 function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot()) {
   if (!snapshot || !snapshot.norm) return false;
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const parsed = snapshot.parsed || {};
   applyLoadedState(snapshot.norm, {
     schema: snapshot.norm.schema,
@@ -360,7 +361,7 @@ function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot()) {
     refocusTreeNavigation(state.selectedId);
     softlyEnsureSelectionVisible();
   });
-  setStatus("Local copy restored. save when ready.", "ok", { durationMs: 5200 });
+  setStatus("Recovery copy restored. Save when ready.", "ok", { durationMs: 5200 });
   return true;
 }
 
@@ -395,7 +396,7 @@ function restorePreviousLocalSafetyVersion() {
   const latestMs = latest ? latest.capturedMs : 0;
   const previous = trail.find((item) => item && item.capturedMs > 0 && (!latestMs || item.capturedMs < latestMs - 1000));
   if (!previous) {
-    setStatus("No earlier local version found yet.", "warn", { durationMs: 5200 });
+    setStatus("No earlier recovery version found yet.", "warn", { durationMs: 5200 });
     refocusTreeNavigation(state.selectedId);
     return false;
   }
@@ -405,7 +406,7 @@ function restorePreviousLocalSafetyVersion() {
     requestAnimationFrame(() => {
       if (state.selectedId) flashTouchedRow(state.selectedId);
     });
-    setStatus(`Restored local version from ${formatAgoLabel(previous.capturedAt)} · ${previous.norm.nodes.length} nodes. save when ready.`, "ok", { durationMs: 7200 });
+    setStatus(`Restored recovery version from ${formatAgoLabel(previous.capturedAt)} · ${previous.norm.nodes.length} nodes. Save when ready.`, "ok", { durationMs: 7200 });
   }
   return ok;
 }
@@ -419,7 +420,7 @@ function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
   const hasNewerLocal = snapshot.capturedMs > Math.max(loadedMs, 0) + 1000;
   if (!hasNewerLocal) return false;
   const label = formatSaveClockLabel(new Date(snapshot.capturedMs));
-  setStatus(`This file looks older. Newer local copy found (${label}).`, "warn", {
+  setStatus(`This file looks older. Newer recovery copy found (${label}).`, "warn", {
     durationMs: 12000,
     action: {
       label: "Restore",

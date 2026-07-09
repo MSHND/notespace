@@ -15,6 +15,7 @@ function renumberChildren(parentId) {
 }
 
 function insertSiblingBelow(nodeId) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
   const node = map.get(nodeId);
   if (!node) {
@@ -44,6 +45,7 @@ function insertSiblingBelow(nodeId) {
 }
 
 function insertChildUnder(nodeId) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
   const node = map.get(nodeId);
   if (!node) {
@@ -77,6 +79,7 @@ function insertChildUnder(nodeId) {
 }
 
 function deleteNodeById(nodeId, options = {}) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const opts = { confirm: true, ...options };
   const map = nodeMap();
   const node = map.get(nodeId);
@@ -170,6 +173,7 @@ function deleteNodeById(nodeId, options = {}) {
 }
 
 function indentNodeById(nodeId) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
   const node = map.get(nodeId);
   if (!node) {
@@ -205,6 +209,7 @@ function indentNodeById(nodeId) {
 }
 
 function outdentNodeById(nodeId) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
   const node = map.get(nodeId);
   if (!node) {
@@ -243,6 +248,7 @@ function outdentNodeById(nodeId) {
 }
 
 function moveNodeWithinSiblings(nodeId, direction) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
   const node = map.get(nodeId);
   if (!node) {
@@ -671,6 +677,7 @@ function toggleMoveMode(force) {
     return;
   }
   const next = typeof force === "boolean" ? force : !state.moveMode;
+  if (next && typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   state.moveMode = !!next && !!state.selectedId;
   refreshMeta();
   if (state.moveMode) {
