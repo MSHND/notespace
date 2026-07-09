@@ -76,6 +76,7 @@ const state = {
     writable: false,
     displayName: "",
     recentName: "",
+    pendingName: "",
     gateMode: "",
     pipSession: false,
   },

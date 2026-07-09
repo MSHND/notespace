@@ -63,10 +63,14 @@ function buildEmptyState(queryText = "", focusRoot = null) {
 function buildPocketFileGateState() {
   const session = state.pocketFile && typeof state.pocketFile === "object" ? state.pocketFile : {};
   const recovery = typeof readLocalSafetySnapshot === "function" ? readLocalSafetySnapshot() : null;
-  const blocked = cleanText(session.gateMode, 20) === "blocked";
+  const gateMode = cleanText(session.gateMode, 20);
+  const blocked = gateMode === "blocked";
+  const permission = gateMode === "permission";
   return {
     blocked,
+    permission,
     recovery: !!recovery,
+    pendingName: cleanText(session.pendingName, 120),
     recentName: cleanText(session.recentName, 120),
   };
 }
@@ -81,19 +85,23 @@ function buildPocketFileGate() {
 
   const title = document.createElement("div");
   title.className = "emptyStateTitle";
-  title.textContent = gate.blocked
+  title.textContent = gate.permission
+    ? "Let Pocket save your changes"
+    : (gate.blocked
     ? "Load your Pocket file to make changes"
-    : (gate.recovery ? "Finish saving your Pocket changes" : "Load your Pocket file");
+    : (gate.recovery ? "Finish saving your Pocket changes" : "Load your Pocket file"));
 
   const text = document.createElement("div");
   text.className = "emptyStateText";
-  text.textContent = gate.blocked
+  text.textContent = gate.permission
+    ? "Chrome may ask if Pocket can save changes to the file you just chose. Choose \"Save changes\" so Pocket can save normally."
+    : (gate.blocked
     ? "Choose a Pocket file, or create a new one."
-    : (gate.recovery ? "Pocket found changes that may not have been saved." : "Choose a Pocket file to continue, or create a new one.");
+    : (gate.recovery ? "Pocket found changes that may not have been saved." : "Choose a Pocket file to continue, or create a new one."));
 
   const actions = document.createElement("div");
   actions.className = "emptyStateActions";
-  const addAction = (label, onClick) => {
+  const addAction = (label, onClick, options = {}) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "emptyStateAction";
@@ -101,21 +109,36 @@ function buildPocketFileGate() {
     btn.addEventListener("click", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      if (state.pocketFile && typeof state.pocketFile === "object") state.pocketFile.gateMode = "";
+      if (options.clearGate !== false && state.pocketFile && typeof state.pocketFile === "object") state.pocketFile.gateMode = "";
       onClick();
     });
     actions.appendChild(btn);
   };
-  addAction("Load Pocket file", () => {
-    if (typeof openPocketFile === "function") void openPocketFile();
-  });
-  addAction("Create new Pocket file", () => {
-    if (typeof createNewPocketFile === "function") void createNewPocketFile();
-  });
+  if (gate.permission) {
+    addAction("Continue", () => {
+      if (typeof continuePocketFilePermissionRequest === "function") void continuePocketFilePermissionRequest();
+    }, { clearGate: false });
+    addAction("Cancel", () => {
+      if (typeof cancelPocketFilePermissionRequest === "function") cancelPocketFilePermissionRequest();
+    }, { clearGate: false });
+  } else {
+    addAction("Load Pocket file", () => {
+      if (typeof openPocketFile === "function") void openPocketFile();
+    });
+    addAction("Create new Pocket file", () => {
+      if (typeof createNewPocketFile === "function") void createNewPocketFile();
+    });
+  }
 
   card.appendChild(title);
   card.appendChild(text);
-  if (gate.recentName) {
+  if (gate.permission) {
+    const hint = document.createElement("div");
+    hint.className = "emptyStateText";
+    hint.textContent = "Pocket only uses the file you select.";
+    card.appendChild(hint);
+  }
+  if (!gate.permission && gate.recentName) {
     const hint = document.createElement("div");
     hint.className = "emptyStateText";
     hint.textContent = `Last used: ${gate.recentName}`;

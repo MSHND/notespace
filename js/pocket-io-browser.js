@@ -100,26 +100,32 @@ function jsonFilePickerOptions() {
 
 function pocketFileState() {
   if (!state.pocketFile || typeof state.pocketFile !== "object") {
-    state.pocketFile = { writable: false, displayName: "", recentName: "", gateMode: "", pipSession: false };
+    state.pocketFile = { writable: false, displayName: "", recentName: "", pendingName: "", gateMode: "", pipSession: false };
   }
   return state.pocketFile;
 }
 
+let pendingPocketFileHandle = null;
+
 function setPocketFileSession(handle, displayName, options = {}) {
+  pendingPocketFileHandle = null;
   truthFileHandle = handle || null;
   const session = pocketFileState();
   session.writable = !!handle || options.pipSession === true;
   session.displayName = cleanText(displayName, 120);
+  session.pendingName = "";
   session.gateMode = "";
   session.pipSession = options.pipSession === true;
   return session;
 }
 
 function clearPocketFileSession(options = {}) {
+  pendingPocketFileHandle = null;
   truthFileHandle = null;
   const session = pocketFileState();
   session.writable = false;
   session.displayName = "";
+  session.pendingName = "";
   session.gateMode = "";
   session.pipSession = false;
   if (options.keepRecent !== true) session.recentName = "";
@@ -149,6 +155,63 @@ function showPocketFileGatePrompt() {
 function requirePocketFileForChanges() {
   if (canModifyPocket()) return true;
   showPocketFileGatePrompt();
+  return false;
+}
+
+async function getPocketFilePermissionState(handle) {
+  if (!handle) return "denied";
+  const opts = { mode: "readwrite" };
+  try {
+    if (typeof handle.queryPermission === "function") {
+      const current = await handle.queryPermission(opts);
+      return current === "granted" || current === "denied" ? current : "prompt";
+    }
+    return typeof handle.requestPermission === "function" ? "prompt" : "granted";
+  } catch (err) {
+    console.warn("[pocket-lite] permission query failed", err);
+    return "prompt";
+  }
+}
+
+function clearPendingPocketFileHandle(options = {}) {
+  pendingPocketFileHandle = null;
+  const session = pocketFileState();
+  session.pendingName = "";
+  if (session.gateMode === "permission") session.gateMode = "";
+  if (options.render !== false && typeof renderTree === "function") renderTree();
+}
+
+function showPocketFilePermissionExplanation(handle, displayName = "") {
+  pendingPocketFileHandle = handle || null;
+  const session = pocketFileState();
+  session.pendingName = cleanText(displayName || handle?.name, 120);
+  session.gateMode = "permission";
+  if (typeof renderTree === "function") renderTree();
+  if (typeof setStatus === "function") setStatus("Pocket will ask before saving changes.", "ok", { durationMs: 4200 });
+  return false;
+}
+
+async function continuePocketFilePermissionRequest() {
+  const handle = pendingPocketFileHandle;
+  const pendingName = cleanText(pocketFileState().pendingName || handle?.name, 120);
+  if (!handle) {
+    clearPendingPocketFileHandle();
+    setStatus("Choose a Pocket file to continue.", "warn");
+    return false;
+  }
+  const canWrite = await ensureWritePermission(handle);
+  if (!canWrite) {
+    clearPendingPocketFileHandle();
+    setStatus("Pocket needs permission to save changes to that file.", "warn", { durationMs: 6200 });
+    return false;
+  }
+  clearPendingPocketFileHandle({ render: false });
+  return loadFromFileHandle(handle, { permissionAlreadyGranted: true, displayName: pendingName });
+}
+
+function cancelPocketFilePermissionRequest() {
+  clearPendingPocketFileHandle();
+  setStatus("Open cancelled.", "warn");
   return false;
 }
 
@@ -243,18 +306,24 @@ async function ensureWritePermission(handle) {
   }
 }
 
-async function loadFromFileHandle(handle) {
+async function loadFromFileHandle(handle, options = {}) {
   if (!handle || typeof handle.getFile !== "function") return false;
+  const opts = { permissionAlreadyGranted: false, displayName: "", ...options };
   try {
-    const canWrite = await ensureWritePermission(handle);
-    if (!canWrite) {
-      clearPocketFileSession({ keepRecent: true });
-      setStatus("Pocket could not save changes in that file. Choose another Pocket file.", "warn", { durationMs: 7200 });
-      if (typeof renderTree === "function") renderTree();
-      return false;
+    if (!opts.permissionAlreadyGranted) {
+      const permissionState = await getPocketFilePermissionState(handle);
+      if (permissionState === "prompt") {
+        return showPocketFilePermissionExplanation(handle, opts.displayName || handle.name);
+      }
+      if (permissionState !== "granted") {
+        clearPocketFileSession({ keepRecent: true });
+        setStatus("Pocket needs permission to save changes to that file.", "warn", { durationMs: 6200 });
+        if (typeof renderTree === "function") renderTree();
+        return false;
+      }
     }
     const file = await handle.getFile();
-    setPocketFileSession(handle, file.name || handle.name);
+    setPocketFileSession(handle, opts.displayName || file.name || handle.name);
     const loaded = await loadFromFile(file);
     if (!loaded) {
       clearPocketFileSession({ keepRecent: true });
@@ -282,8 +351,9 @@ async function openPocketFile() {
   }
   const recent = await readRecentPocketFileRecord();
   if (recent && recent.handle) {
-    const loadedRecent = await loadFromFileHandle(recent.handle);
+    const loadedRecent = await loadFromFileHandle(recent.handle, { displayName: recent.displayName || recent.handle.name });
     if (loadedRecent) return true;
+    if (pocketFileState().gateMode === "permission") return false;
   }
   try {
     const handles = await window.showOpenFilePicker({
@@ -295,7 +365,7 @@ async function openPocketFile() {
       setStatus("Open cancelled.", "warn");
       return false;
     }
-    return await loadFromFileHandle(handle);
+    return await loadFromFileHandle(handle, { displayName: handle.name });
   } catch (err) {
     if (isFilePickerAbort(err)) {
       setStatus("Open cancelled.", "warn");
