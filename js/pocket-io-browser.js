@@ -231,14 +231,19 @@ function openRecentPocketFileDb() {
   });
 }
 
-async function readRecentPocketFileRecord() {
+async function readRecentPocketFileMeta() {
   const db = await openRecentPocketFileDb();
   if (!db) return null;
   return new Promise((resolve) => {
     const tx = db.transaction(RECENT_POCKET_FILE_STORE, "readonly");
     const store = tx.objectStore(RECENT_POCKET_FILE_STORE);
     const request = store.get("current");
-    request.onsuccess = () => resolve(request.result && typeof request.result === "object" ? request.result : null);
+    request.onsuccess = () => {
+      const record = request.result && typeof request.result === "object" ? request.result : null;
+      const displayName = cleanText(record?.displayName || record?.name, 120);
+      const updatedAt = cleanText(record?.updatedAt, 40);
+      resolve(displayName ? { displayName, updatedAt } : null);
+    };
     request.onerror = () => resolve(null);
     tx.oncomplete = () => db.close();
     tx.onerror = () => {
@@ -248,16 +253,16 @@ async function readRecentPocketFileRecord() {
   });
 }
 
-async function storeRecentPocketFileHandle(handle, displayName = "") {
-  if (!handle) return false;
+async function storeRecentPocketFileMeta(displayName = "") {
+  const name = cleanText(displayName, 120);
+  if (!name) return false;
   const db = await openRecentPocketFileDb();
   if (!db) return false;
   return new Promise((resolve) => {
     const tx = db.transaction(RECENT_POCKET_FILE_STORE, "readwrite");
     const store = tx.objectStore(RECENT_POCKET_FILE_STORE);
     store.put({
-      handle,
-      displayName: cleanText(displayName || handle.name, 120),
+      displayName: name,
       updatedAt: nowIso(),
     }, "current");
     tx.oncomplete = () => {
@@ -272,8 +277,8 @@ async function storeRecentPocketFileHandle(handle, displayName = "") {
 }
 
 async function refreshRecentPocketFileHint() {
-  const record = await readRecentPocketFileRecord();
-  const name = cleanText(record?.displayName || record?.handle?.name, 120);
+  const record = await readRecentPocketFileMeta();
+  const name = cleanText(record?.displayName, 120);
   pocketFileState().recentName = name;
   if (!canShowPocketTree() && typeof renderTree === "function") renderTree();
   return record || null;
@@ -330,7 +335,7 @@ async function loadFromFileHandle(handle, options = {}) {
       if (typeof renderTree === "function") renderTree();
       return false;
     }
-    await storeRecentPocketFileHandle(handle, file.name || handle.name);
+    await storeRecentPocketFileMeta(file.name || handle.name);
     pocketFileState().recentName = cleanText(file.name || handle.name, 120);
     setStatus("Pocket file loaded. Changes will save in the right place.", "ok", { durationMs: 5200 });
     refreshMeta();
@@ -348,12 +353,6 @@ async function openPocketFile() {
   if (typeof window.showOpenFilePicker !== "function") {
     setStatus("Pocket file loading is not available in this browser.", "warn", { durationMs: 6200 });
     return false;
-  }
-  const recent = await readRecentPocketFileRecord();
-  if (recent && recent.handle) {
-    const loadedRecent = await loadFromFileHandle(recent.handle, { displayName: recent.displayName || recent.handle.name });
-    if (loadedRecent) return true;
-    if (pocketFileState().gateMode === "permission") return false;
   }
   try {
     const handles = await window.showOpenFilePicker({
@@ -428,7 +427,7 @@ async function writeTruthFile(payload) {
       if (existingAttempt.ok) {
         const name = cleanText(truthFileHandle.name || state.source?.fileName, 120);
         setPocketFileSession(truthFileHandle, name);
-        void storeRecentPocketFileHandle(truthFileHandle, name);
+        void storeRecentPocketFileMeta(name);
         return { ...existingAttempt, target: "opened-file" };
       }
       if (existingAttempt.permissionDenied) return existingAttempt;
@@ -441,7 +440,7 @@ async function writeTruthFile(payload) {
     if (pickedAttempt.ok) {
       const name = cleanText(pickedHandle.name || "pocket-data.json", 120);
       setPocketFileSession(pickedHandle, name);
-      await storeRecentPocketFileHandle(pickedHandle, name);
+      await storeRecentPocketFileMeta(name);
       return { ...pickedAttempt, target: "picked-file" };
     }
     return pickedAttempt;
@@ -507,7 +506,7 @@ async function createNewPocketFile() {
     }
     const name = cleanText(handle.name || "pocket-data.json", 120);
     setPocketFileSession(handle, name);
-    await storeRecentPocketFileHandle(handle, name);
+    await storeRecentPocketFileMeta(name);
     pocketFileState().recentName = name;
     const norm = normaliseInput(payload);
     applyLoadedState(norm, {
@@ -683,7 +682,7 @@ async function loadFromFile(file, options = {}) {
   if (!file) return false;
   const opts = { allowImportFallback: false, ...options };
   if (!canShowPocketTree()) {
-    setStatus("Use Load Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
+    setStatus("Use Choose Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
     return false;
   }
   let text = "";

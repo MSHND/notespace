@@ -1,53 +1,51 @@
 # Codex report
 
-Status: Pocket save-permission explanation added before Chrome's prompt.
+Status: recent Pocket file handle reuse removed.
 
 Files changed:
 
-- `js/pocket-state.js`
 - `js/pocket-io-browser.js`
 - `js/pocket-render.js`
 - `docs/CODEX_REPORT.md`
 
-Behaviour added:
+Behaviour changed:
 
-- Loading a Pocket file now checks read/write permission with `queryPermission()` first.
-- If permission is already granted, the file loads normally with no extra screen.
-- If Chrome is likely to ask, Pocket first shows an in-app explanation screen.
-- The Continue button triggers Chrome's real save-permission prompt from the user click.
-- Cancel clears the pending file handle and returns to the Load/Create screen.
-- Denied/cancelled browser permission keeps the tree hidden and shows a calm message.
+- `openPocketFile()` now always opens the file picker.
+- Stored recent `FileSystemFileHandle` values are ignored.
+- Recent storage now writes only display metadata: file name and timestamp.
+- Existing old IndexedDB records may still contain a handle, but Pocket reads only the display name.
+- After the user chooses a file in the current session, the live in-memory handle is still used for main Save and PE Save.
+- The permission explanation screen still appears before Chrome's save-permission prompt when needed.
 
 User-facing wording:
 
-- Title: `Let Pocket save your changes`
-- Body: `Chrome may ask if Pocket can save changes to the file you just chose. Choose "Save changes" so Pocket can save normally.`
-- Smaller line: `Pocket only uses the file you select.`
-- Buttons: `Continue`, `Cancel`
-- Denied message: `Pocket needs permission to save changes to that file.`
+- Landing title: `Load your Pocket file`
+- Landing body: `Choose a Pocket file to continue, or create a new one.`
+- Recent hint: `Last used: <file name>`
+- Buttons: `Choose Pocket file`, `Create new Pocket file`
 
 Not changed:
 
-- Chrome's browser permission prompt is not bypassed, suppressed, spoofed, or replaced.
-- The file-open-only document model remains in place.
-- No tree rows or edits are allowed until Pocket has writable access.
-- Create new Pocket file, PE Save, main Save, recent file storage, dirty recovery, Enter/copy, outline copy, tree multi-select, stale guard, and safety snapshots were left unchanged.
+- File-open-only document model remains in place.
+- Tree stays hidden until a Pocket file is chosen or created.
+- Create new Pocket file flow is unchanged.
+- PE Save, main Save after load, dirty recovery, Enter/copy, PE outline copy, tree multi-select, stale guard, and local safety snapshots were left unchanged.
 - `node tools/pocket-check.js` was not run per prompt.
 
 Checks run:
 
-- `node --check js/pocket-state.js` - passed via bundled Node.
 - `node --check js/pocket-io-browser.js` - passed via bundled Node.
 - `node --check js/pocket-render.js` - passed via bundled Node.
 
 Manual regression checklist:
 
-- Hard refresh: tree hidden and Load/Create screen shown.
-- Load Pocket file without granted save permission: Pocket explanation appears before Chrome prompt.
-- Continue: Chrome prompt appears; Save changes loads the file and shows the tree.
-- Permission already granted: file loads without unnecessary explanation.
-- Cancel from Pocket explanation: tree remains hidden and no file session is created.
-- Deny/cancel Chrome permission: tree remains hidden and calm message appears.
+- Hard refresh with an old recent handle stored: tree should stay hidden.
+- Landing should show `Last used: <file name>` if known.
+- No Open/Load last used button should appear.
+- `Choose Pocket file` should open the file picker every time.
+- Permission explanation should still appear before Chrome's save prompt when needed.
+- Tree should load only after permission is granted.
+- Main Save and PE Save should write to the file chosen in the current session.
+- Hard refresh again: no silent handle reuse; picker opens again.
 - Create new Pocket file still works.
-- Main Save and PE Save still work after a file is loaded.
-- Risky actions without a file still show the Load/Create guard.
+- Risky actions before loading a file still show the Load/Create guard.

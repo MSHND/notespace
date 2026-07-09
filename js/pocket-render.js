@@ -122,7 +122,7 @@ function buildPocketFileGate() {
       if (typeof cancelPocketFilePermissionRequest === "function") cancelPocketFilePermissionRequest();
     }, { clearGate: false });
   } else {
-    addAction("Load Pocket file", () => {
+    addAction("Choose Pocket file", () => {
       if (typeof openPocketFile === "function") void openPocketFile();
     });
     addAction("Create new Pocket file", () => {
