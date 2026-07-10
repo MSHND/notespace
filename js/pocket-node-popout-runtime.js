@@ -235,6 +235,73 @@
     renderOutline(insertAt);
     return true;
   }
+  function leadingIndentInfo(line) {
+    var match = String(line || "").match(/^[ \t]*/);
+    var leading = match ? match[0] : "";
+    var tabs = 0;
+    var spaces = 0;
+    for (var i = 0; i < leading.length; i += 1) {
+      if (leading.charAt(i) === "\t") tabs += 1;
+      else if (leading.charAt(i) === " ") spaces += 1;
+    }
+    return { tabs: tabs, spaces: spaces, text: String(line || "").slice(leading.length) };
+  }
+  function inferPastedSpaceUnit(lines) {
+    var unit = 0;
+    lines.forEach(function (line) {
+      var info = leadingIndentInfo(line);
+      if (info.spaces > 0 && (unit === 0 || info.spaces < unit)) unit = info.spaces;
+    });
+    return Math.max(1, unit || 1);
+  }
+  function outlineBlocksFromPastedText(text, baseDepth) {
+    var rawLines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+    var lines = rawLines.filter(function (line) { return String(line || "").trim().length > 0; });
+    if (!lines.length) return [];
+    var spaceUnit = inferPastedSpaceUnit(lines);
+    var parsed = lines.map(function (line) {
+      var info = leadingIndentInfo(line);
+      return { text: info.text, relativeDepth: info.tabs + Math.floor(info.spaces / spaceUnit) };
+    });
+    var shallowest = parsed.reduce(function (minDepth, item) { return Math.min(minDepth, item.relativeDepth); }, parsed[0].relativeDepth);
+    return parsed.map(function (item) {
+      return makeBlock(item.text, Math.max(0, Math.min(8, (Number(baseDepth) || 0) + item.relativeDepth - shallowest)));
+    });
+  }
+  function pastedRootIds(blocks) {
+    if (!blocks.length) return [];
+    var minDepth = blocks.reduce(function (depth, block) { return Math.min(depth, Number(block.depth) || 0); }, Number(blocks[0].depth) || 0);
+    return blocks.filter(function (block) { return (Number(block.depth) || 0) === minDepth; }).map(function (block) { return block.id; });
+  }
+  function activeOutlineRowIndex(target) {
+    var textEl = target && target.closest ? target.closest(".outlineText[data-block-id]") : null;
+    var blockId = textEl ? textEl.getAttribute("data-block-id") || "" : "";
+    if (!blockId && document.activeElement && document.activeElement.closest) {
+      var activeText = document.activeElement.closest(".outlineText[data-block-id]");
+      blockId = activeText ? activeText.getAttribute("data-block-id") || "" : "";
+    }
+    return blockIndexById(blockId);
+  }
+  function handleOutlinePaste(ev) {
+    if (mode !== "outline" || !ev || !ev.clipboardData) return;
+    var text = ev.clipboardData.getData("text/plain") || "";
+    if (String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").indexOf("\n") < 0) return;
+    syncOutlineFromDom();
+    var rowIndex = activeOutlineRowIndex(ev.target);
+    if (rowIndex < 0) return;
+    var blocks = outlineBlocksFromPastedText(text, outlineDepth(rowIndex));
+    if (!blocks.length) return;
+    ev.preventDefault();
+    var insertAt = rowIndex + 1;
+    outline.splice.apply(outline, [insertAt, 0].concat(blocks));
+    var rootIds = pastedRootIds(blocks);
+    outlineSelectedIds.clear();
+    rootIds.forEach(function (blockId) { outlineSelectedIds.add(blockId); });
+    outlineSelectionAnchorId = rootIds[0] || "";
+    setDirty(true);
+    setSaveState("pasted " + blocks.length + " outline block" + (blocks.length === 1 ? "" : "s"), "");
+    renderOutline(insertAt);
+  }
   function updateModeChrome() { document.body.classList.toggle("textMode", mode === "text"); document.body.classList.toggle("outlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function renderOutline(focusIndex) {
     syncOutlineFromDom();
@@ -372,6 +439,7 @@
   document.getElementById("saveBtn").addEventListener("click", function () { save(false); });
   saveCloseBtn.addEventListener("click", function () { save(true); });
   if (duplicateOutlineBtn) duplicateOutlineBtn.addEventListener("click", duplicateOutlineSelection);
+  outlinePane.addEventListener("paste", handleOutlinePaste);
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
   unsavedSaveBtn.addEventListener("click", function () { save(true); });
   unsavedDiscardBtn.addEventListener("click", discardAndClose);
