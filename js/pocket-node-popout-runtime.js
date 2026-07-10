@@ -237,11 +237,13 @@
   }
   function leadingIndentInfo(line) {
     var match = String(line || "").match(/^[ \\t]*/);
+    var match = String(line || "").match(/^[ \t]*/);
     var leading = match ? match[0] : "";
     var tabs = 0;
     var spaces = 0;
     for (var i = 0; i < leading.length; i += 1) {
       if (leading.charAt(i) === "\\t") tabs += 1;
+      if (leading.charAt(i) === "\t") tabs += 1;
       else if (leading.charAt(i) === " ") spaces += 1;
     }
     return { tabs: tabs, spaces: spaces, text: String(line || "").slice(leading.length) };
@@ -256,6 +258,7 @@
   }
   function outlineBlocksFromPastedText(text, baseDepth) {
     var rawLines = String(text || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");
+    var rawLines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     var lines = rawLines.filter(function (line) { return String(line || "").trim().length > 0; });
     if (!lines.length) return [];
     var spaceUnit = inferPastedSpaceUnit(lines);
@@ -286,6 +289,7 @@
     if (mode !== "outline" || !ev || !ev.clipboardData) return;
     var text = ev.clipboardData.getData("text/plain") || "";
     if (String(text).replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").indexOf("\\n") < 0) return;
+    if (String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").indexOf("\n") < 0) return;
     syncOutlineFromDom();
     var rowIndex = activeOutlineRowIndex(ev.target);
     if (rowIndex < 0) return;
