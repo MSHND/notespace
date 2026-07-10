@@ -14,7 +14,7 @@ Result:
 
 - Landing wording remains `Choose Pocket file` and `Create new Pocket file`.
 - Top toolbar file control now shows `Choose file` with `Choose Pocket file` title/accessible text.
-- Existing chooser controls still call `openPocketFile()`.
+- Existing chooser controls still call `openPocketFile()`; the toolbar no longer falls back to the hidden file input.
 - `openPocketFile()` already calls `showOpenFilePicker()` directly; no recent handle reuse was added.
 - Build marker is `a370471+choose-file`, exposed as `window.POCKET_BUILD` and shown quietly in the top bar.
 

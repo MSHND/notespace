@@ -466,8 +466,11 @@ function bind() {
   el.btnDeletePrimary?.addEventListener("click", deleteSelected);
   el.btnOpenPrimary?.addEventListener("click", openSelectedItemDetailsFromControls);
   el.btnLoad.addEventListener("click", () => {
-    if (typeof openPocketFile === "function") void openPocketFile();
-    else el.fileInput.click();
+    if (typeof openPocketFile === "function") {
+      void openPocketFile();
+      return;
+    }
+    setStatus("Pocket file picker is not available in this browser.", "warn", { durationMs: 6200 });
   });
   el.btnPip?.addEventListener("click", () => {
     void openPipWindow();
