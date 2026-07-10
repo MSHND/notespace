@@ -18,6 +18,7 @@
   var outlineModeBtn = document.getElementById("outlineModeBtn");
   var saveState = document.getElementById("saveState");
   var saveCloseBtn = document.getElementById("saveCloseBtn");
+  var duplicateOutlineBtn = document.getElementById("duplicateOutlineBtn");
   var unsavedDialog = document.getElementById("unsavedDialog");
   var unsavedSaveBtn = document.getElementById("unsavedSaveBtn");
   var unsavedDiscardBtn = document.getElementById("unsavedDiscardBtn");
@@ -205,6 +206,35 @@
     });
     return true;
   }
+  function cloneOutlineBlock(block) {
+    return { id: makeBlock("", 0).id, text: String(block && block.text || ""), depth: Math.max(0, Math.min(8, Number(block && block.depth) || 0)), collapsed: !!(block && block.collapsed) };
+  }
+  function duplicateOutlineSelection() {
+    if (mode !== "outline" || !hasOutlineSelection()) return false;
+    var rootIndexes = selectedOutlineRootIndexes();
+    if (!rootIndexes.length) return false;
+    var clones = [];
+    var clonedRootIds = [];
+    var insertAt = 0;
+    rootIndexes.forEach(function (rootIndex) {
+      insertAt = Math.max(insertAt, outlineSubtreeEndIndex(rootIndex));
+      var end = outlineSubtreeEndIndex(rootIndex);
+      for (var i = rootIndex; i < end; i += 1) {
+        var clone = cloneOutlineBlock(outline[i]);
+        if (i === rootIndex) clonedRootIds.push(clone.id);
+        clones.push(clone);
+      }
+    });
+    if (!clones.length) return false;
+    outline.splice.apply(outline, [insertAt, 0].concat(clones));
+    outlineSelectedIds.clear();
+    clonedRootIds.forEach(function (blockId) { outlineSelectedIds.add(blockId); });
+    outlineSelectionAnchorId = clonedRootIds[0] || "";
+    setDirty(true);
+    setSaveState("duplicated " + clonedRootIds.length + " outline block" + (clonedRootIds.length === 1 ? "" : "s"), "");
+    renderOutline(insertAt);
+    return true;
+  }
   function updateModeChrome() { document.body.classList.toggle("textMode", mode === "text"); document.body.classList.toggle("outlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function renderOutline(focusIndex) {
     syncOutlineFromDom();
@@ -341,13 +371,14 @@
   bodyInput.addEventListener("input", function () { setDirty(true); });
   document.getElementById("saveBtn").addEventListener("click", function () { save(false); });
   saveCloseBtn.addEventListener("click", function () { save(true); });
+  if (duplicateOutlineBtn) duplicateOutlineBtn.addEventListener("click", duplicateOutlineSelection);
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
   unsavedSaveBtn.addEventListener("click", function () { save(true); });
   unsavedDiscardBtn.addEventListener("click", discardAndClose);
   unsavedCancelBtn.addEventListener("click", keepEditing);
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
-  document.addEventListener("keydown", function (ev) { if ((ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; } if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; } if (ev.key === "Escape") { ev.preventDefault(); if (!unsavedDialog.hidden) keepEditing(); else if (mode === "outline" && clearOutlineSelection()) return; else closeSafely(); } });
+  document.addEventListener("keydown", function (ev) { if ((ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; } if ((ev.key === "d" || ev.key === "D") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && duplicateOutlineSelection()) { ev.preventDefault(); return; } if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; } if (ev.key === "Escape") { ev.preventDefault(); if (!unsavedDialog.hidden) keepEditing(); else if (mode === "outline" && clearOutlineSelection()) return; else closeSafely(); } });
   window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   updateModeChrome();
   if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
