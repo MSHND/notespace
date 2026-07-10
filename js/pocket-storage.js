@@ -251,13 +251,39 @@ function guardMetaFromPayload(payload) {
     || null;
 }
 
+function normaliseSourceFileName(value) {
+  return cleanText(value, 120).toLowerCase();
+}
+
+function loadedSourceFileName(norm = {}, sourceInfo = {}) {
+  const guard = guardMetaFromPayload(norm);
+  return cleanText(sourceInfo.fileName || guard?.sourceFileName || norm.sourceFileName, 120);
+}
+
+function safetySnapshotSourceFileName(snapshot) {
+  const parsed = snapshot && snapshot.parsed && typeof snapshot.parsed === "object" ? snapshot.parsed : {};
+  const guard = guardMetaFromPayload(parsed.payload);
+  return cleanText(parsed.source?.fileName || guard?.sourceFileName, 120);
+}
+
+function sameSourceFileName(left, right) {
+  const a = normaliseSourceFileName(left);
+  const b = normaliseSourceFileName(right);
+  return !!a && !!b && a === b;
+}
+
 function assessStaleFileRisk(norm = {}, sourceInfo = {}) {
   const loadedAt = cleanText(sourceInfo.writtenAt || norm.writtenAt, 40);
   const loadedMs = parseDateMs(loadedAt);
+  const sourceName = loadedSourceFileName(norm, sourceInfo);
   const latestSafety = readLocalSafetySnapshot();
   const backupMeta = readLastBackupMeta();
-  const safetyMs = latestSafety ? latestSafety.capturedMs : 0;
-  const backupMs = backupMeta ? backupMeta.exportedMs : 0;
+  const safetyMs = latestSafety && sameSourceFileName(safetySnapshotSourceFileName(latestSafety), sourceName)
+    ? latestSafety.capturedMs
+    : 0;
+  const backupMs = backupMeta && sameSourceFileName(backupMeta.sourceFileName, sourceName)
+    ? backupMeta.exportedMs
+    : 0;
   const newerMs = Math.max(safetyMs, backupMs);
   if (newerMs <= 0 || loadedMs <= 0 || newerMs <= loadedMs + 1000) {
     return { active: false, reason: "", loadedAt, newerAt: "" };

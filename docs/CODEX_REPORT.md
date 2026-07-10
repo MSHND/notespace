@@ -1,45 +1,51 @@
 # Codex report
 
-Status: Pocket file chooser wording and build marker refreshed.
+Status: active Pocket file switching fixed for PE saves.
 
 Files changed:
 
-- `index.html`
-- `js/pocket-overlays-init.js`
-- `js/pocket-build-label.js`
-- `topbar.css`
+- `js/pocket-state.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-storage.js`
 - `docs/CODEX_REPORT.md`
 
-Result:
+Root cause:
 
-- Landing wording remains `Choose Pocket file` and `Create new Pocket file`.
-- Top toolbar file control now shows `Choose file` with `Choose Pocket file` title/accessible text.
-- Existing chooser controls still call `openPocketFile()`; the toolbar no longer falls back to the hidden file input.
-- `openPocketFile()` already calls `showOpenFilePicker()` directly; no recent handle reuse was added.
-- Build marker is `a370471+choose-file`, exposed as `window.POCKET_BUILD` and shown quietly in the top bar.
+- The stale export guard compared file B against global last-safety/backup timestamps from file A.
+- After choosing B, the first PE Save could return `stale-guard`, flash the main save chip as `check`, and make PE report `save not completed`.
+- The export queue also did not have an active-file session token, so an older queued save had no way to know the writable target had changed.
+
+Fix:
+
+- Stale-file risk now only compares safety/backup metadata for the same source file name.
+- Active file sessions now have a small session id that changes when the writable target changes.
+- `exportTree()` captures the active session when the save is requested.
+- Queued saves whose captured session no longer matches do not write or clear current state.
+- `writeTruthFile()` writes to the captured active handle and does not let old save completion replace the current file session.
 
 Not changed:
 
-- File-open-only document model remains in place.
-- Tree stays hidden until a Pocket file is chosen or created.
-- Create new Pocket file flow is unchanged.
-- PE Save, main Save after load, dirty recovery, Enter/copy, PE outline copy, tree multi-select, stale guard, and local safety snapshots were left unchanged.
-- No auto-sync, background writes, save/export behaviour, PE behaviour, Enter/copy behaviour, or migration logic was changed.
+- Explicit file picker per browser session remains in place.
+- No recent file handle reuse was added.
+- Permission explanation flow, PE apply-before-export semantics, dirty recovery, snapshots, copy/Enter, outline copy, tree multi-select, stale protection for the same file, and save/export model were left intact.
+- No auto-sync or file watching was added.
 
 Checks run:
 
-- `node --check js/pocket-overlays-init.js` - passed via bundled Node.
-- `node --check js/pocket-build-label.js` - passed via bundled Node.
+- `node --check js/pocket-state.js` - passed via bundled Node.
+- `node --check js/pocket-io-browser.js` - passed via bundled Node.
+- `node --check js/pocket-storage.js` - passed via bundled Node.
 - `node tools/pocket-check.js` was not run per prompt.
 
 Manual regression checklist:
 
-- Hard refresh.
-- Landing should show `Choose Pocket file`.
-- Top toolbar `Choose file` should open the file picker every time.
-- Permission explanation should still appear before Chrome's save prompt when needed.
-- Tree should load only after permission is granted.
-- Main Save and PE Save should write to the file chosen in the current session.
-- Hard refresh again: no silent handle reuse; picker opens again.
-- Create new Pocket file still works.
-- `window.POCKET_BUILD` should return `a370471+choose-file`.
+- Create/open file A.
+- Edit in PE and Save; A should change.
+- Choose file B from the top bar.
+- Confirm B is active and tree loads B.
+- Edit in PE and Save; PE should report success and B should change.
+- Confirm A is not changed by the B save.
+- Main Save should write B.
+- Switch back to A and PE Save should write A.
+- Hard refresh should ask the user to choose a file again.
+- Permission explanation should still appear when needed.

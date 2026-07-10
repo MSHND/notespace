@@ -101,6 +101,7 @@ const rowCopyToastTimers = new Map();
 const rowTouchFlashTimers = new Map();
 let lastSavedLabel = "";
 let truthFileHandle = null;
+let pocketFileSessionId = 0;
 let exportTreeQueue = Promise.resolve();
 let pendingStaleExportConfirmExpiresAt = 0;
 let lastPathExtractMeta = {

@@ -109,30 +109,61 @@ let pendingPocketFileHandle = null;
 
 function setPocketFileSession(handle, displayName, options = {}) {
   pendingPocketFileHandle = null;
-  truthFileHandle = handle || null;
+  const nextHandle = handle || null;
+  const nextName = cleanText(displayName, 120);
+  const nextWritable = !!nextHandle || options.pipSession === true;
+  const nextPip = options.pipSession === true;
   const session = pocketFileState();
-  session.writable = !!handle || options.pipSession === true;
-  session.displayName = cleanText(displayName, 120);
+  const targetChanged = truthFileHandle !== nextHandle
+    || session.writable !== nextWritable
+    || session.displayName !== nextName
+    || session.pipSession !== nextPip;
+  truthFileHandle = nextHandle;
+  session.writable = nextWritable;
+  session.displayName = nextName;
   session.pendingName = "";
   session.gateMode = "";
-  session.pipSession = options.pipSession === true;
+  session.pipSession = nextPip;
+  if (targetChanged) pocketFileSessionId += 1;
   return session;
 }
 
 function clearPocketFileSession(options = {}) {
   pendingPocketFileHandle = null;
-  truthFileHandle = null;
   const session = pocketFileState();
+  const targetChanged = !!truthFileHandle
+    || session.writable === true
+    || !!session.displayName
+    || session.pipSession === true;
+  truthFileHandle = null;
   session.writable = false;
   session.displayName = "";
   session.pendingName = "";
   session.gateMode = "";
   session.pipSession = false;
   if (options.keepRecent !== true) session.recentName = "";
+  if (targetChanged) pocketFileSessionId += 1;
 }
 
 function hasWritablePocketFile() {
   return !!truthFileHandle && pocketFileState().writable === true;
+}
+
+function capturePocketFileSaveSession() {
+  const session = pocketFileState();
+  return {
+    id: pocketFileSessionId,
+    handle: truthFileHandle,
+    displayName: cleanText(session.displayName, 120),
+    writable: session.writable === true,
+    pipSession: session.pipSession === true,
+  };
+}
+
+function isPocketFileSaveSessionCurrent(snapshot) {
+  return !!snapshot
+    && snapshot.id === pocketFileSessionId
+    && snapshot.handle === truthFileHandle;
 }
 
 function canShowPocketTree() {
@@ -394,7 +425,10 @@ async function writePocketPayloadToHandle(payload, handle) {
   }
 }
 
-async function writeTruthFile(payload) {
+async function writeTruthFile(payload, options = {}) {
+  const expectedSession = options.expectedSession || null;
+  const activeHandle = expectedSession && expectedSession.handle ? expectedSession.handle : truthFileHandle;
+  let activeHandleFailedForCurrentSession = false;
   const resolveSavePicker = () => {
     const scopes = [window];
     try {
@@ -422,18 +456,29 @@ async function writeTruthFile(payload) {
   };
 
   try {
-    if (truthFileHandle) {
-      const existingAttempt = await writePocketPayloadToHandle(payload, truthFileHandle);
+    if (activeHandle) {
+      const existingAttempt = await writePocketPayloadToHandle(payload, activeHandle);
       if (existingAttempt.ok) {
-        const name = cleanText(truthFileHandle.name || state.source?.fileName, 120);
-        setPocketFileSession(truthFileHandle, name);
-        void storeRecentPocketFileMeta(name);
+        const name = cleanText(activeHandle.name || state.source?.fileName, 120);
+        if (!expectedSession || isPocketFileSaveSessionCurrent(expectedSession)) {
+          setPocketFileSession(activeHandle, name);
+          void storeRecentPocketFileMeta(name);
+        }
         return { ...existingAttempt, target: "opened-file" };
       }
       if (existingAttempt.permissionDenied) return existingAttempt;
-      clearPocketFileSession({ keepRecent: true });
+      if (expectedSession && !isPocketFileSaveSessionCurrent(expectedSession)) {
+        return { ok: false, reason: "file-session-changed" };
+      }
+      if (!expectedSession || isPocketFileSaveSessionCurrent(expectedSession)) {
+        clearPocketFileSession({ keepRecent: true });
+        activeHandleFailedForCurrentSession = true;
+      }
     }
 
+    if (expectedSession && !activeHandleFailedForCurrentSession && !isPocketFileSaveSessionCurrent(expectedSession)) {
+      return { ok: false, reason: "file-session-changed" };
+    }
     const pickedHandle = await pickHandle();
     if (!pickedHandle) return { ok: false, reason: "unsupported" };
     const pickedAttempt = await writePocketPayloadToHandle(payload, pickedHandle);
@@ -448,7 +493,9 @@ async function writeTruthFile(payload) {
     if (isFilePickerAbort(err)) {
       return { ok: false, aborted: true, error: err };
     }
-    clearPocketFileSession({ keepRecent: true });
+    if (!expectedSession || isPocketFileSaveSessionCurrent(expectedSession)) {
+      clearPocketFileSession({ keepRecent: true });
+    }
     return { ok: false, aborted: false, error: err };
   }
 }
@@ -592,7 +639,11 @@ function exportTreeResult(options, ok, reason, extra = {}, legacyOk = ok) {
 }
 
 async function exportTree(options = {}) {
+  const saveSession = capturePocketFileSaveSession();
   return enqueueTreeSave(async () => {
+    if (!isPocketFileSaveSessionCurrent(saveSession)) {
+      return exportTreeResult(options, false, "file-session-changed");
+    }
     if (!canModifyPocket()) {
       showPocketFileGatePrompt();
       refocusTreeNavigation(state.selectedId);
@@ -612,7 +663,10 @@ async function exportTree(options = {}) {
     // into this payload and their ops are preserved as unsaved.
     const payload = buildPocketPayload(nowIso());
     saveLastSaveSnapshot(payload);
-    const writeResult = await writeTruthFile(payload);
+    const writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
+    if (!isPocketFileSaveSessionCurrent(saveSession) && !(writeResult && writeResult.ok && writeResult.target === "picked-file")) {
+      return exportTreeResult(options, false, "file-session-changed");
+    }
     if (writeResult.ok) {
       markSavedNow(payload);
       // Only clear ops that existed at save start.
