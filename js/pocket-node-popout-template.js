@@ -72,7 +72,7 @@
   .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: rgba(37, 99, 235, .86); }
   .outlineSelect:focus-visible, .outlineToggle:focus-visible, .outlineText:focus-visible { box-shadow: var(--pe-focus-ring); }
   .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
-  body.textMode .outlinePane { display: none; }
+  body.textMode .outlinePane, body.textMode .outlineOnly { display: none; }
   body.outlineMode textarea { display: none; }
   .unsavedDialog { position: fixed; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 23, 42, .22); z-index: 10; }
   .unsavedDialog[hidden] { display: none; }
@@ -84,7 +84,7 @@
 </head>
 <body class="textMode">
   <main class="wrap">
-    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
+    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button><button id="duplicateOutlineBtn" class="toolbarBtn outlineOnly" type="button" title="Duplicate selected outline blocks (Cmd/Ctrl+D)">duplicate</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
