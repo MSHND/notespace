@@ -4,8 +4,8 @@
   "use strict";
 
   const BUILD = Object.freeze({
-    label: "build row-handlers-direct-1",
-    stamp: "2026-05-30.9"
+    label: "build a370471+choose-file",
+    stamp: "2026-07-09"
   });
 
   function ensureBuildLabel() {
@@ -26,11 +26,12 @@
     }
 
     label.textContent = BUILD.label;
-    label.title = `${BUILD.label} · ${BUILD.stamp}`;
+    label.title = `${BUILD.label} - ${BUILD.stamp}`;
     return label;
   }
 
   function init() {
+    global.POCKET_BUILD = "a370471+choose-file";
     global.PocketBuild = BUILD;
     ensureBuildLabel();
   }

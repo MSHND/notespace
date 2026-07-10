@@ -476,7 +476,7 @@ function bind() {
   el.btnCancelImport?.addEventListener("click", cancelPendingPathImport);
   el.btnUndoImport?.addEventListener("click", undoLastImportBatch);
   el.fileInput.addEventListener("change", async (ev) => {
-    setStatus("Use Load Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
+    setStatus("Use Choose Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
     ev.target.value = "";
   });
 

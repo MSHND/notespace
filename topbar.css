@@ -132,5 +132,10 @@ body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
 }
 
 .pocketBuildLabel {
-  display: none !important;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  color: rgba(76, 65, 50, 0.58);
+  font-size: 11px;
+  white-space: nowrap;
 }

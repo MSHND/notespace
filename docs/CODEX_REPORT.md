@@ -1,28 +1,22 @@
 # Codex report
 
-Status: recent Pocket file handle reuse removed.
+Status: Pocket file chooser wording and build marker refreshed.
 
 Files changed:
 
-- `js/pocket-io-browser.js`
-- `js/pocket-render.js`
+- `index.html`
+- `js/pocket-overlays-init.js`
+- `js/pocket-build-label.js`
+- `topbar.css`
 - `docs/CODEX_REPORT.md`
 
-Behaviour changed:
+Result:
 
-- `openPocketFile()` now always opens the file picker.
-- Stored recent `FileSystemFileHandle` values are ignored.
-- Recent storage now writes only display metadata: file name and timestamp.
-- Existing old IndexedDB records may still contain a handle, but Pocket reads only the display name.
-- After the user chooses a file in the current session, the live in-memory handle is still used for main Save and PE Save.
-- The permission explanation screen still appears before Chrome's save-permission prompt when needed.
-
-User-facing wording:
-
-- Landing title: `Load your Pocket file`
-- Landing body: `Choose a Pocket file to continue, or create a new one.`
-- Recent hint: `Last used: <file name>`
-- Buttons: `Choose Pocket file`, `Create new Pocket file`
+- Landing wording remains `Choose Pocket file` and `Create new Pocket file`.
+- Top toolbar file control now shows `Choose file` with `Choose Pocket file` title/accessible text.
+- Existing chooser controls still call `openPocketFile()`.
+- `openPocketFile()` already calls `showOpenFilePicker()` directly; no recent handle reuse was added.
+- Build marker is `a370471+choose-file`, exposed as `window.POCKET_BUILD` and shown quietly in the top bar.
 
 Not changed:
 
@@ -30,22 +24,22 @@ Not changed:
 - Tree stays hidden until a Pocket file is chosen or created.
 - Create new Pocket file flow is unchanged.
 - PE Save, main Save after load, dirty recovery, Enter/copy, PE outline copy, tree multi-select, stale guard, and local safety snapshots were left unchanged.
-- `node tools/pocket-check.js` was not run per prompt.
+- No auto-sync, background writes, save/export behaviour, PE behaviour, Enter/copy behaviour, or migration logic was changed.
 
 Checks run:
 
-- `node --check js/pocket-io-browser.js` - passed via bundled Node.
-- `node --check js/pocket-render.js` - passed via bundled Node.
+- `node --check js/pocket-overlays-init.js` - passed via bundled Node.
+- `node --check js/pocket-build-label.js` - passed via bundled Node.
+- `node tools/pocket-check.js` was not run per prompt.
 
 Manual regression checklist:
 
-- Hard refresh with an old recent handle stored: tree should stay hidden.
-- Landing should show `Last used: <file name>` if known.
-- No Open/Load last used button should appear.
-- `Choose Pocket file` should open the file picker every time.
+- Hard refresh.
+- Landing should show `Choose Pocket file`.
+- Top toolbar `Choose file` should open the file picker every time.
 - Permission explanation should still appear before Chrome's save prompt when needed.
 - Tree should load only after permission is granted.
 - Main Save and PE Save should write to the file chosen in the current session.
 - Hard refresh again: no silent handle reuse; picker opens again.
 - Create new Pocket file still works.
-- Risky actions before loading a file still show the Load/Create guard.
+- `window.POCKET_BUILD` should return `a370471+choose-file`.
