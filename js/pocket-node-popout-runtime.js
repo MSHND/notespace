@@ -18,12 +18,13 @@
   var outlineModeBtn = document.getElementById("outlineModeBtn");
   var saveState = document.getElementById("saveState");
   var saveCloseBtn = document.getElementById("saveCloseBtn");
-  var duplicateOutlineBtn = document.getElementById("duplicateOutlineBtn");
+  var outlineContextMenu = document.getElementById("outlineContextMenu");
   var unsavedDialog = document.getElementById("unsavedDialog");
   var unsavedSaveBtn = document.getElementById("unsavedSaveBtn");
   var unsavedDiscardBtn = document.getElementById("unsavedDiscardBtn");
   var unsavedCancelBtn = document.getElementById("unsavedCancelBtn");
   var returnFocus = null;
+  var outlineContextReturnFocus = null;
   var saveInFlight = false;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
@@ -131,6 +132,82 @@
     }
     selectSingleOutlineBlock(blockId);
   }
+  function outlineContextMenuIsOpen() { return !!outlineContextMenu && !outlineContextMenu.hidden; }
+  function outlineContextMenuItems() {
+    if (!outlineContextMenu) return [];
+    return Array.prototype.slice.call(outlineContextMenu.querySelectorAll('[role="menuitem"]'));
+  }
+  function closeOutlineContextMenu(options) {
+    options = options || {};
+    if (!outlineContextMenuIsOpen()) return false;
+    outlineContextMenu.hidden = true;
+    outlineContextMenu.style.left = "";
+    outlineContextMenu.style.top = "";
+    var focusTarget = outlineContextReturnFocus;
+    outlineContextReturnFocus = null;
+    if (options.restoreFocus !== false && focusTarget && focusTarget.isConnected && typeof focusTarget.focus === "function") {
+      requestAnimationFrame(function () { focusTarget.focus({ preventScroll: true }); });
+    }
+    return true;
+  }
+  function openOutlineContextMenu(ev, row) {
+    if (!outlineContextMenu || !row) return false;
+    closeOutlineContextMenu({ restoreFocus: false });
+    outlineContextReturnFocus = row.querySelector(".outlineSelect") || row.querySelector(".outlineText") || document.activeElement;
+    outlineContextMenu.hidden = false;
+    outlineContextMenu.style.left = "0px";
+    outlineContextMenu.style.top = "0px";
+    var rect = outlineContextMenu.getBoundingClientRect();
+    var margin = 6;
+    var viewportWidth = Math.max(margin * 2, Number(window.innerWidth) || document.documentElement.clientWidth || 0);
+    var viewportHeight = Math.max(margin * 2, Number(window.innerHeight) || document.documentElement.clientHeight || 0);
+    var left = Math.max(margin, Math.min(Number(ev.clientX) || margin, viewportWidth - rect.width - margin));
+    var top = Math.max(margin, Math.min(Number(ev.clientY) || margin, viewportHeight - rect.height - margin));
+    outlineContextMenu.style.left = left + "px";
+    outlineContextMenu.style.top = top + "px";
+    var items = outlineContextMenuItems();
+    if (items.length) requestAnimationFrame(function () { items[0].focus({ preventScroll: true }); });
+    return true;
+  }
+  function handleOutlineContextMenu(ev) {
+    if (mode !== "outline" || !ev || !ev.target || typeof ev.target.closest !== "function") return;
+    var row = ev.target.closest(".outlineRow[data-block-id]");
+    if (!row || !outlinePane.contains(row)) return;
+    var blockId = row.getAttribute("data-block-id") || "";
+    if (!blockId || blockIndexById(blockId) < 0) return;
+    ev.preventDefault();
+    syncOutlineFromDom();
+    if (!outlineSelectedIds.has(blockId)) selectSingleOutlineBlock(blockId);
+    else updateOutlineSelectionChrome();
+    openOutlineContextMenu(ev, row);
+  }
+  function handleOutlineContextMenuKeydown(ev) {
+    if (!outlineContextMenuIsOpen()) return;
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeOutlineContextMenu({ restoreFocus: true });
+      return;
+    }
+    var items = outlineContextMenuItems();
+    if (!items.length) return;
+    var index = items.indexOf(document.activeElement);
+    var nextIndex = -1;
+    if (ev.key === "ArrowDown") nextIndex = index < 0 ? 0 : (index + 1) % items.length;
+    else if (ev.key === "ArrowUp") nextIndex = index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length;
+    else if (ev.key === "Home") nextIndex = 0;
+    else if (ev.key === "End") nextIndex = items.length - 1;
+    if (nextIndex < 0) return;
+    ev.preventDefault();
+    items[nextIndex].focus({ preventScroll: true });
+  }
+  function isEditablePeTarget(target) {
+    if (!target || target.nodeType !== 1) return false;
+    if (target === titleInput || target === bodyInput || target.isContentEditable) return true;
+    var tag = String(target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    return !!(typeof target.closest === "function" && target.closest('.outlineText, input, textarea, select, [contenteditable="true"]'));
+  }
   function selectedAncestorIndex(index, selectedIndexes) {
     var searchDepth = outlineDepth(index);
     if (searchDepth <= 0) return -1;
@@ -235,6 +312,35 @@
     renderOutline(insertAt);
     return true;
   }
+  function deleteOutlineSelection() {
+    if (mode !== "outline" || !hasOutlineSelection()) return false;
+    var rootIndexes = selectedOutlineRootIndexes();
+    if (!rootIndexes.length) return false;
+    var ranges = rootIndexes.map(function (rootIndex) {
+      return { start: rootIndex, end: outlineSubtreeEndIndex(rootIndex) };
+    });
+    var firstDeletedIndex = ranges[0].start;
+    var deletedCount = 0;
+    for (var i = ranges.length - 1; i >= 0; i -= 1) {
+      var range = ranges[i];
+      var count = Math.max(0, range.end - range.start);
+      if (!count) continue;
+      outline.splice(range.start, count);
+      deletedCount += count;
+    }
+    if (!deletedCount) return false;
+    outlineSelectedIds.clear();
+    outlineSelectionAnchorId = "";
+    if (!outline.length) outline = [makeBlock("", 0)];
+    var focusIndex = Math.min(firstDeletedIndex, outline.length - 1);
+    var focusBlockId = ensureBlockId(outline[focusIndex]);
+    if (focusBlockId) outlineSelectedIds.add(focusBlockId);
+    outlineSelectionAnchorId = focusBlockId;
+    setDirty(true);
+    setSaveState("deleted " + deletedCount + " outline row" + (deletedCount === 1 ? "" : "s"), "");
+    renderOutline(focusIndex);
+    return true;
+  }
   function leadingIndentInfo(line) {
     var match = String(line || "").match(/^[ \\t]*/);
     var leading = match ? match[0] : "";
@@ -282,25 +388,64 @@
     }
     return blockIndexById(blockId);
   }
-  function handleOutlinePaste(ev) {
-    if (mode !== "outline" || !ev || !ev.clipboardData) return;
-    var text = ev.clipboardData.getData("text/plain") || "";
-    if (String(text).replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").indexOf("\\n") < 0) return;
+  function selectedOutlinePasteTarget() {
+    var rootIndexes = selectedOutlineRootIndexes();
+    if (!rootIndexes.length) return null;
+    var finalRootIndex = rootIndexes[rootIndexes.length - 1];
+    return { insertAt: outlineSubtreeEndIndex(finalRootIndex), baseDepth: outlineDepth(finalRootIndex) };
+  }
+  function insertStructuredOutlineText(text, options) {
+    options = options || {};
+    if (mode !== "outline") return 0;
     syncOutlineFromDom();
-    var rowIndex = activeOutlineRowIndex(ev.target);
-    if (rowIndex < 0) return;
-    var blocks = outlineBlocksFromPastedText(text, outlineDepth(rowIndex));
-    if (!blocks.length) return;
-    ev.preventDefault();
-    var insertAt = rowIndex + 1;
-    outline.splice.apply(outline, [insertAt, 0].concat(blocks));
+    var insertion = hasOutlineSelection() ? selectedOutlinePasteTarget() : null;
+    if (!insertion && options.requireSelection === true) return 0;
+    if (!insertion) {
+      var rowIndex = activeOutlineRowIndex(options.target);
+      if (rowIndex < 0) return 0;
+      insertion = { insertAt: rowIndex + 1, baseDepth: outlineDepth(rowIndex) };
+    }
+    var blocks = outlineBlocksFromPastedText(text, insertion.baseDepth);
+    if (!blocks.length) return 0;
+    outline.splice.apply(outline, [insertion.insertAt, 0].concat(blocks));
     var rootIds = pastedRootIds(blocks);
     outlineSelectedIds.clear();
     rootIds.forEach(function (blockId) { outlineSelectedIds.add(blockId); });
     outlineSelectionAnchorId = rootIds[0] || "";
     setDirty(true);
-    setSaveState("pasted " + blocks.length + " outline block" + (blocks.length === 1 ? "" : "s"), "");
-    renderOutline(insertAt);
+    setSaveState("pasted " + blocks.length + " outline row" + (blocks.length === 1 ? "" : "s"), "");
+    renderOutline(insertion.insertAt);
+    return blocks.length;
+  }
+  function pasteOutlineSelectionFromClipboard() {
+    if (mode !== "outline" || !hasOutlineSelection()) return false;
+    if (!navigator.clipboard || typeof navigator.clipboard.readText !== "function") {
+      setSaveState("paste unavailable - use Cmd/Ctrl+V", "failed");
+      return false;
+    }
+    try {
+      Promise.resolve(navigator.clipboard.readText()).then(function (text) {
+        if (!String(text || "").trim()) {
+          setSaveState("nothing to paste", "failed");
+          return;
+        }
+        if (mode !== "outline" || !hasOutlineSelection() || !insertStructuredOutlineText(text, { requireSelection: true })) {
+          setSaveState("select outline rows first", "failed");
+        }
+      }, function () {
+        setSaveState("paste unavailable - use Cmd/Ctrl+V", "failed");
+      });
+      return true;
+    } catch (_error) {
+      setSaveState("paste unavailable - use Cmd/Ctrl+V", "failed");
+      return false;
+    }
+  }
+  function handleOutlinePaste(ev) {
+    if (mode !== "outline" || !ev || !ev.clipboardData) return;
+    var text = ev.clipboardData.getData("text/plain") || "";
+    if (String(text).replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").indexOf("\\n") < 0) return;
+    if (insertStructuredOutlineText(text, { target: ev.target }) > 0) ev.preventDefault();
   }
   function updateModeChrome() { document.body.classList.toggle("textMode", mode === "text"); document.body.classList.toggle("outlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function renderOutline(focusIndex) {
@@ -347,7 +492,7 @@
       if (index === focusIndex) requestAnimationFrame(function () { text.focus(); });
     });
   }
-  function setMode(nextMode) { if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") clearOutlineSelection(); if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); }
+  function setMode(nextMode) { if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); }
   function currentBody() { if (mode === "outline") { syncOutlineFromDom(); return outlineToText(outline); } return bodyInput.value; }
   function buildPayload() { if (Array.isArray(outline)) { syncOutlineFromDom(); outline.forEach(ensureBlockId); } return { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
   function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
@@ -362,11 +507,12 @@
     hasUnsavedChanges: function () { return dirty === true; },
     requestUnsavedProtection: requestUnsavedProtection
   });
-  function discardAndClose() { allowedToClose = true; dirty = false; if (resumePendingOpen()) return; window.close(); }
+  function discardAndClose() { closeOutlineContextMenu({ restoreFocus: false }); allowedToClose = true; dirty = false; if (resumePendingOpen()) return; window.close(); }
   function finishSuccessfulSave(closeAfter, label) {
     setDirty(false);
     setSaveState(label || "saved", "saved");
     if (closeAfter) {
+      closeOutlineContextMenu({ restoreFocus: false });
       allowedToClose = true;
       if (resumePendingOpen()) return true;
       window.setTimeout(function () { window.close(); }, 80);
@@ -433,20 +579,54 @@
     alert("Pocket is not connected. Copy your text before closing.");
     return false;
   }
-  function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
+  function closeSafely() { closeOutlineContextMenu({ restoreFocus: false }); if (!dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
   titleInput.addEventListener("input", function () { setDirty(true); });
   bodyInput.addEventListener("input", function () { setDirty(true); });
   document.getElementById("saveBtn").addEventListener("click", function () { save(false); });
   saveCloseBtn.addEventListener("click", function () { save(true); });
-  if (duplicateOutlineBtn) duplicateOutlineBtn.addEventListener("click", duplicateOutlineSelection);
   outlinePane.addEventListener("paste", handleOutlinePaste);
+  outlinePane.addEventListener("contextmenu", handleOutlineContextMenu);
+  if (outlineContextMenu) {
+    outlineContextMenu.addEventListener("click", function (ev) {
+      var button = ev.target && typeof ev.target.closest === "function" ? ev.target.closest("button[data-outline-action]") : null;
+      if (!button || !outlineContextMenu.contains(button)) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      var action = button.getAttribute("data-outline-action") || "";
+      if (mode !== "outline" || !hasOutlineSelection()) {
+        closeOutlineContextMenu({ restoreFocus: true });
+        setSaveState("select outline rows first", "failed");
+        return;
+      }
+      if (action === "copy") { closeOutlineContextMenu({ restoreFocus: true }); if (!copyOutlineSelection()) setSaveState("copy failed", "failed"); return; }
+      if (action === "paste") { closeOutlineContextMenu({ restoreFocus: true }); pasteOutlineSelectionFromClipboard(); return; }
+      if (action === "duplicate") { closeOutlineContextMenu({ restoreFocus: false }); if (!duplicateOutlineSelection()) setSaveState("duplicate unavailable", "failed"); return; }
+      if (action === "delete") { closeOutlineContextMenu({ restoreFocus: false }); if (!deleteOutlineSelection()) setSaveState("delete unavailable", "failed"); return; }
+      closeOutlineContextMenu({ restoreFocus: true });
+    });
+    outlineContextMenu.addEventListener("keydown", handleOutlineContextMenuKeydown);
+  }
+  document.addEventListener("pointerdown", function (ev) { if (outlineContextMenuIsOpen() && !outlineContextMenu.contains(ev.target)) closeOutlineContextMenu({ restoreFocus: false }); }, true);
+  window.addEventListener("scroll", function () { closeOutlineContextMenu({ restoreFocus: false }); }, true);
+  window.addEventListener("resize", function () { closeOutlineContextMenu({ restoreFocus: false }); });
   document.getElementById("closeBtn").addEventListener("click", closeSafely);
   unsavedSaveBtn.addEventListener("click", function () { save(true); });
   unsavedDiscardBtn.addEventListener("click", discardAndClose);
   unsavedCancelBtn.addEventListener("click", keepEditing);
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
-  document.addEventListener("keydown", function (ev) { if ((ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; } if ((ev.key === "d" || ev.key === "D") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && duplicateOutlineSelection()) { ev.preventDefault(); return; } if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; } if (ev.key === "Escape") { ev.preventDefault(); if (!unsavedDialog.hidden) keepEditing(); else if (mode === "outline" && clearOutlineSelection()) return; else closeSafely(); } });
+  document.addEventListener("keydown", function (ev) {
+    if ((ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; }
+    if ((ev.key === "d" || ev.key === "D") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && duplicateOutlineSelection()) { ev.preventDefault(); return; }
+    if ((ev.key === "Delete" || ev.key === "Backspace") && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && mode === "outline" && hasOutlineSelection() && !isEditablePeTarget(ev.target)) {
+      ev.preventDefault();
+      closeOutlineContextMenu({ restoreFocus: false });
+      deleteOutlineSelection();
+      return;
+    }
+    if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; }
+    if (ev.key === "Escape") { ev.preventDefault(); if (closeOutlineContextMenu({ restoreFocus: true })) return; if (!unsavedDialog.hidden) keepEditing(); else if (mode === "outline" && clearOutlineSelection()) return; else closeSafely(); }
+  });
   window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   updateModeChrome();
   if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }

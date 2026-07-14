@@ -72,6 +72,11 @@
   .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: rgba(37, 99, 235, .86); }
   .outlineSelect:focus-visible, .outlineToggle:focus-visible, .outlineText:focus-visible { box-shadow: var(--pe-focus-ring); }
   .outlineText:empty::before { content: "note"; color: rgba(100, 116, 139, .34); }
+  .outlineContextMenu { position: fixed; z-index: 9; display: grid; gap: 2px; min-width: 176px; padding: 4px; border: 1px solid rgba(148, 163, 184, .3); border-radius: 8px; background: rgba(255, 255, 255, .99); box-shadow: 0 18px 42px -24px rgba(15, 23, 42, .58); }
+  .outlineContextMenu[hidden] { display: none; }
+  .outlineContextMenu button { width: 100%; min-height: 30px; padding: 5px 9px; border-radius: 6px; text-align: left; font-size: 12px; font-weight: 560; }
+  .outlineContextMenu button[data-outline-action="delete"] { color: rgba(153, 27, 27, .86); }
+  .outlineContextMenu button[data-outline-action="delete"]:hover, .outlineContextMenu button[data-outline-action="delete"]:focus-visible { color: rgba(127, 29, 29, .98); background: rgba(254, 226, 226, .62); }
   body.textMode .outlinePane, body.textMode .outlineOnly { display: none; }
   body.outlineMode textarea { display: none; }
   .unsavedDialog { position: fixed; inset: 0; display: grid; place-items: center; padding: 18px; background: rgba(15, 23, 42, .22); z-index: 10; }
@@ -84,10 +89,16 @@
 </head>
 <body class="textMode">
   <main class="wrap">
-    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button><button id="duplicateOutlineBtn" class="toolbarBtn outlineOnly" type="button" title="Duplicate selected outline blocks (Cmd/Ctrl+D)">duplicate</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
+    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
     <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
+  <div id="outlineContextMenu" class="outlineContextMenu" role="menu" aria-label="Outline selection actions" hidden>
+    <button type="button" role="menuitem" data-outline-action="copy">Copy</button>
+    <button type="button" role="menuitem" data-outline-action="paste">Paste after selection</button>
+    <button type="button" role="menuitem" data-outline-action="duplicate">Duplicate</button>
+    <button type="button" role="menuitem" data-outline-action="delete">Delete</button>
+  </div>
   <div id="unsavedDialog" class="unsavedDialog" role="dialog" aria-modal="true" aria-label="Unsaved changes" hidden>
     <div class="unsavedPanel">
       <div class="unsavedActions">
