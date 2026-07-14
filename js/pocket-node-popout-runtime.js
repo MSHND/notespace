@@ -201,6 +201,16 @@
     ev.preventDefault();
     items[nextIndex].focus({ preventScroll: true });
   }
+  function exitOutlineRowEditing(target) {
+    if (mode !== "outline" || !outlinePane || !target || target.nodeType !== 1 || typeof target.closest !== "function") return false;
+    var text = target.closest(".outlineText[data-block-id]");
+    if (!text || !outlinePane.contains(text)) return false;
+    syncOutlineTextElement(text);
+    var row = text.closest(".outlineRow[data-block-id]");
+    var focusTarget = row ? row.querySelector(".outlineSelect") || row.querySelector(".outlineToggle") : null;
+    if (focusTarget && typeof focusTarget.focus === "function") focusTarget.focus({ preventScroll: true });
+    return true;
+  }
   function isEditablePeTarget(target) {
     if (!target || target.nodeType !== 1) return false;
     if (target === titleInput || target === bodyInput || target.isContentEditable) return true;
@@ -625,7 +635,13 @@
       return;
     }
     if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; }
-    if (ev.key === "Escape") { ev.preventDefault(); if (closeOutlineContextMenu({ restoreFocus: true })) return; if (!unsavedDialog.hidden) keepEditing(); else if (mode === "outline" && clearOutlineSelection()) return; else closeSafely(); }
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      if (closeOutlineContextMenu({ restoreFocus: true })) return;
+      if (!unsavedDialog.hidden) { keepEditing(); return; }
+      if (exitOutlineRowEditing(ev.target)) return;
+      closeSafely();
+    }
   });
   window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   updateModeChrome();
