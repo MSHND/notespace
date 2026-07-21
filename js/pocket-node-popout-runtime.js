@@ -30,7 +30,7 @@
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
   function ensureBlockId(block) { if (block && !block.id) block.id = makeBlock("", 0).id; return block && block.id ? block.id : ""; }
-  function textToOutline(text) { return String(text || "").split("\\n").map(function (line) { var leading = (line.match(/^\s*/) || [""])[0].replace(/\t/g, "  ").length; return makeBlock(line.trimStart(), Math.floor(leading / 2)); }); }
+  function textToOutline(text) { return outlineBlocksFromPastedText(text, 0); }
   function outlineToText(blocks) { return (blocks || []).map(function (block) { return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || ""); }).join("\\n"); }
   function hasChildren(index) { var here = outline[index]; var next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
   function isHidden(index) {
@@ -363,12 +363,14 @@
     return { tabs: tabs, spaces: spaces, text: String(line || "").slice(leading.length) };
   }
   function inferPastedSpaceUnit(lines) {
+    var indents = lines.map(function (line) { return leadingIndentInfo(line).spaces; });
+    var shallowest = indents.reduce(function (minSpaces, spaces) { return Math.min(minSpaces, spaces); }, indents[0] || 0);
     var unit = 0;
-    lines.forEach(function (line) {
-      var info = leadingIndentInfo(line);
-      if (info.spaces > 0 && (unit === 0 || info.spaces < unit)) unit = info.spaces;
+    indents.forEach(function (spaces) {
+      var relativeSpaces = spaces - shallowest;
+      if (relativeSpaces > 0 && (unit === 0 || relativeSpaces < unit)) unit = relativeSpaces;
     });
-    return Math.max(1, unit || 1);
+    return Math.max(1, unit || shallowest || 1);
   }
   function outlineBlocksFromPastedText(text, baseDepth) {
     var rawLines = String(text || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");
