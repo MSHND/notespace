@@ -1,0 +1,36 @@
+{
+  "schema": "portal.export.v1",
+  "writtenAt": "2026-01-02T00:00:00.000Z",
+  "mainThoughtTree": [
+    {
+      "id": "fixture_outline",
+      "parentId": "root",
+      "label": "Synthetic outline note",
+      "order": 1000,
+      "updatedAt": "2026-01-02T00:00:00.000Z",
+      "source": "fixture",
+      "details": "Compatibility projection intentionally differs",
+      "editor": {
+        "schema": "pocket.nodeEditor.v1",
+        "mode": "outline",
+        "outline": [
+          {
+            "id": "fixture_block_parent",
+            "text": "Outline parent",
+            "depth": 0,
+            "collapsed": true,
+            "order": 1
+          },
+          {
+            "id": "fixture_block_child",
+            "text": "Outline child",
+            "depth": 1,
+            "collapsed": false,
+            "order": 2
+          }
+        ]
+      }
+    }
+  ],
+  "mainThoughtTreeTombstones": []
+}

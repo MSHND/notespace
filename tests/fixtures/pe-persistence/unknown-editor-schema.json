@@ -1,0 +1,31 @@
+{
+  "schema": "portal.export.v1",
+  "writtenAt": "2026-01-05T00:00:00.000Z",
+  "mainThoughtTree": [
+    {
+      "id": "fixture_unknown_editor",
+      "parentId": "root",
+      "label": "Synthetic future editor",
+      "order": 1000,
+      "updatedAt": "2026-01-05T00:00:00.000Z",
+      "source": "fixture",
+      "details": "Future-readable projection",
+      "editor": {
+        "schema": "pocket.nodeEditor.v9",
+        "mode": "outline",
+        "futureTopLevel": "preserve-if-untouched",
+        "outline": [
+          {
+            "id": "fixture_future_block",
+            "text": "Future outline content",
+            "depth": 1,
+            "collapsed": false,
+            "order": 90,
+            "futureBlockField": true
+          }
+        ]
+      }
+    }
+  ],
+  "mainThoughtTreeTombstones": []
+}

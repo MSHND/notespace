@@ -1,0 +1,43 @@
+{
+  "schema": "portal.export.v1",
+  "writtenAt": "2026-01-06T00:00:00.000Z",
+  "fixtureRootExtra": {
+    "keep": true
+  },
+  "mainThoughtTree": [
+    {
+      "id": "fixture_root_winner",
+      "parentId": "root",
+      "label": "Top-level winner",
+      "order": 1000,
+      "updatedAt": "2026-01-06T00:00:00.000Z",
+      "source": "fixture",
+      "fixtureNodeExtra": "root copy"
+    }
+  ],
+  "mainThoughtTreeTombstones": [
+    {
+      "id": "fixture_root_tombstone"
+    }
+  ],
+  "data": {
+    "fixtureDataExtra": {
+      "keepOnlyWhenDataWins": true
+    },
+    "mainThoughtTree": [
+      {
+        "id": "fixture_nested_loser",
+        "parentId": "root",
+        "label": "Nested loser",
+        "order": 1000,
+        "updatedAt": "2026-01-06T00:00:00.000Z",
+        "source": "fixture"
+      }
+    ],
+    "mainThoughtTreeTombstones": [
+      {
+        "id": "fixture_nested_tombstone"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "portal.export.v1",
+  "writtenAt": "2026-01-04T00:00:00.000Z",
+  "mainThoughtTree": [
+    {
+      "id": "fixture_malformed_editor",
+      "parentId": "root",
+      "label": "Synthetic malformed editor",
+      "order": 1000,
+      "updatedAt": "2026-01-04T00:00:00.000Z",
+      "source": "fixture",
+      "details": "Readable fallback",
+      "editor": {
+        "schema": "pocket.nodeEditor.v1",
+        "mode": "outline",
+        "outline": "not-an-array",
+        "fixtureMarker": true
+      }
+    }
+  ],
+  "mainThoughtTreeTombstones": []
+}

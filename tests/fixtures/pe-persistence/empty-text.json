@@ -1,0 +1,16 @@
+{
+  "schema": "portal.export.v1",
+  "writtenAt": "2026-01-03T00:00:00.000Z",
+  "mainThoughtTree": [
+    {
+      "id": "fixture_empty",
+      "parentId": "root",
+      "label": "Synthetic empty note",
+      "order": 1000,
+      "updatedAt": "2026-01-03T00:00:00.000Z",
+      "source": "fixture",
+      "details": "   \n\t  "
+    }
+  ],
+  "mainThoughtTreeTombstones": []
+}
