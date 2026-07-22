@@ -1,200 +1,231 @@
 # Codex report
 
-## POCKET TASK P008
+## POCKET TASK P009
 
-Title: Fix PE Text-to-Outline indentation conversion
+Title: Audit the PE data model and design a safe migration path
 
-Status: implemented and validated against the actual generated PE runtime.
+Status: documentation-only architecture audit completed against current `origin/main`.
 
 Commit title:
 
-- `P008 Fix PE text-to-outline indentation`
+- `P009 Audit PE data model migration`
 
 ### Starting point
 
 - Repository: `MSHND/notespace`
 - Local repository: `/Users/murrayhenderson/Library/Mobile Documents/com~apple~CloudDocs/MSHND-notespace`
 - Configured origin: `https://github.com/MSHND/notespace.git`
-- Starting `origin/main`: `c8c9a39f5485d500666a11c8061567cb8658e964`
-- Starting commit: `P007 Refine PE outline Escape behaviour`
-- `git fetch origin` confirmed that `origin/main` had not advanced beyond P007 before editing.
-- The local `main` branch matched `origin/main`, and the working tree was clean before editing.
+- Expected and confirmed starting `origin/main`: `26b6937b54cdd0b383054b1b4fa607d5e159e33e`
+- Starting commit: `P008 Fix PE text-to-outline indentation`
+- P008 browser acceptance was supplied by Murray in the task.
+- `git fetch origin` found no commits newer than the expected P008 baseline.
+- Local `main` matched `origin/main`, and the working tree was clean before the audit.
+- No personal Pocket truth file outside the repository was inspected.
 
-### Root cause confirmed
+### Audit scope
 
-`js/pocket-node-popout-runtime.js` is an outer runtime factory that returns a second JavaScript program from a template string. The old independent `textToOutline()` implementation contained an escape-sensitive leading-whitespace expression in the outer source.
+The audit traced the active routes for:
 
-Inspection of the actual string returned by `PocketNodePopoutRuntime.build(...)` confirmed that the intended leading-whitespace expression was emitted as:
+- JSON parse, root-shape recognition and node normalisation;
+- state adoption and `nodeMap()`;
+- node creation defaults;
+- PE edit routing and payload construction;
+- Text and Outline initialisation;
+- Text-to-Outline and Outline-to-Text conversion;
+- structured multiline paste;
+- runtime save-payload construction;
+- PE application, change detection and operation recording;
+- truth-file export and active-file session protection;
+- browser recovery, PiP, cache, last-save and Vault representations;
+- stale-file checks;
+- legacy popout fallback behaviour;
+- search and details-first copy-context consumers; and
+- repository fixtures and architecture documentation.
 
-```js
-line.match(/^s*/)
-```
+The current implementation was inspected directly rather than inferred from prior reports.
 
-instead of a whitespace matcher. The generated program still compiled, but typical indented lines reported no leading indentation, so Text-to-Outline conversion flattened them to depth 0. Switching back to Text then serialised that flattened outline and removed the visible indentation.
+### Principal verified findings
 
-The independent parser also differed from the established structured multiline paste parser. It did not share blank-line filtering, relative-depth alignment, inferred space units, or the structured parser's fresh-block construction.
+#### The intended PE-aware load normaliser is not active
 
-During validation, the existing shared parser was also found to infer its space unit from absolute indentation. For a common leading margin of 4, 6, and 8 spaces, it selected 4 as the unit and produced `0,0,1`. This was corrected in the canonical parser so the required common-leading case produces `0,1,2` without reintroducing a second parsing model.
+`index.html` loads, in this order:
+
+1. `js/pocket-editor-metadata.js`
+2. `js/pocket-pe-import-preserve.js`
+3. `js/pocket-storage.js`
+4. `js/pocket-import.js`
+
+The first two scripts install editor-aware versions of `normaliseNodes()`. The later top-level declaration in `js/pocket-import.js` replaces them. An in-memory VM probe using the actual source order confirmed that the final owner is the generic importer.
+
+`editor` and `pe` are not reserved core fields in `js/pocket-data.js`. They therefore pass through `normaliseNodeExtras()`, which allows at most 24 extras and only 8,000 serialised characters for an object value.
+
+The probe confirmed:
+
+- a small unknown editor object survived unchanged as a generic extra;
+- an editor object over 8,000 characters was absent after load normalisation;
+- `portal.export.v1` used the top-level tree when root and nested copies disagreed; and
+- `portal.mtt.web.v1` used the nested `data` tree.
+
+This is the audit's highest-priority persistence weakness. A current PE can save editor metadata much larger than the generic load cap, so a large saved Outline can lose its structural metadata on hard refresh and fall back to the at-most-4,000-character details projection.
+
+The older editor-aware normaliser cannot simply be reactivated. It uses a different meaningful-Outline rule and can let generic extras overwrite its normalised editor value.
+
+#### Current canonicality depends on mode
+
+- `node.label` is the title truth.
+- For Text, `node.details` is the active content truth and accepted Outline metadata is absent.
+- For a supported saved Outline, `node.editor.outline` is the active content winner.
+- An Outline save also writes an indented `node.details` compatibility projection.
+- Array position is operationally authoritative. Block `order` is regenerated as `index + 1`.
+- Saving an Outline while in Text deletes `node.editor`, losing IDs, depths, collapse state and any content beyond the details limit.
+- Empty or whitespace-only content has no `details` and no meaningful editor metadata, and reopens in Text.
+
+#### Active editor validation is lossy and does not check schema
+
+`PocketNodePopoutModel.normaliseEditorMeta()`:
+
+- does not verify the incoming schema;
+- rewrites accepted metadata as `pocket.nodeEditor.v1`;
+- retains the first 400 blocks;
+- retains the first 4,000 characters per block;
+- clamps rounded depth to 0 through 8;
+- creates missing IDs;
+- retains duplicate non-empty IDs;
+- replaces incoming order with array index plus one; and
+- removes unknown editor and block fields when metadata is rewritten.
+
+A second actual-model probe confirmed those behaviours, including unknown-schema coercion, duplicate-ID retention, missing-ID generation, 400/4,000 caps, 8/0 depth clamping, sequential order and current empty-Outline rules.
+
+Duplicate IDs are operationally unsafe because selection and text synchronisation use ID sets and first-match lookup.
+
+#### Persisted Outline and Text limits do not align
+
+`node.details` is capped at 4,000 characters. A current Outline can contain up to 400 blocks with up to 4,000 characters per block in the active model. Runtime content is not warned or blocked before apply-time normalisation.
+
+Reachable consequences include:
+
+- a full Outline plus a truncated details projection;
+- loss of all Outline-only content when saving that node as Text;
+- more than 400 short Text lines producing a runtime Outline whose saved editor contains only the first 400 rows;
+- oversized block tails being sliced on changed save; and
+- a saved editor over 8,000 serialised characters being dropped by the next file load.
+
+Text normalisation also removes carriage returns, converts tabs to two spaces, trims outer and trailing-line whitespace, collapses three or more newlines to two, and then slices. Text-to-Outline deliberately ignores all blank lines.
+
+#### `node.pe` is a stale third representation
+
+`applyLoadedState()` calls `ensurePeFromLegacyDetails()`, adding a `pocket.pe.v1` Text copy to every details-bearing node that lacks one. No operation is recorded. Opening alone does not write, but the next unrelated explicit export can persist that added object.
+
+The active standalone PE reads and writes only `node.details` and `node.editor`; it never synchronises `node.pe`. `js/pocket-filter-pe-search.js` still indexes `node.pe`, so stale legacy content can affect search.
+
+#### Unknown and future metadata is not safely gated
+
+Small unknown editor schemas can survive an unrelated export as generic extras, but the active PE ignores the schema identifier. A structurally Outline-like future object can be opened and rewritten as v1 on any actual edit, losing unknown fields. Future root schemas with a top-level tree can load, but export always emits `portal.export.v1`. Unknown root and node fields survive only within bounded extras rules.
+
+No safe older-version editing contract exists. The readable `details` projection is useful compatibility, but it is not proof that older versions preserve or round-trip editor metadata.
+
+#### PE apply has a source-identity gap
+
+The truth export queue correctly captures and verifies the active file session. The PE payload itself contains a node ID but no file-session token or original node revision. `applyPayload()` resolves that ID against the current `nodeMap()`.
+
+If file A's PE remains open, file B becomes active, and B has the same node ID, the popup can apply A's content to B before export captures B's valid session. A missing ID safely rejects. This is a verified static route and was not tested against personal files.
+
+#### Recovery mirrors the same model
+
+Local safety, PiP, cache, last-save and Vault representations copy the same in-memory node fields in different wrappers and with different caps. Readers that call current normalisation inherit the editor/extras limitation.
+
+The selected local JSON remains the only document truth. Browser storage is recovery support. Opening a file does not write it. Main Save and canonical PE Save still use explicit truth-file persistence, and PE remains dirty when persistence fails.
+
+The adjacent `js/pocket-pe-save-dirty.js` wrapper still wraps bridge open/apply surfaces and exposes legacy `__pocketPeApplyAndSave`, but the current generated node-popout runtime saves directly through `PocketNodePopoutEditor.applyAndSave()`. The legacy helper is therefore not the canonical current save owner.
+
+### Recommendation
+
+The durable report recommends **Option A: retain the broad current v1 model and strengthen its contracts**.
+
+No truth-file schema migration is recommended now. The immediate work is safety hardening:
+
+- one deliberate first-class node/editor load owner;
+- exact schema recognition;
+- opaque preservation for unknown schemas and fields;
+- visible validation instead of silent truncation;
+- unique block-ID enforcement;
+- explicit array-order ownership;
+- no automatic creation of new legacy `node.pe` shadows;
+- explicit semantics for converting a saved Outline to Text; and
+- PE binding to its originating file session and node revision.
+
+For Outline, keep `editor.outline` canonical and `details` as a derived compatibility projection until Murray chooses otherwise. This best fits Pocket's explicit local ownership, inspectable JSON, simple recovery and small-app scale.
+
+The recommended immediate next task is P010, a non-writing contract and synthetic-fixture test pass. A v2 or unified content schema should be reconsidered only after current v1 is safe and a real product requirement justifies migration.
+
+### Documentation produced
+
+- `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`
+
+The migration-plan report contains all required sections:
+
+1. Executive Summary
+2. Current Truth Model
+3. Data Flow Map
+4. Current Invariants
+5. Duplicated or Derived Data
+6. Limits and Data-Loss Analysis
+7. Compatibility Matrix
+8. Options
+9. Recommendation
+10. Proposed Target JSON
+11. Migration Policy
+12. Proposed Implementation Phases
+13. Test and Acceptance Plan
+14. Open Product Decisions for Murray
+15. Non-goals
+
+It also includes an evidence index, concrete JSON examples, P010 through P016 tentative phase boundaries and explicit distinctions between verified behaviour, inferred risk, proposed design and product choices.
 
 ### Files changed
 
-- `js/pocket-node-popout-runtime.js`
+- `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`
 - `docs/CODEX_REPORT.md`
 
-No other source, persistence, model, template, main-tree, or retired PE file was modified. No dependency or validation artefact was added.
+No JavaScript, HTML, CSS, JSON fixture, runtime configuration, dependency, retired PE file or personal truth file was changed.
 
-### Implementation
+### Checks performed
 
-`textToOutline()` now delegates directly to the canonical structured multiline parser:
+- Confirmed the repository root and configured `MSHND/notespace` origin.
+- Ran `git status` before the audit and confirmed a clean working tree.
+- Ran `git fetch origin`.
+- Confirmed starting local `HEAD` and `origin/main` were both `26b6937b54cdd0b383054b1b4fa607d5e159e33e`.
+- Confirmed no commits were newer than the expected P008 baseline.
+- Searched the repository for the requested model fields, schemas, normalisers, payload builders, conversions, apply/save owners, export/serialisation, recovery and migration references.
+- Inspected all current active route files and adjacent legacy/recovery consumers named in the evidence index.
+- Executed the exact-load-order VM probe described above against current source.
+- Executed the active-model boundary probe described above against current source.
+- Confirmed all named report functions and files exist on current main.
+- Confirmed the fifteen required numbered headings occur once and in order.
+- Confirmed Markdown code fences are balanced.
+- Reviewed Markdown tables and heading boundaries.
+- Ran `git diff --check`.
+- Reviewed the complete documentation diff.
+- Confirmed only the two expected documentation files changed.
+- Confirmed no temporary validation files or personal data were added.
+- Confirmed no runtime file changed.
 
-```js
-function textToOutline(text) { return outlineBlocksFromPastedText(text, 0); }
-```
+No JavaScript syntax check was needed because no JavaScript changed. `node tools/pocket-check.js` and `npm run check` were not run, as required.
 
-Function declaration hoisting makes this ordering safe inside the generated runtime.
+### Product decisions still requiring Murray
 
-`inferPastedSpaceUnit()` now calculates space offsets relative to the shallowest leading-space count. When any meaningful line begins at zero spaces, the result is identical to the previous structured-paste inference. When every meaningful line has a common positive margin, the margin no longer masks the actual indentation step. A uniform common margin still falls back safely to that margin.
+The report asks Murray to decide, before future implementation:
 
-The former independent Text-to-Outline whitespace calculation has been removed, so Text conversion and structured multiline paste now have one indentation parser.
+- the conflict winner when Outline and details disagree;
+- what Text means on an existing Outline;
+- the future of legacy `node.pe`;
+- the user experience at content limits;
+- the older-version compatibility promise;
+- the unsupported-editor-schema experience; and
+- the trigger for any later real migration.
 
-### New Text-to-Outline behaviour
-
-- Text-only nodes still initialise in Text mode because `js/pocket-node-popout-model.js` still emits `mode: "text"` and `outline: null` when no valid outline metadata exists.
-- Indentation alone does not automatically select Outline mode.
-- On the first manual Outline selection for a text-only node, `setMode()` converts the current live `bodyInput.value`, including edits made after the PE opened.
-- Spaces, tabs, and mixed tabs and spaces are parsed by `leadingIndentInfo()`.
-- Space indentation units are inferred by the shared parser.
-- Common leading indentation is removed through relative-depth alignment.
-- Meaningful lines retain their relative hierarchy.
-- Depth is clamped to 0 through 8.
-- Each converted row receives a fresh block ID and `collapsed: false` through `makeBlock()`.
-- Blank and whitespace-only lines are ignored.
-- Empty or whitespace-only input produces no parsed blocks, after which the existing `renderOutline()` fallback creates one fresh blank depth-0 row.
-- Text serialisation continues to use the standard two-space representation from `outlineToText()`.
-
-### Parser results
-
-The parser exercised was the function embedded in the actual program returned by `PocketNodePopoutRuntime.build(...)`, observed through an in-memory test hook. It was not a separate parser imitation.
-
-- Two-space hierarchy: `0,1,2`
-- Four-space hierarchy: `0,1,2`
-- Tab hierarchy: `0,1,2`
-- Mixed tab and space hierarchy: `0,1,2`
-- Common leading 4, 6, and 8 spaces: `0,1,2`
-- Blank-line sample: three meaningful rows at `0,1,2`, with no blank outline rows
-- Base-depth alignment sample at depth 3: `3,4,5`
-- Eleven-level sample: `0,1,2,3,4,5,6,7,8,8,8`
-- Empty and whitespace-only parser input: no blocks, followed by one blank depth-0 row through rendering fallback
-- PFC sample: `0,1,2,3,3,2,2,3,3,3`
-
-All generated blocks in the parser cases had non-empty unique IDs, `collapsed: false`, and depths within 0 through 8.
-
-### Round-trip results
-
-Text to Outline to Text to Outline round trips were validated for:
-
-- two-space indentation
-- four-space indentation
-- tabs
-- mixed tabs and spaces
-- common leading indentation
-- blank-line input
-- the complete PFC sample
-
-The returned Text used the normalised two-space representation. Re-parsing that Text preserved the same meaningful row text and depth sequence. No tested hierarchy flattened.
-
-### Saved native outline regression
-
-An Outline-mode payload was tested with stable IDs, multiple depths, a collapsed parent, and body text that deliberately did not match the saved outline.
-
-Initialisation:
-
-- used the saved outline array
-- preserved IDs
-- preserved texts
-- preserved depths
-- preserved collapsed state
-- did not parse or replace the mismatched body text
-
-The existing save payload continues to include `mode: "outline"` and the outline array. `js/pocket-node-popout-model.js` and its existing `pocket.nodeEditor.v1` metadata format were not changed. Reopening a valid saved outline therefore continues to use its persisted IDs, depths, and collapsed state instead of reparsing body text.
-
-### Structured paste regression
-
-The generated-runtime interaction harness confirmed:
-
-- multiline paste after the active row
-- paste after the final selected subtree
-- base-depth alignment
-- common leading indentation
-- spaces, tabs, and mixed indentation through the shared parser
-- blank-line filtering
-- insertion position preservation
-- fresh IDs and `collapsed: false`
-- pasted-root selection and selection-anchor update
-- PE dirty state without autosave
-
-When a pasted sample contained an unindented root, space-unit inference was behaviour-identical to the previous parser. Context-menu Paste still uses the same `insertStructuredOutlineText()` path and retains its established selection and insertion semantics.
-
-### P006 and P007 regression review
-
-The generated-runtime interaction harness passed:
-
-- subtree-aware Copy, including hidden descendants and normalised relative indentation
-- context-menu Paste after selection
-- Duplicate of a complete subtree with fresh IDs and preserved depths and collapsed values
-- Delete of the duplicated subtree with focus-selection recovery
-- Enter row creation
-- Tab and Shift+Tab depth changes
-- collapse and expand with descendant preservation
-- P007 Escape order: context menu, unsaved dialog, `.outlineText` editing exit to the row selector, then normal close flow
-
-The parser change did not modify the selection, context-menu, Copy, Duplicate, Delete, row-key, collapse, Escape, or close-flow implementations.
-
-### Save, dirty state, and truth-file protections
-
-The generated-runtime harness confirmed:
-
-- Save builds a body and outline payload with the converted IDs and depths.
-- Successful Save clears dirty state without closing.
-- Successful Save & Close clears dirty state, permits closure, and invokes the existing close path.
-- Applied-but-not-exported results remain dirty and open.
-- Rejected Save and Save & Close results remain dirty and open, report failure, and retain before-unload protection.
-
-The active-file and truth-file owners were inspected and have no diff:
-
-- `js/pocket-node-popout-editor.js` still gates opening and payload application through `requirePocketFileForChanges()` and routes PE Save through `applyAndSave()`.
-- `js/pocket-io-browser.js` still captures and validates the active file session, rejects changed sessions, requires a modifiable Pocket file, and writes through `exportTree()`.
-
-No autosave, background write, file watcher, writable-handle reuse, cloud synchronisation, persistence format, or main-tree Enter routing was added or changed. Main Save, PE Save, dirty-until-export, active-file session, and details-first copy-context behaviour remain outside and untouched by this narrow runtime diff.
-
-### Checks run
-
-- `node --check js/pocket-node-popout-runtime.js` passed.
-- `node --check js/pocket-node-popout-template.js` passed.
-- `git diff --check` passed.
-- A Text-mode payload with `outline: null` was built and the unmodified returned program passed to `new Function(...)`: passed.
-- An Outline-mode payload with valid saved metadata was built and the unmodified returned program passed to `new Function(...)`: passed.
-- Generated-source inspection confirmed the shared `textToOutline()` delegation: passed.
-- Generated-source inspection confirmed the canonical `/^[ \\t]*/` matcher survived generation: passed.
-- Generated-source inspection confirmed the faulty `/^s*/` parser was absent: passed.
-- Generated parser and round-trip harness: `P008 generated parser validation: PASS`.
-- Full UI-driven generated-runtime parser/native-outline harness: `P008 targeted generated-runtime validation: PASS`.
-- Generated-runtime interaction regression harness: `P008 generated-runtime interaction regression: PASS`.
-- Static diff review confirmed active-file protection files were unchanged.
-- Final name-only and status review found only the two expected files and no temporary validation artefacts.
-
-`node tools/pocket-check.js` and `npm run check` were not run, as required.
-
-### Still requiring Murray's physical browser test
-
-- Open the real older PFC text-only node, confirm it starts in Text mode, select Outline, and visually confirm the expected hierarchy.
-- Switch the converted PFC node back to Text and confirm the normalised two-space indentation remains hierarchical.
-- Save against the real selected Pocket truth JSON, close PE, reopen the node, and confirm Outline mode, IDs, depths, and collapsed state persist.
-- Exercise real Clipboard API permission and native context-menu presentation.
-- Confirm focus rings, selector focus, collapse visuals, and the physical P007 Escape feel in the standalone popup.
-- Confirm actual popup close timing and main-window opener integration.
-- Confirm file-picker permission, writable-handle session protection, and the physical truth-file export on Murray's Mac.
+Codex recommends Outline as winner for a supported schema, projection-only Text plus explicit Convert to Text, preserve-but-stop-generating legacy `pe`, block rather than truncate, readable older-version fallback only, read-only unknown schemas, and explicit previewed migration with a verified backup.
 
 ### Git identification
 
-This report is included in the commit titled `P008 Fix PE text-to-outline indentation`. The resulting SHA is not embedded in the same commit because changing this file to add that SHA would produce a different SHA. The completion response is gated on pushing that commit to `origin/main`, fetching again, and confirming local `main` and `origin/main` resolve to the same P008 commit.
+This report is included in the commit titled `P009 Audit PE data model migration`. Its resulting SHA is not embedded in the same commit because adding that SHA would create a different commit. The completion response is gated on pushing that commit to `origin/main`, fetching again, confirming local `main` and `origin/main` resolve to the same commit, and confirming the worktree is clean.
