@@ -8,6 +8,8 @@ const vm = require("node:vm");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const FIXTURE_DIR = path.join(__dirname, "fixtures", "pe-persistence");
+const EDITOR_SCHEMA = "pocket.nodeEditor.v1";
+const UNKNOWN_EDITOR_MESSAGE = "This item uses editor data that this version of Pocket can't safely edit. Its readable text is shown below, and nothing will be changed.";
 const CORE_INDEX_SCRIPTS = [
   "js/pocket-state.js",
   "js/pocket-data.js",
@@ -48,7 +50,7 @@ function indexScriptSources() {
   return Array.from(source("index.html").matchAll(/<script\s+src="([^"]+)"/g), (match) => match[1]);
 }
 
-function createBrowserContext() {
+function createBrowserContext(options = {}) {
   const storage = new Map();
   const storageWrites = [];
   const surfaceCalls = {
@@ -67,7 +69,7 @@ function createBrowserContext() {
     Set,
     Promise,
     structuredClone: globalThis.structuredClone,
-    location: { href: "https://example.test/index.html" },
+    location: { href: options.href || "https://example.test/index.html" },
     console: { log() {}, info() {}, warn() {}, error() {} },
     document: {
       body: { classList },
@@ -147,14 +149,14 @@ function loadScriptsInIndexOrder(context, requestedScripts) {
   return selected;
 }
 
-function createCoreContext() {
-  const context = createBrowserContext();
+function createCoreContext(options = {}) {
+  const context = createBrowserContext(options);
   loadScriptsInIndexOrder(context, CORE_INDEX_SCRIPTS);
   return context;
 }
 
-function createFullContractContext() {
-  const context = createBrowserContext();
+function createFullContractContext(options = {}) {
+  const context = createBrowserContext(options);
   loadScriptsInIndexOrder(context, FULL_CONTRACT_SCRIPTS);
   context.refreshMeta = () => {};
   context.renderTree = () => {};
@@ -209,6 +211,66 @@ function editorObjectAtLength(targetLength) {
   value.padding = "x".repeat(targetLength - baseLength);
   assert.equal(JSON.stringify(value).length, targetLength);
   return value;
+}
+
+function largeCurrentEditor(blockCount = 36, textLength = 320) {
+  const editor = {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    futureTopLevel: { preserve: true, version: 2 },
+    outline: Array.from({ length: blockCount }, (_, index) => ({
+      id: `large_block_${index}`,
+      text: `${String(index).padStart(3, "0")}:` + "x".repeat(textLength),
+      depth: index === 0 ? 0 : Math.min(8, (index % 4) + 1),
+      collapsed: index % 11 === 0,
+      order: (blockCount - index) * 1000,
+      ...(index === 0 ? { futureBlockField: { preserve: "raw" } } : {}),
+    })),
+  };
+  assert.ok(JSON.stringify(editor).length > 8000);
+  return editor;
+}
+
+function largeUnknownEditor() {
+  const editor = {
+    schema: "pocket.nodeEditor.v9",
+    mode: "outline",
+    futureTopLevel: { preserve: true },
+    outline: [{
+      id: "large_future_block",
+      text: "Future outline content",
+      depth: 4,
+      collapsed: true,
+      order: 9000,
+      futureBlockField: true,
+    }],
+    padding: "u".repeat(9000),
+  };
+  assert.ok(JSON.stringify(editor).length > 8000);
+  return editor;
+}
+
+function largeLegacyPe() {
+  const pe = {
+    schema: "pocket.pe.v1",
+    title: "Large legacy PE",
+    mode: "outline",
+    text: "legacy:" + "p".repeat(12000),
+    outline: Array.from({ length: 18 }, (_, index) => ({
+      id: `legacy_line_${index}`,
+      text: `Legacy ${index} ` + "q".repeat(240),
+      depth: index === 0 ? 0 : 1,
+      collapsed: index === 0,
+      order: (index + 1) * 1000,
+    })),
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+  assert.ok(JSON.stringify(pe).length > 8000);
+  return pe;
+}
+
+function outlineMeta(outline) {
+  return { schema: EDITOR_SCHEMA, mode: "outline", outline };
 }
 
 function normaliseOne(context, node) {
@@ -303,6 +365,199 @@ function runtimeProbe(factory, payload) {
   return { program, probe: exposed.__peRuntimeProbe };
 }
 
+function executeControlledRuntime(payload) {
+  const factory = loadRuntimeFactory();
+  const listeners = new Map();
+  const windowListeners = new Map();
+  const controls = new Map();
+  const applyCalls = [];
+  const saveCalls = [];
+  const classNames = new Set(["textMode"]);
+  let closeCalls = 0;
+
+  function classList(set) {
+    return {
+      add(...names) { names.forEach((name) => set.add(name)); },
+      remove(...names) { names.forEach((name) => set.delete(name)); },
+      contains(name) { return set.has(name); },
+      toggle(name, force) {
+        const next = force === undefined ? !set.has(name) : !!force;
+        if (next) set.add(name);
+        else set.delete(name);
+        return next;
+      },
+    };
+  }
+
+  const document = {
+    activeElement: null,
+    body: { classList: classList(classNames) },
+    documentElement: { clientWidth: 1024, clientHeight: 768 },
+    addEventListener(type, handler) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(handler);
+    },
+    dispatch(type, values = {}) {
+      const event = {
+        type,
+        target: values.target || document.body,
+        key: "",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        shiftKey: false,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+        ...values,
+      };
+      for (const handler of listeners.get(type) || []) handler(event);
+      return event;
+    },
+    getElementById(id) { return controls.get(id) || null; },
+    createElement(tagName) { return makeControl("", tagName); },
+    execCommand() { return true; },
+  };
+
+  function makeControl(id, tagName = "div") {
+    const ownListeners = new Map();
+    const ownClasses = new Set();
+    const attributes = new Map();
+    const control = {
+      id,
+      nodeType: 1,
+      tagName: String(tagName).toUpperCase(),
+      className: "",
+      classList: classList(ownClasses),
+      style: {},
+      children: [],
+      hidden: false,
+      disabled: false,
+      readOnly: false,
+      value: "",
+      textContent: "",
+      contentEditable: "false",
+      isConnected: true,
+      addEventListener(type, handler) {
+        if (!ownListeners.has(type)) ownListeners.set(type, []);
+        ownListeners.get(type).push(handler);
+      },
+      dispatch(type, values = {}) {
+        const event = {
+          type,
+          target: control,
+          key: "",
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+          defaultPrevented: false,
+          preventDefault() { this.defaultPrevented = true; },
+          stopPropagation() {},
+          stopImmediatePropagation() {},
+          ...values,
+        };
+        for (const handler of ownListeners.get(type) || []) handler(event);
+        return event;
+      },
+      setAttribute(name, value) { attributes.set(String(name), String(value)); },
+      getAttribute(name) { return attributes.has(String(name)) ? attributes.get(String(name)) : null; },
+      appendChild(child) { this.children.push(child); return child; },
+      removeChild(child) { this.children = this.children.filter((item) => item !== child); return child; },
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      closest() { return null; },
+      contains(child) { return this.children.includes(child); },
+      focus() { document.activeElement = control; },
+      select() {},
+      getBoundingClientRect() { return { width: 100, height: 30 }; },
+    };
+    Object.defineProperty(control, "innerHTML", {
+      get() { return ""; },
+      set() { control.children.length = 0; },
+    });
+    return control;
+  }
+
+  const tags = {
+    titleInput: "input",
+    bodyInput: "textarea",
+    outlinePane: "div",
+    textModeBtn: "button",
+    outlineModeBtn: "button",
+    saveState: "span",
+    saveBtn: "button",
+    saveCloseBtn: "button",
+    outlineContextMenu: "div",
+    unsavedDialog: "div",
+    unsavedSaveBtn: "button",
+    unsavedDiscardBtn: "button",
+    unsavedCancelBtn: "button",
+    closeBtn: "button",
+  };
+  for (const [id, tagName] of Object.entries(tags)) controls.set(id, makeControl(id, tagName));
+  controls.get("titleInput").value = payload.title || "";
+  controls.get("bodyInput").value = payload.body || "";
+  controls.get("outlineContextMenu").hidden = true;
+  controls.get("unsavedDialog").hidden = true;
+
+  const window = {
+    opener: {
+      closed: false,
+      PocketNodePopoutEditor: {
+        apply(nextPayload) {
+          applyCalls.push(nextPayload);
+          return true;
+        },
+        applyAndSave(nextPayload) {
+          saveCalls.push(nextPayload);
+          return Promise.resolve({ ok: true, exported: true });
+        },
+      },
+    },
+    innerWidth: 1024,
+    innerHeight: 768,
+    addEventListener(type, handler) {
+      if (!windowListeners.has(type)) windowListeners.set(type, []);
+      windowListeners.get(type).push(handler);
+    },
+    dispatch(type, values = {}) {
+      const event = {
+        type,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        ...values,
+      };
+      for (const handler of windowListeners.get(type) || []) handler(event);
+      return event;
+    },
+    setTimeout(handler) { if (typeof handler === "function") handler(); return 1; },
+    close() { closeCalls += 1; },
+    focus() {},
+  };
+  const program = factory.build(JSON.stringify(payload));
+  assert.doesNotThrow(() => new Function(program));
+  new Function("window", "document", "navigator", "requestAnimationFrame", "alert", "console", program)(
+    window,
+    document,
+    { clipboard: {} },
+    (callback) => { if (typeof callback === "function") callback(); return 1; },
+    () => {},
+    { log() {}, info() {}, warn() {}, error() {} },
+  );
+  return {
+    program,
+    window,
+    document,
+    controls,
+    applyCalls,
+    saveCalls,
+    classNames,
+    closeCalls: () => closeCalls,
+  };
+}
+
 test("synthetic fixture inventory is compact and valid JSON", () => {
   const names = fs.readdirSync(FIXTURE_DIR).filter((name) => name.endsWith(".json")).sort();
   assert.deepEqual(names, FIXTURE_NAMES);
@@ -313,7 +568,7 @@ test("synthetic fixture inventory is compact and valid JSON", () => {
   }
 });
 
-test("CURRENT-RISK: index load order leaves pocket-import.js as active normaliseNodes owner", () => {
+test("index load order establishes pocket-import.js as the deliberate first-class normaliseNodes owner", () => {
   const context = createBrowserContext();
   const scripts = indexScriptSources();
   const requested = CORE_INDEX_SCRIPTS;
@@ -321,31 +576,32 @@ test("CURRENT-RISK: index load order leaves pocket-import.js as active normalise
 
   runScript(context, requested[0]);
   runScript(context, requested[1]);
+  assert.equal(typeof context.normaliseNodes, "undefined");
   runScript(context, requested[2]);
-  const metadataOwner = context.normaliseNodes;
+  assert.equal(typeof context.normaliseNodes, "undefined");
+  assert.equal(context.PocketEditorMetadata.EDITOR_SCHEMA, EDITOR_SCHEMA);
+  assert.equal(typeof context.PocketEditorMetadata.classifyEditorMeta, "function");
+  assert.equal(typeof context.PocketEditorMetadata.copyFirstClassNodeFields, "function");
   runScript(context, requested[3]);
-  const preservingOwner = context.normaliseNodes;
+  assert.equal(typeof context.normaliseNodes, "undefined");
+  assert.equal(context.__pocketPeImportPreserveInstalled, undefined);
   runScript(context, requested[4]);
-  const storageOwner = context.normaliseNodes;
+  assert.equal(typeof context.normaliseNodes, "undefined");
   runScript(context, requested[5]);
   const finalOwner = context.normaliseNodes;
 
-  assert.notEqual(metadataOwner, preservingOwner);
-  assert.equal(preservingOwner.__peImportPreserveWrapped, true);
-  assert.equal(storageOwner, preservingOwner);
-  assert.notEqual(finalOwner, preservingOwner);
-  assert.equal(finalOwner.__peImportPreserveWrapped, undefined);
-  assert.equal(context.__pocketPeImportPreserveInstalled, true);
+  assert.equal(typeof finalOwner, "function");
+  assert.equal(vm.runInContext("normaliseNodes === window.normaliseNodes", context), true);
 
   const raw = [syntheticNode("owner_probe", { details: "Fallback", editor: editorObjectAtLength(8001) })];
-  const throughPreservingOwner = preservingOwner(raw)[0];
   const throughFinalOwner = finalOwner(raw)[0];
-  assert.equal(throughPreservingOwner.editor.schema, "pocket.nodeEditor.v1");
-  assert.equal(Object.hasOwn(throughFinalOwner, "editor"), false);
+  assert.equal(throughFinalOwner.editor.schema, EDITOR_SCHEMA);
+  assert.equal(JSON.stringify(throughFinalOwner.editor).length, 8001);
 
   const smallFutureEditor = { schema: "pocket.nodeEditor.v9", mode: "outline", outline: [{ text: "Future", depth: 1 }], futureField: true };
-  const throughMetadataOwner = metadataOwner([syntheticNode("metadata_probe", { editor: smallFutureEditor })])[0];
-  assert.deepEqual(plain(throughMetadataOwner.editor), smallFutureEditor);
+  const throughFinalUnknown = finalOwner([syntheticNode("metadata_probe", { editor: smallFutureEditor })])[0];
+  assert.deepEqual(plain(throughFinalUnknown.editor), smallFutureEditor);
+  assert.notStrictEqual(throughFinalUnknown.editor, smallFutureEditor);
 });
 
 test("generic node extras enforce the 24-field and scalar boundaries", () => {
@@ -376,25 +632,31 @@ test("generic node extras enforce the 24-field and scalar boundaries", () => {
   assert.equal(truncatedKeyExtras["k".repeat(48)], "kept");
 });
 
-test("CURRENT-RISK: editor and pe share the first-24 generic extras budget", () => {
+test("editor and pe are reserved outside the generic extras budget regardless of property order", () => {
   const context = createCoreContext();
   const crowded = syntheticNode("crowded");
   for (let index = 0; index < 24; index += 1) crowded[`extra${String(index).padStart(2, "0")}`] = index;
-  crowded.editor = { schema: "pocket.nodeEditor.v1", mode: "outline", outline: [{ text: "Kept?", depth: 1 }] };
+  crowded.editor = { schema: EDITOR_SCHEMA, mode: "outline", outline: [{ text: "Kept?", depth: 1 }] };
   crowded.pe = { schema: "pocket.pe.v1", mode: "text", text: "Kept?" };
   const normalised = normaliseOne(context, crowded);
-  assert.equal(Object.hasOwn(normalised, "editor"), false);
-  assert.equal(Object.hasOwn(normalised, "pe"), false);
+  assert.equal(normalised.editor.schema, EDITOR_SCHEMA);
+  assert.equal(normalised.pe.schema, "pocket.pe.v1");
+  assert.equal(normalised.extra23, 23);
+  assert.equal(Object.keys(context.normaliseNodeExtras(crowded)).length, 24);
+  assert.equal(Object.hasOwn(context.normaliseNodeExtras(crowded), "editor"), false);
+  assert.equal(Object.hasOwn(context.normaliseNodeExtras(crowded), "pe"), false);
 
   const early = syntheticNode("early", {
-    editor: { schema: "pocket.nodeEditor.v1", mode: "outline", outline: [{ text: "Early", depth: 1 }] },
-    pe: { schema: "pocket.pe.v1", mode: "text", text: "Early" },
+    editor: { schema: EDITOR_SCHEMA, mode: "outline", outline: [{ text: "Kept?", depth: 1 }] },
+    pe: { schema: "pocket.pe.v1", mode: "text", text: "Kept?" },
   });
   for (let index = 0; index < 24; index += 1) early[`extra${String(index).padStart(2, "0")}`] = index;
   const earlyNormalised = normaliseOne(context, early);
-  assert.equal(earlyNormalised.editor.schema, "pocket.nodeEditor.v1");
+  assert.equal(earlyNormalised.editor.schema, EDITOR_SCHEMA);
   assert.equal(earlyNormalised.pe.schema, "pocket.pe.v1");
-  assert.equal(Object.hasOwn(earlyNormalised, "extra22"), false);
+  assert.equal(earlyNormalised.extra23, 23);
+  assert.deepEqual(plain(earlyNormalised.editor), plain(normalised.editor));
+  assert.deepEqual(plain(earlyNormalised.pe), plain(normalised.pe));
 });
 
 test("root extras enforce the current 32-field, string, and object boundaries", () => {
@@ -518,14 +780,260 @@ test("active load preserves small and exactly 8,000-character editor objects", (
   assert.equal(boundary.details, "Fallback");
 });
 
-test("CURRENT-RISK: active load drops editor metadata above the generic 8,000-character object cap", () => {
+test("active load preserves editor metadata above the generic 8,000-character object cap", () => {
   const context = createCoreContext();
+  const sourceEditor = editorObjectAtLength(8001);
   const oversized = normaliseOne(context, syntheticNode("oversized_editor", {
     details: "Fallback remains",
-    editor: editorObjectAtLength(8001),
+    editor: sourceEditor,
   }));
-  assert.equal(Object.hasOwn(oversized, "editor"), false);
+  assert.equal(Object.hasOwn(oversized, "editor"), true);
+  assert.equal(JSON.stringify(oversized.editor).length, 8001);
+  assert.deepEqual(plain(oversized.editor), sourceEditor);
+  assert.notStrictEqual(oversized.editor, sourceEditor);
   assert.equal(oversized.details, "Fallback remains");
+});
+
+test("large current v1 Outline survives load, export, reload, and active model opening", () => {
+  const context = createFullContractContext();
+  const editor = largeCurrentEditor();
+  const input = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-01-01T00:00:00.000Z",
+    mainThoughtTree: [syntheticNode("large_current", {
+      details: "Readable large Outline fallback",
+      editor,
+      pe: null,
+    })],
+    mainThoughtTreeTombstones: [],
+  };
+  const first = context.normaliseInput(input);
+  assert.equal(JSON.stringify(first.nodes[0].editor), JSON.stringify(editor));
+  assert.notStrictEqual(first.nodes[0].editor, editor);
+  assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(first.nodes[0]).kind, "supported-v1-outline");
+
+  const opening = context.PocketNodePopoutModel.buildPayload(first.nodes[0]);
+  assert.equal(opening.mode, "outline");
+  assert.equal(opening.schema, EDITOR_SCHEMA);
+  assert.equal(opening.outline.length, editor.outline.length);
+  assert.equal(opening.outline.at(-1).text, editor.outline.at(-1).text);
+  assert.equal(Object.hasOwn(opening, "futureTopLevel"), false);
+  assert.equal(Object.hasOwn(opening.outline[0], "futureBlockField"), false);
+  assert.deepEqual(plain(opening.outline.map((block) => block.order)), editor.outline.map((_block, index) => index + 1));
+  assert.notEqual(opening.outline[0].order, editor.outline[0].order);
+
+  context.applyLoadedState(first, {
+    schema: first.schema,
+    fileName: "large-current.json",
+    writtenAt: first.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  const exported = context.buildPocketPayload("2026-02-01T00:00:00.000Z");
+  assert.equal(JSON.stringify(exported.mainThoughtTree[0].editor), JSON.stringify(editor));
+  const reloaded = context.normaliseInput(exported);
+  assert.equal(JSON.stringify(reloaded.nodes[0].editor), JSON.stringify(editor));
+  assert.equal(context.PocketNodePopoutModel.buildPayload(reloaded.nodes[0]).outline.length, editor.outline.length);
+
+  const editedPayload = context.PocketNodePopoutModel.buildPayload(lexicalState(context).nodes[0]);
+  editedPayload.body = "Explicitly edited projection";
+  editedPayload.outline[0].text = "Explicitly edited Outline";
+  assert.equal(context.PocketNodePopoutEditor.apply(editedPayload), true);
+  const editedNode = lexicalState(context).nodes[0];
+  assert.deepEqual(Object.keys(editedNode.editor).sort(), ["mode", "outline", "schema"]);
+  assert.equal(Object.hasOwn(editedNode.editor, "futureTopLevel"), false);
+  assert.equal(Object.hasOwn(editedNode.editor.outline[0], "futureBlockField"), false);
+  assert.deepEqual(Object.keys(editedNode.editor.outline[0]).sort(), ["collapsed", "depth", "id", "order", "text"]);
+  assert.deepEqual(plain(editedNode.editor.outline.map((block) => block.order)), editor.outline.map((_block, index) => index + 1));
+  assert.equal(editedNode.details, "Explicitly edited projection");
+  assert.equal(editedNode.pe, null);
+  assert.equal(context.__surfaceCalls.exportTree, 0);
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+});
+
+test("large unknown-schema editor survives load, export, and reload while opening read-only rather than as v1", () => {
+  const context = createFullContractContext();
+  const editor = largeUnknownEditor();
+  const input = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-01-01T00:00:00.000Z",
+    mainThoughtTree: [syntheticNode("large_unknown", {
+      details: "Readable future projection",
+      editor,
+      pe: null,
+    })],
+    mainThoughtTreeTombstones: [],
+  };
+  const first = context.normaliseInput(input);
+  assert.equal(JSON.stringify(first.nodes[0].editor), JSON.stringify(editor));
+  assert.notStrictEqual(first.nodes[0].editor, editor);
+  assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(first.nodes[0]).kind, "unsupported-or-malformed");
+
+  const opening = context.PocketNodePopoutModel.buildPayload(first.nodes[0]);
+  assert.equal(opening.mode, "text");
+  assert.equal(opening.outline, null);
+  assert.equal(opening.body, "Readable future projection");
+  assert.equal(opening.readOnly, true);
+  assert.equal(opening.readOnlyReason, "unsupported-editor");
+  assert.equal(opening.editorSchema, "pocket.nodeEditor.v9");
+  assert.equal(Object.hasOwn(opening, "schema"), false);
+  assert.equal(Object.hasOwn(opening, "editor"), false);
+
+  context.applyLoadedState(first, {
+    schema: first.schema,
+    fileName: "large-unknown.json",
+    writtenAt: first.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  const exported = context.buildPocketPayload("2026-02-01T00:00:00.000Z");
+  assert.equal(JSON.stringify(exported.mainThoughtTree[0].editor), JSON.stringify(editor));
+  const reloaded = context.normaliseInput(exported);
+  assert.equal(JSON.stringify(reloaded.nodes[0].editor), JSON.stringify(editor));
+  assert.equal(context.PocketNodePopoutModel.buildPayload(reloaded.nodes[0]).readOnly, true);
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+});
+
+test("large legacy pe survives load, export, reload, and remains outside the active PE model", () => {
+  const context = createFullContractContext();
+  const pe = largeLegacyPe();
+  const input = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-01-01T00:00:00.000Z",
+    mainThoughtTree: [syntheticNode("large_pe", { details: "Current readable Text", pe })],
+    mainThoughtTreeTombstones: [],
+  };
+  const first = context.normaliseInput(input);
+  assert.equal(JSON.stringify(first.nodes[0].pe), JSON.stringify(pe));
+  assert.notStrictEqual(first.nodes[0].pe, pe);
+
+  const opening = context.PocketNodePopoutModel.buildPayload(first.nodes[0]);
+  assert.equal(opening.mode, "text");
+  assert.equal(opening.outline, null);
+  assert.equal(opening.body, "Current readable Text");
+  assert.equal(Object.hasOwn(opening, "pe"), false);
+  assert.equal(Object.hasOwn(opening, "readOnly"), false);
+
+  context.applyLoadedState(first, {
+    schema: first.schema,
+    fileName: "large-pe.json",
+    writtenAt: first.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  const exported = context.buildPocketPayload("2026-02-01T00:00:00.000Z");
+  assert.equal(JSON.stringify(exported.mainThoughtTree[0].pe), JSON.stringify(pe));
+  const reloaded = context.normaliseInput(exported);
+  assert.equal(JSON.stringify(reloaded.nodes[0].pe), JSON.stringify(pe));
+  assert.equal(context.PocketNodePopoutModel.buildPayload(reloaded.nodes[0]).mode, "text");
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+});
+
+test("first-class editor and pe null, scalar, and array values survive load, export, and reload", () => {
+  const context = createFullContractContext();
+  const cases = [
+    { id: "first_class_null", editor: null, pe: null, readOnly: false },
+    { id: "first_class_scalar", editor: "future-editor-scalar", pe: 27, readOnly: true },
+    { id: "first_class_array", editor: ["future", { nested: true }], pe: ["legacy", 4], readOnly: true },
+  ];
+  const input = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-01-01T00:00:00.000Z",
+    mainThoughtTree: cases.map((item) => syntheticNode(item.id, {
+      details: `Readable ${item.id}`,
+      editor: item.editor,
+      pe: item.pe,
+    })),
+    mainThoughtTreeTombstones: [],
+  };
+
+  const first = context.normaliseInput(input);
+  for (const item of cases) {
+    const node = first.nodes.find((candidate) => candidate.id === item.id);
+    assert.equal(JSON.stringify(node.editor), JSON.stringify(item.editor));
+    assert.equal(JSON.stringify(node.pe), JSON.stringify(item.pe));
+    const opening = context.PocketNodePopoutModel.buildPayload(node);
+    assert.equal(opening.mode, "text");
+    assert.equal(opening.outline, null);
+    assert.equal(opening.readOnly === true, item.readOnly);
+    assert.equal(Object.hasOwn(opening, "editor"), false);
+  }
+
+  context.applyLoadedState(first, {
+    schema: first.schema,
+    fileName: "first-class-values.json",
+    writtenAt: first.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  const exported = context.buildPocketPayload("2026-02-01T00:00:00.000Z");
+  const reloaded = context.normaliseInput(exported);
+  for (const item of cases) {
+    const exportedNode = exported.mainThoughtTree.find((candidate) => candidate.id === item.id);
+    const reloadedNode = reloaded.nodes.find((candidate) => candidate.id === item.id);
+    assert.equal(JSON.stringify(exportedNode.editor), JSON.stringify(item.editor));
+    assert.equal(JSON.stringify(exportedNode.pe), JSON.stringify(item.pe));
+    assert.equal(JSON.stringify(reloadedNode.editor), JSON.stringify(item.editor));
+    assert.equal(JSON.stringify(reloadedNode.pe), JSON.stringify(item.pe));
+  }
+  const nullOpening = context.PocketNodePopoutModel.buildPayload(reloaded.nodes.find((node) => node.id === "first_class_null"));
+  assert.equal(Object.hasOwn(nullOpening, "readOnly"), false);
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+});
+
+test("non-JSON in-memory editor or pe values fail closed without discarding the node", async () => {
+  const context = createFullContractContext();
+  const cyclicEditor = {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline: [{ id: "cyclic_block", text: "Must not become editable", depth: 1 }],
+  };
+  cyclicEditor.self = cyclicEditor;
+  const loaded = normaliseOne(context, syntheticNode("cyclic_editor", {
+    details: "Readable cyclic fallback",
+    editor: cyclicEditor,
+    pe: null,
+  }));
+
+  assert.equal(loaded.label, "Synthetic cyclic_editor");
+  assert.equal(loaded.details, "Readable cyclic fallback");
+  assert.strictEqual(loaded.editor, cyclicEditor);
+  assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(loaded).kind, "unsupported-or-malformed");
+  const opening = context.PocketNodePopoutModel.buildPayload(loaded);
+  assert.equal(opening.readOnly, true);
+  assert.equal(opening.mode, "text");
+  assert.equal(opening.outline, null);
+  assert.equal(opening.body, "Readable cyclic fallback");
+
+  const state = lexicalState(context);
+  state.nodes = [loaded];
+  state.ops = [];
+  state.selectedId = loaded.id;
+  let exportCalls = 0;
+  context.exportTree = async () => { exportCalls += 1; return { ok: true }; };
+  const rejected = await context.PocketNodePopoutEditor.applyAndSave(opening);
+  assert.equal(rejected.reason, "unsupported-editor");
+  assert.equal(rejected.applied, false);
+  assert.equal(rejected.exported, false);
+  assert.equal(state.nodes[0].label, "Synthetic cyclic_editor");
+  assert.equal(state.nodes[0].details, "Readable cyclic fallback");
+  assert.strictEqual(state.nodes[0].editor, cyclicEditor);
+  assert.equal(state.ops.length, 0);
+  assert.equal(exportCalls, 0);
+
+  const cyclicPe = { schema: "pocket.pe.v1", mode: "text", text: "Legacy cyclic value" };
+  cyclicPe.self = cyclicPe;
+  const loadedPe = normaliseOne(context, syntheticNode("cyclic_pe", {
+    details: "Readable cyclic pe fallback",
+    pe: cyclicPe,
+  }));
+  assert.strictEqual(loadedPe.pe, cyclicPe);
+  assert.equal(Object.hasOwn(loadedPe, "editor"), false);
+  assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(loadedPe).kind, "unsupported-or-malformed");
+  const peOpening = context.PocketNodePopoutModel.buildPayload(loadedPe);
+  assert.equal(peOpening.readOnly, true);
+  assert.equal(peOpening.body, "Readable cyclic pe fallback");
+  state.nodes = [loadedPe];
+  state.ops = [];
+  state.selectedId = loadedPe.id;
+  const rejectedPe = await context.PocketNodePopoutEditor.applyAndSave(peOpening);
+  assert.equal(rejectedPe.reason, "unsupported-editor");
+  assert.equal(rejectedPe.applied, false);
+  assert.strictEqual(state.nodes[0].pe, cyclicPe);
+  assert.equal(state.ops.length, 0);
+  assert.equal(exportCalls, 0);
 });
 
 test("active PE model accepts current flat and nested non-empty Outlines", () => {
@@ -552,38 +1060,52 @@ test("active PE model accepts current flat and nested non-empty Outlines", () =>
   assert.equal(nested.outline[0].collapsed, true);
 });
 
-test("active PE model rejects absent, Text, empty, blank, and malformed editor states", () => {
-  const model = createFullContractContext().PocketNodePopoutModel;
+test("active PE model exact-gates v1 and rejects absent, Text, empty, blank, unknown, and malformed states", () => {
+  const context = createFullContractContext();
+  const model = context.PocketNodePopoutModel;
   const rejected = [
     undefined,
     null,
     "invalid",
-    { mode: "text", outline: [{ text: "Text", depth: 1 }] },
-    { mode: "outline", outline: [] },
-    { mode: "outline", outline: [{ id: "blank", text: "", depth: 0, collapsed: false }] },
-    { mode: "outline", outline: "invalid" },
+    { schema: EDITOR_SCHEMA, mode: "text", outline: [{ text: "Text", depth: 1 }] },
+    { schema: EDITOR_SCHEMA, mode: "outline", outline: [] },
+    { schema: EDITOR_SCHEMA, mode: "outline", outline: [{ id: "blank", text: "", depth: 0, collapsed: false }] },
+    { schema: EDITOR_SCHEMA, mode: "outline", outline: "invalid" },
+    { mode: "outline", outline: [{ text: "Missing schema", depth: 1 }] },
+    { schema: "pocket.nodeEditor.v9", mode: "outline", outline: [{ text: "Future", depth: 1 }] },
   ];
   for (const value of rejected) assert.equal(model.normaliseEditorMeta(value), null);
-  assert.ok(model.normaliseEditorMeta({ mode: "outline", outline: [{ text: "", depth: 0, collapsed: true }] }));
+  assert.ok(model.normaliseEditorMeta(outlineMeta([{ text: "", depth: 0, collapsed: true }])));
+
+  assert.equal(model.classifyEditorMeta(undefined, { present: false }).kind, "none");
+  assert.equal(model.classifyEditorMeta(null, { present: true }).kind, "none");
+  assert.equal(model.classifyEditorMeta(rejected[3], { present: true }).kind, "unsupported-or-malformed");
+  assert.equal(model.classifyEditorMeta(rejected.at(-1), { present: true }).schema, "pocket.nodeEditor.v9");
 });
 
-test("CURRENT-RISK: unknown Outline-like schema is accepted, rewritten as v1, and stripped of unknown fields", () => {
+test("unknown Outline-like schemas are classified unsupported without v1 rewrite", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  const result = model.normaliseEditorMeta({
+  const unknown = {
     schema: "pocket.nodeEditor.v9",
     mode: "outline",
     futureTopLevel: true,
     outline: [{ id: "future", text: "Future", depth: 1, collapsed: false, order: 77, futureBlockField: true }],
+  };
+  const classification = model.classifyEditorMeta(unknown, { present: true });
+  assert.deepEqual(plain(classification), {
+    kind: "unsupported-or-malformed",
+    supported: false,
+    schema: "pocket.nodeEditor.v9",
+    normalised: null,
   });
-  assert.equal(result.schema, "pocket.nodeEditor.v1");
-  assert.deepEqual(Object.keys(result).sort(), ["mode", "outline", "schema"]);
-  assert.deepEqual(Object.keys(result.outline[0]).sort(), ["collapsed", "depth", "id", "order", "text"]);
-  assert.equal(result.outline[0].order, 1);
+  assert.equal(model.normaliseEditorMeta(unknown), null);
+  assert.equal(unknown.futureTopLevel, true);
+  assert.equal(unknown.outline[0].futureBlockField, true);
 });
 
 test("active PE model generates a missing block ID", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  const result = model.normaliseEditorMeta({ mode: "outline", outline: [{ text: "Needs ID", depth: 0 }] });
+  const result = model.normaliseEditorMeta(outlineMeta([{ text: "Needs ID", depth: 0 }]));
   assert.equal(typeof result.outline[0].id, "string");
   assert.ok(result.outline[0].id.length > 0);
   assert.ok(result.outline[0].id.length <= 80);
@@ -591,26 +1113,20 @@ test("active PE model generates a missing block ID", () => {
 
 test("CURRENT-RISK: active PE model retains duplicate non-empty block IDs", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  const result = model.normaliseEditorMeta({
-    mode: "outline",
-    outline: [
+  const result = model.normaliseEditorMeta(outlineMeta([
       { id: "duplicate", text: "First", depth: 0 },
       { id: "duplicate", text: "Second", depth: 1 },
-    ],
-  });
+  ]));
   assert.deepEqual(plain(result.outline.map((block) => block.id)), ["duplicate", "duplicate"]);
 });
 
 test("active PE model clamps depths, rounds fractions, truncates IDs, and regenerates order", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  const result = model.normaliseEditorMeta({
-    mode: "outline",
-    outline: [
+  const result = model.normaliseEditorMeta(outlineMeta([
       { id: "a".repeat(81), text: "Low", depth: -2, order: 99, unknown: true },
       { id: "fraction", text: "Fraction", depth: 1.6, collapsed: "true", order: 3 },
       { id: "high", text: "High", depth: 99, order: -7 },
-    ],
-  });
+  ]));
   assert.deepEqual(plain(result.outline.map((block) => block.depth)), [0, 2, 8]);
   assert.deepEqual(plain(result.outline.map((block) => block.order)), [1, 2, 3]);
   assert.equal(result.outline[0].id.length, 80);
@@ -622,14 +1138,14 @@ test("active PE model retains 399 and 400 outline blocks", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
   for (const count of [399, 400]) {
     const outline = Array.from({ length: count }, (_, index) => ({ id: `b_${index}`, text: `Block ${index}`, depth: index ? 1 : 0 }));
-    assert.equal(model.normaliseEditorMeta({ mode: "outline", outline }).outline.length, count);
+    assert.equal(model.normaliseEditorMeta(outlineMeta(outline)).outline.length, count);
   }
 });
 
 test("CURRENT-RISK: Outline normalisation silently slices block 401", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
   const outline = Array.from({ length: 401 }, (_, index) => ({ id: `b_${index}`, text: `Block ${index}`, depth: index ? 1 : 0 }));
-  const result = model.normaliseEditorMeta({ mode: "outline", outline });
+  const result = model.normaliseEditorMeta(outlineMeta(outline));
   assert.equal(result.outline.length, 400);
   assert.equal(result.outline[399].id, "b_399");
   assert.equal(result.outline.some((block) => block.id === "b_400"), false);
@@ -638,14 +1154,14 @@ test("CURRENT-RISK: Outline normalisation silently slices block 401", () => {
 test("active PE model retains block text at 3,999 and 4,000 characters", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
   for (const length of [3999, 4000]) {
-    const result = model.normaliseEditorMeta({ mode: "outline", outline: [{ id: `text_${length}`, text: "x".repeat(length), depth: 0 }] });
+    const result = model.normaliseEditorMeta(outlineMeta([{ id: `text_${length}`, text: "x".repeat(length), depth: 0 }]));
     assert.equal(result.outline[0].text.length, length);
   }
 });
 
 test("CURRENT-RISK: Outline normalisation silently slices block text at 4,001 characters", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  const result = model.normaliseEditorMeta({ mode: "outline", outline: [{ id: "oversized_text", text: "x".repeat(4001), depth: 0 }] });
+  const result = model.normaliseEditorMeta(outlineMeta([{ id: "oversized_text", text: "x".repeat(4001), depth: 0 }]));
   assert.equal(result.outline[0].text.length, 4000);
 });
 
@@ -655,6 +1171,7 @@ test("native Outline payload preserves accepted IDs, depths, collapse state, and
   resetState(context, [node]);
   const payload = context.PocketNodePopoutModel.buildPayload(node);
   assert.equal(payload.mode, "outline");
+  assert.equal(payload.schema, EDITOR_SCHEMA);
   assert.equal(payload.body, "Compatibility projection intentionally differs");
   assert.deepEqual(plain(payload.outline.map((block) => block.id)), ["fixture_block_parent", "fixture_block_child"]);
   assert.deepEqual(plain(payload.outline.map((block) => block.depth)), [0, 1]);
@@ -752,6 +1269,34 @@ test("ordinary Text and empty Text fixtures characterise current load/export rou
   assert.equal(Object.hasOwn(empty.payload.mainThoughtTree[0], "details"), false);
 });
 
+test("ordinary absent and null editor values open as editable Text without read-only metadata", () => {
+  const context = createFullContractContext();
+  const nodes = [
+    syntheticNode("absent_editor", { details: "Absent editor Text" }),
+    syntheticNode("null_editor", { details: "Null editor Text", editor: null }),
+  ];
+  const normalised = context.normaliseInput({
+    schema: "portal.export.v1",
+    mainThoughtTree: nodes,
+    mainThoughtTreeTombstones: [],
+  });
+  assert.equal(Object.hasOwn(normalised.nodes[0], "editor"), false);
+  assert.equal(Object.hasOwn(normalised.nodes[1], "editor"), true);
+  assert.equal(normalised.nodes[1].editor, null);
+
+  for (const node of normalised.nodes) {
+    const classification = context.PocketNodePopoutModel.classifyNodeEditor(node);
+    assert.equal(classification.kind, "none");
+    const payload = context.PocketNodePopoutModel.buildPayload(node);
+    assert.equal(payload.mode, "text");
+    assert.equal(payload.outline, null);
+    assert.equal(Object.hasOwn(payload, "readOnly"), false);
+    assert.equal(Object.hasOwn(payload, "readOnlyReason"), false);
+    assert.equal(Object.hasOwn(payload, "editorSchema"), false);
+    assert.equal(Object.hasOwn(payload, "schema"), false);
+  }
+});
+
 test("CURRENT-RISK: accepted Outline and details drift remain independent and Outline wins PE mode", () => {
   const result = loadAndExportFixture("current-outline-v1.json");
   const node = result.state.nodes[0];
@@ -765,19 +1310,39 @@ test("CURRENT-RISK: accepted Outline and details drift remain independent and Ou
   assert.deepEqual(plain(result.payload.mainThoughtTree[0].editor), plain(fixture("current-outline-v1.json").mainThoughtTree[0].editor));
 });
 
-test("CURRENT-RISK: small malformed and unknown editor objects survive load but PE interprets only their shape", () => {
+test("malformed and unknown editor objects survive raw while PE exposes read-only Text payloads", () => {
+  const factory = loadRuntimeFactory();
   const malformed = loadAndExportFixture("malformed-editor.json");
-  assert.equal(malformed.state.nodes[0].editor.fixtureMarker, true);
-  assert.equal(malformed.context.PocketNodePopoutModel.buildPayload(malformed.state.nodes[0]).mode, "text");
-  assert.equal(malformed.payload.mainThoughtTree[0].editor.outline, "not-an-array");
+  const rawMalformed = fixture("malformed-editor.json").mainThoughtTree[0].editor;
+  assert.equal(JSON.stringify(malformed.state.nodes[0].editor), JSON.stringify(rawMalformed));
+  assert.equal(JSON.stringify(malformed.payload.mainThoughtTree[0].editor), JSON.stringify(rawMalformed));
+  const malformedOpening = malformed.context.PocketNodePopoutModel.buildPayload(malformed.state.nodes[0]);
+  assert.equal(malformedOpening.mode, "text");
+  assert.equal(malformedOpening.outline, null);
+  assert.equal(malformedOpening.readOnly, true);
+  assert.equal(malformedOpening.readOnlyReason, "unsupported-editor");
+  assert.equal(malformedOpening.readOnlyMessage, UNKNOWN_EDITOR_MESSAGE);
+  assert.equal(malformedOpening.editorSchema, EDITOR_SCHEMA);
+  assert.equal(Object.hasOwn(malformedOpening, "editor"), false);
+  assert.equal(factory.build(JSON.stringify(malformedOpening)).includes("fixtureMarker"), false);
 
   const unknown = loadAndExportFixture("unknown-editor-schema.json");
-  assert.equal(unknown.state.nodes[0].editor.schema, "pocket.nodeEditor.v9");
+  const rawUnknown = fixture("unknown-editor-schema.json").mainThoughtTree[0].editor;
+  assert.equal(JSON.stringify(unknown.state.nodes[0].editor), JSON.stringify(rawUnknown));
+  assert.equal(JSON.stringify(unknown.payload.mainThoughtTree[0].editor), JSON.stringify(rawUnknown));
   const openingPayload = unknown.context.PocketNodePopoutModel.buildPayload(unknown.state.nodes[0]);
-  assert.equal(openingPayload.mode, "outline");
-  assert.equal(openingPayload.outline[0].id, "fixture_future_block");
-  assert.equal(openingPayload.outline[0].order, 1);
-  assert.equal(unknown.payload.mainThoughtTree[0].editor.schema, "pocket.nodeEditor.v9");
+  assert.equal(openingPayload.mode, "text");
+  assert.equal(openingPayload.outline, null);
+  assert.equal(openingPayload.body, "Future-readable projection");
+  assert.equal(openingPayload.readOnly, true);
+  assert.equal(openingPayload.readOnlyReason, "unsupported-editor");
+  assert.equal(openingPayload.readOnlyMessage, UNKNOWN_EDITOR_MESSAGE);
+  assert.equal(openingPayload.editorSchema, "pocket.nodeEditor.v9");
+  assert.equal(Object.hasOwn(openingPayload, "editor"), false);
+  assert.equal(Object.hasOwn(openingPayload, "futureTopLevel"), false);
+  const program = factory.build(JSON.stringify(openingPayload));
+  assert.equal(program.includes("preserve-if-untouched"), false);
+  assert.equal(program.includes("Future outline content"), false);
 });
 
 test("CURRENT-RISK: portal.export.v1 top-level precedence drops nested data extras on later export", () => {
@@ -822,6 +1387,7 @@ test("CURRENT-RISK: Outline apply accepts independent details/editor content and
     id: "apply_outline",
     title: "T".repeat(221),
     body: "B".repeat(4001),
+    schema: EDITOR_SCHEMA,
     mode: "outline",
     outline: [
       { id: "parent", text: "Parent", depth: 0, collapsed: true, order: 50 },
@@ -857,6 +1423,241 @@ test("CURRENT-RISK: changed Text apply deletes accepted Outline metadata and bla
   assert.equal(Object.hasOwn(state.nodes[0], "details"), false);
   assert.equal(state.ops.length, 1);
   assert.equal(state.ops[0].changed, "details");
+});
+
+test("apply and applyAndSave defend unsupported and malformed editor nodes without mutation or export", async () => {
+  for (const name of ["unknown-editor-schema.json", "malformed-editor.json"]) {
+    const context = createFullContractContext();
+    const rawNode = fixture(name).mainThoughtTree[0];
+    const normalised = normaliseOne(context, rawNode);
+    const state = resetState(context, [normalised]);
+    const before = JSON.stringify(state.nodes[0]);
+    let exportCalls = 0;
+    context.exportTree = async () => { exportCalls += 1; return { ok: true }; };
+    const payload = context.PocketNodePopoutModel.buildPayload(state.nodes[0]);
+    assert.equal(payload.readOnly, true);
+
+    assert.equal(context.PocketNodePopoutEditor.apply(payload), false);
+    const detailed = context.PocketNodePopoutEditor.apply(payload, { returnDetails: true });
+    assert.deepEqual(plain(detailed), {
+      ok: false,
+      changed: false,
+      id: state.nodes[0].id,
+      label: state.nodes[0].label,
+      readOnly: true,
+      reason: "unsupported-editor",
+    });
+    const saved = await context.PocketNodePopoutEditor.applyAndSave(payload);
+    assert.deepEqual(plain(saved), {
+      ok: false,
+      applied: false,
+      changed: false,
+      exported: false,
+      reason: "unsupported-editor",
+    });
+    assert.equal(JSON.stringify(state.nodes[0]), before);
+    assert.equal(state.ops.length, 0);
+    assert.equal(exportCalls, 0);
+    assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+  }
+});
+
+test("editor cutover attempts canonical read-only open and never falls back to the legacy editable popup", () => {
+  const context = createFullContractContext();
+  const unsupported = normaliseOne(context, fixture("unknown-editor-schema.json").mainThoughtTree[0]);
+  const ordinary = syntheticNode("cutover_ordinary", { details: "Editable Text" });
+  const supported = normaliseOne(context, fixture("current-outline-v1.json").mainThoughtTree[0]);
+  resetState(context, [unsupported, ordinary, supported]);
+  let standaloneCalls = 0;
+  let legacyBridgeCalls = 0;
+  let legacyPopupCalls = 0;
+  const statuses = [];
+  context.PocketPeEditor = {
+    open() {
+      standaloneCalls += 1;
+      return false;
+    },
+  };
+  context.openDetailsEditorForSelectedNode = () => { legacyBridgeCalls += 1; };
+  context.PocketEditorPopout = {
+    open() {
+      legacyPopupCalls += 1;
+      return true;
+    },
+  };
+  context.setStatus = (message, tone) => { statuses.push({ message, tone }); };
+  context.document.readyState = "complete";
+  runScript(context, "js/pocket-editor-cutover-v3.js");
+
+  assert.equal(context.openPocketNodeEditor(unsupported.id), false);
+  assert.equal(standaloneCalls, 1);
+  assert.equal(legacyBridgeCalls, 0);
+  assert.equal(legacyPopupCalls, 0);
+  assert.deepEqual(statuses.at(-1), {
+    message: "This item requires Pocket's read-only compatibility view. Its editor data was not changed.",
+    tone: "warn",
+  });
+
+  assert.equal(context.openPocketEditor(ordinary.id), true);
+  assert.equal(standaloneCalls, 2);
+  assert.equal(legacyBridgeCalls, 1);
+  assert.equal(legacyPopupCalls, 1);
+
+  assert.equal(context.openPocketNodeEditor(supported.id), true);
+  assert.equal(standaloneCalls, 3);
+  assert.equal(legacyBridgeCalls, 2);
+  assert.equal(legacyPopupCalls, 2);
+});
+
+test("an unrelated edit and explicit export preserve raw unsupported and large first-class metadata", () => {
+  const context = createFullContractContext();
+  const unknown = fixture("unknown-editor-schema.json").mainThoughtTree[0];
+  const malformed = fixture("malformed-editor.json").mainThoughtTree[0];
+  const largeEditor = largeCurrentEditor();
+  const largePe = largeLegacyPe();
+  const input = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-01-01T00:00:00.000Z",
+    mainThoughtTree: [
+      unknown,
+      malformed,
+      syntheticNode("unrelated_large_editor", { details: "Large fallback", editor: largeEditor, pe: null }),
+      syntheticNode("unrelated_large_pe", { details: "Legacy fallback", pe: largePe }),
+      syntheticNode("unrelated_target", { details: "Before", pe: null }),
+    ],
+    mainThoughtTreeTombstones: [],
+  };
+  const normalised = context.normaliseInput(input);
+  context.applyLoadedState(normalised, {
+    schema: normalised.schema,
+    fileName: "unrelated.json",
+    writtenAt: normalised.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  const state = lexicalState(context);
+  const changed = context.PocketNodePopoutEditor.apply({
+    id: "unrelated_target",
+    title: "Synthetic unrelated_target",
+    body: "After",
+    mode: "text",
+    outline: null,
+  });
+  assert.equal(changed, true);
+  assert.equal(state.ops.length, 1);
+
+  const exported = context.buildPocketPayload("2026-02-03T00:00:00.000Z");
+  const byId = new Map(exported.mainThoughtTree.map((node) => [node.id, node]));
+  assert.equal(JSON.stringify(byId.get(unknown.id).editor), JSON.stringify(unknown.editor));
+  assert.equal(JSON.stringify(byId.get(malformed.id).editor), JSON.stringify(malformed.editor));
+  assert.equal(JSON.stringify(byId.get("unrelated_large_editor").editor), JSON.stringify(largeEditor));
+  assert.equal(JSON.stringify(byId.get("unrelated_large_pe").pe), JSON.stringify(largePe));
+  assert.equal(byId.get("unrelated_target").details, "After");
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+  assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
+});
+
+test("local safety, trail, auto-cache, and PiP recovery routes retain large and unknown first-class metadata", () => {
+  const currentEditor = largeCurrentEditor();
+  const unknownEditor = largeUnknownEditor();
+  const legacyPe = largeLegacyPe();
+  const rawNodes = [
+    syntheticNode("recovery_current", { details: "Current recovery view", editor: currentEditor, pe: null }),
+    syntheticNode("recovery_unknown", { details: "Unknown recovery view", editor: unknownEditor, pe: null }),
+    syntheticNode("recovery_pe", { details: "Legacy recovery view", editor: null, pe: legacyPe }),
+  ];
+  const payload = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-02-04T00:00:00.000Z",
+    mainThoughtTree: rawNodes,
+    mainThoughtTreeTombstones: [],
+  };
+
+  function assertRecoveredMetadata(nodes) {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    assert.equal(JSON.stringify(byId.get("recovery_current").editor), JSON.stringify(currentEditor));
+    assert.equal(JSON.stringify(byId.get("recovery_unknown").editor), JSON.stringify(unknownEditor));
+    assert.equal(JSON.stringify(byId.get("recovery_pe").pe), JSON.stringify(legacyPe));
+  }
+
+  const context = createFullContractContext();
+  let normaliseCalls = 0;
+  const canonicalOwner = context.normaliseNodes;
+  context.normaliseNodes = function countedNormaliseNodes(raw) {
+    normaliseCalls += 1;
+    return canonicalOwner(raw);
+  };
+  const safetyEntry = {
+    schema: "pocket.localSafety.v1",
+    capturedAt: "2026-02-04T00:01:00.000Z",
+    reason: "test",
+    source: { schema: "portal.export.v1", fileName: "recovery.json", writtenAt: payload.writtenAt },
+    selectedId: "recovery_unknown",
+    focusRootId: "",
+    collapsedIds: ["recovery_current"],
+    ops: [{ type: "synthetic_recovery" }],
+    payload,
+  };
+  context.__storage.set("pocketLite.localSafety.snapshot.v1", JSON.stringify(safetyEntry));
+  const snapshot = context.readLocalSafetySnapshot();
+  assert.ok(snapshot);
+  assertRecoveredMetadata(snapshot.norm.nodes);
+  assert.ok(normaliseCalls >= 1);
+
+  context.__storage.set("pocketLite.localSafety.trail.v1", JSON.stringify([safetyEntry]));
+  const trail = context.readLocalSafetyTrail();
+  assert.equal(trail.length, 1);
+  assertRecoveredMetadata(trail[0].norm.nodes);
+  assert.ok(normaliseCalls >= 2);
+
+  assert.equal(context.restoreLocalSafetySnapshot(snapshot), true);
+  const restoredState = lexicalState(context);
+  assertRecoveredMetadata(restoredState.nodes);
+  assert.equal(restoredState.selectedId, "recovery_unknown");
+  assert.equal(restoredState.collapsed.has("recovery_current"), true);
+  assert.deepEqual(plain(restoredState.ops), [{ type: "synthetic_recovery" }]);
+  assert.equal(context.PocketNodePopoutModel.buildPayload(restoredState.nodes.find((node) => node.id === "recovery_unknown")).readOnly, true);
+
+  context.__storage.set("pocketLite.auto.cache.v1", JSON.stringify({
+    cachedAt: "2026-02-04T00:02:00.000Z",
+    source: { schema: "portal.export.v1", fileName: "recovery-cache.json", writtenAt: payload.writtenAt },
+    data: { mainThoughtTree: rawNodes, mainThoughtTreeTombstones: [] },
+  }));
+  const cache = context.restoreAutoCache();
+  assert.ok(cache);
+  assertRecoveredMetadata(cache.norm.nodes);
+  assert.ok(normaliseCalls >= 3);
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+  assert.equal(context.__surfaceCalls.showOpenFilePicker, 0);
+  assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
+
+  const pipContext = createFullContractContext({ href: "https://example.test/index.html?pip=1" });
+  let pipNormaliseCalls = 0;
+  const pipCanonicalOwner = pipContext.normaliseNodes;
+  pipContext.normaliseNodes = function countedPipNormaliseNodes(raw) {
+    pipNormaliseCalls += 1;
+    return pipCanonicalOwner(raw);
+  };
+  pipContext.__storage.set("pocketLite.pip.snapshot.v1", JSON.stringify({
+    savedAt: "2026-02-04T00:03:00.000Z",
+    source: { schema: "portal.export.v1", fileName: "recovery-pip.json", writtenAt: payload.writtenAt },
+    nodes: rawNodes,
+    tombstones: [],
+    rootExtras: {},
+    dataExtras: {},
+    selectedId: "recovery_unknown",
+    focusRootId: "",
+    collapsedIds: ["recovery_current"],
+    ops: [{ type: "synthetic_pip" }],
+  }));
+  assert.equal(pipContext.restoreFromPipSnapshot(), true);
+  const pipState = lexicalState(pipContext);
+  assertRecoveredMetadata(pipState.nodes);
+  assert.equal(pipNormaliseCalls, 1);
+  assert.equal(pipState.selectedId, "recovery_unknown");
+  assert.equal(pipState.collapsed.has("recovery_current"), true);
+  assert.equal(pipContext.PocketNodePopoutModel.buildPayload(pipState.nodes.find((node) => node.id === "recovery_unknown")).readOnly, true);
+  assert.equal(pipContext.__surfaceCalls.writeTruthFile, 0);
+  assert.equal(pipContext.__surfaceCalls.showOpenFilePicker, 0);
+  assert.equal(pipContext.__surfaceCalls.showSaveFilePicker, 0);
 });
 
 test("unchanged PE apply records no operation", async () => {
@@ -992,6 +1793,112 @@ test("generated PE runtime builds and compiles for Text, saved Outline, and reje
     assert.equal(typeof program, "string");
     assert.doesNotThrow(() => new Function(program));
   }
+});
+
+test("generated editable Outline runtime emits the exact v1 schema on save", () => {
+  const runtime = executeControlledRuntime({
+    id: "runtime_schema_save",
+    title: "Schema save",
+    body: "Parent\n  Child",
+    mode: "outline",
+    outline: [
+      { id: "runtime_parent", text: "Parent", depth: 0, collapsed: true, order: 90 },
+      { id: "runtime_child", text: "Child", depth: 1, collapsed: false, order: 80 },
+    ],
+  });
+  runtime.controls.get("saveBtn").dispatch("click");
+  assert.equal(runtime.applyCalls.length, 0);
+  assert.equal(runtime.saveCalls.length, 1);
+  assert.equal(runtime.saveCalls[0].schema, EDITOR_SCHEMA);
+  assert.equal(runtime.saveCalls[0].mode, "outline");
+  assert.equal(runtime.saveCalls[0].outline.length, 2);
+});
+
+test("generated read-only runtime disables mutation and save paths while keeping readable Text closable", () => {
+  const context = createFullContractContext();
+  const rawEditor = largeUnknownEditor();
+  const rawNode = syntheticNode("runtime_large_unknown", {
+    details: "Future-readable projection",
+    editor: rawEditor,
+    pe: null,
+  });
+  const node = normaliseOne(context, rawNode);
+  const payload = context.PocketNodePopoutModel.buildPayload(node);
+  const runtime = executeControlledRuntime(payload);
+  const title = runtime.controls.get("titleInput");
+  const body = runtime.controls.get("bodyInput");
+  const save = runtime.controls.get("saveBtn");
+  const saveClose = runtime.controls.get("saveCloseBtn");
+  const textMode = runtime.controls.get("textModeBtn");
+  const outlineMode = runtime.controls.get("outlineModeBtn");
+
+  assert.equal(payload.readOnly, true);
+  assert.equal(payload.mode, "text");
+  assert.equal(payload.outline, null);
+  assert.equal(runtime.classNames.has("readOnly"), true);
+  assert.equal(runtime.classNames.has("textMode"), true);
+  assert.equal(runtime.classNames.has("outlineMode"), false);
+  assert.equal(runtime.classNames.has("isDirty"), false);
+  assert.equal(title.value, "Synthetic runtime_large_unknown");
+  assert.equal(body.value, "Future-readable projection");
+  assert.equal(title.readOnly, true);
+  assert.equal(body.readOnly, true);
+  assert.equal(save.disabled, true);
+  assert.equal(saveClose.disabled, true);
+  assert.equal(textMode.disabled, true);
+  assert.equal(outlineMode.disabled, true);
+  assert.strictEqual(runtime.document.activeElement, body);
+
+  title.value = "Programmatic mutation attempt";
+  body.value = "Programmatic body attempt";
+  title.dispatch("input");
+  body.dispatch("input");
+  outlineMode.dispatch("click");
+  save.dispatch("click");
+  saveClose.dispatch("click");
+  const shortcut = runtime.document.dispatch("keydown", { key: "s", metaKey: true, target: body });
+  assert.equal(shortcut.defaultPrevented, true);
+  assert.equal(runtime.applyCalls.length, 0);
+  assert.equal(runtime.saveCalls.length, 0);
+  assert.equal(runtime.controls.get("outlinePane").children.length, 0);
+  assert.equal(runtime.classNames.has("outlineMode"), false);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(runtime.window.PocketNodePopoutSession.requestUnsavedProtection(), false);
+  assert.equal(runtime.controls.get("unsavedDialog").hidden, true);
+  assert.equal(runtime.window.dispatch("beforeunload").defaultPrevented, false);
+
+  const escape = runtime.document.dispatch("keydown", { key: "Escape", target: body });
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(runtime.closeCalls(), 1);
+  assert.equal(runtime.applyCalls.length, 0);
+  assert.equal(runtime.saveCalls.length, 0);
+  assert.equal(runtime.controls.get("unsavedDialog").hidden, true);
+  assert.equal(runtime.program.includes("preserve-if-untouched"), false);
+  assert.equal(runtime.program.includes("Future outline content"), false);
+  assert.equal(runtime.program.includes(rawEditor.padding.slice(0, 128)), false);
+
+  const closeRuntime = executeControlledRuntime(payload);
+  const closeButton = closeRuntime.controls.get("closeBtn");
+  assert.equal(closeButton.disabled, false);
+  closeButton.dispatch("click");
+  assert.equal(closeRuntime.closeCalls(), 1);
+  assert.equal(closeRuntime.applyCalls.length, 0);
+  assert.equal(closeRuntime.saveCalls.length, 0);
+  assert.equal(closeRuntime.controls.get("unsavedDialog").hidden, true);
+  assert.equal(closeRuntime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  const templateContext = vm.createContext({ window: {} });
+  runScript(templateContext, "js/pocket-node-popout-template.js");
+  const html = templateContext.window.PocketNodePopoutTemplate.render(payload, { runtimeScript: "void 0;" });
+  assert.match(html, /id="readOnlyBanner"/);
+  assert.equal(html.includes(UNKNOWN_EDITOR_MESSAGE), true);
+  assert.match(html, /readonly aria-readonly="true"/);
+  assert.match(html, /id="saveBtn"[^>]* disabled/);
+  assert.match(html, /id="outlineModeBtn"[^>]* disabled/);
+  assert.match(html, /Read only · select text to copy/);
+  assert.equal(html.includes("preserve-if-untouched"), false);
+  assert.equal(html.includes("Future outline content"), false);
+  assert.equal(html.includes(rawEditor.padding.slice(0, 128)), false);
 });
 
 test("generated PE runtime shared parser handles spaces, tabs, mixed indentation, common indentation, blanks, and depth clamp", () => {

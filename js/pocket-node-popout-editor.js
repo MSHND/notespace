@@ -15,7 +15,7 @@
   }
 
   function popoutModel() {
-    if (!global.PocketNodePopoutModel || typeof global.PocketNodePopoutModel.buildPayload !== "function" || typeof global.PocketNodePopoutModel.normaliseEditorMeta !== "function") {
+    if (!global.PocketNodePopoutModel || typeof global.PocketNodePopoutModel.buildPayload !== "function" || typeof global.PocketNodePopoutModel.classifyNodeEditor !== "function" || typeof global.PocketNodePopoutModel.normaliseEditorMeta !== "function") {
       throw new Error("PocketNodePopoutModel is not loaded.");
     }
     return global.PocketNodePopoutModel;
@@ -66,6 +66,20 @@
     }
 
     const model = popoutModel();
+    const currentEditor = model.classifyNodeEditor(node);
+    if (currentEditor.kind === "unsupported-or-malformed") {
+      if (typeof setStatus === "function") {
+        setStatus("This item is read-only because its editor data is not supported by this Pocket version.", "warn", { durationMs: 6200 });
+      }
+      return {
+        ok: false,
+        changed: false,
+        id: id,
+        label: clean(node.label, 220),
+        readOnly: true,
+        reason: "unsupported-editor"
+      };
+    }
     const beforeLabel = clean(node.label, 220);
     const beforeDetails = normaliseDetailsSafe(node.details, 4000);
     const beforeEditor = JSON.stringify(model.normaliseEditorMeta(node.editor) || null);
@@ -99,8 +113,9 @@
     return { ok: true, changed: true, id: id, label: clean(node.label, 220), reason: "changed" };
   }
 
-  function apply(payload) {
-    return applyPayload(payload).ok === true;
+  function apply(payload, options = {}) {
+    const result = applyPayload(payload, options);
+    return options.returnDetails === true ? result : result.ok === true;
   }
 
   async function applyAndSave(payload, options = {}) {

@@ -1,5 +1,279 @@
 # Codex report
 
+## POCKET TASK P011
+
+Title: Consolidate PE editor recognition
+
+Status: first-class PE metadata ownership, exact editor recognition and read-only compatibility handling implemented and validated. Physical browser acceptance remains.
+
+Commit title:
+
+- `P011 Consolidate PE editor recognition`
+
+### Starting point
+
+- Repository: `MSHND/notespace`
+- Local repository: `/Users/murrayhenderson/Library/Mobile Documents/com~apple~CloudDocs/MSHND-notespace`
+- Configured origin: `https://github.com/MSHND/notespace.git`
+- Expected and confirmed starting `origin/main`: `8699d91a35ae941a49c42d28c216548e552635fd`
+- Starting commit: `P010 Specify PE persistence contract`
+- Local `main` matched `origin/main`, and the working tree was clean before P011.
+- No personal or active Pocket truth file outside the repository was inspected.
+
+### Outcome
+
+P011 makes `editor` and `pe` deliberate first-class node fields, gives the active PE one exact recognition contract, and prevents unsupported or malformed editor data from reaching an editable fallback.
+
+The resulting boundary is:
+
+- load and recovery preserve JSON-compatible `editor` and `pe` values opaquely without the generic extras count or size caps;
+- the active PE interprets only an exact supported `pocket.nodeEditor.v1` Outline;
+- absent and explicit-null editor states remain ordinary editable Text;
+- unsupported, future and malformed non-null editor states open as readable, read-only Text projections;
+- no read path rewrites opaque editor data or writes the selected truth file;
+- unrelated edits and exports preserve untouched raw first-class metadata; and
+- an explicit edit of a supported v1 Outline writes the existing canonical v1 representation.
+
+No new persistence schema or migration was introduced.
+
+### Files changed
+
+Production files:
+
+- `js/pocket-data.js`
+- `js/pocket-editor-metadata.js`
+- `js/pocket-pe-import-preserve.js`
+- `js/pocket-import.js`
+- `js/pocket-node-popout-model.js`
+- `js/pocket-node-popout-template.js`
+- `js/pocket-node-popout-runtime.js`
+- `js/pocket-node-popout-editor.js`
+- `js/pocket-editor-cutover-v3.js`
+
+`js/pocket-editor-cutover-v3.js` is included because the cutover previously treated a failed canonical open as permission to use a legacy editable popup. P011 must block that fallback for unsupported or malformed editor data, otherwise the read-only contract could be bypassed.
+
+Test and documentation files:
+
+- `tests/pe-persistence-contract.test.js`
+- `docs/PE_PERSISTENCE_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+The six synthetic P010 fixtures are unchanged. No dependency, package script, production JSON example or retired PE implementation was added or modified.
+
+### Canonical load owner
+
+`js/pocket-import.js` remains the final `normaliseNodes()` owner in actual `index.html` load order, but it is now deliberate rather than accidental:
+
+- `js/pocket-editor-metadata.js` supplies recognition, normalisation and JSON-compatible cloning helpers without replacing `normaliseNodes()`;
+- `js/pocket-pe-import-preserve.js` no longer wraps node normalisation and now owns only the existing visible PE version marker patch;
+- `editor` and `pe` are reserved node keys, so generic extras cannot consume their first-24 field budget or overwrite them by property order; and
+- the canonical owner copies both fields after ordinary node construction through the first-class metadata helper.
+
+The focused suite confirms that the final lexical and window-visible `normaliseNodes()` identity is the canonical `js/pocket-import.js` owner.
+
+### Uncapped opaque first-class preservation
+
+For truth-file JSON values, `editor` and `pe` are preserved as detached JSON-compatible clones outside the generic extras limits. This removes the prior 8,000-character object loss path and the shared 24-field budget interaction.
+
+Coverage includes:
+
+- small and large current v1 Outline objects;
+- large unknown-schema editor objects;
+- large legacy `pe` objects;
+- explicit nulls, scalars and arrays;
+- cyclic non-JSON in-memory `editor` and `pe` values that fail closed without discarding their nodes;
+- unsupported and malformed editor objects;
+- load, export and reload;
+- unrelated-node edits followed by explicit export; and
+- local safety snapshot, safety trail, auto-cache and PiP recovery routes.
+
+Opaque preservation is not semantic acceptance. Raw unsupported data can survive intact while the active PE refuses to edit it.
+
+The standalone PE still ignores JSON-compatible legacy `pe` content for mode and content selection. It checks only first-class cloneability, so an impossible cyclic in-memory `pe` fails closed before editing or export just like an impossible cyclic `editor`.
+
+### Exact editor-recognition gate
+
+The shared metadata contract classifies editor state as one of:
+
+- `none` for an absent field or `editor: null`;
+- `supported-v1-outline` for an exact supported Outline; or
+- `unsupported-or-malformed` for every other present, non-null value.
+
+Supported editor metadata must have all of:
+
+- `schema === "pocket.nodeEditor.v1"`;
+- `mode === "outline"`;
+- an array-valued `outline`; and
+- at least one meaningful retained block.
+
+Unknown schemas are no longer accepted by shape, relabelled as v1 or stripped in the PE view as if they were supported. Malformed current-schema objects, scalars and arrays also fail closed. Existing supported v1 block normalisation, including current ID, depth, collapse, ordering and size limits, remains the canonical editable view.
+
+### Read-only compatibility view
+
+Unsupported or malformed editor data produces a Text-mode payload containing the normalised title and readable `details` projection, plus an explicit read-only reason and message. The raw opaque editor object is not embedded in the generated popup program or HTML.
+
+The template and generated runtime jointly enforce the view:
+
+- a visible read-only banner explains why editing is unavailable;
+- the title and body remain selectable for copy but are read-only;
+- Save, Save & Close, Text and Outline controls are disabled;
+- no Outline is initialised or rendered from unsupported metadata;
+- input events, mode switching, buttons and save shortcuts cannot mark the popup dirty or invoke apply/save;
+- unsaved-dialog and `beforeunload` protection stay inactive because no edit is possible; and
+- Close and Escape still close the readable popup normally.
+
+This is compatibility presentation only. There is no hidden preserve-on-save branch because saving is unavailable.
+
+### Apply defence and cutover bypass fix
+
+The main-window apply owner reclassifies the current node before accepting any payload. If its stored editor is unsupported or malformed:
+
+- `apply()` returns failure, with optional structured details for callers that request them;
+- `applyAndSave()` reports `unsupported-editor`;
+- the node is not mutated;
+- no operation is recorded; and
+- no export or truth-write route is invoked.
+
+The cutover attempts the canonical standalone read-only open first. If that open fails, unsupported or malformed nodes do not fall through to either legacy editable bridge. Ordinary Text and supported v1 nodes retain the established fallback behaviour for a genuine canonical-open failure.
+
+### Raw v1 extensions and explicit canonicalisation
+
+Load ownership and PE interpretation are deliberately separate for supported v1 data too:
+
+- raw v1 editor and block extension fields remain in state after load;
+- an unrelated edit and later explicit export preserve that untouched raw v1 object exactly;
+- opening the node uses a detached canonical editable view; and
+- explicitly saving an edit to that v1 Outline replaces the raw object with the canonical `pocket.nodeEditor.v1` shape, so unrecognised extensions are removed only at that explicit edit boundary.
+
+The generated editable Outline runtime now emits the exact v1 schema in its save payload. This makes canonicalisation intentional and testable rather than a silent read-time migration.
+
+### Legacy `pe` synthesis
+
+P011 does not change `ensurePeFromLegacyDetails()`:
+
+- a details-bearing node without its own `pe` field can still gain an in-memory Text `pocket.pe.v1` projection during load;
+- any own `pe` value, including null, still prevents synthesis; and
+- the standalone node PE still does not use legacy `node.pe` as its editable model.
+
+This remains an explicitly named CURRENT-RISK compatibility behaviour. Consolidating first-class preservation does not endorse or expand it.
+
+### P010 CURRENT-RISK results
+
+P011 resolves P010 CURRENT-RISK categories 1, 2, 3, 4 and 10:
+
+1. `normaliseNodes()` ownership is now deliberate and tested.
+2. `editor` and `pe` are reserved outside the generic first-24 extras budget.
+3. first-class editor metadata is no longer dropped above the generic 8,000-character object cap.
+4. unknown Outline-like schemas are exact-gated and never rewritten as v1 merely because their shape resembles Outline.
+10. malformed and unknown raw objects remain preserved while PE exposes an explicit read-only Text view rather than shape-based interpretation.
+
+The following exact CURRENT-RISK categories remain:
+
+- `CURRENT-RISK: active PE model retains duplicate non-empty block IDs`
+- `CURRENT-RISK: Outline normalisation silently slices block 401`
+- `CURRENT-RISK: Outline normalisation silently slices block text at 4,001 characters`
+- `CURRENT-RISK: load-time pe synthesis changes a later explicit export shape without a truth write on open`
+- `CURRENT-RISK: accepted Outline and details drift remain independent and Outline wins PE mode`
+- `CURRENT-RISK: portal.export.v1 top-level precedence drops nested data extras on later export`
+- `CURRENT-RISK: PE opening payload has no file-session or original-revision identity`
+- `CURRENT-RISK: Outline apply accepts independent details/editor content and silently enforces title/body limits`
+- `CURRENT-RISK: changed Text apply deletes accepted Outline metadata and blank details`
+- `CURRENT-RISK: unchanged PE save cannot see lexical unsaved operations through window.state`
+
+These retained assertions cover duplicate IDs, the block-401 and block-text-4,001 truncation boundaries, legacy `pe` synthesis, details/Outline drift, root/data extras precedence, missing source identity, apply limits and drift, Text deletion semantics, and the lexical-state visibility gap.
+
+### Generated-runtime validation
+
+`PocketNodePopoutRuntime.build()` returned programs that compiled with `new Function(...)` for:
+
+- ordinary editable Text with `outline: null`;
+- a valid saved v1 Outline; and
+- an unsupported or rejected editor state represented by the read-only Text payload.
+
+The controlled generated-runtime tests confirm:
+
+- an editable Outline save includes `schema: "pocket.nodeEditor.v1"`;
+- read-only controls and fields are disabled at both template and runtime layers;
+- programmatic input, mode, Save, Save & Close and shortcut attempts do not call apply/save or create dirty state;
+- no unsupported raw editor content is embedded in the generated program or HTML;
+- read-only Text remains selectable and closable; and
+- the unsaved dialog and unload guard remain inactive.
+
+P008 regression coverage remains green for:
+
+- two-space and four-space indentation;
+- tabs and mixed tab/space indentation;
+- common leading indentation;
+- blank-line filtering;
+- depth clamping;
+- structured-paste base-depth alignment;
+- Text to Outline to Text round trips with normalised two-space projection; and
+- one fresh blank depth-0 uncollapsed row for empty or whitespace-only Text.
+
+### Focused test result
+
+Node version:
+
+```text
+v23.11.0
+```
+
+Command:
+
+```sh
+node --test tests/pe-persistence-contract.test.js
+```
+
+Result:
+
+```text
+tests 53
+suites 0
+pass 53
+fail 0
+cancelled 0
+skipped 0
+todo 0
+```
+
+The suite uses actual repository source in isolated VM contexts and controlled in-memory browser/file surfaces. It creates no file handle, invokes no picker, performs no network access and writes no truth file.
+
+### Additional validation
+
+Passed:
+
+- `node --check` for all nine changed production JavaScript files;
+- `node --check tests/pe-persistence-contract.test.js`;
+- generated-runtime compilation and controlled execution;
+- fixture inventory and JSON parsing through the focused suite; and
+- `git diff --check`.
+
+The final review confirms:
+
+- no synthetic fixture changed;
+- no personal Pocket truth file was read or written;
+- no truth-file migration, background write, autosave, watcher, cloud synchronisation or silent handle reuse was added;
+- no new dependency or package script was added;
+- no retired PE file was restored or modified;
+- P006 outline actions, P007 Escape order, P008 indentation conversion, details-first copy context and the one active main-tree Enter owner remain covered or unchanged;
+- `node tools/pocket-check.js` was not run; and
+- `npm run check` was not run.
+
+### Still requiring Murray's physical browser acceptance
+
+- Unsupported and malformed nodes visibly open in the standalone read-only compatibility view.
+- The banner wording, disabled controls, selectable text and close/Escape feel are acceptable in the real popup.
+- A failed canonical read-only open does not expose a legacy editable fallback.
+- Ordinary Text and native v1 Outline editing, Save and Save & Close still feel unchanged against a selected disposable truth file.
+- Large current v1, unknown-schema and legacy `pe` values survive a real open and unrelated explicit save without silent migration.
+- Explicitly editing a supported v1 Outline canonicalises only that edited editor object as documented.
+
+### Git identification
+
+This report is included in the commit titled `P011 Consolidate PE editor recognition`. Its resulting SHA is intentionally not embedded in the same commit because adding that SHA would create a different commit. Completion remains gated on pushing that exact commit to `origin/main`, fetching again, confirming local `main` and `origin/main` resolve to it, and confirming the worktree is clean.
+
+---
+
 ## POCKET TASK P010
 
 Title: Specify and test the current PE persistence contract

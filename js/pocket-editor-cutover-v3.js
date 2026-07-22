@@ -108,6 +108,18 @@
     return ok;
   }
 
+  function requiresReadOnlyCompatibility(node) {
+    if (!node || typeof node !== "object" || !Object.prototype.hasOwnProperty.call(node, "editor") || node.editor === null) return false;
+    const model = global.PocketNodePopoutModel;
+    if (!model || typeof model.classifyNodeEditor !== "function") return true;
+    try {
+      return model.classifyNodeEditor(node).kind === "unsupported-or-malformed";
+    } catch (error) {
+      console.warn("[editor cutover v3] editor classification failed", error);
+      return true;
+    }
+  }
+
   function openDirect(input) {
     const node = selectedNode(input);
     console.info("[editor cutover v3] edit requested", {
@@ -126,6 +138,7 @@
       return false;
     }
 
+    const readOnlyCompatibility = requiresReadOnlyCompatibility(node);
     let ok = false;
     try {
       ok = openStandalone(node);
@@ -134,8 +147,11 @@
       ok = false;
     }
 
-    if (!ok) ok = openLegacyFallback(node);
-    if (!ok) setStatusSafe("Editor failed to open. Refresh and try again.", "warn");
+    if (!ok && !readOnlyCompatibility) ok = openLegacyFallback(node);
+    if (!ok && readOnlyCompatibility) {
+      setStatusSafe("This item requires Pocket's read-only compatibility view. Its editor data was not changed.", "warn");
+    }
+    if (!ok && !readOnlyCompatibility) setStatusSafe("Editor failed to open. Refresh and try again.", "warn");
     console.info("[editor cutover v3] editor open result", { ok, id: node.id });
     return ok;
   }

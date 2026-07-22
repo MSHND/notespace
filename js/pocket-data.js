@@ -333,6 +333,8 @@ const RESERVED_NODE_KEYS = new Set([
   "due",
   "urgent",
   "details",
+  "editor",
+  "pe",
   "task",
   "taskMeta",
   "profile",

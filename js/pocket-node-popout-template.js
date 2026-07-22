@@ -17,6 +17,20 @@
     const safeTitle = htmlEscape(payload.title || "Untitled");
     const safePath = htmlEscape(payload.path || "");
     const safeBody = htmlEscape(payload.body || "");
+    const readOnly = payload.readOnly === true;
+    const readOnlyMessage = htmlEscape(
+      payload.readOnlyMessage
+      || "This item uses editor data that this version of Pocket can’t safely edit. Its readable text is shown below, and nothing will be changed."
+    );
+    const readOnlyBanner = readOnly
+      ? `<div id="readOnlyBanner" class="readOnlyBanner" role="status">${readOnlyMessage}</div>`
+      : "";
+    const readOnlyFieldAttributes = readOnly
+      ? ` readonly aria-readonly="true" aria-describedby="readOnlyBanner"`
+      : "";
+    const disabledEditorControl = readOnly ? " disabled" : "";
+    const toolbarHint = readOnly ? "Read only · select text to copy" : "Tab indents branch · Cmd/Ctrl+S saves";
+    const bodyClass = readOnly ? "textMode readOnly" : "textMode";
 
     return `<!doctype html>
 <html lang="en">
@@ -41,6 +55,7 @@
   .toolbarBtn, .mode button { border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .98); color: rgba(20, 25, 30, .95); height: 28px; min-height: 28px; padding: 0 12px; line-height: 1; white-space: nowrap; box-shadow: var(--pe-chip-shadow); display: inline-flex; align-items: center; justify-content: center; font-weight: 500; }
   .toolbarBtn:hover, .mode button:hover { background: rgba(255, 255, 255, 1); border-color: rgba(116, 124, 136, .26); color: rgba(13, 17, 22, .99); outline: none; box-shadow: var(--pe-chip-shadow); }
   .toolbarBtn:focus-visible, .mode button:focus-visible { background: rgba(255, 255, 255, 1); border-color: rgba(116, 124, 136, .26); color: rgba(13, 17, 22, .99); outline: none; box-shadow: var(--pe-focus-ring), var(--pe-chip-shadow); }
+  button:disabled, button:disabled:hover, button:disabled:focus-visible { cursor: not-allowed; opacity: .48; color: rgba(100, 116, 139, .7); background: rgba(248, 250, 252, .82); border-color: rgba(148, 163, 184, .2); box-shadow: none; }
   #closeBtn { width: 30px; min-height: 30px; padding: 0; border: 1px solid rgba(148, 163, 184, .28); border-radius: 999px; background: rgba(255, 255, 255, .9); color: rgba(15, 23, 42, .82); font-size: 20px; line-height: 1; box-shadow: 0 8px 18px -16px rgba(15, 23, 42, .65); }
   #closeBtn:hover, #closeBtn:focus-visible { border-color: rgba(71, 85, 105, .36); background: rgba(241, 245, 249, .96); color: rgba(15, 23, 42, .98); }
   .mode button.on { color: rgba(29, 78, 216, .88); background: rgba(37, 99, 235, .1); border-color: rgba(37, 99, 235, .3); font-style: normal; }
@@ -52,12 +67,14 @@
   .dirty { opacity: 0; display: inline-block; width: 6px; height: 6px; margin-left: 4px; border-radius: 999px; background: rgba(37, 99, 235, .72); color: transparent; overflow: hidden; transform: translateY(-1px); }
   body.isDirty .dirty { opacity: 1; }
   .meta { padding: 10px 14px 3px; min-width: 0; }
+  .readOnlyBanner { margin-bottom: 9px; padding: 8px 10px; border: 1px solid rgba(100, 116, 139, .2); border-radius: 10px; background: rgba(241, 245, 249, .72); color: rgba(51, 65, 85, .82); font-size: 12px; line-height: 1.42; }
   .titleLine { font-size: 12px; font-weight: 650; color: rgba(71, 85, 105, .72); }
   .path { margin-top: 1px; font-size: 11px; color: rgba(100, 116, 139, .58); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fields { min-height: 0; padding: 8px 14px 14px; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 10px; }
   input, textarea, .outlinePane { width: 100%; border: 1px solid rgba(148, 163, 184, .18); border-radius: 15px; background: rgba(255, 255, 255, .96); color: rgba(15, 23, 42, .94); outline: none; box-shadow: 0 10px 24px -22px rgba(15, 23, 42, .38); }
   input { min-height: 42px; padding: 9px 11px; font-size: 17px; font-weight: 560; }
   textarea { min-height: 0; height: 100%; resize: none; padding: 14px; font: inherit; font-size: 16px; line-height: 1.52; }
+  body.readOnly input, body.readOnly textarea { cursor: text; user-select: text; background: rgba(248, 250, 252, .88); }
   .outlinePane { min-height: 0; height: 100%; overflow: auto; padding: 10px 8px; }
   .outlineRow { display: grid; grid-template-columns: 18px 20px minmax(0, 1fr); align-items: start; gap: 4px; min-height: 30px; padding: 2px 4px; border-radius: 9px; transition: background-color 120ms ease; }
   .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
@@ -87,11 +104,11 @@
   .unsavedActions button.primary { background: rgba(37, 99, 235, .1); color: rgba(30, 64, 175, .94); }
 </style>
 </head>
-<body class="textMode">
+<body class="${bodyClass}">
   <main class="wrap">
-    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button">save</button><button id="saveCloseBtn" class="toolbarBtn" type="button">save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button">text</button><button id="outlineModeBtn" type="button">outline</button></div><div class="grow"></div><div class="toolbarHint">Tab indents branch · Cmd/Ctrl+S saves</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
-    <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
-    <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
+    <div class="topbar"><div class="toolbarGroup identity"><div class="brand">pocket editor <span class="dirty">*</span></div><span id="saveState" class="status" aria-live="polite"></span></div><div class="toolbarGroup actions" aria-label="Save actions"><button id="saveBtn" class="toolbarBtn" type="button"${disabledEditorControl}>save</button><button id="saveCloseBtn" class="toolbarBtn" type="button"${disabledEditorControl}>save &amp; close</button></div><div class="toolbarGroup mode" aria-label="Editor mode"><button id="textModeBtn" type="button"${disabledEditorControl}>text</button><button id="outlineModeBtn" type="button"${disabledEditorControl}>outline</button></div><div class="grow"></div><div class="toolbarHint">${toolbarHint}</div><button id="closeBtn" type="button" aria-label="Close editor">×</button></div>
+    <div class="meta">${readOnlyBanner}<div class="titleLine">${readOnly ? "viewing" : "editing"}</div><div class="path" title="${safePath}">${safePath}</div></div>
+    <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"${readOnlyFieldAttributes}><textarea id="bodyInput" aria-label="Item details"${readOnlyFieldAttributes}>${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
   </main>
   <div id="outlineContextMenu" class="outlineContextMenu" role="menu" aria-label="Outline selection actions" hidden>
     <button type="button" role="menuitem" data-outline-action="copy">Copy</button>

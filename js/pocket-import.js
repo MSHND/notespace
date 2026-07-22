@@ -293,6 +293,8 @@ function showCopiedFeedback(nodeId) {
   setStatus(copiedLabel ? `Copied · ${copiedLabel}` : "Copied.", "ok");
 }
 
+/* Canonical owner for truth-file node normalisation. First-class PE fields are
+   copied opaquely; interpretation belongs to PocketEditorMetadata consumers. */
 function normaliseNodes(raw) {
   const arr = Array.isArray(raw) ? raw : [];
   const out = [];
@@ -331,6 +333,16 @@ function normaliseNodes(raw) {
     if (system) payload.system = system;
     if (status) payload.status = status;
     if (extras) Object.assign(payload, extras);
+    const metadata = window.PocketEditorMetadata;
+    if (metadata && typeof metadata.copyFirstClassNodeFields === "function") {
+      metadata.copyFirstClassNodeFields(item, payload);
+    } else {
+      for (const field of ["editor", "pe"]) {
+        if (!Object.prototype.hasOwnProperty.call(item, field)) continue;
+        const cloned = safeJsonClone(item[field], Number.MAX_SAFE_INTEGER);
+        payload[field] = cloned === null && item[field] !== null ? item[field] : cloned;
+      }
+    }
     out.push(payload);
   }
   return out;

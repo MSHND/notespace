@@ -3,6 +3,7 @@
   "use strict";
 
   const OUTLINE_EDITOR_SCHEMA = "pocket.nodeEditor.v1";
+  const UNSUPPORTED_EDITOR_MESSAGE = "This item uses editor data that this version of Pocket can't safely edit. Its readable text is shown below, and nothing will be changed.";
 
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
@@ -12,32 +13,36 @@
     return typeof normaliseDetails === "function" ? normaliseDetails(value, max) : String(value || "").replace(/\r/g, "").trim().slice(0, max);
   }
 
-  function normaliseOutlineBlock(raw, index) {
-    const depth = Number(raw?.depth);
-    return {
-      id: clean(raw?.id, 80) || (typeof makeId === "function" ? makeId("block") : "block_" + index),
-      text: String(raw?.text == null ? "" : raw.text).replace(/\r/g, "").slice(0, 4000),
-      depth: Number.isFinite(depth) ? Math.max(0, Math.min(8, Math.round(depth))) : 0,
-      collapsed: raw?.collapsed === true,
-      order: index + 1
-    };
+  function metadataContract() {
+    const contract = global.PocketEditorMetadata;
+    if (!contract || typeof contract.classifyEditorMeta !== "function" || typeof contract.normaliseSupportedEditorMeta !== "function" || typeof contract.cloneJsonCompatibleValue !== "function") {
+      throw new Error("PocketEditorMetadata is not loaded.");
+    }
+    return contract;
+  }
+
+  function classifyEditorMeta(value, options = {}) {
+    return metadataContract().classifyEditorMeta(value, options);
+  }
+
+  function classifyNodeEditor(node) {
+    const present = !!node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, "editor");
+    const classification = classifyEditorMeta(present ? node.editor : undefined, { present });
+    const hasPe = !!node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, "pe");
+    if (hasPe && !metadataContract().cloneJsonCompatibleValue(node.pe).ok) {
+      return { kind: "unsupported-or-malformed", supported: false, schema: classification.schema || "", normalised: null };
+    }
+    return classification;
   }
 
   function normaliseEditorMeta(value) {
-    if (!value || typeof value !== "object") return null;
-    const mode = clean(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
-    if (mode !== "outline") return null;
-    const outline = Array.isArray(value.outline) ? value.outline.slice(0, 400).map(normaliseOutlineBlock) : [];
-    const meaningful = outline.some(function (block) {
-      return (Number(block.depth) || 0) > 0 || block.collapsed === true || clean(block.text, 4000);
-    });
-    if (!meaningful) return null;
-    return { schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline: outline };
+    return metadataContract().normaliseSupportedEditorMeta(value);
   }
 
   function buildPayload(node) {
-    const editor = normaliseEditorMeta(node.editor) || null;
-    return {
+    const classification = classifyNodeEditor(node);
+    const editor = classification.kind === "supported-v1-outline" ? classification.normalised : null;
+    const payload = {
       id: clean(node.id, 80),
       title: clean(node.label, 220) || "Untitled",
       body: normaliseDetailsSafe(node.details, 4000),
@@ -47,10 +52,22 @@
       openedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+    if (editor) payload.schema = OUTLINE_EDITOR_SCHEMA;
+    if (classification.kind === "unsupported-or-malformed") {
+      payload.mode = "text";
+      payload.outline = null;
+      payload.readOnly = true;
+      payload.readOnlyReason = "unsupported-editor";
+      payload.readOnlyMessage = UNSUPPORTED_EDITOR_MESSAGE;
+      if (classification.schema) payload.editorSchema = classification.schema;
+    }
+    return payload;
   }
 
   global.PocketNodePopoutModel = Object.freeze({
     buildPayload: buildPayload,
+    classifyEditorMeta: classifyEditorMeta,
+    classifyNodeEditor: classifyNodeEditor,
     normaliseEditorMeta: normaliseEditorMeta
   });
 })(window);

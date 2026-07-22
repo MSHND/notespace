@@ -5,10 +5,11 @@
   function build(initialJson) {
     return `(function () {
   var payload = ${initialJson};
+  var readOnly = payload.readOnly === true;
   var dirty = false;
   var allowedToClose = false;
-  var mode = payload.mode === "outline" ? "outline" : "text";
-  var outline = Array.isArray(payload.outline) ? payload.outline.map(function (b) { return { id: b.id || "", text: String(b.text || ""), depth: Math.max(0, Math.min(8, Number(b.depth) || 0)), collapsed: b.collapsed === true }; }) : null;
+  var mode = !readOnly && payload.mode === "outline" ? "outline" : "text";
+  var outline = !readOnly && Array.isArray(payload.outline) ? payload.outline.map(function (b) { return { id: b.id || "", text: String(b.text || ""), depth: Math.max(0, Math.min(8, Number(b.depth) || 0)), collapsed: b.collapsed === true }; }) : null;
   var outlineSelectedIds = new Set();
   var outlineSelectionAnchorId = "";
   var titleInput = document.getElementById("titleInput");
@@ -17,6 +18,7 @@
   var textModeBtn = document.getElementById("textModeBtn");
   var outlineModeBtn = document.getElementById("outlineModeBtn");
   var saveState = document.getElementById("saveState");
+  var saveBtn = document.getElementById("saveBtn");
   var saveCloseBtn = document.getElementById("saveCloseBtn");
   var outlineContextMenu = document.getElementById("outlineContextMenu");
   var unsavedDialog = document.getElementById("unsavedDialog");
@@ -27,7 +29,20 @@
   var outlineContextReturnFocus = null;
   var saveInFlight = false;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
-  function setDirty(next) { dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
+  function setDirty(next) { if (readOnly) { dirty = false; document.body.classList.remove("isDirty"); return; } dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
+  function applyReadOnlyState() {
+    if (!readOnly) return;
+    document.body.classList.add("readOnly");
+    titleInput.readOnly = true;
+    bodyInput.readOnly = true;
+    saveBtn.disabled = true;
+    saveCloseBtn.disabled = true;
+    textModeBtn.disabled = true;
+    outlineModeBtn.disabled = true;
+    outlineContextMenu.hidden = true;
+    unsavedDialog.hidden = true;
+    setDirty(false);
+  }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
   function ensureBlockId(block) { if (block && !block.id) block.id = makeBlock("", 0).id; return block && block.id ? block.id : ""; }
   function textToOutline(text) { return outlineBlocksFromPastedText(text, 0); }
@@ -504,19 +519,25 @@
       if (index === focusIndex) requestAnimationFrame(function () { text.focus(); });
     });
   }
-  function setMode(nextMode) { if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); }
+  function setMode(nextMode) { if (readOnly) return false; if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); return true; }
   function currentBody() { if (mode === "outline") { syncOutlineFromDom(); return outlineToText(outline); } return bodyInput.value; }
-  function buildPayload() { if (Array.isArray(outline)) { syncOutlineFromDom(); outline.forEach(ensureBlockId); } return { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
+  function buildPayload() {
+    if (readOnly) return null;
+    if (Array.isArray(outline)) { syncOutlineFromDom(); outline.forEach(ensureBlockId); }
+    var nextPayload = { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() };
+    if (mode === "outline") nextPayload.schema = "pocket.nodeEditor.v1";
+    return nextPayload;
+  }
   function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
   function hideUnsavedDialog() { unsavedDialog.hidden = true; }
   function openerPopoutWindow() { try { return window.opener && !window.opener.closed && window.opener.PocketNodePopoutWindow ? window.opener.PocketNodePopoutWindow : null; } catch (_error) { return null; } }
   function resumePendingOpen() { var target = openerPopoutWindow(); try { return !!(target && typeof target.resumePendingOpen === "function" && target.resumePendingOpen()); } catch (error) { console.error(error); return false; } }
   function cancelPendingOpen() { var target = openerPopoutWindow(); try { if (target && typeof target.cancelPendingOpen === "function") target.cancelPendingOpen(); } catch (error) { console.error(error); } }
   function keepEditing() { cancelPendingOpen(); hideUnsavedDialog(); focusEditor(); }
-  function showUnsavedDialog() { returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); }
-  function requestUnsavedProtection() { if (!dirty) return false; showUnsavedDialog(); try { window.focus(); } catch (_error) {} return true; }
+  function showUnsavedDialog() { if (readOnly) return false; returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); return true; }
+  function requestUnsavedProtection() { if (readOnly || !dirty) return false; showUnsavedDialog(); try { window.focus(); } catch (_error) {} return true; }
   window.PocketNodePopoutSession = Object.freeze({
-    hasUnsavedChanges: function () { return dirty === true; },
+    hasUnsavedChanges: function () { return !readOnly && dirty === true; },
     requestUnsavedProtection: requestUnsavedProtection
   });
   function discardAndClose() { closeOutlineContextMenu({ restoreFocus: false }); allowedToClose = true; dirty = false; if (resumePendingOpen()) return; window.close(); }
@@ -555,6 +576,7 @@
     return false;
   }
   function save(closeAfter) {
+    if (readOnly) return false;
     closeAfter = closeAfter === true;
     if (saveInFlight) return false;
     hideUnsavedDialog();
@@ -591,10 +613,10 @@
     alert("Pocket is not connected. Copy your text before closing.");
     return false;
   }
-  function closeSafely() { closeOutlineContextMenu({ restoreFocus: false }); if (!dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
+  function closeSafely() { closeOutlineContextMenu({ restoreFocus: false }); if (readOnly || !dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
   titleInput.addEventListener("input", function () { setDirty(true); });
   bodyInput.addEventListener("input", function () { setDirty(true); });
-  document.getElementById("saveBtn").addEventListener("click", function () { save(false); });
+  saveBtn.addEventListener("click", function () { save(false); });
   saveCloseBtn.addEventListener("click", function () { save(true); });
   outlinePane.addEventListener("paste", handleOutlinePaste);
   outlinePane.addEventListener("contextmenu", handleOutlineContextMenu);
@@ -636,7 +658,7 @@
       deleteOutlineSelection();
       return;
     }
-    if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(false); return; }
+    if ((ev.key === "s" || ev.key === "S" || ev.key === "Enter") && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); if (!readOnly) save(false); return; }
     if (ev.key === "Escape") {
       ev.preventDefault();
       if (closeOutlineContextMenu({ restoreFocus: true })) return;
@@ -645,11 +667,12 @@
       closeSafely();
     }
   });
-  window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
+  window.addEventListener("beforeunload", function (ev) { if (readOnly || !dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
+  applyReadOnlyState();
   updateModeChrome();
-  if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
-  titleInput.focus();
-  titleInput.select();
+  if (!readOnly && mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
+  if (readOnly) bodyInput.focus({ preventScroll: true });
+  else { titleInput.focus(); titleInput.select(); }
 })();
 `;
   }
