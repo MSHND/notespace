@@ -1,6 +1,6 @@
 # PE Persistence Contract
 
-P011 updates the executable P010 baseline to describe the current persistence contract after first-class PE metadata hardening.
+P012 updates the executable P010/P011 baseline to describe the current persistence contract after source-identity binding, node-revision checks and non-lossy save preflight.
 
 The terms used below are deliberate:
 
@@ -8,13 +8,15 @@ The terms used below are deliberate:
 - **Compatibility** means behaviour retained for existing Pocket inputs, but not necessarily preferred for new data.
 - **CURRENT-RISK** means an executable test freezes a known weakness so a later fix can replace the observation deliberately.
 - **Unsupported/unknown** means Pocket preserves the value but does not claim that the current editor can interpret it.
-- **Future desired** means a direction from the P009 migration plan that P011 does not implement.
+- **Future desired** means a direction from the P009 migration plan that P012 does not implement.
 
-P011 makes a narrow production change. It establishes one load-normalisation owner, preserves `editor` and `pe` as first-class opaque JSON, exact-gates the supported editor schema, and provides a details-only read-only view for unsupported editor data. It does not migrate the truth-file schema or rewrite a file merely because it was opened. Tests use synthetic fixtures only. No personal Pocket truth file was read or written.
+P012 makes a narrow safety change at the explicit PE save boundary. Each canonical PE opening now carries a JSON-safe document-session identity and the node revision it actually opened. The main window rejects a save before node lookup or mutation when the document session changed, and rejects before mutation when that node revision is stale. Raw save content is checked before the existing slicing normalisers can lose it. Successful in-memory apply returns a new revision to the popup, so a failed truth-file export can be retried safely. P011 first-class `editor`/`pe` preservation and unsupported-editor read-only behaviour remain intact.
+
+P012 does not migrate the truth-file schema, persist the runtime source binding, or rewrite a file merely because it was opened. Tests use synthetic fixtures, in-memory handles and instrumented write surfaces only. No personal Pocket truth file was read or written, and this synthetic validation does not claim Murray's physical browser acceptance.
 
 ## 1. Purpose and scope
 
-This contract records the P011-tested behaviour that P012 and later work must change deliberately. It covers:
+This contract records the P012-tested behaviour that P013 and later work must change deliberately. It covers:
 
 - active `index.html` script order and sole node-normalisation ownership;
 - accepted root shapes and precedence;
@@ -23,7 +25,10 @@ This contract records the P011-tested behaviour that P012 and later work must ch
 - the exact supported-v1 recognition gate;
 - the read-only PE compatibility view and its defence in depth;
 - load-time `node.pe` synthesis;
-- PE opening, apply and save-request payloads;
+- PE opening identity, optimistic node-revision binding, apply and save-request payloads;
+- document-session renewal and successful save-as identity adoption;
+- raw Text and Outline save preflight, including exact non-lossy limits;
+- failed-export revision handshakes, pending-operation visibility and retry;
 - root export and browser recovery representations;
 - compact load, export and reload round trips;
 - generated PE runtime compilation and P008 indentation parsing; and
@@ -31,7 +36,7 @@ This contract records the P011-tested behaviour that P012 and later work must ch
 
 This document distinguishes opening a file from explicitly writing the selected truth file. It also distinguishes browser `localStorage` recovery writes from truth-file persistence.
 
-P011 does not declare every retained behaviour desirable. Every CURRENT-RISK test is expected to pass while that weakness remains. A later task that fixes one must replace the corresponding expectation instead of preserving the bug for the sake of a green suite.
+P012 does not declare every retained behaviour desirable. Every CURRENT-RISK test is expected to pass while that weakness remains. A later task that fixes one must replace the corresponding expectation instead of preserving the bug for the sake of a green suite.
 
 ## 2. How to run the focused test
 
@@ -50,11 +55,11 @@ The harness:
 - derives the relevant source order from actual `index.html` script tags;
 - replaces UI and file-system surfaces with controlled in-memory shims;
 - records browser `localStorage` activity separately;
-- does not load `js/pocket-io-browser.js` or create a file handle;
-- does not invoke a picker, `writeTruthFile()`, or a real `exportTree()`; and
+- executes `js/pocket-io-browser.js` with controlled, in-memory file handles and deterministic picker/write spies;
+- does not create a real `FileSystemFileHandle`, invoke a real picker, or write a truth file;
 - instruments generated runtime code in memory only.
 
-The P011 validation run on Node `v23.11.0` reports 53 tests, 53 passes and 0 failures.
+The P012 validation run on Node `v23.11.0` reports 77 tests, 77 passes and 0 failures. The same command and result are also recorded in `docs/CODEX_REPORT.md`.
 
 ## 3. Source files exercised
 
@@ -70,15 +75,17 @@ The suite parses or executes these current production sources:
 | `js/pocket-storage.js` | `buildPocketPayload()`, `ensurePeFromLegacyDetails()`, `applyLoadedState()` and browser safety representations |
 | `js/pocket-import.js` | Sole `normaliseNodes()` owner, `normaliseInput()`, `nodeMap()` and PiP recovery |
 | `js/pocket-editor-copy.js` | `collapseAllNodes()`, `getPath()` and `copyContextPayloadForNode()` |
-| `js/pocket-history-status.js` | Actual `recordOp()` path used by PE apply |
-| `js/pocket-node-popout-model.js` | Editor classification, supported-view normalisation and opening payloads |
+| `js/pocket-history-status.js` | Actual `recordOp()` path and narrow lexical pending-operation count |
+| `js/pocket-io-browser.js` | File sessions, safe editor identity, load/create/adopt transitions, queued export guards, truth-write result propagation and save-as adoption |
+| `js/pocket-node-popout-model.js` | Editor classification, supported-view normalisation, opening bindings and raw non-lossy save preflight |
 | `js/pocket-node-popout-target.js` | Node resolution by explicit ID and current fallback |
-| `js/pocket-node-popout-editor.js` | `apply()`, `applyAndSave()` and unsupported-editor rejection |
-| `js/pocket-node-popout-runtime.js` | Generated program, read-only guards, exact save schema, shared parser and Text/Outline projection |
+| `js/pocket-node-popout-editor.js` | Ordered identity/revision/apply gates, non-lossy preparation, retry handshake and export-result propagation |
+| `js/pocket-node-popout-runtime.js` | Generated program, bound save payload, revision/identity adoption, dirty-state result handling, read-only guards, exact save schema, shared parser and Text/Outline projection |
 | `js/pocket-node-popout-template.js` | Read-only fields, warning and disabled controls |
-| `js/pocket-editor-cutover-v3.js` | Canonical open route and unsupported-node legacy-fallback guard |
+| `js/pocket-editor-cutover-v3.js`, `js/pocket-editor-popout.js` and `js/pocket-pe-save-dirty.js` | Canonical open/apply/save ownership and fail-closed legacy routes |
+| `js/pocket-storage.js`, `js/pocket-import.js`, `js/pocket-editor-copy.js` and `js/pocket-vault-io-browser.js` | Active recovery, PiP and Vault state adoption as new document sessions |
 
-`js/pocket-io-browser.js` remains the production truth-write owner, but the focused suite deliberately does not execute it. Tests of `applyAndSave()` inject an in-memory `exportTree()` result and separately assert that picker and `writeTruthFile()` spies remain untouched.
+`js/pocket-io-browser.js` remains the production truth-write owner. Tests of rejection paths assert that no export, picker, writable, workspace safety write or PiP snapshot is reached. Export and retry tests use controlled return values and fake handles only.
 
 ## 4. Current persisted root shape
 
@@ -160,6 +167,8 @@ Current Text rules:
 - A node with any other own, non-null `editor` value is not treated as ordinary editable Text. It receives the read-only compatibility view described below.
 - `node.pe` is preserved and its schema/content is not an active standalone PE model. Its JSON cloneability is checked only as a fail-closed persistence safety gate.
 
+P012 does not change how already persisted Text is normalised on load. At an explicit PE save, however, title and body are first normalised without slicing and rejected when they exceed 220 or 4,000 characters. The normal save path no longer silently turns a 221-character title or 4,001-character body into the persisted maximum.
+
 On active load, a details-bearing node without its own `pe` property still gains an in-memory `pocket.pe.v1` Text object through `ensurePeFromLegacyDetails()`. That is CURRENT-RISK compatibility behaviour, not the Text canonical model. An own `pe` property, including `pe: null`, prevents synthesis.
 
 ## 6. Current Outline-node contract
@@ -223,6 +232,8 @@ For a supported saved Outline:
 
 The canonicalisation boundary is an explicit changed PE apply to that node. An unchanged apply leaves the raw object alone. A changed Outline apply writes the known v1 shape from the normalised PE payload, so raw extensions and non-canonical incoming order values may be removed at that deliberate edit boundary. P011 does not claim lossless extension preservation after the user edits that same editor object.
 
+P012 narrows the explicit Outline boundary: Outline canonicalisation may proceed only when both the preserved supported raw Outline and the unsliced incoming save payload pass the explicit save contract. A view that has sliced row 401, sliced a 4,001-character block or retained duplicate IDs cannot be saved back as Outline over the raw object. The separate P013-unresolved changed-Text deletion behaviour remains as documented below.
+
 The generated runtime normally builds the save body from `outlineToText(outline)`, producing two spaces per depth. `applyPayload()` does not verify that `payload.body` matches `payload.outline`, so independently supplied details and Outline content can still diverge.
 
 An Outline apply writes both `node.editor` and the `node.details` projection. It leaves an existing `node.pe` untouched.
@@ -233,19 +244,26 @@ An Outline apply writes both `node.editor` and the `node.details` projection. It
 | --- | --- |
 | PE opening `path` | Runtime-derived from `getPath(node.id)` |
 | PE opening `openedAt` | Runtime timestamp |
-| PE opening `updatedAt` | Runtime timestamp, not the original node revision |
+| PE opening `updatedAt` | Compatibility alias of the node revision at opening; it is no longer a newly generated “now” value |
+| PE opening `originalUpdatedAt` | Exact normalised `node.updatedAt` captured at opening; required optimistic-concurrency token |
+| PE opening `fileSessionId` | JSON-safe document-session token; authoritative source identity for PE apply |
+| PE opening `sourceFileName` | Cleaned diagnostic display name, not identity and not persisted by PE |
+| PE opening `sourcePipSession` | Diagnostic PiP-session flag, not identity and not persisted by PE |
 | PE `readOnly`, reason, message and schema diagnostic | Runtime compatibility state, not persisted editor data |
-| Popup dirty, allowed-to-close, selection and menu state | Runtime-only |
+| Popup dirty, save generation, allowed-to-close, selection and menu state | Runtime-only |
 | Runtime Outline blocks created from Text | Derived from the current textarea through the shared structured-paste parser |
 | Runtime block IDs created during Text conversion | Fresh values, persisted only after apply and successful truth export |
 | Outline body text | Derived by `outlineToText()` in the normal generated-runtime save path |
 | Normalised supported-v1 PE copy | Derived editing view; the raw state object remains separate until a changed apply |
 | `state.ops` | Runtime operation history and dirty signal, copied into recovery representations but not the root truth payload |
+| `getPocketUnsavedOperationCount()` | Read-only count over lexical `state.ops`; exposes neither `state` nor the mutable operation array |
 | `state.collapsed`, `selectedId`, `focusRootId` | Workspace/runtime state, not node Outline collapse metadata |
 | Synthesised `node.pe` | Added in memory on load from details, then included in a later explicit export unless future work stops synthesis |
 | `pocketGuard` | Derived for each export from instance and source metadata |
 
 Outline block `order` is persisted but derived in the active PE view. Array order is operationally authoritative.
+
+None of the P012 source-binding fields is added to a node or the root truth schema. They exist only in the opening popup payload, subsequent save attempts and structured apply/save results.
 
 ## 8. Script-load and normalisation ownership
 
@@ -310,7 +328,29 @@ All exact object-size boundaries below use `JSON.stringify(value).length`, which
 | Runtime Text-to-Outline depth | Clamped 0 to 8 | Tabs and inferred space units supported; shallowest line aligned to base |
 | Runtime blank Text lines | Filtered | Empty conversion yields no blocks; renderer supplies one fresh blank row |
 
-The 400-block and 4,000-character block limits apply to the supported editing view, not to first-class raw preservation. A larger raw editor remains in state and exports unchanged until an explicit changed PE apply canonicalises that node.
+The preceding table includes read-time and editing-view normalisation. P012 adds a separate explicit-save boundary:
+
+| Explicit PE save input | Accepted maximum or shape | Rejection reason |
+| --- | --- | --- |
+| Title after full `cleanText()` whitespace normalisation | 220 characters | `title-too-long` |
+| Readable body after full `normaliseDetails()` whitespace normalisation | 4,000 characters | `details-too-long` |
+| Outline schema and mode | Exact `pocket.nodeEditor.v1` and `outline` | `invalid-outline` |
+| Outline container | Array with at most 400 rows | `invalid-outline` or `outline-too-many-blocks` |
+| Outline meaning and cloneability | JSON-compatible and meaningful under the exact current-v1 rules | `invalid-outline` |
+| Outline row | Non-null, non-array object | `invalid-outline-block` |
+| Row ID | String which cleans to 1 through 80 characters | `invalid-outline-id` or `outline-id-too-long` |
+| Row-ID uniqueness | Unique after cleaning | `duplicate-outline-block-id` |
+| Row text | String or absent/null; carriage returns removed before counting; at most 4,000 characters | `invalid-outline-block` or `outline-block-text-too-long` |
+| Row depth | Finite integer from 0 through 8 | `invalid-outline-depth` |
+| Row collapse state | Boolean when the property is present; omission means false under canonical normalisation | `invalid-outline-block` |
+
+Exact boundaries are accepted: title 220, body 4,000, 400 Outline rows, block text 4,000, ID 80, and depths 0 and 8. The next value is rejected. Fractional, non-finite, negative and above-8 depths are rejected rather than rounded or clamped at save time. Text-mode save checks title and body but deliberately ignores an unused `outline` member.
+
+These checks inspect the unsliced input. Only after they pass may `prepareSave()` call the existing canonical normalisers. There is no “save anyway”, trimming choice, duplicate-ID rewrite or automatic row deletion.
+
+The 400-block and 4,000-character block limits still apply to the supported editing view, not to first-class raw preservation. A larger raw editor remains in state and exports unchanged when the node is not explicitly saved. Before an explicit Outline save, `validateStoredEditorForSave()` also scans a currently supported node's stored raw Outline. That defence blocks an Outline save when the editable view would already have hidden rows, oversized text, duplicate cleaned IDs, excessive IDs, invalid depth, invalid row shape or invalid collapse state. Missing stored IDs remain compatible because the generated runtime supplies IDs before an explicit save. The scan does not repair or mutate loaded data.
+
+The stored-raw scan intentionally does not redefine the P013-unresolved Text conversion boundary. A changed explicit Text save can still delete accepted Outline metadata, including raw metadata which the Outline path would refuse to overwrite. That remains a clearly named CURRENT-RISK, not an endorsed data-loss policy.
 
 `normalisePocketPe()` still declares larger legacy limits, but the active loader does not run existing `pe` through it. Existing `pe` is copied opaquely. A newly synthesised `pe.text` is based on the already normalised, at-most-4,000-character details body.
 
@@ -330,7 +370,7 @@ The 400-block and 4,000-character block limits apply to the supported editing vi
 
 For `portal.export.v1`, top-level tree precedence is current compatibility because Pocket emits both copies. Ignoring nested data extras remains a CURRENT-RISK loss path. A later export rebuilds `data` from empty `state.dataExtras`, so a data-only extension disappears.
 
-Every `buildPocketPayload()` output is `portal.export.v1`, regardless of the loaded input schema. P011 does not grant a lossless round-trip promise to unknown root schemas.
+Every `buildPocketPayload()` output is `portal.export.v1`, regardless of the loaded input schema. P012 does not grant a lossless round-trip promise to unknown root schemas.
 
 ## 11. PE payload and apply contract
 
@@ -339,10 +379,23 @@ Every `buildPocketPayload()` output is `portal.export.v1`, regardless of the loa
 All opening payloads contain:
 
 ~~~text
-id, title, body, mode, outline, path, openedAt, updatedAt
+id, title, body, mode, outline, path, openedAt, updatedAt,
+fileSessionId, sourceFileName, sourcePipSession, originalUpdatedAt
 ~~~
 
 A supported Outline payload also contains `schema: "pocket.nodeEditor.v1"`.
+
+The source binding is deliberately popup-safe:
+
+- `fileSessionId` is the authoritative identity token.
+- `sourceFileName` is a cleaned display diagnostic only. Equal filenames do not make two sessions equal.
+- `sourcePipSession` is a diagnostic boolean.
+- `originalUpdatedAt` is the exact normalised node revision captured at opening.
+- no `FileSystemFileHandle`, picker, callback, mutable state object, raw file object or browser permission is included.
+
+`PocketNodePopoutRuntime` returns these fields unchanged on every save attempt. It does not generate a new session identity or replace the original revision with the clock.
+
+The runtime also sends the unsliced title, readable body and Outline rows to the main window. Oversized and duplicate-row payload tests confirm that the popup does not pre-trim away the evidence needed by authoritative main-window preflight. The popup performs only the local completeness check for its source binding before contacting the opener.
 
 An unsupported or malformed own non-null editor produces:
 
@@ -364,48 +417,116 @@ The read-only template and runtime:
 - allow ordinary Close and Escape closure; and
 - keep the details text selectable for copying.
 
-The opening payload still has no file-session ID, source filename identity, writable-handle identity or original node revision. Its `updatedAt` is generated at open time and is not an optimistic-concurrency token.
+Unsupported read-only payloads may carry the safe source binding, but it cannot make them editable and the popup never sends a save.
+
+### Document-session contract
+
+`pocketFileSessionId` is runtime-only. `capturePocketEditorSourceIdentity()` exposes only the three safe opening fields, while `capturePocketFileSaveSession()` separately retains the main-window handle for queued truth writes. `isPocketEditorSourceIdentityCurrent()` compares the numeric session token. It does not use the filename as identity.
+
+A fresh session token is established when a different document state is successfully adopted:
+
+- a selected Pocket JSON file is loaded, including a successful reload of the same handle;
+- a new Pocket file is created;
+- PiP snapshot state is restored;
+- PiP session state is adopted back into a host;
+- a local safety snapshot is restored;
+- an encrypted Vault payload is opened; and
+- a newly picked truth-file target is successfully written and adopted.
+
+File parsing or permission failure does not discard the previously active session. A failed write also leaves the current binding available for an explicit retry. `setPocketFileSession(..., { forceNewSession: true })` is used only for a genuine document adoption. A routine successful write to the already active handle refreshes diagnostics without incrementing the session.
+
+For save-as, `writeTruthFile()` verifies the old queued session before and after picker/write stages. A successful picked-file result names the old session it adopted from and returns the newly active safe source identity. `exportTree()` recognises only that precise handoff as a legitimate session transition. The popup adopts the new identity only after `ok: true` and `exported: true`.
+
+### Ordered main-window gate
+
+`PocketNodePopoutEditor.applyPayload()` fails closed in this order:
+
+1. `canModifyPocket()` confirms a current modifiable Pocket document.
+2. The payload must contain a complete JSON-safe source-identity shape.
+3. The source session ID must equal the active document session.
+4. The supplied node ID is validated, then resolved explicitly through `PocketNodePopoutTarget.getById()`.
+5. The target node must still exist.
+6. `originalUpdatedAt` must be present and valid.
+7. It must equal the current node's normalised `updatedAt`.
+8. The current node is reclassified under the P011 unsupported-editor gate.
+9. Stored-raw loss scan and raw payload preflight must both pass.
+10. Only then are before/after values calculated and any mutation applied.
+11. Only a successful changed apply records an operation or refreshes workspace/PiP safety state. Truth export can begin only after apply succeeds, either for that change or to retry an already pending operation.
+
+The session check precedes node lookup. A stale PE from file A therefore cannot resolve and mutate a same-ID node in file B. Rejection does not change node content, `updatedAt`, selection, operation history, browser safety state, PiP snapshot or truth file.
+
+| Safety failure | Structured reason | User-facing meaning |
+| --- | --- | --- |
+| No current modifiable document | `no-pocket-file` | There is no writable Pocket file for this save |
+| Missing or malformed safe identity | `missing-source-identity` | Pocket cannot verify where the editor belongs |
+| Session token differs | `file-session-changed` | Pocket is now using a different document |
+| Target cannot be resolved | `missing-node` | The original item no longer exists |
+| Missing original revision | `missing-node-revision` | Pocket cannot verify which item revision was opened |
+| Current revision differs | `node-revision-changed` | The item changed after the editor opened |
+| Unsupported current editor data | `unsupported-editor` | This Pocket version cannot safely edit the item |
+| Raw input outside the save contract | Specific reason from the limits table | Nothing is trimmed, repaired or applied |
 
 ### Applying
 
 `PocketNodePopoutEditor.apply()` reaches private `applyPayload()` and:
 
-- requires the current Pocket file gate when available;
-- resolves the current node by explicit payload ID;
+- requires a current modifiable file/session;
+- validates source identity before resolving a node;
+- resolves only the explicit payload ID, never the current selection fallback;
+- rejects a missing node with `missing-node`;
+- rejects missing binding or revision with `missing-source-identity` or `missing-node-revision`;
+- rejects a changed document session with `file-session-changed`;
+- rejects a changed node revision with `node-revision-changed`;
 - reclassifies the current node before any mutation;
 - rejects an unsupported or malformed current editor with reason `unsupported-editor`;
-- records no operation and invokes no export for that rejection;
+- runs the stored-raw and incoming-payload preflight before normalisation;
+- records no operation and invokes no export for any rejection;
 - compares normalised before and after title, details and supported editor metadata;
-- returns success without an operation for unchanged content;
+- returns success without an operation for unchanged content, including the current revision and source identity;
 - applies by ID even if lexical `state.selectedId` names another node;
-- writes title and details within current caps;
+- writes title and details only after the unsliced values are within current caps;
 - writes supported Outline metadata or deletes accepted editor metadata for changed Text;
-- updates `node.updatedAt`;
+- advances `node.updatedAt`, forcing at least one millisecond of monotonic progress if the clock has not moved;
 - records one `details_edit` operation; and
 - invokes UI, workspace and PiP refresh surfaces.
 
 The defence is based on the current node, not a caller-supplied `readOnly` flag. `applyAndSave()` returns `applied: false`, `exported: false`, and reason `unsupported-editor` without reaching `exportTree()`.
 
-`js/pocket-editor-cutover-v3.js` also refuses to route an unsupported node into the legacy editable popup if the standalone read-only open fails. Ordinary Text and supported v1 nodes retain the established fallback behaviour.
+The canonical cutover no longer opens the unbound legacy editor when the safe standalone editor cannot open. Older `PocketEditorPopout.apply()` calls delegate to the canonical apply owner and therefore fail closed without a P012 binding. The older PE dirty/save bridge delegates `applyAndSave()` to the canonical owner. There is no active legacy mutation path which bypasses identity, revision or preflight checks.
 
-The generated editable Outline runtime stamps the exact v1 schema on save. Text payloads remain schema-free. There is still no source-file session binding or original-node revision preflight before a supported mutation.
+The generated editable Outline runtime stamps the exact v1 schema on save. Text payloads remain schema-free. Both modes carry the opening source session and original node revision to the main-window gate.
 
 ### Applying and requesting persistence
 
-The suite replaces `exportTree()` with an in-memory result. Current outcomes for supported or ordinary editable nodes are:
+`applyAndSave()` returns a structured result. Current outcomes for supported or ordinary editable nodes are:
 
-| Controlled export result | `applyAndSave()` result |
+| Outcome | `applyAndSave()` result |
 | --- | --- |
-| `{ ok: true }` after a changed apply | `ok: true`, `exported: true`, reason `exported` |
-| `false` or `{ ok: false }` | `ok: false`, `exported: false`, reason `export-failed-or-cancelled` |
-| `{ downloaded: true }` | `ok: false`, `downloaded: true`, reason `downloaded-copy` |
-| Throw or rejected promise | `ok: false`, reason `export-failed` |
-| No `exportTree` function | `ok: false`, reason `export-unavailable` |
-| Unchanged payload with no visible operations | `ok: true`, `applied: false`, `exported: false`, reason `unchanged` |
+| Rejected before apply | `ok: false`, `applied: false`, `exported: false`, precise safety reason |
+| Changed apply plus successful truth write | `ok: true`, `applied: true`, `changed: true`, `exported: true`, reason `exported` |
+| Unchanged apply with no pending operation | `ok: true`, `applied: false`, `changed: false`, `exported: false`, reason `unchanged` |
+| Unchanged apply with a pending lexical operation | Truth export is retried rather than skipped |
+| Changed apply plus cancel/failure/stale guard | `ok: false`, `applied: true`, `exported: false`, precise export reason and the new node revision |
+| Download fallback only | `ok: false`, `applied: true`, `exported: false`, `downloaded: true`, reason `downloaded-copy` |
+| No export function | `ok: false`, `applied: true`, `exported: false`, reason `export-unavailable` |
+| Thrown/rejected export | `ok: false`, `applied: true`, `exported: false`, reason `write-failed` |
 
-After an export failure, a supported in-memory node mutation and recorded operation remain. The popup runtime treats applied-but-not-exported as incomplete and stays dirty.
+Recognised failure reasons include `file-session-changed`, `cancelled`, `stale-guard`, `no-pocket-file`, `permission-denied`, `write-failed`, `downloaded-copy` and `export-unavailable`. The generated runtime maps these and the identity/revision/preflight reasons to calm, specific status and alert text rather than collapsing them into a generic failure.
 
-`pocket-state.js` still declares top-level lexical `state`, which is not automatically `window.state`. `PocketNodePopoutEditor.hasUnsavedOps()` reads `global.state`. An unchanged PE save can therefore miss lexical pending operations and skip an export request. This remains CURRENT-RISK.
+After an export failure, the supported in-memory mutation and its operation remain pending. The result includes `nodeUpdatedAt`; the popup adopts that revision whenever `applied: true`, while remaining dirty. A second unchanged save then passes the revision check. `getPocketUnsavedOperationCount()` reads lexical `state.ops` without exposing mutable state, so that retry still invokes `exportTree()`. A successful retry clears dirty only after truth persistence succeeds.
+
+After a successful picked-file save, the result also includes the newly active `sourceIdentity`. The popup adopts it only with successful persistence. It does not adopt the identity of a different file after a rejected switch or stale queued save.
+
+The generated runtime tracks an edit generation for an in-flight save. If the user makes a newer edit before the earlier save completes, that earlier success does not clear the newer dirty state. Save & Close closes only after successful truth persistence, or a genuinely unchanged save with no pending operation and no newer edit. Every rejection and every applied-but-not-exported result leaves the popup open and dirty.
+
+| Popup result | Revision adopted | Source identity adopted | Dirty/close result |
+| --- | --- | --- | --- |
+| Rejected before apply | No | No | Dirty; stays open |
+| Applied, export failed/cancelled/paused | Yes, the revision created by this apply | No | Dirty; stays open and retryable |
+| Export succeeded to active handle | Yes | Returned current identity, which remains the same session | Clean; Save & Close may close |
+| Export succeeded through picked-file adoption | Yes | Yes, the new session identity | Clean; Save & Close may close |
+| Save response succeeds but a newer popup edit exists | Yes for the saved generation | Only on successful export | Newer content remains dirty; no close |
+| Read-only unsupported editor | Not applicable | Not applicable | Always clean, never saves |
 
 ## 12. Browser safety storage versus truth-file persistence
 
@@ -428,7 +549,9 @@ Those are `localStorage` writes. They are not truth-file persistence. During loa
 
 Opening alone does not write the selected truth file. It can still mutate in-memory node shape through `node.pe` synthesis, and a later explicit export can carry that mutation. This remains CURRENT-RISK.
 
-P011 additionally verifies that local safety snapshot, safety trail, auto-cache and PiP recovery routes preserve raw large current editor objects, raw unknown editor objects and raw legacy `pe` values. Recovery normalisation does not convert their schema or trim them to the generic extras cap.
+P011 additionally verified that local safety snapshot, safety trail, auto-cache and PiP recovery routes preserve raw large current editor objects, raw unknown editor objects and raw legacy `pe` values. Recovery normalisation does not convert their schema or trim them to the generic extras cap.
+
+P012 treats adopting recovered, PiP or Vault state as a new document session even when the writable handle is unchanged. That invalidates existing PE source bindings before the replacement tree can be edited. This session renewal is in-memory safety state, not a truth-file write. Browser safety snapshots remain recovery support rather than working truth.
 
 ## 13. Stable behaviour assertions
 
@@ -446,6 +569,19 @@ The focused suite treats these as stable current assertions:
 - Read-only mode disables all edit and save controls, never becomes dirty, and closes with Close or Escape.
 - Application-level apply and save-request paths reject unsupported current nodes before mutation, operation recording or export.
 - The legacy editable popup is not a fallback for an unsupported node.
+- Every canonical editable opening carries a safe document-session token and exact original node revision, with no handle or mutable state.
+- A same-name or same-handle reload establishes a new session and invalidates older PE openings.
+- Routine successful writes to the already active handle do not invalidate a still-open PE.
+- File A/B same-ID, missing identity, stale node and missing node saves reject before mutation, operation recording or export.
+- A change to another node does not invalidate the target node's PE.
+- Raw title, body, row-count, row-text, ID, uniqueness, depth, collapse and Outline-shape checks run before slicing normalisers.
+- Existing supported raw Outline data is scanned before explicit Outline save so a truncated editing view cannot overwrite the preserved raw object as Outline.
+- Every preflight rejection leaves the node, operation list, workspace safety state, PiP snapshot and truth-write surfaces unchanged.
+- Changed apply returns the new node revision whether export succeeds or fails.
+- Failed or cancelled export keeps the popup dirty, and a retry can export its pending lexical operation without exposing `state`.
+- Successful save-as returns and adopts the new safe source identity.
+- The popup cannot become clean or close through Save & Close until persistence succeeds; newer edits made during an in-flight save also remain dirty.
+- Legacy apply/save routes delegate to the canonical owner or fail closed.
 - The selected truth file is not written merely by `applyLoadedState()`.
 - Browser recovery storage remains distinguishable from truth persistence.
 - Valid saved Outlines open from the editor array rather than reparsing body text.
@@ -453,7 +589,7 @@ The focused suite treats these as stable current assertions:
 - `buildPocketPayload()` emits guarded top-level and nested tree copies.
 - Text normalisation retains its tested whitespace and 4,000-character policy.
 - Changed supported applies record one `details_edit` operation; unchanged applies record none.
-- Failed controlled export results do not falsely report truth persistence.
+- Failed controlled export results preserve their meaningful reason and do not falsely report truth persistence.
 - Generated runtime programs compile for Text, saved Outline and rejected metadata payloads.
 - P008 Text-to-Outline uses the shared structured-paste parser.
 - Spaces, tabs, mixed indentation and common leading indentation retain hierarchy.
@@ -461,7 +597,7 @@ The focused suite treats these as stable current assertions:
 - Text to Outline to Text normalises to two-space indentation without flattening.
 - Copy context remains details-first and ignores editor metadata.
 
-P011 does not change active-file protections, Main Save ownership, PE dirty-after-failed-persistence behaviour, P006 selection/subtree actions, P007 Escape ordering, P008 indentation conversion, structured paste, the one Enter owner or truth-write routing.
+P012 preserves Main Save ownership, existing queued export/expected-handle protection, P011 unsupported-editor compatibility, P006 selection/subtree actions, P007 Escape ordering, P008 indentation conversion, structured paste, details-first copy context, the one Enter owner and truth-write routing.
 
 ## 14. Compatibility behaviour assertions
 
@@ -481,46 +617,55 @@ P011 does not change active-file protections, Main Save ownership, PE dirty-afte
 | Unknown editor schema | Raw value retained first-class | Details-only read-only view | Raw value retained through unrelated export | Stable preservation, unsupported editing |
 | Scalar or array editor | Raw value retained first-class | Details-only read-only view | Raw value retained through unrelated export | Stable preservation, unsupported editing |
 | Missing block ID in otherwise supported v1 | Raw missing value retained | PE view generates an ID | Generated ID persists after a changed Outline save | Compatibility |
-| Duplicate block IDs | Raw duplicates retained | PE view retains duplicates | Changed Outline save still contains duplicates | Current-risk |
-| Invalid or excessive depth | Raw value retained | PE rounds and clamps to 0 through 8 | Changed Outline save persists the clamped value | Compatibility |
-| More than 400 blocks or block text above 4,000 | Large raw editor retained | Supported view slices at current caps | Untouched export is raw; changed PE save can persist the sliced view | Current-risk at edit boundary |
+| Duplicate block IDs | Raw duplicates retained | PE view retains duplicates | Explicit Outline save is blocked before mutation; untouched export retains raw | Stable Outline-save defence; read-view compatibility |
+| Invalid or excessive depth | Raw value retained | PE view rounds/clamps for display | Explicit Outline save is blocked while stored raw data remains invalid; untouched export retains raw | Stable Outline-save defence; read-view compatibility |
+| More than 400 blocks or block text above 4,000 | Large raw editor retained | Supported view may slice at current caps | Explicit Outline save is blocked by stored-raw scan; untouched export retains raw | Stable Outline-save defence; read-view compatibility |
 | Mismatched details and supported Outline | Both retained | Outline wins mode while body remains independent | Drift survives untouched export | Current-risk |
 | Large or unknown `pe` | Raw value retained outside extras caps | Ignored by active standalone PE | Raw value retained through export and recovery | Compatibility |
+| PE bound to current file and matching node revision | Node resolves by explicit ID | Editable Text or Outline | Valid save applies and exports normally | Stable |
+| PE from an older file session, including same filename/ID | Active tree remains untouched | Stale popup remains dirty and readable/editable for copying | No operation, export, picker or write | Stable rejection |
+| PE with stale target-node revision | Current newer node remains untouched | Stale popup remains dirty | No operation or export | Stable rejection |
+| PE whose target node was deleted | No replacement lookup | Popup remains dirty | No operation or export | Stable rejection |
+| PE with over-limit or structurally unsafe raw save payload | Loaded state remains untouched | Exact issue and limit reported | No truncation, operation or export | Stable rejection |
+| Changed apply followed by failed/cancelled export | New in-memory revision and operation remain pending | Popup adopts its own new revision and remains dirty | Later unchanged retry exports pending operation | Stable retry |
+| Successful save-as to a picked file | New target becomes active with a new session | Still-open popup adopts returned identity | Later saves target the adopted document | Stable |
 | Unknown root schema with top-level tree | Best-effort top-level load | Nodes follow their individual PE rules | Export schema becomes `portal.export.v1` | Unsupported/unknown |
 | Unknown root schema with nested-data-only tree | No nodes loaded | No PE target | Empty normalised state if later exported | Unsupported/unknown |
 
-P011's cross-version promise is deliberately narrow. Current Pocket preserves unsupported editor JSON on unrelated load, recovery and export routes and shows only persisted `details` read-only. It does not promise that `details` exactly represents a future editor, that an older Pocket build will preserve fields it does not know, or that unsupported content can be edited bidirectionally.
+P011's cross-version promise remains deliberately narrow. Current Pocket preserves unsupported editor JSON on unrelated load, recovery and export routes and shows only persisted `details` read-only. It does not promise that `details` exactly represents a future editor, that an older Pocket build will preserve fields it does not know, or that unsupported content can be edited bidirectionally.
 
 Existing `node.pe` remains opaque compatibility data and is not synchronised by standalone PE edits. Raw arrays still load as `array.nodes`; `portal.mtt.web.v1`, `portal.sync.v1` and `portal.pocketlite.changes.v1` retain their established nested-container routes.
 
 ## 15. Current-risk characterisation assertions
 
-The suite contains these ten explicitly named passing tests:
+The suite retains these seven explicitly named characterisation tests:
 
 1. `CURRENT-RISK: active PE model retains duplicate non-empty block IDs`
-   - ID uniqueness is not enforced.
+   - Read-time supported-view normalisation retains duplicates. P012 separately blocks any explicit Outline save while duplicate cleaned IDs exist.
 2. `CURRENT-RISK: Outline normalisation silently slices block 401`
-   - The editing-view block cap truncates instead of rejecting before edit.
+   - The detached editing view still has a 400-row cap. P012's stored-raw scan prevents that view from overwriting the larger preserved raw object.
 3. `CURRENT-RISK: Outline normalisation silently slices block text at 4,001 characters`
-   - Per-block text is truncated in the editing view.
+   - The detached editing view still has a 4,000-character row cap. P012 blocks explicit save before the preserved raw text can be lost.
 4. `CURRENT-RISK: load-time pe synthesis changes a later explicit export shape without a truth write on open`
    - Load is truth-write-free but not shape-neutral in memory.
 5. `CURRENT-RISK: accepted Outline and details drift remain independent and Outline wins PE mode`
    - Mode/content selection and body projection can disagree.
 6. `CURRENT-RISK: portal.export.v1 top-level precedence drops nested data extras on later export`
    - A data-only extension is not retained on this route.
-7. `CURRENT-RISK: PE opening payload has no file-session or original-revision identity`
-   - Apply cannot bind itself to the source session or original node revision.
-8. `CURRENT-RISK: Outline apply accepts independent details/editor content and silently enforces title/body limits`
-   - Apply can persist drift and truncates title/body at current caps.
-9. `CURRENT-RISK: changed Text apply deletes accepted Outline metadata and blank details`
+7. `CURRENT-RISK: changed Text apply deletes accepted Outline metadata and blank details`
    - Explicit Text persistence removes IDs, depths and collapse metadata.
-10. `CURRENT-RISK: unchanged PE save cannot see lexical unsaved operations through window.state`
-    - An unchanged PE save can skip export when lexical operations are pending.
 
-The former load-owner, generic extras, oversized metadata, unknown-schema coercion and malformed-shape interpretation risks are no longer current-risk assertions. P011 replaces them with positive preservation, exact-gating and read-only tests.
+P012 replaces these former CURRENT-RISK observations with positive safety assertions:
 
-These tests freeze observations, not product policy. The ten named weaknesses remain present after P011.
+- missing file-session and original-node identity;
+- unchanged save being unable to see lexical pending operations;
+- explicit save silently accepting row 401 or row text at 4,001 characters;
+- explicit apply silently truncating title or body; and
+- explicit save accepting duplicate row IDs.
+
+The three retained read-view limit/duplicate tests do not grant permission to persist a lossy normalised Outline view. Their companion P012 tests prove explicit Outline-save rejection and zero mutation. The changed-Text deletion risk is intentionally retained separately for P013.
+
+These tests freeze observations, not product policy. The seven named weaknesses remain present after P012. Details/editor equality and destructive Text/Outline conversion remain P013 work. Load-time `node.pe` synthesis remains P014 work.
 
 ## 16. Fixture inventory
 
@@ -551,27 +696,34 @@ Large boundaries, scalar and array metadata, raw extension objects and recovery 
 | Text normalisation | Empty, whitespace, CR, tabs, trailing, outer, blank runs and 3,999/4,000/4,001 | Stable current limits |
 | Exact editor gate | Absent, null, v1, mode, array, meaningful, empty, blank, malformed, unknown, scalar and array | Stable recognition |
 | Raw supported v1 | Large object, extension fields and incoming order across load/export/reload | Stable preservation |
-| Block IDs/depth/order | Missing, duplicate, long ID, depth bounds, incoming order and unknown fields | Compatibility plus CURRENT-RISK duplicates |
-| Outline limits | 399/400/401 blocks and 3,999/4,000/4,001 block text | Stable boundaries plus CURRENT-RISK slicing |
+| Block IDs/depth/order | Read view plus explicit-save missing/duplicate/80/81 and depth 0/8/-1/9/fractional/non-finite checks | Stable save defence plus CURRENT-RISK read duplicates |
+| Outline limits | Read view and explicit save at 399/400/401 blocks and 3,999/4,000/4,001 block text | Stable non-lossy save defence plus CURRENT-RISK read slicing |
 | Native Outline open | IDs, depths, collapse, body drift and no reparse | Stable plus CURRENT-RISK drift |
 | Unsupported PE view | Read-only Text/details, warning, raw exclusion, disabled controls, Cmd/Ctrl+S, Escape and Close | Stable compatibility |
 | Apply defence | Unsupported apply and `applyAndSave()` with zero mutation, operation and export | Stable |
-| Cutover defence | Unsupported node cannot fall back; ordinary and supported nodes retain fallback | Stable |
+| Cutover and legacy defence | Canonical open only; old apply/save surfaces delegate to the safe owner or fail closed | Stable |
 | Unrelated edit | Raw unknown, malformed, large current editor and large `pe` preserved | Stable |
 | Recovery routes | Safety snapshot/trail, auto-cache and PiP with large and unknown metadata | Stable |
 | Load-time synthesis | No op, browser keys, zero truth surfaces and later export shape | CURRENT-RISK |
 | Root export | Schema, timestamps, guards, dual trees, tombstones, extras and detached clones | Stable |
 | Compact round trips | Text, empty, v1, malformed, unknown, drift and extras | Mixed |
-| PE identity | Missing source session and original revision | CURRENT-RISK |
-| PE apply | By ID, dual Outline write, Text deletion, unchanged detection, operation and caps | Mixed |
-| PE save request | Success, false/cancel, downloaded copy, throw and unavailable | Stable current result contract |
-| Lexical/global state | Pending lexical operation with unchanged PE | CURRENT-RISK |
-| Generated runtime | Compile states, exact Outline schema, parser, round trips and empty renderer | Stable |
+| Document identity | Valid, missing, malformed, wrong session, same-name A/B, PiP, same-handle reload and picked-file adoption | Stable |
+| Node revision | Match, missing, label/details/editor stale changes, unrelated-node change, deletion and successive saves | Stable |
+| Raw preflight | Title/body, block count/text, ID, duplicates, depth, malformed Outline, exact schema and Text unused Outline | Stable non-lossy save defence |
+| Rejection side effects | Exact node/editor/`pe`/revision/ops plus workspace, PiP, export, writer and picker counts | Stable |
+| Retry | Cancel, throw/write failure, stale guard, revision adoption, lexical pending op and successful second export | Stable |
+| Queued write | Active session switched before queued write runs; new file is not written | Stable |
+| PE apply | Explicit ID, dual Outline write, Text deletion, unchanged detection, operation and limits | Mixed, with P013 Text conversion risk |
+| PE save request | Success and precise cancel/stale/session/no-file/write/download/unavailable propagation | Stable |
+| Lexical operation helper | Read-only count supports unchanged retry without exposing mutable `state` | Stable |
+| Generated runtime | Compile states, bound Text/Outline payloads, read-only, rejection, retry, revision/identity adoption, parser, round trips and empty renderer | Stable |
+| P006/P007 runtime regressions | Subtree Copy, Paste-after-selection, Duplicate, Delete and Escape menu/dialog/row/close ordering | Stable |
 | Copy context | Details first, label fallback and editor ignored | Stable |
+| Main-tree Enter ownership | Active scripts retain `handleTreeKeydown` as the sole owner | Stable |
 
-The focused P011 suite reports 53 tests, 53 passes and 0 failures.
+The focused P012 suite reports 77 tests, 77 passes and 0 failures on Node `v23.11.0`.
 
-## 18. Change protocol for P012 and later tasks
+## 18. Change protocol for P013 and later tasks
 
 Any later task that changes a tested contract must:
 
@@ -583,23 +735,24 @@ Any later task that changes a tested contract must:
 6. keep browser safety writes distinct from truth persistence;
 7. preserve raw unsupported metadata through unrelated paths;
 8. test both sides of every changed cap or schema gate;
-9. compile and exercise generated runtime whenever payload or runtime shape changes;
-10. rehearse any destructive migration only with disposable copies; and
-11. require Murray's product decision before changing conversion meaning, older-version promises or migration triggers.
+9. preserve the P012 check order and assert zero mutation for every new rejection;
+10. compile and exercise generated runtime whenever payload or runtime shape changes;
+11. test failed persistence and retry whenever apply/export semantics change;
+12. rehearse any destructive migration only with disposable copies; and
+13. require Murray's product decision before changing conversion meaning, older-version promises or migration triggers.
 
 Tentative next boundaries remain:
 
-- **P012, identity binding and non-lossy preflight:** add file-session identity and original node revision, reject stale or mismatched saves before mutation, and validate block counts, text sizes and duplicate IDs without silently slicing. Rejection must leave PE dirty and must not export. Murray must decide size-limit UX and whether explicit truncation is ever allowed.
 - **P013, explicit Text/Outline conversion:** define whether Text on a saved Outline is projection-only or an explicit destructive conversion. Preserve IDs and collapse state unless the user confirms conversion. Murray must decide the product meaning before implementation.
 - **P014, retire `node.pe` as live content:** stop load-time synthesis and stale search use while continuing to preserve existing raw `pe` values. No existing value may be deleted automatically. Murray must confirm preserve-and-stop-generating rather than promotion or synchronisation.
 
-P011 does not approve those phases. No future task should make opening a file silently migrate it. Ordinary explicit Save must not mass-rewrite untouched nodes merely because a newer reader recognised them.
+P012 does not approve those phases. No future task should make opening a file silently migrate it. Ordinary explicit Save must not mass-rewrite untouched nodes merely because a newer reader recognised them.
 
-The lexical `state` versus `window.state` gap also needs deliberately scoped future work. This contract does not prescribe exposing mutable state globally.
+P012 closes the specific lexical-operation visibility gap with `getPocketUnsavedOperationCount()`. Future work must keep that surface narrow and read-only. It must not expose `window.state` or permit callers to replace `state.ops`.
 
 ## 19. Non-goals
 
-P011 does not add or propose:
+P012 does not add or propose:
 
 - autosave;
 - cloud synchronisation;
@@ -615,7 +768,9 @@ P011 does not add or propose:
 - a current truth-file schema migration;
 - changes to root-shape precedence or root extras;
 - removal of load-time `pe` synthesis;
-- file-session identity or stale-revision protection;
+- persisted file-session or revision fields in the truth schema;
+- automatic merge, rebase or last-writer-wins;
+- “save anyway”, explicit truncation or automatic duplicate-ID repair;
 - new Text/Outline conversion semantics;
 - changes to existing title, details, block or depth caps;
 - changes to Main Save, PE Save ownership or active-file protections;
@@ -625,4 +780,4 @@ P011 does not add or propose:
 - changes to details-first copy context or the one active main-tree Enter owner; or
 - inspection or testing of Murray's personal Pocket files.
 
-Future desired behaviour remains documented in `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`. P011's role is narrower: make first-class metadata recognition and preservation safe without silently migrating Pocket's explicit truth file.
+Future desired behaviour remains documented in `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`. P012's role is narrower: bind explicit PE saves to their source, reject stale or lossy saves, and preserve retry without silently migrating Pocket's explicit truth file.

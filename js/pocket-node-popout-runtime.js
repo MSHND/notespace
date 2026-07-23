@@ -7,6 +7,7 @@
   var payload = ${initialJson};
   var readOnly = payload.readOnly === true;
   var dirty = false;
+  var editGeneration = 0;
   var allowedToClose = false;
   var mode = !readOnly && payload.mode === "outline" ? "outline" : "text";
   var outline = !readOnly && Array.isArray(payload.outline) ? payload.outline.map(function (b) { return { id: b.id || "", text: String(b.text || ""), depth: Math.max(0, Math.min(8, Number(b.depth) || 0)), collapsed: b.collapsed === true }; }) : null;
@@ -29,7 +30,7 @@
   var outlineContextReturnFocus = null;
   var saveInFlight = false;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
-  function setDirty(next) { if (readOnly) { dirty = false; document.body.classList.remove("isDirty"); return; } dirty = !!next; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
+  function setDirty(next) { if (readOnly) { dirty = false; document.body.classList.remove("isDirty"); return; } dirty = !!next; if (dirty) editGeneration += 1; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function applyReadOnlyState() {
     if (!readOnly) return;
     document.body.classList.add("readOnly");
@@ -524,9 +525,30 @@
   function buildPayload() {
     if (readOnly) return null;
     if (Array.isArray(outline)) { syncOutlineFromDom(); outline.forEach(ensureBlockId); }
-    var nextPayload = { id: payload.id, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() };
+    var nextPayload = {
+      id: payload.id,
+      title: titleInput.value,
+      body: currentBody(),
+      mode: mode,
+      outline: outline,
+      updatedAt: new Date().toISOString(),
+      fileSessionId: payload.fileSessionId,
+      sourceFileName: payload.sourceFileName,
+      sourcePipSession: payload.sourcePipSession,
+      originalUpdatedAt: payload.originalUpdatedAt
+    };
     if (mode === "outline") nextPayload.schema = "pocket.nodeEditor.v1";
     return nextPayload;
+  }
+  function hasCompleteSaveContext() {
+    return Number.isSafeInteger(payload.fileSessionId)
+      && payload.fileSessionId >= 0
+      && typeof payload.sourceFileName === "string"
+      && payload.sourceFileName.length <= 120
+      && typeof payload.sourcePipSession === "boolean"
+      && typeof payload.originalUpdatedAt === "string"
+      && payload.originalUpdatedAt.length > 0
+      && payload.originalUpdatedAt.length <= 40;
   }
   function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
   function hideUnsavedDialog() { unsavedDialog.hidden = true; }
@@ -554,25 +576,101 @@
     }
     return true;
   }
-  function handleSaveResult(result, closeAfter) {
+  function adoptAcceptedResult(result) {
+    if (!result || result.applied !== true) return;
+    if (typeof result.nodeUpdatedAt === "string" && result.nodeUpdatedAt) {
+      payload.originalUpdatedAt = result.nodeUpdatedAt;
+      payload.updatedAt = result.nodeUpdatedAt;
+    }
+    var identity = result.sourceIdentity;
+    if (!result.ok || !result.exported || !identity || !Number.isSafeInteger(identity.fileSessionId)) return;
+    payload.fileSessionId = identity.fileSessionId;
+    payload.sourceFileName = typeof identity.sourceFileName === "string" ? identity.sourceFileName : "";
+    payload.sourcePipSession = identity.sourcePipSession === true;
+  }
+  function saveFailureDetails(result) {
+    var reason = result && result.reason ? result.reason : "save-failed";
+    if (reason === "file-session-changed") return {
+      status: "Different Pocket file — not saved",
+      message: "Pocket is now using a different file. Your editor changes were not applied. Copy anything you need, close this editor, and reopen the item from the current file."
+    };
+    if (reason === "node-revision-changed") return {
+      status: "Item changed elsewhere — not saved",
+      message: "This item changed after the editor was opened. Your changes were not applied. Copy anything you need, then close and reopen the item."
+    };
+    if (reason === "missing-node") return {
+      status: "Item no longer exists — not saved",
+      message: "This item no longer exists. Your editor changes were not applied."
+    };
+    if (reason === "missing-source-identity" || reason === "missing-node-revision") return {
+      status: "Editor source could not be verified — not saved",
+      message: "Pocket could not verify where this editor belongs. Nothing was changed. Close and reopen the item before saving."
+    };
+    if (reason === "cancelled") return {
+      status: "Save cancelled — not saved",
+      message: "The truth-file save was cancelled. Your editor changes are still here."
+    };
+    if (reason === "stale-guard") return {
+      status: "Truth-file safety check — not saved",
+      message: "Pocket paused at its stale-file safety check. Your editor changes are still here."
+    };
+    if (reason === "no-pocket-file") return {
+      status: "No writable Pocket file — not saved",
+      message: "Pocket does not have a current writable file. Your editor changes are still here."
+    };
+    if (reason === "downloaded-copy") return {
+      status: "Copy downloaded — truth file not saved",
+      message: "Pocket made a separate download, but the current truth file was not saved. Your editor remains unsaved."
+    };
+    if (reason === "export-unavailable") return {
+      status: "Truth-file save unavailable",
+      message: "Pocket could not reach the current truth-file save path. Your editor changes are still here."
+    };
+    if (reason === "write-failed" || reason === "permission-denied") return {
+      status: "Truth-file write failed — not saved",
+      message: "Pocket could not write the truth file. Your editor changes are still here, so you can retry."
+    };
+    return {
+      status: result && result.status ? result.status : "Save not completed",
+      message: result && result.message ? result.message : "Pocket did not complete the truth-file save. Your editor changes are still here."
+    };
+  }
+  function handleSaveResult(result, closeAfter, saveGeneration) {
     result = result || {};
-    if (result.ok && result.exported) return finishSuccessfulSave(closeAfter, "saved");
-    if (result.ok && result.reason === "unchanged") return finishSuccessfulSave(closeAfter, "no changes");
+    adoptAcceptedResult(result);
+    if (result.ok && result.exported) {
+      if (editGeneration !== saveGeneration) {
+        setDirty(true);
+        setSaveState("earlier changes saved — newer edits remain", "saved");
+        return false;
+      }
+      return finishSuccessfulSave(closeAfter, "saved");
+    }
+    if (result.ok && result.reason === "unchanged") {
+      if (editGeneration !== saveGeneration) {
+        setDirty(true);
+        setSaveState("newer edits remain", "failed");
+        return false;
+      }
+      return finishSuccessfulSave(closeAfter, "no changes");
+    }
+    var failure = saveFailureDetails(result);
     if (result.applied && !result.exported) {
       setDirty(true);
-      setSaveState("save not completed", "failed");
+      setSaveState(failure.status, "failed");
+      alert(failure.message);
       return false;
     }
     setDirty(true);
-    setSaveState("failed", "failed");
-    alert("Pocket did not accept the save. Copy your text before closing.");
+    setSaveState(failure.status, "failed");
+    alert(failure.message);
     return false;
   }
   function handleSaveError(error) {
     console.error(error);
     setDirty(true);
-    setSaveState("failed", "failed");
-    alert("Pocket is not connected. Copy your text before closing.");
+    setSaveState("Truth-file write failed — not saved", "failed");
+    alert("Pocket could not complete the truth-file save. Your editor changes are still here, so you can retry.");
     return false;
   }
   function save(closeAfter) {
@@ -580,28 +678,30 @@
     closeAfter = closeAfter === true;
     if (saveInFlight) return false;
     hideUnsavedDialog();
+    if (!hasCompleteSaveContext()) {
+      handleSaveResult({
+        ok: false,
+        applied: false,
+        exported: false,
+        reason: "missing-source-identity"
+      }, closeAfter, editGeneration);
+      return false;
+    }
     setSaveState("saving…", "");
     saveInFlight = true;
+    var saveGeneration = editGeneration;
+    var outgoingPayload = buildPayload();
     try {
       if (window.opener && !window.opener.closed && window.opener.PocketNodePopoutEditor) {
         if (typeof window.opener.PocketNodePopoutEditor.applyAndSave === "function") {
-          Promise.resolve(window.opener.PocketNodePopoutEditor.applyAndSave(buildPayload())).then(function (result) {
+          Promise.resolve(window.opener.PocketNodePopoutEditor.applyAndSave(outgoingPayload)).then(function (result) {
             saveInFlight = false;
-            handleSaveResult(result, closeAfter);
+            handleSaveResult(result, closeAfter, saveGeneration);
           }, function (error) {
             saveInFlight = false;
             handleSaveError(error);
           });
           return true;
-        }
-        if (typeof window.opener.PocketNodePopoutEditor.apply === "function") {
-          var ok = window.opener.PocketNodePopoutEditor.apply(buildPayload());
-          saveInFlight = false;
-          if (ok) {
-            setDirty(true);
-            setSaveState("save not completed", "failed");
-            return false;
-          }
         }
       }
     } catch (error) {

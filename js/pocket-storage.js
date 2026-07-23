@@ -366,6 +366,7 @@ function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot()) {
   if (!snapshot || !snapshot.norm) return false;
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const parsed = snapshot.parsed || {};
+  if (typeof renewPocketDocumentSession === "function") renewPocketDocumentSession();
   applyLoadedState(snapshot.norm, {
     schema: snapshot.norm.schema,
     fileName: cleanText(parsed?.source?.fileName, 120) || "local safety snapshot",

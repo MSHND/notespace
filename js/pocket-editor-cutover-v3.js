@@ -147,11 +147,12 @@
       ok = false;
     }
 
-    if (!ok && !readOnlyCompatibility) ok = openLegacyFallback(node);
     if (!ok && readOnlyCompatibility) {
       setStatusSafe("This item requires Pocket's read-only compatibility view. Its editor data was not changed.", "warn");
     }
-    if (!ok && !readOnlyCompatibility) setStatusSafe("Editor failed to open. Refresh and try again.", "warn");
+    if (!ok && !readOnlyCompatibility) {
+      setStatusSafe("The safe editor could not open. Nothing was changed. Allow popups, then try again.", "warn");
+    }
     console.info("[editor cutover v3] editor open result", { ok, id: node.id });
     return ok;
   }

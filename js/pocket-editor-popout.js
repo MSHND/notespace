@@ -232,52 +232,14 @@
   }
 
   function applyPopoutEdit(payload) {
-    if (!payload || !cleanText(payload.id, 80)) {
-      setStatus("Editor popout could not identify the item.", "warn");
+    const canonical = global.PocketNodePopoutEditor;
+    if (!canonical || typeof canonical.apply !== "function") {
+      if (typeof setStatus === "function") {
+        setStatus("This older editor cannot save safely. Close it and reopen the item.", "warn", { durationMs: 6200 });
+      }
       return false;
     }
-    const id = cleanText(payload.id, 80);
-    const node = nodeMap().get(id) || null;
-    if (!node) {
-      setStatus("Editor popout item no longer exists.", "warn");
-      return false;
-    }
-
-    const beforeEditor = JSON.stringify(normalisePopoutEditorMeta(node.editor) || null);
-    const beforeLabel = cleanText(node.label, 220);
-    const beforeDetails = normaliseDetails(node.details, 4000);
-    const nextLabel = cleanText(payload.title, 220) || beforeLabel || "Untitled";
-    const nextDetails = normaliseDetails(String(payload.body || ""), 4000);
-    const editorMeta = normalisePopoutEditorMeta(payload);
-    const afterEditor = JSON.stringify(editorMeta || null);
-    const changed = beforeLabel !== nextLabel || beforeDetails !== nextDetails || beforeEditor !== afterEditor;
-
-    if (!changed) {
-      clearStoredDraft(id);
-      setStatus("No editor changes to save.", "ok");
-      return true;
-    }
-
-    node.label = nextLabel;
-    if (nextDetails) node.details = nextDetails;
-    else delete node.details;
-    if (editorMeta) node.editor = editorMeta;
-    else delete node.editor;
-    node.updatedAt = nowIso();
-
-    if (el.detailEditorLabel instanceof HTMLInputElement && cleanText(state.detailsEdit?.id, 80) === id) el.detailEditorLabel.value = nextLabel;
-    if (el.detailEditorBody instanceof HTMLTextAreaElement && cleanText(state.detailsEdit?.id, 80) === id) el.detailEditorBody.value = nextDetails;
-
-    state.selectedId = id;
-    recordOp({ type: "details_edit", id, path: getPath(id), changed: editorMeta ? "outline" : "details" });
-    refreshMeta();
-    renderTree();
-    focusRowByNodeId(id, { instant: true });
-    saveWorkspaceState();
-    persistPipSnapshot();
-    clearStoredDraft(id);
-    setStatus(editorMeta ? `Saved outline for "${cleanText(node.label, 80)}".` : `Saved details for "${cleanText(node.label, 80)}".`, "ok");
-    return true;
+    return canonical.apply(payload) === true;
   }
 
   function notifyPopoutSaved() {

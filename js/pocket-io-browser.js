@@ -56,7 +56,7 @@ async function openPipWindow() {
     );
     pipWin.document.close();
     pipWin.__pocketLiteSaveFromPip = async (snapshot) => {
-      if (!adoptPocketLiteSessionState(snapshot)) {
+      if (!adoptPocketDocumentFromPip(snapshot)) {
         return { ok: false, error: "Could not receive PiP changes." };
       }
       const saved = await exportTree({ downloadFallback: false });
@@ -75,7 +75,7 @@ async function openPipWindow() {
         const snapshot = typeof exportSession === "function"
           ? exportSession({ commitDetails: true })
           : null;
-        if (snapshot && snapshot.dirty) adoptPocketLiteSessionState(snapshot);
+        if (snapshot && snapshot.dirty) adoptPocketDocumentFromPip(snapshot);
       } catch {}
     });
     setStatus("Opened popout window.", "ok");
@@ -116,7 +116,6 @@ function setPocketFileSession(handle, displayName, options = {}) {
   const session = pocketFileState();
   const targetChanged = truthFileHandle !== nextHandle
     || session.writable !== nextWritable
-    || session.displayName !== nextName
     || session.pipSession !== nextPip;
   truthFileHandle = nextHandle;
   session.writable = nextWritable;
@@ -124,7 +123,7 @@ function setPocketFileSession(handle, displayName, options = {}) {
   session.pendingName = "";
   session.gateMode = "";
   session.pipSession = nextPip;
-  if (targetChanged) pocketFileSessionId += 1;
+  if (targetChanged || options.forceNewSession === true) pocketFileSessionId += 1;
   return session;
 }
 
@@ -164,6 +163,37 @@ function isPocketFileSaveSessionCurrent(snapshot) {
   return !!snapshot
     && snapshot.id === pocketFileSessionId
     && snapshot.handle === truthFileHandle;
+}
+
+function capturePocketEditorSourceIdentity() {
+  const session = pocketFileState();
+  return {
+    fileSessionId: pocketFileSessionId,
+    sourceFileName: cleanText(session.displayName || state.source?.fileName, 120),
+    sourcePipSession: session.pipSession === true,
+  };
+}
+
+function isPocketEditorSourceIdentityCurrent(identity) {
+  return !!identity
+    && typeof identity === "object"
+    && !Array.isArray(identity)
+    && Number.isSafeInteger(identity.fileSessionId)
+    && identity.fileSessionId >= 0
+    && identity.fileSessionId === pocketFileSessionId;
+}
+
+function renewPocketDocumentSession() {
+  const session = pocketFileState();
+  setPocketFileSession(truthFileHandle, session.displayName || state.source?.fileName, {
+    pipSession: session.pipSession === true,
+    forceNewSession: true,
+  });
+  return capturePocketEditorSourceIdentity();
+}
+
+function adoptPocketDocumentFromPip(snapshot) {
+  return typeof adoptPocketLiteSessionState === "function" && adoptPocketLiteSessionState(snapshot);
 }
 
 function canShowPocketTree() {
@@ -352,28 +382,32 @@ async function loadFromFileHandle(handle, options = {}) {
         return showPocketFilePermissionExplanation(handle, opts.displayName || handle.name);
       }
       if (permissionState !== "granted") {
-        clearPocketFileSession({ keepRecent: true });
         setStatus("Pocket needs permission to save changes to that file.", "warn", { durationMs: 6200 });
         if (typeof renderTree === "function") renderTree();
         return false;
       }
     }
     const file = await handle.getFile();
-    setPocketFileSession(handle, opts.displayName || file.name || handle.name);
-    const loaded = await loadFromFile(file);
+    const fileSession = {
+      handle,
+      displayName: opts.displayName || file.name || handle.name,
+      adoptedIdentity: null,
+    };
+    const loaded = await loadFromFile(file, {
+      fileSession,
+    });
     if (!loaded) {
-      clearPocketFileSession({ keepRecent: true });
       if (typeof renderTree === "function") renderTree();
       return false;
     }
-    await storeRecentPocketFileMeta(file.name || handle.name);
+    if (!isPocketEditorSourceIdentityCurrent(fileSession.adoptedIdentity)) return true;
+    void storeRecentPocketFileMeta(file.name || handle.name);
     pocketFileState().recentName = cleanText(file.name || handle.name, 120);
     setStatus("Pocket file loaded. Changes will save in the right place.", "ok", { durationMs: 5200 });
     refreshMeta();
     return true;
   } catch (err) {
     console.warn("[pocket-lite] open file handle failed", err);
-    clearPocketFileSession({ keepRecent: true });
     setStatus("Could not open that Pocket file.", "warn");
     if (typeof renderTree === "function") renderTree();
     return false;
@@ -428,7 +462,7 @@ async function writePocketPayloadToHandle(payload, handle) {
 async function writeTruthFile(payload, options = {}) {
   const expectedSession = options.expectedSession || null;
   const activeHandle = expectedSession && expectedSession.handle ? expectedSession.handle : truthFileHandle;
-  let activeHandleFailedForCurrentSession = false;
+  const expectedSessionIsCurrent = () => !expectedSession || isPocketFileSaveSessionCurrent(expectedSession);
   const resolveSavePicker = () => {
     const scopes = [window];
     try {
@@ -458,45 +492,49 @@ async function writeTruthFile(payload, options = {}) {
   try {
     if (activeHandle) {
       const existingAttempt = await writePocketPayloadToHandle(payload, activeHandle);
-      if (existingAttempt.ok) {
-        const name = cleanText(activeHandle.name || state.source?.fileName, 120);
-        if (!expectedSession || isPocketFileSaveSessionCurrent(expectedSession)) {
-          setPocketFileSession(activeHandle, name);
-          void storeRecentPocketFileMeta(name);
-        }
-        return { ...existingAttempt, target: "opened-file" };
-      }
-      if (existingAttempt.permissionDenied) return existingAttempt;
-      if (expectedSession && !isPocketFileSaveSessionCurrent(expectedSession)) {
+      if (!expectedSessionIsCurrent()) {
         return { ok: false, reason: "file-session-changed" };
       }
-      if (!expectedSession || isPocketFileSaveSessionCurrent(expectedSession)) {
-        clearPocketFileSession({ keepRecent: true });
-        activeHandleFailedForCurrentSession = true;
+      if (existingAttempt.ok) {
+        const name = cleanText(activeHandle.name || state.source?.fileName, 120);
+        setPocketFileSession(activeHandle, name);
+        void storeRecentPocketFileMeta(name);
+        return {
+          ...existingAttempt,
+          target: "opened-file",
+          sourceIdentity: capturePocketEditorSourceIdentity(),
+        };
       }
+      if (existingAttempt.permissionDenied) return existingAttempt;
     }
 
-    if (expectedSession && !activeHandleFailedForCurrentSession && !isPocketFileSaveSessionCurrent(expectedSession)) {
-      return { ok: false, reason: "file-session-changed" };
-    }
+    if (!expectedSessionIsCurrent()) return { ok: false, reason: "file-session-changed" };
     const pickedHandle = await pickHandle();
     if (!pickedHandle) return { ok: false, reason: "unsupported" };
+    if (!expectedSessionIsCurrent()) return { ok: false, reason: "file-session-changed" };
     const pickedAttempt = await writePocketPayloadToHandle(payload, pickedHandle);
+    if (!expectedSessionIsCurrent()) {
+      return { ok: false, reason: "file-session-changed", wroteSeparateCopy: pickedAttempt.ok === true };
+    }
     if (pickedAttempt.ok) {
       const name = cleanText(pickedHandle.name || "pocket-data.json", 120);
-      setPocketFileSession(pickedHandle, name);
-      await storeRecentPocketFileMeta(name);
-      return { ...pickedAttempt, target: "picked-file" };
+      setPocketFileSession(pickedHandle, name, { forceNewSession: true });
+      state.source.fileName = name;
+      const adoptedIdentity = capturePocketEditorSourceIdentity();
+      void storeRecentPocketFileMeta(name);
+      return {
+        ...pickedAttempt,
+        target: "picked-file",
+        adoptedFromSessionId: expectedSession ? expectedSession.id : null,
+        sourceIdentity: adoptedIdentity,
+      };
     }
     return pickedAttempt;
   } catch (err) {
     if (isFilePickerAbort(err)) {
-      return { ok: false, aborted: true, error: err };
+      return { ok: false, reason: "cancelled", aborted: true, error: err };
     }
-    if (!expectedSession || isPocketFileSaveSessionCurrent(expectedSession)) {
-      clearPocketFileSession({ keepRecent: true });
-    }
-    return { ok: false, aborted: false, error: err };
+    return { ok: false, reason: "write-failed", aborted: false, error: err };
   }
 }
 
@@ -552,15 +590,14 @@ async function createNewPocketFile() {
       return false;
     }
     const name = cleanText(handle.name || "pocket-data.json", 120);
-    setPocketFileSession(handle, name);
-    await storeRecentPocketFileMeta(name);
-    pocketFileState().recentName = name;
     const norm = normaliseInput(payload);
+    setPocketFileSession(handle, name, { forceNewSession: true });
     applyLoadedState(norm, {
       schema: norm.schema,
       fileName: name,
       writtenAt: norm.writtenAt || payload.writtenAt || "",
     }, { skipLocalSafetyCheck: true });
+    pocketFileState().recentName = name;
     state.ops = [];
     clearLocalSafetySnapshot();
     clearConflictGuard();
@@ -568,6 +605,7 @@ async function createNewPocketFile() {
     refreshMeta();
     renderTree();
     setStatus("Pocket file created. Changes will save in the right place.", "ok", { durationMs: 5200 });
+    void storeRecentPocketFileMeta(name);
     return true;
   } catch (err) {
     if (isFilePickerAbort(err)) {
@@ -664,7 +702,14 @@ async function exportTree(options = {}) {
     const payload = buildPocketPayload(nowIso());
     saveLastSaveSnapshot(payload);
     const writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
-    if (!isPocketFileSaveSessionCurrent(saveSession) && !(writeResult && writeResult.ok && writeResult.target === "picked-file")) {
+    const pickedFileAdoption = !!(
+      writeResult
+      && writeResult.ok
+      && writeResult.target === "picked-file"
+      && writeResult.adoptedFromSessionId === saveSession.id
+      && isPocketEditorSourceIdentityCurrent(writeResult.sourceIdentity)
+    );
+    if (!isPocketFileSaveSessionCurrent(saveSession) && !pickedFileAdoption) {
       return exportTreeResult(options, false, "file-session-changed");
     }
     if (writeResult.ok) {
@@ -685,7 +730,10 @@ async function exportTree(options = {}) {
       clearConflictGuard();
       persistPipSnapshot();
       refocusTreeNavigation(state.selectedId);
-      return exportTreeResult(options, true, "truth-file", { target: writeResult.target || "truth-file" });
+      return exportTreeResult(options, true, "truth-file", {
+        target: writeResult.target || "truth-file",
+        sourceIdentity: writeResult.sourceIdentity || capturePocketEditorSourceIdentity(),
+      });
     }
     if (writeResult.aborted) {
       setStatus("Save cancelled.", "warn");
@@ -734,8 +782,22 @@ function saveCurrentContext() {
 
 async function loadFromFile(file, options = {}) {
   if (!file) return false;
-  const opts = { allowImportFallback: false, ...options };
-  if (!canShowPocketTree()) {
+  const opts = { allowImportFallback: false, fileSession: null, ...options };
+  const pendingFileSession = opts.fileSession
+    && opts.fileSession.handle
+    && typeof opts.fileSession.handle === "object"
+    ? opts.fileSession
+    : null;
+  const adoptLoadedFileSession = () => {
+    if (!pendingFileSession) return;
+    setPocketFileSession(
+      pendingFileSession.handle,
+      pendingFileSession.displayName || file.name || pendingFileSession.handle.name,
+      { forceNewSession: true }
+    );
+    pendingFileSession.adoptedIdentity = capturePocketEditorSourceIdentity();
+  };
+  if (!canShowPocketTree() && !pendingFileSession) {
     setStatus("Use Choose Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
     return false;
   }
@@ -754,6 +816,7 @@ async function loadFromFile(file, options = {}) {
     const latestChange = pickLatestChangeSnapshot(ndjsonEntries);
     if (opts.allowImportFallback && latestChange && latestChange.norm && Array.isArray(latestChange.norm.nodes) && latestChange.norm.nodes.length > 0) {
       snapshotCurrentTreeForRestore();
+      adoptLoadedFileSession();
       applyLoadedState(latestChange.norm, {
         schema: latestChange.norm.schema || "pocket.change.v1",
         fileName: cleanText(file.name, 120),
@@ -788,6 +851,7 @@ async function loadFromFile(file, options = {}) {
   if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) {
     if (isPocketPayloadShape(parsed)) {
       snapshotCurrentTreeForRestore();
+      adoptLoadedFileSession();
       applyLoadedState(norm, {
         schema: norm.schema || "",
         fileName: cleanText(file.name, 120),
@@ -818,6 +882,7 @@ async function loadFromFile(file, options = {}) {
     return false;
   }
   snapshotCurrentTreeForRestore();
+  adoptLoadedFileSession();
   applyLoadedState(norm, {
     schema: norm.schema || "",
     fileName: cleanText(file.name, 120),

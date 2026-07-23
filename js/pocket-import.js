@@ -136,7 +136,10 @@ function restoreFromPipSnapshot() {
       writtenAt: cleanText(parsed.source && parsed.source.writtenAt, 40),
     };
     if (typeof setPocketFileSession === "function") {
-      setPocketFileSession(null, state.source.fileName || "Pocket popout", { pipSession: true });
+      setPocketFileSession(null, state.source.fileName || "Pocket popout", {
+        pipSession: true,
+        forceNewSession: true,
+      });
     }
     refreshMeta();
     renderTree();

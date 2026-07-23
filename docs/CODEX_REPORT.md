@@ -1,5 +1,378 @@
 # Codex report
 
+## POCKET TASK P012
+
+Title: Bind PE saves to source identity and block lossy saves
+
+Status: source-bound PE saves, optimistic node-revision checks, non-lossy raw save preflight and failed-export retry implemented and validated. Physical browser acceptance remains.
+
+Commit title:
+
+- `P012 Bind PE saves to source identity`
+
+### Starting point
+
+- Repository: `MSHND/notespace`
+- Local repository: `/Users/murrayhenderson/Library/Mobile Documents/com~apple~CloudDocs/MSHND-notespace`
+- Configured origin: `https://github.com/MSHND/notespace.git`
+- Expected and confirmed starting `origin/main`: `a79b16638818681ea06ab1b4264341475bce766f`
+- Starting commit: `P011 Consolidate PE editor recognition`
+- Local `main` matched `origin/main`, and the working tree was clean before P012.
+- `git fetch origin` found no commits newer than the expected P011 baseline.
+- Murray supplied physical-browser acceptance for P011 ordinary Text, ordinary Outline and unsupported-editor compatibility views.
+- No personal or active Pocket truth file outside the repository was inspected.
+
+### Outcome
+
+P012 makes an editable PE save conditional on both the document session and the node revision it opened. It also checks the unsliced save payload before any normaliser can truncate or structurally alter user content.
+
+The resulting boundary is:
+
+- every canonical opening carries a JSON-safe file-session token, diagnostic filename and PiP flag, plus the exact normalised `node.updatedAt`;
+- the main-window apply owner checks the active document session before resolving a node ID;
+- the explicitly resolved node must still exist and retain the opening revision;
+- P011 unsupported-editor recognition is re-run against current state;
+- Text and Outline payloads are checked against the current persistence limits before mutation;
+- explicit Outline save rejects duplicate or invalid row IDs, unsafe depths, malformed rows, non-meaningful metadata and hidden stored-raw loss;
+- no failed preflight changes node state, operations, browser safety state, PiP state or truth-write surfaces;
+- changed apply returns its new node revision even when truth persistence fails;
+- the popup adopts that revision, remains dirty, and can retry the pending truth export; and
+- a successful picked-file save returns the new safe document identity for the still-open popup to adopt.
+
+Normal successful Text and v1 Outline saves retain their established behaviour. No truth-file schema field or node field was added.
+
+### Files changed
+
+Production files:
+
+- `js/pocket-editor-copy.js`
+- `js/pocket-editor-cutover-v3.js`
+- `js/pocket-editor-popout.js`
+- `js/pocket-history-status.js`
+- `js/pocket-import.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-node-popout-editor.js`
+- `js/pocket-node-popout-model.js`
+- `js/pocket-node-popout-runtime.js`
+- `js/pocket-node-popout-target.js`
+- `js/pocket-pe-save-dirty.js`
+- `js/pocket-storage.js`
+- `js/pocket-vault-io-browser.js`
+
+Test and documentation files:
+
+- `tests/pe-persistence-contract.test.js`
+- `docs/PE_PERSISTENCE_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No fixture, `package.json`, `index.html`, dependency, production JSON example or retired `pocket-editor-popout-default.js` file changed.
+
+### Source identity design
+
+`js/pocket-io-browser.js` now owns two explicit popup-safe helpers:
+
+- `capturePocketEditorSourceIdentity()` returns only `fileSessionId`, `sourceFileName` and `sourcePipSession`; and
+- `isPocketEditorSourceIdentityCurrent(identity)` treats the numeric session ID as authoritative.
+
+The display name and PiP flag are diagnostics. They are not treated as unique identity. The object contains no writable handle, picker callback, permission, file object or mutable application state.
+
+`PocketNodePopoutModel.buildPayload()` includes those three fields plus `originalUpdatedAt`. The latter is the exact normalised node timestamp at opening, not a new clock value. The generated popup returns the binding unchanged on every attempt and cannot create a replacement identity.
+
+The main-window apply order is:
+
+1. confirm a current modifiable Pocket document;
+2. validate the source-identity shape;
+3. compare the source session with the active document session;
+4. validate and resolve the explicit target ID through `PocketNodePopoutTarget.getById()`;
+5. confirm the node still exists;
+6. require the original node revision;
+7. compare it with the current node revision;
+8. re-run the P011 unsupported-editor classification;
+9. run stored-raw and incoming raw save preflight;
+10. calculate and apply a mutation only after every gate passes; and
+11. record an operation and request export only after successful apply.
+
+This ordering prevents an editor opened from file A from resolving a same-ID node in file B.
+
+### Document-session increment rules
+
+`pocketFileSessionId` remains runtime-only. P012 makes session renewal deliberate:
+
+- every successfully loaded selected file creates a new session, including a successful reload of the same handle;
+- a newly created Pocket file creates a new session;
+- a picked truth-file target creates a new session only after its write succeeds and it becomes active;
+- PiP snapshot adoption creates a new session;
+- local safety, returned PiP and Vault whole-document adoption create a new session; and
+- a routine successful write to the already active handle does not create a new session.
+
+Changing only the display name does not rotate identity. `setPocketFileSession()` accepts `forceNewSession: true` only at document-adoption boundaries. Existing queued-save handle and session checks remain in place.
+
+Selected-file validation happens before adoption. An unreadable or invalid candidate does not first clear or replace the current document session. The post-adoption paths contain no asynchronous gap in which a later document switch could be relabelled as the earlier load or picked save.
+
+### Node-revision contract
+
+`originalUpdatedAt` is required on every editable save. `PocketNodePopoutEditor.applyPayload()` compares it exactly with the resolved node's current normalised `updatedAt`.
+
+Rejections are:
+
+- `missing-node-revision` when the opening revision is absent or malformed;
+- `node-revision-changed` when the item changed after opening; and
+- `missing-node` when the original item no longer exists.
+
+An edit to another node does not invalidate the target PE. Active persistent mutations of PE-owned label, details and editor content already refresh `updatedAt`. Whole-document recovery/adoption paths additionally rotate the document session. PE's own timestamp update is monotonic by at least one millisecond when the clock has not advanced, so two successive saves from the same still-open popup receive distinct revisions.
+
+### Non-lossy save preflight
+
+`PocketNodePopoutModel.validateSavePayload()` is the authoritative incoming-payload check. `prepareSave()` invokes it before the current canonical normalisers. Outline saves also scan the preserved supported raw editor before applying a normalised editing view.
+
+Accepted maxima:
+
+| Value | Maximum |
+| --- | ---: |
+| Normalised title | 220 characters |
+| Normalised readable body | 4,000 characters |
+| Outline rows | 400 |
+| CR-normalised row text | 4,000 characters |
+| Cleaned row ID | 80 characters |
+| Integer depth | 0 through 8 |
+
+Outline save additionally requires:
+
+- exact `schema: "pocket.nodeEditor.v1"`;
+- exact `mode: "outline"`;
+- an array-valued, JSON-compatible and meaningful Outline;
+- object-valued rows;
+- non-empty string IDs by save time;
+- unique cleaned IDs;
+- finite integer depths;
+- boolean collapse state when supplied; and
+- independently safe readable body length.
+
+Boundary tests accept title 219/220, body 3,999/4,000, row counts 399/400, row text 3,999/4,000, ID length 80 and depths 0/8. They reject the next value, missing or duplicate IDs, ID length 81, depth -1/9/fractional/non-finite, scalar rows, invalid collapse state, empty/non-meaningful Outline and wrong schema.
+
+Text mode validates title and readable body and ignores an unused Outline member. It deliberately retains the P013-unresolved behaviour in which an explicit changed Text save can delete accepted Outline metadata.
+
+There is no truncation option, silent repair, row deletion, duplicate-ID regeneration, merge or last-writer-wins path.
+
+### Rejection reasons and messages
+
+The structured apply/save contract now preserves specific reasons including:
+
+- `no-pocket-file`
+- `missing-source-identity`
+- `file-session-changed`
+- `missing-node`
+- `missing-node-revision`
+- `node-revision-changed`
+- `unsupported-editor`
+- `title-too-long`
+- `details-too-long`
+- `outline-too-many-blocks`
+- `outline-block-text-too-long`
+- `invalid-outline-id`
+- `outline-id-too-long`
+- `duplicate-outline-block-id`
+- `invalid-outline-depth`
+- `invalid-outline-block`
+- `invalid-outline`
+- `cancelled`
+- `stale-guard`
+- `permission-denied`
+- `write-failed`
+- `downloaded-copy`
+- `export-unavailable`
+
+The generated runtime maps the safety cases to calm, direct status and alert text. File switches, stale nodes, missing nodes and exact limit failures tell the user that nothing was applied. Ordinary IO failures explain that the editor content remains available for retry. Save and Save & Close leave the popup dirty and open after every rejection.
+
+### Apply, export and revision handshake
+
+A successful in-memory change returns `nodeUpdatedAt`. The popup adopts that revision whenever `applied: true`, even when export is cancelled, paused by the stale guard or throws. It does not adopt a different source identity from a failed result.
+
+`getPocketUnsavedOperationCount()` is a narrow read-only helper over lexical `state.ops`. `PocketNodePopoutEditor` no longer assumes that lexical state is exposed as `window.state`. After an applied-but-unpersisted result:
+
+- the operation remains pending;
+- the popup remains dirty;
+- a retry sends the returned node revision;
+- unchanged apply passes its revision check; and
+- pending lexical operations force another `exportTree({ returnDetails: true })` call.
+
+On successful truth persistence the result includes the current safe source identity. A picked-file save includes proof that the new session was adopted from the queued save's expected session. The popup adopts that new identity only on success.
+
+The generated runtime also tracks an edit generation. A successful response for an earlier generation cannot clear or close over newer popup edits made while the export was in flight.
+
+### Export-result propagation
+
+`applyAndSave()` retains the apply-time node revision and meaningful export reason. Controlled tests cover:
+
+- cancelled export;
+- stale guard;
+- file-session change;
+- missing active file;
+- write failure;
+- unavailable export surface;
+- downloaded copy; and
+- thrown export.
+
+The existing export queue still captures the file session before enqueueing. A delayed file-A write followed by a switch to file B reports `file-session-changed`, never writes B and never clears B's state as though A had saved.
+
+### Legacy and cutover routes
+
+The canonical generated runtime saves only through `PocketNodePopoutEditor.applyAndSave()`. Its older apply-only fallback has been removed.
+
+Active compatibility surfaces now fail closed:
+
+- `PocketEditorPopout.apply()` delegates dynamically to canonical `PocketNodePopoutEditor.apply()`;
+- the P011/P012 cutover does not open an unbound legacy editor when the safe popup cannot open; and
+- `__pocketPeApplyAndSave` delegates to canonical `applyAndSave()` rather than applying, clearing dirty state and exporting independently.
+
+An already constructed old payload lacks P012 identity and therefore rejects before mutation. No second PE implementation or retired default editor was restored.
+
+### P010/P011 CURRENT-RISK results
+
+P012 replaces these previously characterised risks with stable safety assertions:
+
+- PE openings now include file-session and original-node revision identity.
+- Unchanged retry sees lexical pending operations without exposing `state`.
+- Explicit Outline save blocks row 401 before applying.
+- Explicit Outline save blocks 4,001-character row text before applying.
+- Explicit save rejects title/body content which would be truncated.
+- Explicit Outline save rejects duplicate internal row IDs.
+
+Read-time normalisation remains characterised separately because raw P011 preservation and the editable view are distinct layers.
+
+Seven exact CURRENT-RISK tests intentionally remain:
+
+- `CURRENT-RISK: active PE model retains duplicate non-empty block IDs`
+- `CURRENT-RISK: Outline normalisation silently slices block 401`
+- `CURRENT-RISK: Outline normalisation silently slices block text at 4,001 characters`
+- `CURRENT-RISK: load-time pe synthesis changes a later explicit export shape without a truth write on open`
+- `CURRENT-RISK: accepted Outline and details drift remain independent and Outline wins PE mode`
+- `CURRENT-RISK: portal.export.v1 top-level precedence drops nested data extras on later export`
+- `CURRENT-RISK: changed Text apply deletes accepted Outline metadata and blank details`
+
+The first three now describe read-view normalisation only. P012 prevents those observations from causing a lossy explicit Outline save.
+
+### Focused test result
+
+Node version:
+
+```text
+v23.11.0
+```
+
+Command:
+
+```sh
+node --test tests/pe-persistence-contract.test.js
+```
+
+Result:
+
+```text
+tests 77
+suites 0
+pass 77
+fail 0
+cancelled 0
+skipped 0
+todo 0
+```
+
+The evolved suite executes actual production source in controlled VM and generated-runtime contexts. It uses synthetic fixtures and in-memory handles only. It does not open a real picker, create a real `FileSystemFileHandle`, use the network, access a personal Pocket file or write a truth file.
+
+Coverage includes:
+
+- safe opening bindings and absence of handles;
+- valid, missing, malformed and mismatched source identities;
+- same-name different sessions;
+- same-handle reload renewal and same-handle write stability;
+- file A/B with the same node ID;
+- PiP identity, returned-PiP/Vault adoption and picked-file adoption;
+- matching, missing, stale, unrelated and deleted node revisions;
+- successful first and second saves;
+- exact raw preflight boundaries and rejection no-mutation assertions;
+- stored-raw loss hidden by editable-view normalisation;
+- cancelled, stale-guard and thrown-export retries;
+- queued file-session switching;
+- generated Text, Outline and P011 read-only runtime compilation;
+- runtime dirty, close, revision and source-identity handshakes;
+- P006 Copy, Paste, Duplicate and Delete paths;
+- P007 Escape ordering;
+- P008 indentation parsing and round trip;
+- details-first copy context;
+- one active main-tree Enter owner; and
+- no truth-file write during load or recognition.
+
+### Generated-runtime validation
+
+`PocketNodePopoutRuntime.build()` produced programs compiled with `new Function(...)` for:
+
+- editable Text with `outline: null`;
+- native current-v1 Outline;
+- P011 unsupported-editor read-only Text;
+- stale and switched-file failures;
+- oversized Text and Outline payloads;
+- duplicate-ID rejection; and
+- failed-export retry.
+
+Controlled execution confirms:
+
+- source binding returns unchanged on each attempt;
+- editable Outline save emits the exact v1 schema;
+- unsliced oversized and duplicate Outline data reaches the authoritative main-window preflight;
+- rejected Save and Save & Close retain content, dirty state and the open window;
+- applied export failure adopts only the apply-time revision;
+- a later retry sends that revision and the original source identity;
+- successful save-as identity is adopted;
+- successful Save & Close closes only after persistence;
+- P011 read-only mode still never saves or becomes dirty; and
+- P006, P007 and P008 runtime paths remain intact.
+
+### Validation and safety confirmations
+
+The final validation set includes:
+
+- `node --version`;
+- `node --check` for every changed JavaScript file;
+- `node --test tests/pe-persistence-contract.test.js`;
+- generated-runtime build, `new Function(...)` compilation and controlled execution in that suite;
+- `JSON.parse()` over every committed fixture;
+- `git diff --check`;
+- Markdown fence, heading and table review;
+- exact CURRENT-RISK name matching between tests and documentation;
+- full changed-path and production diff review;
+- confirmation that `package.json` and `index.html` did not change;
+- confirmation that no temporary file or personal data was added;
+- confirmation that rejection paths invoke no export, picker, writer, workspace safety save or PiP snapshot;
+- confirmation that no mutable lexical state object was exposed globally;
+- confirmation that no active legacy route bypasses the canonical P012 owner; and
+- confirmation that existing export queue/session checks remain active.
+
+No truth-file migration, autosave, background write, file watcher, cloud synchronisation, silent writable-handle reuse, automatic merge, automatic downgrade or new PE implementation was introduced.
+
+`node tools/pocket-check.js` and `npm run check` were not run, as required.
+
+### Physical browser checks still required
+
+Murray should physically confirm:
+
+- ordinary Text Save and Save & Close;
+- native current-v1 Outline Save and Save & Close;
+- file A/B same-ID rejection;
+- stale-node and deleted-node rejection;
+- 4,001-character body rejection;
+- 401-row, 4,001-character row and duplicate-ID Outline rejection;
+- cancelled or failed truth export followed by retry;
+- picked-file/save-as identity adoption for a still-open PE;
+- P011 unsupported-editor read-only behaviour; and
+- rejection-specific status, content retention, Escape and dirty-close behaviour at normal popup dimensions.
+
+### Git identification
+
+This report is included in the commit titled `P012 Bind PE saves to source identity`. Its resulting SHA is not embedded in the same commit because adding that SHA would create a different commit. Completion is gated on pushing that commit to `origin/main`, fetching again, confirming local `main` and `origin/main` resolve to the same commit, and confirming the worktree is clean.
+
+---
+
 ## POCKET TASK P011
 
 Title: Consolidate PE editor recognition

@@ -128,6 +128,7 @@ function adoptPocketLiteSessionState(snapshot) {
   if (!snapshot || typeof snapshot !== "object") return false;
   const nodes = normaliseNodes(snapshot.nodes);
   if (!Array.isArray(nodes) || nodes.length === 0) return false;
+  if (typeof renewPocketDocumentSession === "function") renewPocketDocumentSession();
   state.nodes = nodes;
   state.tombstones = Array.isArray(snapshot.tombstones) ? snapshot.tombstones : [];
   state.rootExtras = (snapshot.rootExtras && typeof snapshot.rootExtras === "object" && !Array.isArray(snapshot.rootExtras))

@@ -8,6 +8,10 @@ function recordOp(op) {
   saveLocalSafetySnapshot(op && op.type ? op.type : "change");
 }
 
+function getPocketUnsavedOperationCount() {
+  return Array.isArray(state.ops) ? state.ops.length : 0;
+}
+
 function cloneForUndo(value) {
   try {
     if (typeof structuredClone === "function") return structuredClone(value);

@@ -209,34 +209,17 @@
     const originalOpen = typeof pe.open === "function" ? pe.open.bind(pe) : null;
 
     async function applyAndSaveFromMain(payload) {
-      const applied = originalApply(payload);
-      if (!applied) return { ok: false, applied: false, saved: false, message: "apply failed" };
-
-      if (global.__pocketPeWindow && !global.__pocketPeWindow.closed) global.__pocketPeWindow.__pocketPeDirty = false;
-      if (typeof refreshMeta === "function") refreshMeta();
-      if (typeof flashSaveChip === "function") flashSaveChip("saving");
-
-      if (typeof exportTree !== "function") {
-        if (typeof setStatus === "function") setStatus("Editor saved locally. Main save is not available here.", "warn", { durationMs: 5200 });
-        if (typeof flashSaveChip === "function") flashSaveChip("save*");
-        return { ok: true, applied: true, saved: false, message: "applied locally" };
+      const canonical = global.PocketNodePopoutEditor;
+      if (!canonical || typeof canonical.applyAndSave !== "function") {
+        return {
+          ok: false,
+          applied: false,
+          changed: false,
+          exported: false,
+          reason: "export-unavailable",
+        };
       }
-
-      if (typeof setStatus === "function") setStatus("Saving editor content and truth file…", "ok", { durationMs: 3200 });
-      try {
-        const saved = await exportTree({ downloadFallback: false });
-        if (saved) return { ok: true, applied: true, saved: true, message: "saved" };
-        if (typeof setStatus === "function") {
-          setStatus("Editor saved locally. Use main Save to reconnect the truth file — no download copy was made.", "warn", { durationMs: 7200 });
-        }
-        if (typeof flashSaveChip === "function") flashSaveChip("save*");
-        return { ok: true, applied: true, saved: false, message: "applied locally; main save needed" };
-      } catch (error) {
-        console.error("[pe apply-and-save bridge] failed", error);
-        if (typeof setStatus === "function") setStatus("Editor content saved locally, but the truth file save failed.", "warn", { durationMs: 6200 });
-        if (typeof flashSaveChip === "function") flashSaveChip("save*");
-        return { ok: true, applied: true, saved: false, message: "truth save failed" };
-      }
+      return canonical.applyAndSave(payload);
     }
 
     const wrappedApply = function applyPeWithDirtyCue(payload) {

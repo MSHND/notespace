@@ -87,6 +87,7 @@
       }
       const payload = await global.PocketVault.openVaultEnvelope(envelope, passphrase);
       const norm = global.normaliseInput(payload);
+      if (typeof global.renewPocketDocumentSession === "function") global.renewPocketDocumentSession();
       global.applyLoadedState(norm, {
         schema: norm.schema,
         fileName: file.name || "pocket.vault.json",
