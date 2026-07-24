@@ -35,12 +35,7 @@
 
   function classifyNodeEditor(node) {
     const present = !!node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, "editor");
-    const classification = classifyEditorMeta(present ? node.editor : undefined, { present });
-    const hasPe = !!node && typeof node === "object" && Object.prototype.hasOwnProperty.call(node, "pe");
-    if (hasPe && !metadataContract().cloneJsonCompatibleValue(node.pe).ok) {
-      return { kind: "unsupported-or-malformed", supported: false, schema: classification.schema || "", normalised: null };
-    }
-    return classification;
+    return classifyEditorMeta(present ? node.editor : undefined, { present });
   }
 
   function normaliseEditorMeta(value) {

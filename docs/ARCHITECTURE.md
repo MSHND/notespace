@@ -84,7 +84,7 @@ Current design:
 Relevant files/functions:
 
 - `js/pocket-io-browser.js`: `exportTree()`, `enqueueTreeSave()`, `writeTruthFile()`, `saveCurrentContext()`.
-- `js/pocket-storage.js`: `buildPocketPayload()`, `saveLocalSafetySnapshot()`, `readLocalSafetySnapshot()`, conflict guard helpers, restore helpers, and legacy PE normalisation on load.
+- `js/pocket-storage.js`: `buildPocketPayload()`, `saveLocalSafetySnapshot()`, `readLocalSafetySnapshot()`, conflict guard helpers and restore helpers. It no longer synthesises legacy `node.pe` on load.
 - `js/pocket-tree-actions.js`: tree mutation functions call `recordOp()` for delete/move operations.
 - `js/pocket-node-popout-editor.js`: PE apply calls `recordOp({ type: "details_edit", ... })` and persists state after applying popup changes.
 
@@ -183,14 +183,14 @@ Still present and should not be casually removed:
 - `js/pocket-editor-popout-fresh.js`
 - old details overlay plumbing
 - `js/pocket-pe-save-dirty.js`
-- legacy `node.details`, `node.editor`, and `node.pe` compatibility/preservation code
+- current `node.details` Notes and first-class `node.editor` compatibility/preservation code; retired `node.pe` stays reserved and is discarded during normalisation
 - old details/dirty/close scripts that may still reference older popup names
 
 Current caution:
 
 - `pocket-editor-cutover-v3.js` still keeps old poput fallback behaviour if standalone PE fails.
 - `pocket-pe-save-dirty.js` still wraps `PocketPeEditor.open/apply` and also references old details behaviours.
-- `pocket-storage.js` contains legacy details-to-PE normalisation and should not be changed casually.
+- `pocket-storage.js` owns current payload and recovery-state adoption and should not be changed casually.
 
 ## 10. Removed / Superseded Route
 
@@ -219,7 +219,7 @@ Use a focused test plan before changing:
 - operation tracking and recovery snapshots
 - sync-status `canAutoWrite`
 - multi-select delete root reduction
-- data model fields including `node.details`, `node.editor`, and legacy `node.pe`
+- data model fields including current `node.details` and `node.editor`, plus the reserved/discarded `node.pe` key
 
 ## 12. Suggested Next Work
 

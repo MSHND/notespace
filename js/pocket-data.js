@@ -334,6 +334,7 @@ const RESERVED_NODE_KEYS = new Set([
   "urgent",
   "details",
   "editor",
+  // Retired node.pe stays reserved so it is discarded rather than revived as a generic extra.
   "pe",
   "task",
   "taskMeta",

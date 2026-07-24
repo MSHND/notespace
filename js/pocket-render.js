@@ -281,20 +281,12 @@ function openRowActionMenu(nodeId, point) {
   return true;
 }
 
-function treeContentIndicatorForNode(node) {
-  const detailText = normaliseDetails(node && node.details, 4000);
-  if (detailText) {
-    return {
-      visible: true,
-      title: cleanText(detailText.split("\n")[0], 180) || "Has details",
-    };
-  }
-
+function supportedOutlineForNode(node) {
   const metadata = window.PocketEditorMetadata;
   if (!metadata
     || typeof metadata.classifyEditorMeta !== "function"
     || typeof metadata.isMeaningfulOutline !== "function") {
-    return { visible: false, title: "" };
+    return null;
   }
 
   const present = !!node
@@ -307,9 +299,20 @@ function treeContentIndicatorForNode(node) {
   const outline = classification.kind === "supported-v1-outline"
     ? classification.normalised && classification.normalised.outline
     : null;
-  if (!metadata.isMeaningfulOutline(outline)) {
-    return { visible: false, title: "" };
+  return metadata.isMeaningfulOutline(outline) ? outline : null;
+}
+
+function treeContentIndicatorForNode(node) {
+  const detailText = normaliseDetails(node && node.details, 4000);
+  if (detailText) {
+    return {
+      visible: true,
+      title: cleanText(detailText.split("\n")[0], 180) || "Has details",
+    };
   }
+
+  const outline = supportedOutlineForNode(node);
+  if (!outline) return { visible: false, title: "" };
 
   const firstOutlineText = outline
     .map((block) => cleanText(block && block.text, 180))
@@ -340,8 +343,8 @@ function renderTree() {
   const focusRoot = state.focusRootId ? byId.get(state.focusRootId) : null;
 
   function nodeOutlineText(node) {
-    const outline = Array.isArray(node?.editor?.outline) ? node.editor.outline : [];
-    if (!outline.length) return "";
+    const outline = supportedOutlineForNode(node);
+    if (!outline) return "";
     return outline.map((block) => String(block?.text || "")).filter(Boolean).join("\n");
   }
 

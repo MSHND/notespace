@@ -1,5 +1,5 @@
 /* PE visible-version compatibility patch.
-   First-class editor and pe preservation is owned by pocket-import.js. */
+   Current node.editor handling is independent; retired node.pe is not preserved. */
 (function initialisePocketPeVisibleVersion(global) {
   "use strict";
 

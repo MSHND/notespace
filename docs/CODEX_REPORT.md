@@ -1,5 +1,156 @@
 # Codex report
 
+## POCKET TASK P014 — RETIRE THE LEGACY NODE.PE SHADOW
+
+Title: Retire legacy node.pe shadow
+
+Status: legacy `node.pe` retired from the active node model, search and every normalised adoption route. Focused automated validation is complete; Murray's physical browser acceptance remains.
+
+Commit title:
+
+- `P014 Retire legacy node.pe shadow`
+
+### Baseline and product decision
+
+- Repository: `MSHND/notespace`
+- GitHub-visible, fetched and exact starting `origin/main`: `2185b776089106fd80c95581abf52a40426cde47`
+- Baseline title: `P013 Show Outline content indicator`
+- Local branch: `main`
+- Local `main` matched `origin/main`, with a clean worktree and zero ahead/behind commits before implementation.
+- Superseded PR #6 was not merged, cherry-picked, modified or used as a working branch.
+- Murray had manually retained the legacy-only pe content he wanted and selected full retirement rather than preservation, promotion, synchronisation or a compatibility view.
+- No personal, uploaded or active Pocket truth JSON was inspected, copied, modified or written.
+
+### Retirement semantics
+
+The active model now has three PE content owners:
+
+- `node.label` for the shared title;
+- `node.details` for Notes; and
+- accepted `node.editor.outline` for Outline.
+
+`node.pe` is no longer content or first-class metadata. The canonical `normaliseNodes()` owner in `js/pocket-import.js` omits it on every normalised load/adoption route. `pe` remains in `RESERVED_NODE_KEYS`, so malformed, scalar, array, cyclic, known-schema, unknown-schema, extension-rich and very large values cannot reappear through generic extras. `node.editor` remains an uncapped opaque first-class field and retains the P011-P013 recognition and preservation contract.
+
+`applyLoadedState()` no longer creates a `pocket.pe.v1` shadow from Notes. The retired synthesis helpers and pe-specific metadata constants/normalisers are removed. Loading Notes leaves Notes, loading Outline preserves editor plus any independent Notes, and loading a title-only or pe-only node leaves an ordinary title-only node.
+
+Retirement is load-only normalisation, not a write-on-load migration:
+
+- no operation is recorded;
+- Pocket is not marked dirty;
+- no truth or backup file is written;
+- no picker opens;
+- the active file session is not changed merely because pe was omitted; and
+- unchanged Save retains its established `no-changes` behavior.
+
+After one real current user edit, the normal controlled explicit save naturally writes the already-normalised top-level and nested trees without `pe`. Newly built local-safety snapshots, safety-trail entries, PiP snapshots, auto-cache, last-save snapshots and truth/Vault payloads also omit `pe`.
+
+### Search, indicators, copy context and PE
+
+The obsolete `js/pocket-filter-pe-search.js` wrapper and its `index.html` entry are removed. Search stays read-only and includes path, label, Notes, accepted supported Outline text and existing task/profile fields. It never reads pe title, text or rows and no longer temporarily mutates `node.details`.
+
+`js/pocket-render.js` now shares one `supportedOutlineForNode()` helper between accepted Outline search and the P013 content indicator. This keeps unsupported or malformed editor shapes out of both interpretation paths. Notes retain badge-tooltip precedence.
+
+`js/pocket-node-popout-model.js` no longer checks pe cloneability or makes cyclic pe data read-only. PE opening and saving depend only on current title, Notes and editor data. A pe-only legacy node opens as empty editable Notes, shows no content badge, does not match pe-only searches and uses the label for copy context.
+
+### Files changed and deleted
+
+Production:
+
+- `index.html` — removes the retired search wrapper from the active script list.
+- `js/pocket-data.js` — keeps `pe` reserved with an explicit retirement comment.
+- `js/pocket-editor-metadata.js` — keeps only first-class editor ownership and removes pe constants, normalisers and exposure.
+- `js/pocket-import.js` — makes central node normalisation omit `pe` on every adoption route.
+- `js/pocket-storage.js` — removes Notes-to-pe synthesis and its dormant helpers.
+- `js/pocket-node-popout-model.js` — removes the remaining active pe cloneability/editability dependency.
+- `js/pocket-render.js` — removes reliance on the deleted wrapper and shares exact supported-Outline recognition for search and indicators.
+- `js/pocket-pe-import-preserve.js` — corrects its visible-version ownership comment without removing unrelated active behavior.
+- Deleted: `js/pocket-filter-pe-search.js`.
+
+Tests and documentation:
+
+- `tests/pe-persistence-contract.test.js`
+- `docs/PE_PERSISTENCE_CONTRACT.md`
+- `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`
+- `docs/ARCHITECTURE.md`
+- `docs/MIGRATION_STATUS.md`
+- `docs/CODEX_REPORT.md`
+
+The generated PE runtime, template, editor schema, root schema, truth-write owner, file-session protections, PE apply/save owner, fixtures and dependencies did not change.
+
+### Focused validation
+
+Node:
+
+~~~text
+v24.14.0
+~~~
+
+Focused command:
+
+~~~sh
+node --test tests/pe-persistence-contract.test.js
+~~~
+
+Result:
+
+~~~text
+tests 94
+pass 94
+fail 0
+cancelled 0
+skipped 0
+todo 0
+~~~
+
+The suite executes actual active production source with synthetic fixtures, controlled VM contexts, in-memory handles and instrumented DOM/storage/write surfaces. P014 coverage includes:
+
+1. details-only, Outline-only, combined and pe-only loading;
+2. matching and conflicting current content versus stale pe;
+3. every required pe shape, including cyclic and above-limit objects;
+4. unchanged uncapped editor preservation and unsupported-editor read-only behavior;
+5. generic-extras budget and reserved-key behavior;
+6. ordinary, alternate-root, change-log, local-safety, trail, auto-cache, PiP and Vault adoption;
+7. zero-operation/no-write loading and unchanged Save;
+8. one real edit followed by a controlled successful explicit export without pe in either tree;
+9. newly built browser recovery and truth/Vault representations without pe;
+10. label, Notes, supported Outline, task and profile search with pe fields excluded and no temporary mutation;
+11. Notes/Outline indicators, pe-only absence, tooltip precedence and render immutability;
+12. details-first copy and label fallback;
+13. current PE opening/saving plus the complete P006-P013 identity, non-lossy, retry and runtime regressions; and
+14. a focused source scan proving the wrapper and pe data-path owners are gone.
+
+Targeted static checks:
+
+- `node --check` passed for every changed JavaScript file and the focused test file.
+- `git diff --check` passed.
+- The generated PE runtime did not change, so no additional generated-source validation was required; its existing build, `new Function(...)` compilation and controlled runtime cases remained green within the 94-test suite.
+- `node tools/pocket-check.js` was not run.
+- `npm run check` was not run because it invokes the prohibited checker.
+
+### Remaining CURRENT-RISK items
+
+P014 removes the former load-time pe-synthesis risk. Four existing characterisations remain:
+
+- duplicate non-empty block IDs retained in the detached read view, with explicit changed Outline save blocked;
+- read-view slicing at row 401, with raw preservation and changed Outline rejection;
+- read-view slicing after 4,000 block-text characters, with raw preservation and changed Outline rejection; and
+- `portal.export.v1` top-level precedence dropping nested-only data extras.
+
+### Physical browser acceptance checklist
+
+1. Load the ordinary current truth file.
+2. Confirm normal Notes nodes still open and save normally.
+3. Confirm Outline nodes still open and save normally.
+4. Search for known Notes text.
+5. Search for known Outline text.
+6. Confirm a stale legacy-only pe term no longer appears in search.
+7. Make one harmless current edit and Save.
+8. Refresh and reopen the truth file.
+9. Confirm current Notes and Outline remain intact.
+10. Confirm no unexpected content badges or empty legacy content appear.
+11. Cancel or fail a save, confirm PE remains dirty/open, then retry successfully.
+12. Recheck same-node-ID cross-file rejection if practical.
+
 ## POCKET TASK P013 — TREE INDICATOR CORRECTION
 
 Title: Show Outline content in the tree indicator

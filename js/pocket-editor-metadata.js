@@ -1,14 +1,10 @@
-/* First-class PE metadata recognition and opaque JSON preservation helpers. */
+/* First-class node.editor recognition and opaque JSON preservation helpers. */
 
 (function initialisePocketEditorMetadata(global) {
   "use strict";
 
   const EDITOR_SCHEMA = "pocket.nodeEditor.v1";
-  const PE_SCHEMA = "pocket.pe.v1";
-  const PE_MAX_TEXT_CHARS = 120000;
-  const PE_MAX_OUTLINE_LINES = 3000;
-  const PE_MAX_LINE_CHARS = 1200;
-  const FIRST_CLASS_NODE_FIELDS = ["editor", "pe"];
+  const FIRST_CLASS_NODE_FIELDS = ["editor"];
 
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
@@ -37,40 +33,6 @@
           || block.collapsed === true
         );
     });
-  }
-
-  function normalisePeLine(raw, index) {
-    const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-    const depthRaw = Number(source.depth);
-    const orderRaw = Number(source.order);
-    return {
-      id: clean(source.id, 80) || (typeof makeId === "function" ? makeId("line") : "line_" + index),
-      text: String(source.text == null ? "" : source.text).replace(/\r/g, "").slice(0, PE_MAX_LINE_CHARS),
-      depth: Number.isFinite(depthRaw) ? Math.max(0, Math.min(8, Math.round(depthRaw))) : 0,
-      collapsed: source.collapsed === true,
-      order: Number.isFinite(orderRaw) ? Math.max(0, Math.round(orderRaw)) : (index + 1) * 1000
-    };
-  }
-
-  function normalisePocketPe(value, fallbackTitle = "") {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const title = clean(value.title || fallbackTitle, 220);
-    const mode = clean(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
-    const text = String(value.text == null ? "" : value.text).replace(/\r/g, "").slice(0, PE_MAX_TEXT_CHARS);
-    const outline = Array.isArray(value.outline)
-      ? value.outline.slice(0, PE_MAX_OUTLINE_LINES).map(normalisePeLine)
-      : [];
-    const hasOutlineContent = outline.some((line) => String(line.text || "").trim());
-    const hasContent = !!title || !!text.trim() || hasOutlineContent;
-    if (!hasContent) return null;
-    return {
-      schema: PE_SCHEMA,
-      title: title || clean(fallbackTitle, 220),
-      mode,
-      text,
-      outline: outline.length ? outline : [{ id: typeof makeId === "function" ? makeId("line") : "line_0", text: "", depth: 0, collapsed: false, order: 1000 }],
-      updatedAt: clean(value.updatedAt, 40) || (typeof nowIso === "function" ? nowIso() : new Date().toISOString())
-    };
   }
 
   function cloneJsonCompatibleValue(value) {
@@ -165,7 +127,6 @@
   }
 
   global.normaliseTreeEditorMeta = normaliseSupportedEditorMeta;
-  global.normalisePocketPe = normalisePocketPe;
   global.PocketEditorMetadata = Object.freeze({
     EDITOR_SCHEMA,
     classifyEditorMeta,

@@ -324,6 +324,16 @@ function normaliseOne(context, node) {
   return result.nodes[0];
 }
 
+function assertNoRetiredPe(value, label = "value") {
+  if (!value || typeof value !== "object") return;
+  if (!Array.isArray(value)) {
+    assert.equal(Object.hasOwn(value, "pe"), false, `${label} contains retired pe`);
+  }
+  for (const [key, child] of Object.entries(value)) {
+    assertNoRetiredPe(child, `${label}.${key}`);
+  }
+}
+
 function loadAndExportFixture(name) {
   const context = createFullContractContext();
   const parsed = fixture(name);
@@ -371,6 +381,7 @@ function createTreeRenderHarness(nodes, query = "") {
       this.tagName = String(tagName).toUpperCase();
       this.nodeType = 1;
       this.children = [];
+      this.childNodes = this.children;
       this.parentNode = null;
       this.attributes = new Map();
       this.listeners = new Map();
@@ -895,7 +906,7 @@ test("generic node extras enforce the 24-field and scalar boundaries", () => {
   assert.equal(truncatedKeyExtras["k".repeat(48)], "kept");
 });
 
-test("editor and pe are reserved outside the generic extras budget regardless of property order", () => {
+test("editor remains first-class while retired pe stays reserved outside generic extras regardless of property order", () => {
   const context = createCoreContext();
   const crowded = syntheticNode("crowded");
   for (let index = 0; index < 24; index += 1) crowded[`extra${String(index).padStart(2, "0")}`] = index;
@@ -903,7 +914,7 @@ test("editor and pe are reserved outside the generic extras budget regardless of
   crowded.pe = { schema: "pocket.pe.v1", mode: "text", text: "Kept?" };
   const normalised = normaliseOne(context, crowded);
   assert.equal(normalised.editor.schema, EDITOR_SCHEMA);
-  assert.equal(normalised.pe.schema, "pocket.pe.v1");
+  assert.equal(Object.hasOwn(normalised, "pe"), false);
   assert.equal(normalised.extra23, 23);
   assert.equal(Object.keys(context.normaliseNodeExtras(crowded)).length, 24);
   assert.equal(Object.hasOwn(context.normaliseNodeExtras(crowded), "editor"), false);
@@ -916,10 +927,9 @@ test("editor and pe are reserved outside the generic extras budget regardless of
   for (let index = 0; index < 24; index += 1) early[`extra${String(index).padStart(2, "0")}`] = index;
   const earlyNormalised = normaliseOne(context, early);
   assert.equal(earlyNormalised.editor.schema, EDITOR_SCHEMA);
-  assert.equal(earlyNormalised.pe.schema, "pocket.pe.v1");
+  assert.equal(Object.hasOwn(earlyNormalised, "pe"), false);
   assert.equal(earlyNormalised.extra23, 23);
   assert.deepEqual(plain(earlyNormalised.editor), plain(normalised.editor));
-  assert.deepEqual(plain(earlyNormalised.pe), plain(normalised.pe));
 });
 
 test("root extras enforce the current 32-field, string, and object boundaries", () => {
@@ -980,6 +990,33 @@ test("normaliseInput applies current schema-specific root precedence", () => {
   const unsupportedNestedOnly = context.normaliseInput({ schema: "future.root.v9", data: { mainThoughtTree: dataTree } });
   assert.equal(unsupportedNestedOnly.schema, "");
   assert.equal(unsupportedNestedOnly.nodes.length, 0);
+});
+
+test("ordinary, alternate-root, change-log, and array normalisation all discard pe centrally", () => {
+  const context = createCoreContext();
+  const rawNode = syntheticNode("alternate_pe", {
+    details: "Current alternate Notes",
+    editor: outlineMeta([{ id: "alternate_outline", text: "Current alternate Outline", depth: 0, collapsed: false }]),
+    pe: { schema: "pocket.pe.v1", text: "Retired alternate shadow" },
+  });
+  const cases = [
+    { schema: "portal.export.v1", mainThoughtTree: [rawNode], mainThoughtTreeTombstones: [] },
+    { schema: "portal.mtt.web.v1", data: { mainThoughtTree: [rawNode], mainThoughtTreeTombstones: [] } },
+    { schema: "portal.sync.v1", data: { mainThoughtTree: [rawNode], mainThoughtTreeTombstones: [] } },
+    {
+      schema: "portal.pocketlite.changes.v1",
+      snapshot: { data: { mainThoughtTree: [rawNode], mainThoughtTreeTombstones: [] } },
+    },
+    [rawNode],
+    { schema: "future.root.v9", mainThoughtTree: [rawNode], mainThoughtTreeTombstones: [] },
+  ];
+  for (const [index, input] of cases.entries()) {
+    const result = context.normaliseInput(input);
+    assert.equal(result.nodes.length, 1, `case ${index}`);
+    assert.equal(result.nodes[0].details, "Current alternate Notes", `case ${index}`);
+    assert.equal(result.nodes[0].editor.outline[0].text, "Current alternate Outline", `case ${index}`);
+    assert.equal(Object.hasOwn(result.nodes[0], "pe"), false, `case ${index}`);
+  }
 });
 
 test("normaliseDetails applies the current whitespace policy", () => {
@@ -1108,7 +1145,7 @@ test("large current v1 Outline survives load, export, reload, and active model o
   assert.deepEqual(Object.keys(editedNode.editor.outline[0]).sort(), ["collapsed", "depth", "id", "order", "text"]);
   assert.deepEqual(plain(editedNode.editor.outline.map((block) => block.order)), editor.outline.map((_block, index) => index + 1));
   assert.equal(editedNode.details, "Explicitly edited projection");
-  assert.equal(editedNode.pe, null);
+  assert.equal(Object.hasOwn(editedNode, "pe"), false);
   assert.equal(context.__surfaceCalls.exportTree, 0);
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
 });
@@ -1154,7 +1191,7 @@ test("large unknown-schema editor survives load, export, and reload while openin
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
 });
 
-test("large legacy pe survives load, export, reload, and remains outside the active PE model", () => {
+test("large legacy pe is discarded on load, export, and reload without affecting current Notes", () => {
   const context = createFullContractContext();
   const pe = largeLegacyPe();
   const input = {
@@ -1164,8 +1201,7 @@ test("large legacy pe survives load, export, reload, and remains outside the act
     mainThoughtTreeTombstones: [],
   };
   const first = context.normaliseInput(input);
-  assert.equal(JSON.stringify(first.nodes[0].pe), JSON.stringify(pe));
-  assert.notStrictEqual(first.nodes[0].pe, pe);
+  assert.equal(Object.hasOwn(first.nodes[0], "pe"), false);
 
   const opening = context.PocketNodePopoutModel.buildPayload(first.nodes[0]);
   assert.equal(opening.mode, "text");
@@ -1180,14 +1216,15 @@ test("large legacy pe survives load, export, reload, and remains outside the act
     writtenAt: first.writtenAt,
   }, { skipLocalSafetyCheck: true });
   const exported = context.buildPocketPayload("2026-02-01T00:00:00.000Z");
-  assert.equal(JSON.stringify(exported.mainThoughtTree[0].pe), JSON.stringify(pe));
+  assert.equal(Object.hasOwn(exported.mainThoughtTree[0], "pe"), false);
+  assert.equal(Object.hasOwn(exported.data.mainThoughtTree[0], "pe"), false);
   const reloaded = context.normaliseInput(exported);
-  assert.equal(JSON.stringify(reloaded.nodes[0].pe), JSON.stringify(pe));
+  assert.equal(Object.hasOwn(reloaded.nodes[0], "pe"), false);
   assert.equal(context.PocketNodePopoutModel.buildPayload(reloaded.nodes[0]).mode, "text");
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
 });
 
-test("first-class editor and pe null, scalar, and array values survive load, export, and reload", () => {
+test("first-class editor values survive while pe null, scalar, and array values are discarded", () => {
   const context = createFullContractContext();
   const cases = [
     { id: "first_class_null", editor: null, pe: null, readOnly: false },
@@ -1209,7 +1246,7 @@ test("first-class editor and pe null, scalar, and array values survive load, exp
   for (const item of cases) {
     const node = first.nodes.find((candidate) => candidate.id === item.id);
     assert.equal(JSON.stringify(node.editor), JSON.stringify(item.editor));
-    assert.equal(JSON.stringify(node.pe), JSON.stringify(item.pe));
+    assert.equal(Object.hasOwn(node, "pe"), false);
     const opening = context.PocketNodePopoutModel.buildPayload(node);
     assert.equal(opening.mode, "text");
     assert.equal(opening.outline, null);
@@ -1228,16 +1265,16 @@ test("first-class editor and pe null, scalar, and array values survive load, exp
     const exportedNode = exported.mainThoughtTree.find((candidate) => candidate.id === item.id);
     const reloadedNode = reloaded.nodes.find((candidate) => candidate.id === item.id);
     assert.equal(JSON.stringify(exportedNode.editor), JSON.stringify(item.editor));
-    assert.equal(JSON.stringify(exportedNode.pe), JSON.stringify(item.pe));
     assert.equal(JSON.stringify(reloadedNode.editor), JSON.stringify(item.editor));
-    assert.equal(JSON.stringify(reloadedNode.pe), JSON.stringify(item.pe));
+    assert.equal(Object.hasOwn(exportedNode, "pe"), false);
+    assert.equal(Object.hasOwn(reloadedNode, "pe"), false);
   }
   const nullOpening = context.PocketNodePopoutModel.buildPayload(reloaded.nodes.find((node) => node.id === "first_class_null"));
   assert.equal(Object.hasOwn(nullOpening, "readOnly"), false);
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
 });
 
-test("non-JSON in-memory editor or pe values fail closed without discarding the node", async () => {
+test("non-JSON editor fails closed while a cyclic pe value is ignored without discarding the node", async () => {
   const context = createFullContractContext();
   const cyclicEditor = {
     schema: EDITOR_SCHEMA,
@@ -1285,22 +1322,24 @@ test("non-JSON in-memory editor or pe values fail closed without discarding the 
     details: "Readable cyclic pe fallback",
     pe: cyclicPe,
   }));
-  assert.strictEqual(loadedPe.pe, cyclicPe);
+  assert.equal(Object.hasOwn(loadedPe, "pe"), false);
   assert.equal(Object.hasOwn(loadedPe, "editor"), false);
-  assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(loadedPe).kind, "unsupported-or-malformed");
+  assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(loadedPe).kind, "none");
   const peOpening = context.PocketNodePopoutModel.buildPayload(loadedPe);
-  assert.equal(peOpening.readOnly, true);
+  assert.equal(Object.hasOwn(peOpening, "readOnly"), false);
   assert.equal(peOpening.body, "Readable cyclic pe fallback");
   state.nodes = [loadedPe];
   state.ops = [];
   state.selectedId = loadedPe.id;
   const boundPeOpening = context.PocketNodePopoutModel.buildPayload(loadedPe);
-  const rejectedPe = await context.PocketNodePopoutEditor.applyAndSave(boundPeOpening);
-  assert.equal(rejectedPe.reason, "unsupported-editor");
-  assert.equal(rejectedPe.applied, false);
-  assert.strictEqual(state.nodes[0].pe, cyclicPe);
-  assert.equal(state.ops.length, 0);
-  assert.equal(exportCalls, 0);
+  boundPeOpening.body = "Editable current Notes";
+  const savedPe = await context.PocketNodePopoutEditor.applyAndSave(boundPeOpening);
+  assert.equal(savedPe.ok, true);
+  assert.equal(savedPe.applied, true);
+  assert.equal(Object.hasOwn(state.nodes[0], "pe"), false);
+  assert.equal(state.nodes[0].details, "Editable current Notes");
+  assert.equal(state.ops.length, 1);
+  assert.equal(exportCalls, 1);
 });
 
 test("active PE model accepts current flat and nested non-empty Outlines", () => {
@@ -1445,7 +1484,7 @@ test("native Outline payload preserves accepted IDs, depths, collapse state, and
   assert.deepEqual(plain(payload.outline.map((block) => block.collapsed)), [true, false]);
 });
 
-test("CURRENT-RISK: load-time pe synthesis changes a later explicit export shape without a truth write on open", () => {
+test("details-only load does not synthesise pe, record an operation, or write truth", () => {
   const context = createFullContractContext();
   const parsed = fixture("legacy-text.json");
   assert.equal(Object.hasOwn(parsed.mainThoughtTree[0], "pe"), false);
@@ -1460,14 +1499,8 @@ test("CURRENT-RISK: load-time pe synthesis changes a later explicit export shape
   }, { skipLocalSafetyCheck: true });
 
   assert.equal(state.ops.length, 0);
-  assert.deepEqual(plain(state.nodes[0].pe), {
-    schema: "pocket.pe.v1",
-    title: "Synthetic text note",
-    mode: "text",
-    text: "Parent\n  Child",
-    outline: [],
-    updatedAt: "2026-01-01T00:00:00.000Z",
-  });
+  assert.equal(state.nodes[0].details, "Parent\n  Child");
+  assert.equal(Object.hasOwn(state.nodes[0], "pe"), false);
   assert.equal(context.__surfaceCalls.exportTree, 0);
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
   assert.equal(context.__surfaceCalls.showOpenFilePicker, 0);
@@ -1479,20 +1512,398 @@ test("CURRENT-RISK: load-time pe synthesis changes a later explicit export shape
   ]);
 
   const exported = context.buildPocketPayload("2026-02-01T00:00:00.000Z");
-  assert.equal(exported.mainThoughtTree[0].pe.schema, "pocket.pe.v1");
-  assert.equal(exported.data.mainThoughtTree[0].pe.text, "Parent\n  Child");
+  assert.equal(Object.hasOwn(exported.mainThoughtTree[0], "pe"), false);
+  assert.equal(Object.hasOwn(exported.data.mainThoughtTree[0], "pe"), false);
+  assert.equal(exported.mainThoughtTree[0].details, "Parent\n  Child");
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
   assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
 });
 
+test("Outline-only and combined current sections load independently without pe, Notes synthesis, operations, or writes", () => {
+  const context = createFullContractContext();
+  const outlineOnlyEditor = outlineMeta([{
+    id: "outline_only_current",
+    text: "Outline-only current content",
+    depth: 0,
+    collapsed: false,
+  }]);
+  const combinedEditor = outlineMeta([{
+    id: "combined_current",
+    text: "Combined current Outline",
+    depth: 0,
+    collapsed: true,
+  }]);
+  const normalised = context.normaliseInput({
+    schema: "portal.export.v1",
+    writtenAt: "2026-03-01T00:00:00.000Z",
+    mainThoughtTree: [
+      syntheticNode("outline_only_load", { editor: outlineOnlyEditor }),
+      syntheticNode("combined_load", { details: "Combined current Notes", editor: combinedEditor }),
+    ],
+    mainThoughtTreeTombstones: [],
+  });
+  const state = lexicalState(context);
+  state.ops = [{ type: "must-clear" }];
+  context.applyLoadedState(normalised, {
+    schema: normalised.schema,
+    fileName: "current-sections.json",
+    writtenAt: normalised.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+
+  const byId = new Map(state.nodes.map((node) => [node.id, node]));
+  const outlineOnly = byId.get("outline_only_load");
+  assert.equal(Object.hasOwn(outlineOnly, "details"), false);
+  assert.equal(Object.hasOwn(outlineOnly, "pe"), false);
+  assert.deepEqual(plain(outlineOnly.editor), outlineOnlyEditor);
+  assert.equal(context.PocketNodePopoutModel.buildPayload(outlineOnly).mode, "outline");
+
+  const combined = byId.get("combined_load");
+  assert.equal(combined.details, "Combined current Notes");
+  assert.equal(Object.hasOwn(combined, "pe"), false);
+  assert.deepEqual(plain(combined.editor), combinedEditor);
+  const combinedOpening = context.PocketNodePopoutModel.buildPayload(combined);
+  assert.equal(combinedOpening.mode, "outline");
+  assert.equal(combinedOpening.body, "Combined current Notes");
+  assert.equal(combinedOpening.outline[0].text, "Combined current Outline");
+
+  assert.equal(state.ops.length, 0);
+  assert.deepEqual(plain(context.__surfaceCalls), {
+    exportTree: 0,
+    writeTruthFile: 0,
+    showOpenFilePicker: 0,
+    showSaveFilePicker: 0,
+  });
+});
+
+test("all legacy pe shapes are discarded without throwing, leaking into extras, or weakening editor preservation", () => {
+  const context = createFullContractContext();
+  const supportedEditor = {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline: [{
+      id: "shape_supported",
+      text: "Supported current Outline",
+      depth: 0,
+      collapsed: false,
+      order: 41,
+      futureBlockField: { preserved: true },
+    }],
+    futureTopLevel: { preserved: true },
+  };
+  const shapes = [
+    null,
+    "retired scalar",
+    [],
+    {},
+    { schema: "pocket.pe.v1", title: "Legacy", mode: "text", text: "Legacy text", outline: [] },
+    { schema: "pocket.pe.v99", future: true },
+    largeLegacyPe(),
+    { schema: "extension.rich", nested: { one: { two: [{ three: "retired" }] } }, extensions: { keep: false } },
+  ];
+  const input = {
+    schema: "portal.export.v1",
+    mainThoughtTree: shapes.map((pe, index) => syntheticNode(`shape_${index}`, {
+      details: `Current Notes ${index}`,
+      ...(index === shapes.length - 1 ? { editor: supportedEditor } : {}),
+      pe,
+      unrelatedExtra: `extra-${index}`,
+    })),
+    mainThoughtTreeTombstones: [],
+  };
+
+  const normalised = context.normaliseInput(input);
+  assert.equal(normalised.nodes.length, shapes.length);
+  for (const [index, node] of normalised.nodes.entries()) {
+    assert.equal(Object.hasOwn(node, "pe"), false, `shape ${index}`);
+    assert.equal(node.details, `Current Notes ${index}`, `shape ${index}`);
+    assert.equal(node.unrelatedExtra, `extra-${index}`, `shape ${index}`);
+    assert.equal(Object.hasOwn(context.normaliseNodeExtras(input.mainThoughtTree[index]), "pe"), false, `shape ${index}`);
+  }
+  assert.deepEqual(plain(normalised.nodes.at(-1).editor), supportedEditor);
+  assert.notStrictEqual(normalised.nodes.at(-1).editor, supportedEditor);
+  assertNoRetiredPe(normalised, "normalised shapes");
+});
+
+test("current Notes and editor content win over matching or conflicting pe across opening, search, badges, and copy context", () => {
+  const context = createFullContractContext();
+  const supported = (id, text) => outlineMeta([{ id, text, depth: 0, collapsed: false }]);
+  const rawNodes = [
+    syntheticNode("matching_notes", {
+      details: "Current matching Notes needle",
+      pe: { title: "Legacy matching title", text: "Current matching Notes needle" },
+    }),
+    syntheticNode("conflicting_notes", {
+      details: "Authoritative Notes needle",
+      pe: { title: "Stale title needle", text: "Retired conflicting needle" },
+    }),
+    syntheticNode("conflicting_outline", {
+      editor: supported("conflicting_outline_block", "Authoritative Outline needle"),
+      pe: { text: "Retired outline shadow needle", outline: [{ text: "Stale nested needle" }] },
+    }),
+    syntheticNode("both_current", {
+      details: "Independent Notes needle",
+      editor: supported("both_current_block", "Independent Outline needle"),
+      pe: { text: "Retired combined needle" },
+    }),
+    syntheticNode("unsupported_with_pe", {
+      details: "Readable unsupported Notes",
+      editor: { schema: "pocket.nodeEditor.v9", mode: "outline", outline: [{ text: "Future opaque text" }] },
+      pe: { text: "Retired unsupported needle" },
+    }),
+    syntheticNode("pe_only", {
+      label: "Title-only survivor",
+      pe: { title: "Retired title needle", text: "Retired pe-only needle", outline: [{ text: "Retired row needle" }] },
+    }),
+  ];
+  const normalised = context.normaliseInput({
+    schema: "portal.export.v1",
+    mainThoughtTree: rawNodes,
+    mainThoughtTreeTombstones: [],
+  });
+  assertNoRetiredPe(normalised.nodes, "current-content matrix");
+  const matrixState = lexicalState(context);
+  matrixState.ops = [{ type: "must-clear" }];
+  context.applyLoadedState(normalised, {
+    schema: normalised.schema,
+    fileName: "current-content-matrix.json",
+    writtenAt: normalised.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  assert.equal(matrixState.ops.length, 0);
+  assert.equal(context.__surfaceCalls.exportTree, 0);
+  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
+  assert.equal(context.__surfaceCalls.showOpenFilePicker, 0);
+  assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
+  const byId = new Map(normalised.nodes.map((node) => [node.id, node]));
+
+  assert.equal(byId.get("matching_notes").details, "Current matching Notes needle");
+  assert.equal(byId.get("conflicting_notes").details, "Authoritative Notes needle");
+  assert.equal(byId.get("conflicting_outline").editor.outline[0].text, "Authoritative Outline needle");
+  assert.equal(byId.get("both_current").details, "Independent Notes needle");
+  assert.equal(byId.get("both_current").editor.outline[0].text, "Independent Outline needle");
+  assert.equal(context.PocketNodePopoutModel.buildPayload(byId.get("both_current")).mode, "outline");
+  assert.equal(context.PocketNodePopoutModel.buildPayload(byId.get("unsupported_with_pe")).readOnly, true);
+
+  const peOnly = byId.get("pe_only");
+  assert.equal(peOnly.label, "Title-only survivor");
+  assert.equal(Object.hasOwn(peOnly, "details"), false);
+  assert.equal(Object.hasOwn(peOnly, "editor"), false);
+  const peOnlyOpening = context.PocketNodePopoutModel.buildPayload(peOnly);
+  assert.equal(peOnlyOpening.mode, "text");
+  assert.equal(peOnlyOpening.body, "");
+  assert.equal(Object.hasOwn(peOnlyOpening, "readOnly"), false);
+  const copy = context.copyContextPayloadForNode(peOnly);
+  assert.equal(copy.kind, "label");
+  assert.equal(copy.text, "Title-only survivor");
+
+  for (const [query, expectedRows] of [
+    ["authoritative notes needle", 1],
+    ["authoritative outline needle", 1],
+    ["independent notes needle", 1],
+    ["independent outline needle", 1],
+    ["retired conflicting needle", 0],
+    ["retired outline shadow needle", 0],
+    ["retired combined needle", 0],
+    ["retired unsupported needle", 0],
+    ["retired pe-only needle", 0],
+    ["title-only survivor", 1],
+  ]) {
+    assert.equal(createTreeRenderHarness(normalised.nodes, query).rows.length, expectedRows, query);
+  }
+
+  const badgeExpectations = new Map([
+    ["matching_notes", ["Current matching Notes needle"]],
+    ["conflicting_notes", ["Authoritative Notes needle"]],
+    ["conflicting_outline", ["Authoritative Outline needle"]],
+    ["both_current", ["Independent Notes needle"]],
+    ["unsupported_with_pe", ["Readable unsupported Notes"]],
+    ["pe_only", []],
+  ]);
+  for (const node of normalised.nodes) {
+    const before = plain(node);
+    const rendered = createTreeRenderHarness([node]);
+    const expectedTitles = badgeExpectations.get(node.id);
+    assert.deepEqual(rendered.badges.map((badge) => badge.title), expectedTitles, node.id);
+    assert.deepEqual(plain(node), before, `${node.id}: source`);
+    assert.deepEqual(plain(rendered.state.nodes[0]), before, `${node.id}: rendered state`);
+  }
+});
+
+test("normalised search retains label, Notes, supported Outline, task, and profile fields without pe mutation", () => {
+  const context = createFullContractContext();
+  const raw = syntheticNode("search_owners", {
+    label: "Label owner needle",
+    details: "Notes owner needle",
+    editor: outlineMeta([{ id: "search_owner_outline", text: "Outline owner needle", depth: 0, collapsed: false }]),
+    task: { notes: "Task owner needle" },
+    profile: {
+      keywords: ["Keyword owner needle"],
+      entities: ["Entity owner needle"],
+      people: ["Person owner needle"],
+    },
+    pe: {
+      title: "Retired title-only search",
+      text: "Retired text-only search",
+      outline: [{ text: "Retired outline-only search" }],
+    },
+  });
+  const node = normaliseOne(context, raw);
+  const before = plain(node);
+  for (const query of [
+    "label owner needle",
+    "notes owner needle",
+    "outline owner needle",
+    "task owner needle",
+    "keyword owner needle",
+    "entity owner needle",
+    "person owner needle",
+  ]) {
+    assert.equal(createTreeRenderHarness([node], query).rows.length, 1, query);
+  }
+  for (const query of [
+    "retired title-only search",
+    "retired text-only search",
+    "retired outline-only search",
+  ]) {
+    assert.equal(createTreeRenderHarness([node], query).rows.length, 0, query);
+  }
+  assert.deepEqual(plain(node), before);
+  assert.equal(Object.hasOwn(node, "pe"), false);
+});
+
+test("pe retirement is load-only normalisation until a real edit, and all newly built snapshots omit pe", async () => {
+  const context = createFullContractContext();
+  const rawNode = syntheticNode("retirement_flow", {
+    details: "Current Notes before edit",
+    editor: outlineMeta([{ id: "retirement_outline", text: "Current Outline survives", depth: 0, collapsed: true }]),
+    pe: { schema: "pocket.pe.v1", title: "Retired", text: "Retired shadow", outline: [{ text: "Retired row" }] },
+  });
+  const input = {
+    schema: "portal.export.v1",
+    writtenAt: "2026-03-01T00:00:00.000Z",
+    mainThoughtTree: [rawNode],
+    mainThoughtTreeTombstones: [],
+    data: {
+      mainThoughtTree: [syntheticNode("nested_loser", { pe: { text: "Nested retired shadow" } })],
+      mainThoughtTreeTombstones: [],
+    },
+  };
+  const inputBefore = plain(input);
+  const normalised = context.normaliseInput(input);
+  const beforeLoadIdentity = establishSyntheticSession(context, "retirement-flow.json");
+  const state = lexicalState(context);
+  state.ops = [{ type: "must-clear-on-load" }];
+
+  context.applyLoadedState(normalised, {
+    schema: normalised.schema,
+    fileName: "retirement-flow.json",
+    writtenAt: normalised.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+
+  assert.deepEqual(plain(input), inputBefore);
+  assert.equal(state.nodes.length, 1);
+  assert.equal(state.nodes[0].id, "retirement_flow");
+  assert.equal(state.nodes[0].details, "Current Notes before edit");
+  assert.equal(state.nodes[0].editor.outline[0].text, "Current Outline survives");
+  assert.equal(Object.hasOwn(state.nodes[0], "pe"), false);
+  assert.equal(state.ops.length, 0);
+  assert.deepEqual(plain(context.capturePocketEditorSourceIdentity()), beforeLoadIdentity);
+  assert.deepEqual(plain(context.__surfaceCalls), {
+    exportTree: 0,
+    writeTruthFile: 0,
+    showOpenFilePicker: 0,
+    showSaveFilePicker: 0,
+  });
+
+  for (const key of ["pocketLite.lastSaveSnapshot.v1", "pocketLite.pip.snapshot.v1"]) {
+    assertNoRetiredPe(JSON.parse(context.__storage.get(key)), key);
+  }
+  assert.equal(context.saveLocalSafetySnapshot("p014"), true);
+  assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1")), "new local safety");
+  assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.localSafety.trail.v1")), "new local safety trail");
+  context.saveAutoCache(normalised, {
+    schema: normalised.schema,
+    fileName: "retirement-flow.json",
+    writtenAt: normalised.writtenAt,
+  });
+  assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.auto.cache.v1")), "new auto cache");
+  assertNoRetiredPe(context.buildPocketPayload("2026-03-02T00:00:00.000Z"), "new truth payload");
+  runScript(context, "js/pocket-vault.js");
+  assertNoRetiredPe(context.PocketVault.buildCurrentPocketPayload(), "new Vault payload");
+
+  let truthWrites = 0;
+  context.writeTruthFile = async () => {
+    truthWrites += 1;
+    return { ok: true, target: "opened-file" };
+  };
+  const unchangedSave = await context.exportTree({ returnDetails: true });
+  assert.equal(unchangedSave.ok, false);
+  assert.equal(unchangedSave.reason, "no-changes");
+  assert.equal(truthWrites, 0);
+  assert.equal(state.ops.length, 0);
+
+  let exportedPayload = null;
+  let exportCalls = 0;
+  context.exportTree = async () => {
+    exportCalls += 1;
+    exportedPayload = context.buildPocketPayload("2026-03-03T00:00:00.000Z");
+    state.ops = [];
+    return {
+      ok: true,
+      reason: "truth-file",
+      sourceIdentity: plain(context.capturePocketEditorSourceIdentity()),
+    };
+  };
+  const edited = editorPayload(context, state.nodes[0], { body: "Current Notes after edit" });
+  const result = await context.PocketNodePopoutEditor.applyAndSave(edited);
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, true);
+  assert.equal(result.exported, true);
+  assert.equal(exportCalls, 1);
+  assert.equal(state.nodes[0].details, "Current Notes after edit");
+  assert.equal(state.nodes[0].editor.outline[0].text, "Current Outline survives");
+  assert.equal(state.ops.length, 0);
+  assertNoRetiredPe(exportedPayload, "controlled explicit export");
+  assert.equal(exportedPayload.mainThoughtTree[0].details, "Current Notes after edit");
+  assert.equal(exportedPayload.data.mainThoughtTree[0].details, "Current Notes after edit");
+});
+
+test("active production sources have no remaining node.pe content path or legacy search wrapper", () => {
+  const indexScripts = indexScriptSources();
+  assert.equal(indexScripts.includes("js/pocket-filter-pe-search.js"), false);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, "js", "pocket-filter-pe-search.js")), false);
+
+  const metadata = source("js/pocket-editor-metadata.js");
+  assert.equal(metadata.includes("pocket.pe.v1"), false);
+  assert.equal(metadata.includes("normalisePocketPe"), false);
+  assert.equal(metadata.includes('FIRST_CLASS_NODE_FIELDS = ["editor", "pe"]'), false);
+  assert.match(metadata, /FIRST_CLASS_NODE_FIELDS\s*=\s*\["editor"\]/);
+
+  const storage = source("js/pocket-storage.js");
+  assert.equal(storage.includes("buildPeFromLegacyDetails"), false);
+  assert.equal(storage.includes("ensurePeFromLegacyDetails"), false);
+  assert.equal(storage.includes(".pe"), false);
+
+  const importer = source("js/pocket-import.js");
+  assert.equal(/\bitem\.pe\b|\bpayload\.pe\b/.test(importer), false);
+  assert.match(importer, /retired node\.pe.+omitted/);
+
+  for (const file of ["js/pocket-render.js", "js/pocket-node-popout-model.js", "js/pocket-editor-copy.js"]) {
+    assert.equal(/\bnode\??\.pe\b|\bnode\[['"]pe['"]\]/.test(source(file)), false, file);
+  }
+
+  const data = source("js/pocket-data.js");
+  assert.match(data, /Retired node\.pe stays reserved/);
+  assert.match(data, /"pe",/);
+});
+
 test("buildPocketPayload emits the current guarded dual-tree export shape", () => {
   const context = createFullContractContext();
-  const node = syntheticNode("exported", {
+  const node = normaliseOne(context, syntheticNode("exported", {
     details: "Projection",
     editor: { schema: "pocket.nodeEditor.v1", mode: "outline", outline: [{ id: "block", text: "Outline", depth: 0 }] },
     pe: { schema: "pocket.pe.v1", mode: "text", text: "Legacy shadow" },
     unknownNodeField: { keep: true },
-  });
+  }));
   const state = resetState(context, [node]);
   state.tombstones = [{ id: "deleted_fixture" }];
   state.rootExtras = { rootExtension: { keep: true } };
@@ -1514,7 +1925,8 @@ test("buildPocketPayload emits the current guarded dual-tree export shape", () =
   assert.equal(payload.rootExtension.keep, true);
   assert.equal(payload.data.dataExtension, "keep");
   assert.equal(payload.mainThoughtTree[0].editor.schema, "pocket.nodeEditor.v1");
-  assert.equal(payload.mainThoughtTree[0].pe.schema, "pocket.pe.v1");
+  assert.equal(Object.hasOwn(payload.mainThoughtTree[0], "pe"), false);
+  assert.equal(Object.hasOwn(payload.data.mainThoughtTree[0], "pe"), false);
   assert.equal(payload.mainThoughtTree[0].unknownNodeField.keep, true);
 
   state.nodes[0].label = "Mutated after build";
@@ -1525,11 +1937,12 @@ test("buildPocketPayload emits the current guarded dual-tree export shape", () =
   assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
 });
 
-test("ordinary Text and empty Text fixtures characterise current load/export round trips", () => {
+test("ordinary Text and empty Text fixtures round trip without synthesising pe", () => {
   const text = loadAndExportFixture("legacy-text.json");
   assert.equal(text.state.nodes[0].details, "Parent\n  Child");
-  assert.equal(text.state.nodes[0].pe.schema, "pocket.pe.v1");
+  assert.equal(Object.hasOwn(text.state.nodes[0], "pe"), false);
   assert.equal(text.payload.mainThoughtTree[0].details, "Parent\n  Child");
+  assert.equal(Object.hasOwn(text.payload.mainThoughtTree[0], "pe"), false);
 
   const empty = loadAndExportFixture("empty-text.json");
   assert.equal(Object.hasOwn(empty.state.nodes[0], "details"), false);
@@ -1570,7 +1983,7 @@ test("accepted Outline and independent Notes both load while Outline owns the op
   const node = result.state.nodes[0];
   assert.equal(node.details, "Compatibility projection intentionally differs");
   assert.equal(node.editor.outline[0].text, "Outline parent");
-  assert.equal(node.pe.mode, "text");
+  assert.equal(Object.hasOwn(node, "pe"), false);
   const openingPayload = result.context.PocketNodePopoutModel.buildPayload(node);
   assert.equal(openingPayload.mode, "outline");
   assert.equal(openingPayload.body, node.details);
@@ -1804,7 +2217,6 @@ test("lossy PE save preflight rejects over-limit and structurally unsafe payload
     const context = createFullContractContext();
     const node = syntheticNode(`reject_${reason}`, {
       details: "Before",
-      pe: { schema: "pocket.pe.v1", text: "Preserve" },
     });
     const state = resetState(context, [node]);
     state.selectedId = node.id;
@@ -1854,7 +2266,6 @@ test("unchanged unsafe raw Outline survives Notes and title saves while actual O
     const rawNode = syntheticNode(`loaded_${reason}`, {
       details: "Readable projection",
       editor: outlineMeta(outline),
-      pe: { preserve: true },
     });
 
     for (const [changeLabel, overrides] of [
@@ -2047,7 +2458,7 @@ test("main-tree Enter remains owned only by handleTreeKeydown in the active scri
   assert.match(guard, /Enter capture disabled/);
 });
 
-test("an unrelated edit and explicit export preserve raw unsupported and large first-class metadata", () => {
+test("an unrelated edit preserves raw editor metadata while later export omits retired pe", () => {
   const context = createFullContractContext();
   const unknown = fixture("unknown-editor-schema.json").mainThoughtTree[0];
   const malformed = fixture("malformed-editor.json").mainThoughtTree[0];
@@ -2088,13 +2499,15 @@ test("an unrelated edit and explicit export preserve raw unsupported and large f
   assert.equal(JSON.stringify(byId.get(unknown.id).editor), JSON.stringify(unknown.editor));
   assert.equal(JSON.stringify(byId.get(malformed.id).editor), JSON.stringify(malformed.editor));
   assert.equal(JSON.stringify(byId.get("unrelated_large_editor").editor), JSON.stringify(largeEditor));
-  assert.equal(JSON.stringify(byId.get("unrelated_large_pe").pe), JSON.stringify(largePe));
+  assert.equal(Object.hasOwn(byId.get("unrelated_large_pe"), "pe"), false);
   assert.equal(byId.get("unrelated_target").details, "After");
+  assert.equal(exported.mainThoughtTree.every((node) => !Object.hasOwn(node, "pe")), true);
+  assert.equal(exported.data.mainThoughtTree.every((node) => !Object.hasOwn(node, "pe")), true);
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
   assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
 });
 
-test("local safety, trail, auto-cache, and PiP recovery routes retain large and unknown first-class metadata", () => {
+test("local safety, trail, auto-cache, and PiP recovery retain editor metadata while discarding pe", () => {
   const currentEditor = largeCurrentEditor();
   const unknownEditor = largeUnknownEditor();
   const legacyPe = largeLegacyPe();
@@ -2114,7 +2527,8 @@ test("local safety, trail, auto-cache, and PiP recovery routes retain large and 
     const byId = new Map(nodes.map((node) => [node.id, node]));
     assert.equal(JSON.stringify(byId.get("recovery_current").editor), JSON.stringify(currentEditor));
     assert.equal(JSON.stringify(byId.get("recovery_unknown").editor), JSON.stringify(unknownEditor));
-    assert.equal(JSON.stringify(byId.get("recovery_pe").pe), JSON.stringify(legacyPe));
+    assert.equal(Object.hasOwn(byId.get("recovery_pe"), "pe"), false);
+    assert.equal(byId.get("recovery_pe").details, "Legacy recovery view");
   }
 
   const context = createFullContractContext();
@@ -2157,6 +2571,12 @@ test("local safety, trail, auto-cache, and PiP recovery routes retain large and 
   assert.equal(restoredState.collapsed.has("recovery_current"), true);
   assert.deepEqual(plain(restoredState.ops), [{ type: "synthetic_recovery" }]);
   assert.equal(context.PocketNodePopoutModel.buildPayload(restoredState.nodes.find((node) => node.id === "recovery_unknown")).readOnly, true);
+  assert.equal(context.saveLocalSafetySnapshot("p014-recovered"), true);
+  assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1")), "rewritten recovered safety");
+  const rewrittenTrail = JSON.parse(context.__storage.get("pocketLite.localSafety.trail.v1"));
+  const rewrittenEntry = rewrittenTrail.find((entry) => entry?.reason === "p014-recovered");
+  assert.ok(rewrittenEntry);
+  assertNoRetiredPe(rewrittenEntry, "new rewritten recovered trail entry");
 
   context.__storage.set("pocketLite.auto.cache.v1", JSON.stringify({
     cachedAt: "2026-02-04T00:02:00.000Z",
@@ -2200,6 +2620,8 @@ test("local safety, trail, auto-cache, and PiP recovery routes retain large and 
   assert.equal(pipState.selectedId, "recovery_unknown");
   assert.equal(pipState.collapsed.has("recovery_current"), true);
   assert.equal(pipContext.PocketNodePopoutModel.buildPayload(pipState.nodes.find((node) => node.id === "recovery_unknown")).readOnly, true);
+  pipContext.persistPipSnapshot();
+  assertNoRetiredPe(JSON.parse(pipContext.__storage.get("pocketLite.pip.snapshot.v1")), "rewritten PiP snapshot");
   assert.equal(pipContext.__surfaceCalls.writeTruthFile, 0);
   assert.equal(pipContext.__surfaceCalls.showOpenFilePicker, 0);
   assert.equal(pipContext.__surfaceCalls.showSaveFilePicker, 0);
@@ -2356,7 +2778,7 @@ test("PE apply fails closed for no file, missing or malformed identity, and a wr
 
   for (const [label, mutate, reason] of cases) {
     const context = createFullContractContext();
-    const node = syntheticNode(`identity_${reason}`, { details: "Before", pe: { preserve: true } });
+    const node = syntheticNode(`identity_${reason}`, { details: "Before" });
     const state = resetState(context, [node]);
     state.selectedId = node.id;
     const payload = editorPayload(context, node, { body: "After" });
@@ -2384,12 +2806,12 @@ test("PE apply fails closed for no file, missing or malformed identity, and a wr
 
 test("file A editor cannot mutate file B even when filename and node ID are identical", async () => {
   const context = createFullContractContext();
-  const nodeA = syntheticNode("shared_id", { label: "File A", details: "A body", pe: { source: "A" } });
+  const nodeA = syntheticNode("shared_id", { label: "File A", details: "A body" });
   resetState(context, [nodeA]);
   const stalePayload = editorPayload(context, nodeA, { title: "Old editor", body: "Old editor body" });
 
   const state = lexicalState(context);
-  const nodeB = syntheticNode("shared_id", { label: "File B", details: "B body", pe: { source: "B" } });
+  const nodeB = syntheticNode("shared_id", { label: "File B", details: "B body" });
   state.nodes = [plain(nodeB)];
   state.ops = [];
   state.selectedId = nodeB.id;

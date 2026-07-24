@@ -8,7 +8,7 @@ Known state:
 - PE route functional rebuild is paused.
 - Older editor and PE scripts may still be loaded.
 - `node.label` is the intended title source of truth.
-- `node.pe` is intended native item-details metadata.
+- `node.pe` is retired: canonical normalisation reserves and discards it, and current PE content is owned only by title, Notes and supported Outline data.
 - `js/commands/pocket-command-router.js` exists as a dormant future owner for command behaviour.
 - `tools/pocket-check.js` exists as a read-only repo health check.
 - `tools/pocket-mod-index.js` exists as a narrow index.html mod tool.

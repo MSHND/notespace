@@ -5,6 +5,28 @@
 - Audit date: 22 July 2026
 - Status: report only. No runtime, schema, persistence, fixture or personal truth-file change was made.
 
+## P014 product decision addendum — 24 July 2026
+
+Murray manually retained the legacy-only `node.pe` content he wanted and then selected full retirement of that shadow from the active model.
+
+P014 implements the decision centrally:
+
+- `node.label` remains shared title truth;
+- `node.details` remains Notes truth;
+- accepted `node.editor.outline` remains Outline truth;
+- `node.pe` is discarded whenever nodes are normalised, regardless of value shape, schema or size;
+- `pe` remains reserved so generic extras cannot revive it;
+- Notes-to-pe synthesis and its dormant helpers are removed;
+- tree search no longer reads legacy pe title, text or rows, and the old search wrapper is removed;
+- PE opening, saving, copy context and tree indicators use only current title, Notes and editor data; and
+- newly built truth, safety, trail, PiP, cache, last-save and Vault representations contain no `pe`.
+
+This is not a write-on-load migration. Opening or restoring legacy input records no operation, marks no dirty state, opens no picker, writes no truth or backup file and does not retarget the active file session merely because `pe` was omitted in memory. An unchanged Save remains unchanged. Only a later successful explicit save caused by a real current user change naturally persists the already-normalised tree without `pe`.
+
+No pe-to-Notes or pe-to-Outline promotion, compatibility viewer, warning, tombstone, migration marker, hidden backup or new schema was added. A pe-only legacy node becomes an ordinary title-only node and opens as empty editable Notes.
+
+The P009 findings below remain historical evidence. Their statements that `node.pe` was preserved, synthesised or searched describe the pre-P014 implementation and are resolved by this addendum. P011's first-class preservation decision now applies only to `node.editor`; P013's independent Notes/Outline model remains unchanged.
+
 ## P013 product decision addendum — 24 July 2026
 
 Murray selected independent Notes and Outline content rather than destructive conversion semantics.
@@ -38,7 +60,7 @@ An unchanged raw supported Outline is preserved through Notes-only and title-onl
 
 Unsupported or malformed non-null editor metadata remains wholly read-only under P011. P013 does not selectively edit Notes around unknown metadata. P012 file-session identity, source diagnostics, node revision, failed-export retry, queued-write rejection and Save & Close persistence requirements remain unchanged.
 
-No automatic migration is required or permitted. Older Pocket versions may display `node.details` as readable Notes without understanding the independent Outline, and may not offer equivalent editing semantics. P014 remains the separate decision about retiring live `node.pe` synthesis and search use while preserving raw legacy values.
+No automatic Notes/Outline migration is required or permitted. Older Pocket versions may display `node.details` as readable Notes without understanding the independent Outline, and may not offer equivalent editing semantics. The later P014 addendum above supersedes this section's then-pending assumption that raw legacy `node.pe` values would remain preserved.
 
 The P009 audit findings below are retained as historical evidence of the pre-P010/P013 implementation. Statements describing `details` as an Outline projection document that earlier state and are superseded by this addendum for current behavior.
 
