@@ -1,5 +1,20 @@
 # PE Persistence Contract
 
+## P013 independent content-section contract
+
+P013 makes **Notes** and **Outline** independent content sections of one node. `node.label` remains the shared title, `node.details` is Notes truth, and a supported `node.editor.outline` under the exact `pocket.nodeEditor.v1` schema is Outline truth. Neither section is a projection of the other after P013.
+
+- A supported Outline opens the Outline tab; otherwise PE opens Notes. The selected tab is runtime UI state only.
+- Switching tabs never converts content, marks PE dirty, records an operation, or writes a truth file. Unsaved edits in both sections remain in memory.
+- Saving compares Notes and Outline independently in the main window. Notes-only changes preserve the existing raw editor object; Outline-only changes preserve Notes; combined changes persist together.
+- Blank Notes remove only `node.details`. An absent or wholly blank Outline removes only `node.editor`; a fresh blank runtime row is not persisted.
+- Existing `details` on older Outline nodes is retained verbatim as initial Notes, even when it resembles the Outline. There is no heuristic cleanup or automatic migration.
+- An unchanged supported raw Outline, including supported raw extensions, survives a Notes-only save. An actual Outline change crosses the P012 canonicalisation and non-lossy preflight boundary.
+- Unsupported or malformed non-null editor metadata remains in the P011 read-only compatibility experience; Notes are not selectively enabled around it.
+- Older Pocket versions may display Notes without understanding the independent Outline. P013 makes no bidirectional older-reader editing promise.
+
+The terms `mode: "text"` and `mode: "outline"` may remain inside the popup payload as a presentation-tab indicator for compatibility. They do not describe conversion or persistence ownership.
+
 P012 updates the executable P010/P011 baseline to describe the current persistence contract after source-identity binding, node-revision checks and non-lossy save preflight.
 
 The terms used below are deliberate:
@@ -59,7 +74,7 @@ The harness:
 - does not create a real `FileSystemFileHandle`, invoke a real picker, or write a truth file;
 - instruments generated runtime code in memory only.
 
-The P012 validation run on Node `v23.11.0` reports 77 tests, 77 passes and 0 failures. The same command and result are also recorded in `docs/CODEX_REPORT.md`.
+The P013 validation run reports 79 tests, 79 passes and 0 failures. The same command and result are also recorded in `docs/CODEX_REPORT.md`.
 
 ## 3. Source files exercised
 
@@ -80,7 +95,7 @@ The suite parses or executes these current production sources:
 | `js/pocket-node-popout-model.js` | Editor classification, supported-view normalisation, opening bindings and raw non-lossy save preflight |
 | `js/pocket-node-popout-target.js` | Node resolution by explicit ID and current fallback |
 | `js/pocket-node-popout-editor.js` | Ordered identity/revision/apply gates, non-lossy preparation, retry handshake and export-result propagation |
-| `js/pocket-node-popout-runtime.js` | Generated program, bound save payload, revision/identity adoption, dirty-state result handling, read-only guards, exact save schema, shared parser and Text/Outline projection |
+| `js/pocket-node-popout-runtime.js` | Generated program, independent Notes/Outline payload, tab state, revision/identity adoption, dirty-state result handling, read-only guards and structured-paste parser |
 | `js/pocket-node-popout-template.js` | Read-only fields, warning and disabled controls |
 | `js/pocket-editor-cutover-v3.js`, `js/pocket-editor-popout.js` and `js/pocket-pe-save-dirty.js` | Canonical open/apply/save ownership and fail-closed legacy routes |
 | `js/pocket-storage.js`, `js/pocket-import.js`, `js/pocket-editor-copy.js` and `js/pocket-vault-io-browser.js` | Active recovery, PiP and Vault state adoption as new document sessions |
@@ -134,7 +149,7 @@ Verified export rules:
 
 Tombstone entries are selected from the winning root container and copied as an array. The active input normaliser does not apply a tombstone item schema or item-count limit.
 
-## 5. Current Text-node contract
+## 5. Historical pre-P013 Text-node contract
 
 A representative persisted Text node is:
 
@@ -171,7 +186,7 @@ P012 does not change how already persisted Text is normalised on load. At an exp
 
 On active load, a details-bearing node without its own `pe` property still gains an in-memory `pocket.pe.v1` Text object through `ensurePeFromLegacyDetails()`. That is CURRENT-RISK compatibility behaviour, not the Text canonical model. An own `pe` property, including `pe: null`, prevents synthesis.
 
-## 6. Current Outline-node contract
+## 6. Historical pre-P013 Outline-node contract
 
 A representative persisted saved Outline node is:
 

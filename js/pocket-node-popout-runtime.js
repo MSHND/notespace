@@ -46,8 +46,6 @@
   }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
   function ensureBlockId(block) { if (block && !block.id) block.id = makeBlock("", 0).id; return block && block.id ? block.id : ""; }
-  function textToOutline(text) { return outlineBlocksFromPastedText(text, 0); }
-  function outlineToText(blocks) { return (blocks || []).map(function (block) { return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || ""); }).join("\\n"); }
   function hasChildren(index) { var here = outline[index]; var next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
   function isHidden(index) {
     var searchDepth = Number(outline[index] && outline[index].depth) || 0;
@@ -520,8 +518,8 @@
       if (index === focusIndex) requestAnimationFrame(function () { text.focus(); });
     });
   }
-  function setMode(nextMode) { if (readOnly) return false; if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } if (nextMode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } setDirty(true); return true; }
-  function currentBody() { if (mode === "outline") { syncOutlineFromDom(); return outlineToText(outline); } return bodyInput.value; }
+  function setMode(nextMode) { if (readOnly) return false; if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } mode = nextMode === "outline" ? "outline" : "text"; updateModeChrome(); if (mode === "outline") renderOutline(0); else bodyInput.focus({ preventScroll: true }); return true; }
+  function currentBody() { return bodyInput.value; }
   function buildPayload() {
     if (readOnly) return null;
     if (Array.isArray(outline)) { syncOutlineFromDom(); outline.forEach(ensureBlockId); }
@@ -537,7 +535,7 @@
       sourcePipSession: payload.sourcePipSession,
       originalUpdatedAt: payload.originalUpdatedAt
     };
-    if (mode === "outline") nextPayload.schema = "pocket.nodeEditor.v1";
+    nextPayload.schema = "pocket.nodeEditor.v1";
     return nextPayload;
   }
   function hasCompleteSaveContext() {
@@ -770,7 +768,7 @@
   window.addEventListener("beforeunload", function (ev) { if (readOnly || !dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   applyReadOnlyState();
   updateModeChrome();
-  if (!readOnly && mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); }
+  if (!readOnly && mode === "outline") { if (!outline) outline = []; renderOutline(0); }
   if (readOnly) bodyInput.focus({ preventScroll: true });
   else { titleInput.focus(); titleInput.select(); }
 })();
