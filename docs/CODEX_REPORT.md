@@ -1,5 +1,116 @@
 # Codex report
 
+## POCKET TASK P015 — AUDIT ARCHITECTURE, SECURITY AND FAILURE MODES
+
+Title: Audit architecture, security and failure modes
+
+Status: report-only audit complete against the exact P014 baseline. The audit found six reachable RED ownership/data-integrity paths, fourteen YELLOW reliability, availability, hardening or architectural gaps, ten confirmed GREEN boundaries and six INFORMATIONAL items. No implementation or runtime behaviour changed.
+
+Commit title:
+
+- `P015 Audit architecture and failure modes`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched GitHub-visible starting `origin/main`: `29224a3218a7dd12c40ac5d0503394282e7624d3`
+- Baseline title: `P014 Retire legacy node.pe shadow`
+- Branch: `main`
+- Local `main`, `HEAD` and `origin/main` were identical, with zero ahead/behind divergence and a clean worktree before the audit.
+- PR #6 was not merged, cherry-picked, modified or used.
+- The audit inspected the active P014 repository rather than relying on older handovers.
+- Scope covered 95 tracked files, 60 production JavaScript files, active `index.html` load order, global owners and wrappers, document adoption, truth writes, recovery, PiP, Vault, normalisation, generated code, DOM and messaging surfaces, browser storage, size handling, tests, CI, dependencies and network surfaces.
+- No personal Pocket truth file, real Vault, browser localStorage, IndexedDB contents or uploaded user JSON was inspected.
+- No external scanner or service received repository content.
+
+### Files changed
+
+- Added `docs/P015_ARCHITECTURE_SECURITY_AUDIT.md`
+- Updated `docs/CODEX_REPORT.md`
+
+No production JavaScript, HTML, CSS, package, test, fixture, workflow, schema, runtime configuration or existing architecture/migration document changed.
+
+### Audit method and commands
+
+The audit used line-numbered active-source inspection, repository-wide symbol/sink searches, script-order and global-owner tracing, actual-source Node VM probes with synthetic inputs, focused test review and execution, syntax checks and Git validation.
+
+Commands included:
+
+- `git fetch origin`
+- `git status --short --branch`
+- `git rev-parse HEAD`
+- `git rev-parse origin/main`
+- `git log --oneline --decorate`
+- `git ls-files`
+- `gh run list --repo MSHND/notespace --branch main --limit 10 --json databaseId,workflowName,headSha,status,conclusion,event,createdAt`
+- targeted `rg`, `nl`, `sed` and `find` inspections
+- `node --version`
+- `node --test tests/pe-persistence-contract.test.js`
+- `find js -name '*.js' -print0 | xargs -0 -n1 node --check`
+- separate `node --check` runs for `sw.js`, the focused test and repository tools
+- `git diff --check`
+- `git diff --name-only`
+- `git diff --cached --check`
+- `git diff --cached --name-only`
+
+`node tools/pocket-check.js` and `npm run check` were not run.
+
+### Validation result
+
+- Node: `v23.11.0`
+- Focused command: `node --test tests/pe-persistence-contract.test.js`
+- Focused result: 94 tests, 94 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo
+- Production JavaScript syntax: all 60 files under `js/` passed `node --check`
+- Relevant non-production JavaScript syntax: `sw.js`, `tests/pe-persistence-contract.test.js`, `tools/pocket-check.js` and `tools/pocket-mod-index.js` passed `node --check`
+- Markdown: required P015 headings are present once and in order; stable finding IDs are unique; tables were reviewed; there are no unbalanced code fences
+- Git: `git diff --check` passed
+- Final changed-file review: documentation only
+
+### Finding counts
+
+- RED: 6
+- YELLOW: 14
+- GREEN: 10
+- INFORMATIONAL: 6
+
+### RED findings
+
+1. `P015-F01` Recovery adoption can overwrite the wrong active truth file
+2. `P015-F02` Opening a Vault retains the previous JSON truth handle
+3. `P015-F03` Document PiP return is not bound to its opening document
+4. `P015-F04` Destructive load normalisation is silent and later Save commits the loss
+5. `P015-F05` Root-shape recognition can accept valid content as an empty editable document
+6. `P015-F06` No save-time disk freshness check permits last-writer-wins loss
+
+### Current-risk summary
+
+Ordinary single-file Notes and Outline editing remains acceptable when one valid current Pocket file is used in one tab. P011 unsupported-editor preservation, P012 PE source/revision binding and lossless preflight, P013 independent Notes/Outline semantics, P014 `node.pe` retirement, explicit file gating, queued handle checks and canonical popup escaping were confirmed.
+
+The unsafe boundaries are whole-document adoption and hostile/ambiguous input, not the accepted PE content model:
+
+- recovery, Vault and returned PiP can replace in-memory state while keeping a different writable handle;
+- post-load external or second-tab changes have no save-time freshness check;
+- destructive node/root normalisation can become permanent on a later explicit Save;
+- recovery can fail, be cleared during a save race, or remain stale after Undo without accurately preserving the newest visible tree;
+- Vault envelope validation, revision and plaintext-recovery contracts are incomplete;
+- the loaded legacy editor/message layer remains security and maintenance debt;
+- several visible Edit controls lose selected-node identity in capture routing; and
+- tracked CI does not run the 94-case focused source suite.
+
+The report distinguishes these from dormant loaders, dormant legacy popup injection, documentation drift, CSP deployment uncertainty and disproved prototype-pollution concerns.
+
+### Recommended next task
+
+The recommended next task is **P016: Bind recovery restore to document ownership**.
+
+It should cover automatic recovery offer, manual previous-version restore and Phone-mode automatic restore for different-name and same-name A/B sources. It must decide whether cross-source recovery is rejected, opened read-only or allowed only after an explicit destination confirmation. No implementation prompt or approval is assumed by P015.
+
+### Completion boundary
+
+The detailed evidence, line references, mitigations, coverage gaps, ownership/storage/security maps and provisional P016–P026 sequence are in `docs/P015_ARCHITECTURE_SECURITY_AUDIT.md`.
+
+This report remains documentation-only. No truth-file migration occurred, no personal data was accessed and no production or test behaviour changed. Completion is gated on committing with the exact title above, pushing to `origin/main`, fetching again, proving the pushed commit's parent is the P014 baseline, confirming only the two permitted documentation files changed and confirming the final worktree is clean.
+
 ## POCKET TASK P014 — RETIRE THE LEGACY NODE.PE SHADOW
 
 Title: Retire legacy node.pe shadow
