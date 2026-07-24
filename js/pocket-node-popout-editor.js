@@ -211,14 +211,15 @@
     else delete node.editor;
     node.updatedAt = updatedAt;
 
-    if (typeof recordOp === "function") recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: prepared.editorMeta ? "outline" : "details" });
+    const changedSection = prepared.editorChanged && prepared.notesChanged ? "notes-and-outline" : prepared.editorChanged ? "outline" : prepared.notesChanged ? "notes" : "title";
+    if (typeof recordOp === "function") recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: changedSection });
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(id, { instant: true });
     if (typeof saveWorkspaceState === "function") saveWorkspaceState();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
-    if (options.quiet !== true && typeof setStatus === "function") setStatus(prepared.editorMeta ? `Saved outline for "${clean(node.label, 80)}".` : `Saved details for "${clean(node.label, 80)}".`, "ok");
-    console.info("[node popout editor] saved", { id: id, changed: prepared.editorMeta ? "outline" : "details" });
+    if (options.quiet !== true && typeof setStatus === "function") setStatus(`Saved editor content for "${clean(node.label, 80)}".`, "ok");
+    console.info("[node popout editor] saved", { id: id, changed: changedSection });
     return {
       ok: true,
       changed: true,

@@ -170,7 +170,7 @@
     return { ok: true };
   }
 
-  function validateSavePayload(payload) {
+  function validateSavePayload(payload, options = {}) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return saveIssue(
         "invalid-save-payload",
@@ -199,8 +199,16 @@
       );
     }
 
-    if (payload.mode === "text") return { ok: true, mode: "text", title, details };
-    if (payload.mode !== "outline" || payload.schema !== OUTLINE_EDITOR_SCHEMA) {
+    if (payload.mode !== "text" && payload.mode !== "outline") {
+      return saveIssue(
+        "invalid-outline",
+        "Pocket could not verify the selected content section. Nothing was changed.",
+        "Content section is not valid — not saved"
+      );
+    }
+
+    if (payload.outline == null) return { ok: true, mode: payload.mode, title, details, editorMeta: null };
+    if (!Array.isArray(payload.outline) || payload.schema !== OUTLINE_EDITOR_SCHEMA) {
       return saveIssue(
         "invalid-outline",
         "Pocket could not verify this outline format. Nothing was changed.",
@@ -208,8 +216,10 @@
       );
     }
 
-    const outlineResult = validateOutlineBlocks(payload.outline);
-    if (!outlineResult.ok) return outlineResult;
+    if (options.deferOutlineSafety !== true) {
+      const outlineResult = validateOutlineBlocks(payload.outline);
+      if (!outlineResult.ok) return outlineResult;
+    }
     if (!metadataContract().cloneJsonCompatibleValue(payload.outline).ok) {
       return saveIssue(
         "invalid-outline",
@@ -217,7 +227,9 @@
         "Outline is not valid — not saved"
       );
     }
-    const editorMeta = normaliseEditorMeta(payload);
+    const hasMeaningfulOutline = payload.outline.some((block) => String(block?.text || "").trim().length > 0);
+    if (!hasMeaningfulOutline) return { ok: true, mode: payload.mode, title, details, editorMeta: null };
+    const editorMeta = normaliseEditorMeta({ schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline: payload.outline });
     if (!editorMeta) {
       return saveIssue(
         "invalid-outline",
@@ -225,7 +237,7 @@
         "Outline is not valid — not saved"
       );
     }
-    return { ok: true, mode: "outline", title, details, editorMeta };
+    return { ok: true, mode: payload.mode, title, details, editorMeta };
   }
 
   function validateStoredEditorForSave(node) {
@@ -235,23 +247,42 @@
   }
 
   function prepareSave(node, payload) {
-    if (payload && payload.mode === "outline") {
-      const storedResult = validateStoredEditorForSave(node);
-      if (!storedResult.ok) return storedResult;
-    }
-    const validation = validateSavePayload(payload);
+    const storedClassification = classifyNodeEditor(node);
+    const validation = validateSavePayload(payload, { deferOutlineSafety: storedClassification.kind === "supported-v1-outline" });
     if (!validation.ok) return validation;
 
     const beforeLabel = clean(node.label, SAVE_LIMITS.title);
     const beforeDetails = normaliseDetailsSafe(node.details, SAVE_LIMITS.details);
-    const beforeEditor = JSON.stringify(normaliseEditorMeta(node.editor) || null);
+    const beforeEditorMeta = normaliseEditorMeta(node.editor);
+    const beforeEditor = JSON.stringify(beforeEditorMeta || null);
     const nextLabel = validation.title || beforeLabel || "Untitled";
     const nextDetails = validation.details;
-    const editorMeta = validation.mode === "outline" ? validation.editorMeta : null;
-    const afterEditor = JSON.stringify(editorMeta || null);
+    const incomingEditorMeta = validation.editorMeta;
+    const incomingComparable = incomingEditorMeta && Array.isArray(payload.outline) ? {
+      schema: OUTLINE_EDITOR_SCHEMA,
+      mode: "outline",
+      outline: payload.outline.map((block, index) => ({
+        id: block && block.id,
+        text: block && block.text,
+        depth: block && block.depth,
+        collapsed: block && block.collapsed === true,
+        order: index + 1
+      }))
+    } : null;
+    const afterEditor = JSON.stringify(incomingComparable);
+    const editorChanged = beforeEditor !== afterEditor;
+    if (editorChanged) {
+      const storedResult = validateStoredEditorForSave(node);
+      if (!storedResult.ok) return storedResult;
+      const incomingResult = validateSavePayload(payload);
+      if (!incomingResult.ok) return incomingResult;
+    }
+    const editorMeta = editorChanged ? incomingEditorMeta : (beforeEditorMeta ? node.editor : null);
     return {
       ok: true,
-      changed: beforeLabel !== nextLabel || beforeDetails !== nextDetails || beforeEditor !== afterEditor,
+      changed: beforeLabel !== nextLabel || beforeDetails !== nextDetails || editorChanged,
+      notesChanged: beforeDetails !== nextDetails,
+      editorChanged,
       beforeLabel,
       nextLabel,
       nextDetails,

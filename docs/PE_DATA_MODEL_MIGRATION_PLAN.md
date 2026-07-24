@@ -912,7 +912,11 @@ These are tentative future Pocket tasks. P009 does not approve or implement them
 - Test newer schema input and an older-reader simulation. The older-reader acceptance target is readable details fallback unless Murray chooses a stronger promise.
 - Do not mark rehearsal successful until the candidate was read back, normalised under the intended version and compared against explicit invariants.
 
-## 14. Open Product Decisions for Murray
+## P013 product decision: independent Notes and Outline
+
+Murray selected independent content sections rather than destructive conversion semantics. `node.details` is Notes truth and the supported `node.editor.outline` array is Outline truth. Neither is regenerated from the other, existing details projections are retained as Notes, and no automatic migration runs on open, tab switching, or save. The historical audit and alternatives below remain as context; questions 1 and 2 are resolved by this P013 decision. `node.pe` policy remains deferred to P014.
+
+## 14. Historical product questions
 
 ### 1. Which representation wins when a saved Outline and `details` disagree?
 
