@@ -31,7 +31,7 @@
     const mode = cleanText(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
     if (mode !== "outline") return null;
     const outline = Array.isArray(value.outline) ? value.outline.slice(0, 400).map(normalisePopoutOutlineBlock) : [];
-    const meaningful = outline.some((block) => (Number(block.depth) || 0) > 0 || block.collapsed === true);
+    const meaningful = outline.some((block) => String(block.text || "").trim().length > 0 || (Number(block.depth) || 0) > 0 || block.collapsed === true);
     if (!meaningful) return null;
     return { schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline };
   }
@@ -140,9 +140,9 @@
 </head>
 <body class="isTextMode">
   <main class="wrap">
-    <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn" class="quietBtn" type="button">save</button><span id="saveState" class="saveState" aria-live="polite"></span><div class="modeSwitch" aria-label="Editor mode"><button id="textModeBtn" class="quietBtn modeBtn" type="button">text</button><button id="outlineModeBtn" class="quietBtn modeBtn" type="button">outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · drag dot reorders</div><button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button></div>
+    <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn" class="quietBtn" type="button">save</button><span id="saveState" class="saveState" aria-live="polite"></span><div class="modeSwitch" aria-label="Content sections"><button id="textModeBtn" class="quietBtn modeBtn" type="button">Notes</button><button id="outlineModeBtn" class="quietBtn modeBtn" type="button">Outline</button></div><div class="grow"></div><div class="hint">Tab indents branch · drag dot reorders</div><button id="closeBtn" class="quietBtn closeBtn" type="button" aria-label="Close editor" title="Close editor">×</button></div>
     <div class="meta"><div class="titleLine">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
-    <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Item details">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Item outline"></div></div>
+    <div class="fields"><input id="titleInput" value="${safeTitle}" aria-label="Item name"><textarea id="bodyInput" aria-label="Notes">${safeBody}</textarea><div id="outlinePane" class="outlinePane" aria-label="Outline"></div></div>
   </main>
 <script>
 (function () {
@@ -162,13 +162,11 @@
   const saveState = document.getElementById("saveState");
   function setSaveState(text, kind) { if (!saveState) return; saveState.textContent = text || ""; saveState.className = "saveState" + (kind ? " " + kind : ""); }
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
-  function textToOutline(text) { return String(text || "").split("\\n").map(function (line) { const leading = (line.match(/^\\s*/) || [""])[0].replace(/\\t/g, "  ").length; return makeBlock(line.trimStart(), Math.floor(leading / 2)); }); }
-  function outlineToText(blocks) { return (blocks || []).map(function (block) { return "  ".repeat(Math.max(0, Number(block.depth) || 0)) + String(block.text || ""); }).join("\\n"); }
   function hasChildren(index) { const here = outline[index]; const next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
   function subtreeEnd(index) { const base = Number(outline[index]?.depth) || 0; let end = index + 1; while (end < outline.length && (Number(outline[end]?.depth) || 0) > base) end += 1; return end; }
   function isHidden(index) { const depth = Number(outline[index]?.depth) || 0; for (let i = index - 1; i >= 0; i -= 1) { const parentDepth = Number(outline[i]?.depth) || 0; if (parentDepth < depth && outline[i].collapsed) return true; } return false; }
   function setDirty(next) { dirty = !!next; draft.dirty = dirty; document.body.classList.toggle("isDirty", dirty); }
-  function currentBody() { return mode === "outline" ? outlineToText(outline) : bodyInput.value; }
+  function currentBody() { return bodyInput.value; }
   function buildDraft() { return { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, openedAt: draft.openedAt || new Date().toISOString(), updatedAt: new Date().toISOString(), dirty: dirty }; }
   function storeDraft() { try { draft = buildDraft(); window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (_error) {} }
   function clearDraft() { try { window.localStorage.removeItem(DRAFT_KEY); } catch (_error) {} }
@@ -215,8 +213,8 @@
     });
     if (Number.isFinite(focusIndex)) focusBlock(focusIndex);
   }
-  function setMode(nextMode) { const target = nextMode === "outline" ? "outline" : "text"; if (target === "outline") { if (mode !== "outline" || !outline) outline = textToOutline(bodyInput.value); mode = "outline"; updateModeChrome(); renderOutline(0); } else { if (mode === "outline" && outline) bodyInput.value = outlineToText(outline); mode = "text"; updateModeChrome(); bodyInput.focus({ preventScroll: true }); } markDirty(); }
-  function buildPayload() { return { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, updatedAt: new Date().toISOString() }; }
+  function setMode(nextMode) { mode = nextMode === "outline" ? "outline" : "text"; updateModeChrome(); if (mode === "outline") renderOutline(0); else bodyInput.focus({ preventScroll: true }); }
+  function buildPayload() { return { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, schema: "pocket.nodeEditor.v1", outline: outline, updatedAt: new Date().toISOString() }; }
   function closeAfterSaved() { allowedToClose = true; setDirty(false); clearDraft(); setSaveState("saved", "saved"); window.setTimeout(function () { allowedToClose = true; window.close(); }, 60); }
   function save() { const payload = buildPayload(); setSaveState("saving…", ""); storeDraft(); try { if (window.opener && !window.opener.closed && window.opener.PocketEditorPopout && typeof window.opener.PocketEditorPopout.apply === "function") { const ok = window.opener.PocketEditorPopout.apply(payload); if (ok) { closeAfterSaved(); return; } } } catch (error) { console.error(error); } try { if (window.opener && !window.opener.closed) { window.opener.postMessage({ type: "pocketEditorPopout:save", payload: payload }, "*"); window.setTimeout(function () { if (dirty) setSaveState("waiting…", ""); }, 450); return; } } catch (error) { console.error(error); } setSaveState("failed", "failed"); alert("Pocket is not connected. This draft is still stored here."); }
   function closeSafely() { if (!dirty) { allowedToClose = true; window.close(); return; } if (confirm("Save changes before closing?")) { save(); return; } if (confirm("Close without saving?")) { clearDraft(); allowedToClose = true; setDirty(false); window.close(); } }
@@ -224,7 +222,7 @@
   document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } });
   window.addEventListener("message", function (ev) { if (!ev.data || ev.data.type !== "pocketEditorPopout:saved") return; closeAfterSaved(); });
   window.addEventListener("beforeunload", function (ev) { if (!dirty || allowedToClose) return; storeDraft(); ev.preventDefault(); ev.returnValue = "Unsaved editor changes."; });
-  updateModeChrome(); if (mode === "outline") { if (!outline) outline = textToOutline(bodyInput.value); renderOutline(0); } setDirty(dirty); titleInput.focus(); titleInput.select();
+  updateModeChrome(); if (mode === "outline") { if (!outline) outline = []; renderOutline(0); } setDirty(dirty); titleInput.focus(); titleInput.select();
 })();
 </script>
 </body>

@@ -204,21 +204,30 @@
     }
 
     const updatedAt = nextNodeUpdatedAt(currentUpdatedAt);
-    node.label = prepared.nextLabel;
-    if (prepared.nextDetails) node.details = prepared.nextDetails;
-    else delete node.details;
-    if (prepared.editorMeta) node.editor = prepared.editorMeta;
-    else delete node.editor;
+    if (prepared.titleChanged) node.label = prepared.nextLabel;
+    if (prepared.notesChanged) {
+      if (prepared.nextDetails) node.details = prepared.nextDetails;
+      else delete node.details;
+    }
+    if (prepared.editorChanged) {
+      if (prepared.editorMeta) node.editor = prepared.editorMeta;
+      else delete node.editor;
+    }
     node.updatedAt = updatedAt;
 
-    if (typeof recordOp === "function") recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: prepared.editorMeta ? "outline" : "details" });
+    const changedSections = [];
+    if (prepared.titleChanged) changedSections.push("title");
+    if (prepared.notesChanged) changedSections.push("notes");
+    if (prepared.editorChanged) changedSections.push("outline");
+    const changedSection = changedSections.join("-and-");
+    if (typeof recordOp === "function") recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: changedSection });
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(id, { instant: true });
     if (typeof saveWorkspaceState === "function") saveWorkspaceState();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
-    if (options.quiet !== true && typeof setStatus === "function") setStatus(prepared.editorMeta ? `Saved outline for "${clean(node.label, 80)}".` : `Saved details for "${clean(node.label, 80)}".`, "ok");
-    console.info("[node popout editor] saved", { id: id, changed: prepared.editorMeta ? "outline" : "details" });
+    if (options.quiet !== true && typeof setStatus === "function") setStatus(`Saved editor content for "${clean(node.label, 80)}".`, "ok");
+    console.info("[node popout editor] saved", { id: id, changed: changedSection });
     return {
       ok: true,
       changed: true,

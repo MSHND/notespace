@@ -1,5 +1,170 @@
 # Codex report
 
+## POCKET TASK P013
+
+Title: Separate Notes and Outline content
+
+Status: independent Notes/Outline sections, corrected structural-only Outline preservation, P012 non-lossy safety and focused automated validation implemented. Murray's physical browser acceptance remains.
+
+Commit title:
+
+- `P013 Separate Notes and Outline content`
+
+### Baseline
+
+- Repository: `MSHND/notespace`
+- GitHub-visible and fetched `origin/main`: `70e1cd3a01ea661465c25a1c1b502f86c8d6804b`
+- Baseline title: `P012 Bind PE saves to source identity`
+- Local branch: `main`
+- Local `main` matched `origin/main`, with a clean worktree and zero ahead/behind commits before implementation.
+- PR #6 was inspected only as conceptual context. It was not merged, cherry-picked, checked out, modified or applied wholesale.
+- No personal or active Pocket truth file was inspected or modified.
+
+### Implemented current behavior
+
+- The visible controls are **Notes** and **Outline**, not Text and Outline modes.
+- The shared title truth remains `node.label`.
+- Notes truth remains `node.details`.
+- Outline truth remains accepted `node.editor` using the unchanged `pocket.nodeEditor.v1` schema.
+- No `node.notes`, root-schema change or editor-schema change was introduced.
+- A node may have Notes only, Outline only, both sections or neither.
+- Accepted Outline opens the Outline tab; otherwise Notes opens. The selected tab is runtime-only.
+- Tab switching does not convert, project, mirror or synchronise content and does not mark PE dirty.
+- Opening Outline on a Notes-only node shows one fresh blank depth-0 uncollapsed runtime row without copying Notes, recording an operation or creating editor metadata.
+- Every canonical Save submits both independent sections through `PocketNodePopoutEditor.applyAndSave()`, regardless of the visible tab.
+- The main-window owner compares title, Notes and Outline independently and mutates only sections that actually changed.
+- Title-only and Notes-only saves preserve the unchanged raw supported editor object, including top-level and row extensions.
+- Outline-only saves preserve Notes exactly and do not create an indented Notes projection.
+- Both sections may be edited before one Save and persist together with one operation and one `updatedAt` change.
+- Clearing Notes removes only `details`; clearing Outline removes only `editor`; clearing both removes both optional content fields.
+- Existing details on older Outline nodes remain Notes exactly as stored. No equality heuristic or migration runs.
+- Structured multiline paste remains the sole use of the P008 indentation parser.
+- Compatibility popouts no longer contain Notes-to-Outline or Outline-to-Notes conversion helpers, and their unbound save path continues to fail closed at P012 identity validation.
+
+### Meaningful Outline and raw preservation contract
+
+`PocketEditorMetadata.isMeaningfulOutline()` is now the shared rule used by current-v1 recognition and the save/comparison boundary. An Outline is meaningful when at least one row has:
+
+- nonblank text;
+- depth greater than zero; or
+- `collapsed === true`.
+
+Null, an empty array, and arrays made only of blank depth-0 uncollapsed placeholders represent absent Outline. Therefore blank structural rows at depth 1, blank collapsed rows and hierarchies containing blank structural rows remain meaningful.
+
+When the submitted editable Outline is semantically unchanged, `prepareSave()` preserves the existing raw `node.editor` object rather than canonicalising it. This applies to Notes-only and title-only saves, including stored raw cases whose editing view hides row 401, text after character 4,000 or duplicate IDs.
+
+When Outline actually changes or is deliberately cleared, the existing P012 stored-raw scan and incoming non-lossy validation both run before mutation. Clearing to empty incoming content cannot bypass an unsafe stored raw Outline. A safe deliberate edit to only blank depth-0 uncollapsed placeholder content removes `node.editor`.
+
+### P011/P012 protections retained
+
+- Unsupported or malformed non-null editor data remains wholly read-only; Notes are not selectively editable around it.
+- File-session source identity, filename diagnostics and PiP identity remain bound to the popup.
+- Same-ID cross-file, stale-node and missing-node saves reject before mutation.
+- Stored-raw and incoming non-lossy preflight remains mandatory for actual Outline changes.
+- Failed truth export adopts only the applied node revision, keeps PE dirty and supports retry.
+- Successful save-as identity adoption, queued stale-write rejection, edit-generation protection and Save & Close persistence rules remain unchanged.
+- No autosave, background write, picker-on-open, file watcher, cloud sync, new Enter owner or second PE was added.
+
+### Files changed
+
+Production:
+
+- `js/pocket-editor-metadata.js` — owns the shared meaningful-Outline rule.
+- `js/pocket-node-popout-model.js` — validates and compares Notes/Outline independently, preserves unchanged raw Outline and gates actual Outline changes.
+- `js/pocket-node-popout-editor.js` — mutates only changed sections and records one combined operation.
+- `js/pocket-node-popout-runtime.js` — removes implicit conversion and makes tabs presentation-only while sending both sections.
+- `js/pocket-node-popout-template.js` — labels the sections Notes and Outline.
+- `js/pocket-editor-popout.js` — removes destructive conversion from the first compatibility popup and keeps it fail closed.
+- `js/pocket-editor-popout-v2.js` — removes the same conversion from the loaded v2 compatibility popup.
+
+Tests and documentation:
+
+- `tests/pe-persistence-contract.test.js`
+- `docs/PE_PERSISTENCE_CONTRACT.md`
+- `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`
+- `docs/CODEX_REPORT.md`
+
+No `index.html`, `package.json`, dependency, fixture, production JSON example or retired `pocket-editor-popout-default.js` file changed.
+
+### Focused validation
+
+Node:
+
+~~~text
+v24.14.0
+~~~
+
+Focused command:
+
+~~~sh
+node --test tests/pe-persistence-contract.test.js
+~~~
+
+Result:
+
+~~~text
+tests 84
+pass 84
+fail 0
+cancelled 0
+skipped 0
+todo 0
+~~~
+
+The suite executes actual active source with synthetic fixtures, isolated VM contexts and in-memory handles. P013 coverage includes Notes-only, Outline-only, both sections, old details projections, independent title/Notes/Outline edits, combined save, independent clears, absent placeholders, structural-only blank Outlines, raw supported extensions, unsafe stored raw preservation/rejection, tab switching, compatibility conversion removal and no-operation recognition. Existing P006-P012 tests remain green.
+
+Generated-runtime validation builds with `PocketNodePopoutRuntime.build()`, compiles with `new Function(...)`, and uses controlled execution for:
+
+- Notes-only, Outline-only, combined and absent-Outline payloads;
+- blank depth structural Outline and blank collapsed Outline;
+- independent clear-Notes and clear-Outline outgoing payloads;
+- tab switching with unsaved edits in both sections;
+- both-section Save independent of the visible tab;
+- unsupported-editor read-only behavior;
+- failed export and retry;
+- stale-node and switched-file rejection;
+- raw-size and duplicate-ID rejection;
+- P006 Copy, structured Paste, Duplicate and Delete;
+- P007 Escape ordering; and
+- P008 structured-paste indentation.
+
+Targeted static checks:
+
+- `node --check` passed for all seven changed JavaScript files.
+- `git diff --check` passed.
+- Generated source compiled without syntax errors.
+- `node tools/pocket-check.js` was not run.
+- `npm run check` was not run because it invokes the prohibited checker.
+
+### Remaining CURRENT-RISK items
+
+P013 resolves destructive Text/Outline conversion and reclassifies accepted details/Outline drift as supported independent content. The focused suite still characterises:
+
+- duplicate non-empty block IDs retained in the read view, with explicit changed Outline save blocked;
+- read-view slicing at row 401, with raw preservation and changed Outline rejection;
+- read-view slicing after 4,000 block-text characters, with raw preservation and changed Outline rejection;
+- load-time `node.pe` synthesis affecting a later explicit export shape; and
+- `portal.export.v1` top-level precedence dropping nested-only data extras.
+
+P014 remains the separate `node.pe` task.
+
+### Physical browser acceptance checklist
+
+1. Save and reopen a Notes-only node; confirm Outline remains absent until meaningfully edited.
+2. Save and reopen an Outline-only node; confirm Notes remains empty.
+3. Edit both sections on one node before one Save; reopen and confirm both.
+4. Edit Notes on an Outline node; confirm IDs, depths, collapse, order and text remain unchanged.
+5. Edit Outline; confirm Notes remains exactly unchanged.
+6. Clear Notes independently and reopen.
+7. Clear Outline independently and reopen.
+8. Switch tabs repeatedly with unsaved edits in both; confirm no conversion and dirty state reflects edits, not switching.
+9. Paste a structured multiline Outline and confirm hierarchy.
+10. Exercise selection, subtree Copy, Duplicate and Delete.
+11. Confirm dirty-close protection and P007 Escape layering.
+12. Cancel or fail a save, confirm PE stays open/dirty, then retry successfully.
+13. Reproduce the P012 same-node-ID cross-file rejection.
+14. Confirm blank depth/collapsed structural Outline content survives a Notes-only save.
+
 ## POCKET TASK P012
 
 Title: Bind PE saves to source identity and block lossy saves

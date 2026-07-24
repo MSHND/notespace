@@ -23,7 +23,7 @@
 
   function metadataContract() {
     const contract = global.PocketEditorMetadata;
-    if (!contract || typeof contract.classifyEditorMeta !== "function" || typeof contract.normaliseSupportedEditorMeta !== "function" || typeof contract.cloneJsonCompatibleValue !== "function") {
+    if (!contract || typeof contract.classifyEditorMeta !== "function" || typeof contract.normaliseSupportedEditorMeta !== "function" || typeof contract.isMeaningfulOutline !== "function" || typeof contract.cloneJsonCompatibleValue !== "function") {
       throw new Error("PocketEditorMetadata is not loaded.");
     }
     return contract;
@@ -170,7 +170,7 @@
     return { ok: true };
   }
 
-  function validateSavePayload(payload) {
+  function validateSavePayload(payload, options = {}) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return saveIssue(
         "invalid-save-payload",
@@ -199,8 +199,18 @@
       );
     }
 
-    if (payload.mode === "text") return { ok: true, mode: "text", title, details };
-    if (payload.mode !== "outline" || payload.schema !== OUTLINE_EDITOR_SCHEMA) {
+    if (payload.mode !== "text" && payload.mode !== "outline") {
+      return saveIssue(
+        "invalid-content-section",
+        "Pocket could not verify the selected content section. Nothing was changed.",
+        "Content section is not valid — not saved"
+      );
+    }
+
+    if (payload.outline == null) {
+      return { ok: true, mode: payload.mode, title, details, editorMeta: null };
+    }
+    if (!Array.isArray(payload.outline) || payload.schema !== OUTLINE_EDITOR_SCHEMA) {
       return saveIssue(
         "invalid-outline",
         "Pocket could not verify this outline format. Nothing was changed.",
@@ -208,8 +218,10 @@
       );
     }
 
-    const outlineResult = validateOutlineBlocks(payload.outline);
-    if (!outlineResult.ok) return outlineResult;
+    if (options.deferOutlineSafety !== true) {
+      const outlineResult = validateOutlineBlocks(payload.outline);
+      if (!outlineResult.ok) return outlineResult;
+    }
     if (!metadataContract().cloneJsonCompatibleValue(payload.outline).ok) {
       return saveIssue(
         "invalid-outline",
@@ -217,7 +229,14 @@
         "Outline is not valid — not saved"
       );
     }
-    const editorMeta = normaliseEditorMeta(payload);
+    if (!metadataContract().isMeaningfulOutline(payload.outline)) {
+      return { ok: true, mode: payload.mode, title, details, editorMeta: null };
+    }
+    const editorMeta = normaliseEditorMeta({
+      schema: OUTLINE_EDITOR_SCHEMA,
+      mode: "outline",
+      outline: payload.outline
+    });
     if (!editorMeta) {
       return saveIssue(
         "invalid-outline",
@@ -225,7 +244,7 @@
         "Outline is not valid — not saved"
       );
     }
-    return { ok: true, mode: "outline", title, details, editorMeta };
+    return { ok: true, mode: payload.mode, title, details, editorMeta };
   }
 
   function validateStoredEditorForSave(node) {
@@ -234,28 +253,54 @@
     return validateOutlineBlocks(node.editor && node.editor.outline, { stored: true });
   }
 
+  function comparableOutlineMeta(outline) {
+    if (!metadataContract().isMeaningfulOutline(outline)) return null;
+    return {
+      schema: OUTLINE_EDITOR_SCHEMA,
+      mode: "outline",
+      outline: outline.map((block, index) => ({
+        id: block && block.id,
+        text: block && block.text,
+        depth: block && block.depth,
+        collapsed: !!(block && block.collapsed === true),
+        order: index + 1
+      }))
+    };
+  }
+
   function prepareSave(node, payload) {
-    if (payload && payload.mode === "outline") {
-      const storedResult = validateStoredEditorForSave(node);
-      if (!storedResult.ok) return storedResult;
-    }
-    const validation = validateSavePayload(payload);
+    const storedClassification = classifyNodeEditor(node);
+    const validation = validateSavePayload(payload, {
+      deferOutlineSafety: storedClassification.kind === "supported-v1-outline"
+    });
     if (!validation.ok) return validation;
 
     const beforeLabel = clean(node.label, SAVE_LIMITS.title);
     const beforeDetails = normaliseDetailsSafe(node.details, SAVE_LIMITS.details);
-    const beforeEditor = JSON.stringify(normaliseEditorMeta(node.editor) || null);
+    const beforeEditorMeta = normaliseEditorMeta(node.editor);
+    const beforeEditor = JSON.stringify(beforeEditorMeta || null);
     const nextLabel = validation.title || beforeLabel || "Untitled";
     const nextDetails = validation.details;
-    const editorMeta = validation.mode === "outline" ? validation.editorMeta : null;
-    const afterEditor = JSON.stringify(editorMeta || null);
+    const afterEditor = JSON.stringify(comparableOutlineMeta(payload.outline));
+    const editorChanged = beforeEditor !== afterEditor;
+    if (editorChanged) {
+      const storedResult = validateStoredEditorForSave(node);
+      if (!storedResult.ok) return storedResult;
+      const incomingResult = validateSavePayload(payload);
+      if (!incomingResult.ok) return incomingResult;
+    }
+    const titleChanged = beforeLabel !== nextLabel;
+    const notesChanged = beforeDetails !== nextDetails;
     return {
       ok: true,
-      changed: beforeLabel !== nextLabel || beforeDetails !== nextDetails || beforeEditor !== afterEditor,
+      changed: titleChanged || notesChanged || editorChanged,
+      titleChanged,
+      notesChanged,
+      editorChanged,
       beforeLabel,
       nextLabel,
       nextDetails,
-      editorMeta
+      editorMeta: editorChanged ? validation.editorMeta : beforeEditorMeta
     };
   }
 

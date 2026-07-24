@@ -378,8 +378,6 @@ function runtimeProbe(factory, payload) {
   const injection = [
     marker,
     "  globalThis.__peRuntimeProbe = {",
-    "    textToOutline: textToOutline,",
-    "    outlineToText: outlineToText,",
     "    outlineBlocksFromPastedText: outlineBlocksFromPastedText,",
     "    renderEmptyOutline: function (pane) {",
     "      outline = [];",
@@ -1421,7 +1419,7 @@ test("ordinary absent and null editor values open as editable Text without read-
   }
 });
 
-test("CURRENT-RISK: accepted Outline and details drift remain independent and Outline wins PE mode", () => {
+test("accepted Outline and independent Notes both load while Outline owns the opening tab", () => {
   const result = loadAndExportFixture("current-outline-v1.json");
   const node = result.state.nodes[0];
   assert.equal(node.details, "Compatibility projection intentionally differs");
@@ -1517,7 +1515,7 @@ test("PE opening payload carries safe file-session identity and the exact origin
   assert.equal(Object.values(payload).includes(context.__syntheticTruthHandle), false);
 });
 
-test("raw PE save preflight accepts exact limits and Text ignores an unused Outline array", () => {
+test("raw PE save preflight accepts exact independent Notes and Outline limits", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
   const outline = Array.from({ length: 400 }, (_, index) => ({
     id: index === 0 ? "i".repeat(80) : `block_${index}`,
@@ -1569,7 +1567,32 @@ test("raw PE save preflight accepts exact limits and Text ignores an unused Outl
     body: "Body",
     mode: "text",
     outline: "ignored in Text mode",
-  }).ok, true);
+  }).ok, false);
+  for (const outlineValue of [null, [], [{ id: "placeholder", text: "", depth: 0, collapsed: false }]]) {
+    const accepted = model.validateSavePayload({
+      title: "Independent content",
+      body: "Notes",
+      schema: EDITOR_SCHEMA,
+      mode: "text",
+      outline: outlineValue,
+    });
+    assert.equal(accepted.ok, true);
+    assert.equal(accepted.editorMeta, null);
+  }
+  for (const structural of [
+    [{ id: "blank_depth", text: "", depth: 1, collapsed: false }],
+    [{ id: "blank_collapsed", text: "", depth: 0, collapsed: true }],
+  ]) {
+    const accepted = model.validateSavePayload({
+      title: "Structural Outline",
+      body: "Notes",
+      schema: EDITOR_SCHEMA,
+      mode: "text",
+      outline: structural,
+    });
+    assert.equal(accepted.ok, true);
+    assert.equal(accepted.editorMeta.outline.length, 1);
+  }
 });
 
 test("lossy PE save preflight rejects over-limit and structurally unsafe payloads before mutation or export", async () => {
@@ -1620,14 +1643,6 @@ test("lossy PE save preflight rejects over-limit and structurally unsafe payload
     ["fractional depth", { title: "Title", body: "Body", schema: EDITOR_SCHEMA, mode: "outline", outline: [{ ...baseOutline[0], depth: 1.5 }] }, "invalid-outline-depth"],
     ["non-finite depth", { title: "Title", body: "Body", schema: EDITOR_SCHEMA, mode: "outline", outline: [{ ...baseOutline[0], depth: Infinity }] }, "invalid-outline-depth"],
     ["malformed Outline", { title: "Title", body: "Body", schema: EDITOR_SCHEMA, mode: "outline", outline: {} }, "invalid-outline"],
-    ["empty Outline", { title: "Title", body: "Body", schema: EDITOR_SCHEMA, mode: "outline", outline: [] }, "invalid-outline"],
-    ["non-meaningful Outline", {
-      title: "Title",
-      body: "Body",
-      schema: EDITOR_SCHEMA,
-      mode: "outline",
-      outline: [{ id: "blank", text: "", depth: 0, collapsed: false }],
-    }, "invalid-outline"],
     ["scalar block", { title: "Title", body: "Body", schema: EDITOR_SCHEMA, mode: "outline", outline: ["row"] }, "invalid-outline-block"],
     ["invalid collapse state", {
       title: "Title",
@@ -1669,7 +1684,7 @@ test("lossy PE save preflight rejects over-limit and structurally unsafe payload
   }
 });
 
-test("explicit save blocks raw loaded Outline loss hidden by editable-view normalisation", async () => {
+test("unchanged unsafe raw Outline survives Notes and title saves while actual Outline edits remain blocked", async () => {
   const cases = [
     ["401 rows", Array.from({ length: 401 }, (_, index) => ({
       id: `loaded_${index}`,
@@ -1690,14 +1705,32 @@ test("explicit save blocks raw loaded Outline loss hidden by editable-view norma
   ];
 
   for (const [label, outline, reason] of cases) {
-    const context = createFullContractContext();
     const rawNode = syntheticNode(`loaded_${reason}`, {
       details: "Readable projection",
       editor: outlineMeta(outline),
       pe: { preserve: true },
     });
+
+    for (const [changeLabel, overrides] of [
+      ["Notes", { body: "Changed Notes" }],
+      ["title", { title: "Changed title" }],
+    ]) {
+      const context = createFullContractContext();
+      const state = resetState(context, [rawNode]);
+      const opening = editorPayload(context, state.nodes[0], overrides);
+      let exportCalls = 0;
+      context.exportTree = async () => { exportCalls += 1; return { ok: true }; };
+      const result = await context.PocketNodePopoutEditor.applyAndSave(opening);
+      assert.equal(result.ok, true, `${label}: ${changeLabel}`);
+      assert.equal(result.changed, true, `${label}: ${changeLabel}`);
+      assert.deepEqual(plain(state.nodes[0].editor), plain(rawNode.editor), `${label}: ${changeLabel}`);
+      assert.equal(exportCalls, 1, `${label}: ${changeLabel}`);
+    }
+
+    const context = createFullContractContext();
     const state = resetState(context, [rawNode]);
     const opening = editorPayload(context, state.nodes[0]);
+    opening.outline[0].text = `${opening.outline[0].text}!`;
     const before = snapshotSaveBoundary(context, rawNode.id);
     let exportCalls = 0;
     context.exportTree = async () => { exportCalls += 1; return { ok: true }; };
@@ -1709,21 +1742,23 @@ test("explicit save blocks raw loaded Outline loss hidden by editable-view norma
   }
 });
 
-test("CURRENT-RISK: changed Text apply deletes accepted Outline metadata and blank details", () => {
+test("clearing Notes removes only details and preserves accepted Outline metadata", () => {
   const context = createFullContractContext();
   const outlineNode = fixture("current-outline-v1.json").mainThoughtTree[0];
   const state = resetState(context, [outlineNode]);
+  const rawEditor = plain(state.nodes[0].editor);
   const ok = context.PocketNodePopoutEditor.apply(editorPayload(context, outlineNode, {
     title: outlineNode.label,
     body: "   \n\t ",
     mode: "text",
-    outline: null,
+    outline: context.PocketNodePopoutModel.buildPayload(state.nodes[0]).outline,
+    schema: EDITOR_SCHEMA,
   }));
   assert.equal(ok, true);
-  assert.equal(Object.hasOwn(state.nodes[0], "editor"), false);
+  assert.deepEqual(plain(state.nodes[0].editor), rawEditor);
   assert.equal(Object.hasOwn(state.nodes[0], "details"), false);
   assert.equal(state.ops.length, 1);
-  assert.equal(state.ops[0].changed, "details");
+  assert.equal(state.ops[0].changed, "notes");
 });
 
 test("apply and applyAndSave defend unsupported and malformed editor nodes without mutation or export", async () => {
@@ -1806,6 +1841,30 @@ test("editor cutover fails closed when the canonical editor cannot open and neve
   assert.equal(standaloneCalls, 3);
   assert.equal(legacyBridgeCalls, 0);
   assert.equal(legacyPopupCalls, 0);
+});
+
+test("active and compatibility popouts contain no Notes-Outline conversion route", () => {
+  for (const file of [
+    "js/pocket-node-popout-runtime.js",
+    "js/pocket-editor-popout.js",
+    "js/pocket-editor-popout-v2.js",
+  ]) {
+    const program = source(file);
+    assert.equal(program.includes("function textToOutline"), false, file);
+    assert.equal(program.includes("function outlineToText"), false, file);
+  }
+  for (const file of [
+    "js/pocket-node-popout-template.js",
+    "js/pocket-editor-popout.js",
+    "js/pocket-editor-popout-v2.js",
+  ]) {
+    const program = source(file);
+    assert.equal(program.includes(">Notes<"), true, file);
+    assert.equal(program.includes(">Outline<"), true, file);
+  }
+  const activeRuntime = source("js/pocket-node-popout-runtime.js");
+  assert.equal(activeRuntime.includes("outlineBlocksFromPastedText"), true);
+  assert.equal(activeRuntime.includes("outlineBlocksFromPastedText(bodyInput.value"), false);
 });
 
 test("legacy PE bridge and dirty-save route delegate to canonical identity validation and fail closed unbound", async () => {
@@ -2332,6 +2391,190 @@ test("unchanged PE save sees pending lexical operations without exposing mutable
   assert.equal(state.ops.length, 1);
 });
 
+test("P013 opening payload keeps Notes and Outline independent and chooses only the initial tab", () => {
+  const context = createFullContractContext();
+  resetState(context, []);
+
+  const notesOnly = context.PocketNodePopoutModel.buildPayload(syntheticNode("p013_notes_open", {
+    details: "Notes only\n  with indentation",
+  }));
+  assert.equal(notesOnly.mode, "text");
+  assert.equal(notesOnly.body, "Notes only\n  with indentation");
+  assert.equal(notesOnly.outline, null);
+
+  const outlineOnly = context.PocketNodePopoutModel.buildPayload(syntheticNode("p013_outline_open", {
+    editor: outlineMeta([{ id: "outline_only", text: "Outline only", depth: 0, collapsed: true }]),
+  }));
+  assert.equal(outlineOnly.mode, "outline");
+  assert.equal(outlineOnly.body, "");
+  assert.equal(outlineOnly.outline[0].text, "Outline only");
+
+  const oldProjection = "Parent\n  Child";
+  const both = context.PocketNodePopoutModel.buildPayload(syntheticNode("p013_both_open", {
+    details: oldProjection,
+    editor: outlineMeta([{ id: "different_outline", text: "Different Outline", depth: 0, collapsed: true }]),
+  }));
+  assert.equal(both.mode, "outline");
+  assert.equal(both.body, oldProjection);
+  assert.equal(both.outline[0].text, "Different Outline");
+  assert.equal(both.outline[0].collapsed, true);
+});
+
+test("P013 main apply compares title, Notes, and Outline independently across edits and clears", () => {
+  const baseOutline = [
+    { id: "p013_parent", text: "Parent", depth: 0, collapsed: true, order: 90, rowExtension: "preserve" },
+    { id: "p013_child", text: "Child", depth: 1, collapsed: false, order: 80 },
+  ];
+
+  function applyCase(id, overrides) {
+    const context = createFullContractContext();
+    const rawEditor = {
+      ...outlineMeta(baseOutline),
+      extension: { preserve: "raw" },
+    };
+    const rawNode = syntheticNode(id, {
+      details: "Original Notes\n  second line",
+      editor: rawEditor,
+    });
+    const state = resetState(context, [rawNode]);
+    const beforeUpdatedAt = state.nodes[0].updatedAt;
+    const payload = editorPayload(context, state.nodes[0], overrides);
+    const result = context.PocketNodePopoutEditor.apply(payload, { returnDetails: true });
+    return { state, node: state.nodes[0], result, rawNode, rawEditor, beforeUpdatedAt };
+  }
+
+  const notesOnly = applyCase("p013_notes", { body: "Changed Notes" });
+  assert.equal(notesOnly.result.ok, true);
+  assert.equal(notesOnly.node.details, "Changed Notes");
+  assert.deepEqual(plain(notesOnly.node.editor), plain(notesOnly.rawEditor));
+  assert.equal(notesOnly.state.ops.length, 1);
+  assert.equal(notesOnly.state.ops[0].changed, "notes");
+
+  const changedRows = baseOutline.map((block, index) => index === 1
+    ? { ...block, text: "Changed child" }
+    : block);
+  const outlineOnly = applyCase("p013_outline", {
+    schema: EDITOR_SCHEMA,
+    outline: changedRows,
+  });
+  assert.equal(outlineOnly.node.details, "Original Notes\n  second line");
+  assert.equal(outlineOnly.node.editor.outline[1].text, "Changed child");
+  assert.equal(Object.hasOwn(outlineOnly.node.editor, "extension"), false);
+  assert.equal(outlineOnly.state.ops[0].changed, "outline");
+
+  const titleOnly = applyCase("p013_title", { title: "Changed title" });
+  assert.equal(titleOnly.node.label, "Changed title");
+  assert.equal(titleOnly.node.details, titleOnly.rawNode.details);
+  assert.deepEqual(plain(titleOnly.node.editor), plain(titleOnly.rawEditor));
+  assert.equal(titleOnly.state.ops[0].changed, "title");
+
+  const combined = applyCase("p013_combined", {
+    title: "Combined title",
+    body: "Combined Notes",
+    schema: EDITOR_SCHEMA,
+    outline: changedRows,
+  });
+  assert.equal(combined.node.label, "Combined title");
+  assert.equal(combined.node.details, "Combined Notes");
+  assert.equal(combined.node.editor.outline[1].text, "Changed child");
+  assert.equal(combined.state.ops.length, 1);
+  assert.equal(combined.state.ops[0].changed, "title-and-notes-and-outline");
+  assert.notEqual(combined.node.updatedAt, combined.beforeUpdatedAt);
+
+  const clearNotes = applyCase("p013_clear_notes", { body: " \n\t" });
+  assert.equal(Object.hasOwn(clearNotes.node, "details"), false);
+  assert.deepEqual(plain(clearNotes.node.editor), plain(clearNotes.rawEditor));
+
+  const clearOutline = applyCase("p013_clear_outline", {
+    schema: EDITOR_SCHEMA,
+    outline: [{ id: "fresh_placeholder", text: "", depth: 0, collapsed: false }],
+  });
+  assert.equal(clearOutline.node.details, clearOutline.rawNode.details);
+  assert.equal(Object.hasOwn(clearOutline.node, "editor"), false);
+
+  const clearBoth = applyCase("p013_clear_both", {
+    body: " \n\t",
+    schema: EDITOR_SCHEMA,
+    outline: [],
+  });
+  assert.equal(Object.hasOwn(clearBoth.node, "details"), false);
+  assert.equal(Object.hasOwn(clearBoth.node, "editor"), false);
+  assert.equal(clearBoth.node.label, clearBoth.rawNode.label);
+  assert.equal(clearBoth.state.ops.length, 1);
+});
+
+test("structural-only blank Outlines are meaningful, preserve raw data, and clear only at an explicit safe edit boundary", () => {
+  for (const [label, structuralBlock] of [
+    ["depth", { id: "blank_depth", text: "", depth: 1, collapsed: false, rawRowExtension: "depth" }],
+    ["collapse", { id: "blank_collapse", text: "", depth: 0, collapsed: true, rawRowExtension: "collapse" }],
+  ]) {
+    const rawEditor = {
+      ...outlineMeta([structuralBlock]),
+      rawExtension: { preserve: label },
+    };
+
+    for (const overrides of [{ body: `Changed ${label} Notes` }, { title: `Changed ${label} title` }]) {
+      const context = createFullContractContext();
+      const rawNode = syntheticNode(`p013_structural_${label}`, { details: "Original Notes", editor: rawEditor });
+      const state = resetState(context, [rawNode]);
+      const payload = editorPayload(context, state.nodes[0], overrides);
+      assert.equal(context.PocketNodePopoutModel.classifyNodeEditor(state.nodes[0]).kind, "supported-v1-outline");
+      const result = context.PocketNodePopoutEditor.apply(payload, { returnDetails: true });
+      assert.equal(result.ok, true, label);
+      assert.deepEqual(plain(state.nodes[0].editor), plain(rawEditor), label);
+    }
+
+    const clearContext = createFullContractContext();
+    const clearNode = syntheticNode(`p013_structural_clear_${label}`, { details: "Keep Notes", editor: rawEditor });
+    const clearState = resetState(clearContext, [clearNode]);
+    const cleared = clearContext.PocketNodePopoutEditor.apply(editorPayload(clearContext, clearState.nodes[0], {
+      schema: EDITOR_SCHEMA,
+      outline: [{ id: "blank_placeholder", text: "", depth: 0, collapsed: false }],
+    }), { returnDetails: true });
+    assert.equal(cleared.ok, true, label);
+    assert.equal(Object.hasOwn(clearState.nodes[0], "editor"), false, label);
+    assert.equal(clearState.nodes[0].details, "Keep Notes", label);
+  }
+
+  const unsafeContext = createFullContractContext();
+  const unsafeNode = syntheticNode("p013_unsafe_clear", {
+    details: "Keep unsafe Notes",
+    editor: outlineMeta(Array.from({ length: 401 }, (_, index) => ({
+      id: `unsafe_clear_${index}`,
+      text: index === 0 ? "Root" : "",
+      depth: index === 0 ? 0 : 1,
+      collapsed: false,
+    }))),
+  });
+  const unsafeState = resetState(unsafeContext, [unsafeNode]);
+  const before = snapshotSaveBoundary(unsafeContext, unsafeNode.id);
+  const rejected = unsafeContext.PocketNodePopoutEditor.apply(editorPayload(unsafeContext, unsafeState.nodes[0], {
+    schema: EDITOR_SCHEMA,
+    outline: [],
+  }), { returnDetails: true });
+  assert.equal(rejected.reason, "outline-too-many-blocks");
+  assertSaveBoundaryUnchanged(unsafeContext, unsafeNode.id, before);
+});
+
+test("opening an absent Outline placeholder and saving without edits remains a no-operation", async () => {
+  const context = createFullContractContext();
+  const node = syntheticNode("p013_absent_placeholder", { details: "Notes stay independent" });
+  const state = resetState(context, [node]);
+  let exportCalls = 0;
+  context.exportTree = async () => { exportCalls += 1; return { ok: true }; };
+  const payload = editorPayload(context, state.nodes[0], {
+    mode: "outline",
+    schema: EDITOR_SCHEMA,
+    outline: [{ id: "runtime_placeholder", text: "", depth: 0, collapsed: false }],
+  });
+  const result = await context.PocketNodePopoutEditor.applyAndSave(payload);
+  assert.equal(result.reason, "unchanged");
+  assert.equal(state.ops.length, 0);
+  assert.equal(exportCalls, 0);
+  assert.equal(state.nodes[0].details, "Notes stay independent");
+  assert.equal(Object.hasOwn(state.nodes[0], "editor"), false);
+});
+
 test("applyAndSave requests the controlled export surface after a changed apply", async () => {
   const context = createFullContractContext();
   const node = syntheticNode("save_success", { details: "Before" });
@@ -2368,12 +2611,12 @@ test("applyAndSave requests the controlled export surface after a changed apply"
   assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
 });
 
-test("native v1 Outline save keeps canonical IDs, depths, collapse state, and details projection", async () => {
+test("native v1 Outline save keeps canonical IDs, depths, collapse state, and independently edited Notes", async () => {
   const context = createFullContractContext();
   const rawNode = fixture("current-outline-v1.json").mainThoughtTree[0];
   const state = resetState(context, [rawNode]);
   const payload = editorPayload(context, rawNode);
-  payload.body = "Updated compatibility projection";
+  payload.body = "Updated independent Notes";
   payload.outline[1].text = "Updated child";
   context.exportTree = async () => ({
     ok: true,
@@ -2383,7 +2626,7 @@ test("native v1 Outline save keeps canonical IDs, depths, collapse state, and de
   const result = await context.PocketNodePopoutEditor.applyAndSave(payload);
   assert.equal(result.ok, true);
   assert.equal(result.exported, true);
-  assert.equal(state.nodes[0].details, "Updated compatibility projection");
+  assert.equal(state.nodes[0].details, "Updated independent Notes");
   assert.equal(state.nodes[0].editor.schema, EDITOR_SCHEMA);
   assert.deepEqual(plain(state.nodes[0].editor.outline.map((block) => block.id)), ["fixture_block_parent", "fixture_block_child"]);
   assert.deepEqual(plain(state.nodes[0].editor.outline.map((block) => block.depth)), [0, 1]);
@@ -2616,7 +2859,7 @@ test("successful picked and newly created truth-file targets establish new edito
   assert.equal(pickerCalls, 2);
 });
 
-test("generated PE runtime builds and compiles for Text, saved Outline, and rejected metadata payloads", () => {
+test("generated PE runtime builds and compiles for independent Notes, Outline, both, structural-only, absent, and rejected payloads", () => {
   const factory = loadRuntimeFactory();
   const modelContext = createFullContractContext();
   const rejected = modelContext.PocketNodePopoutModel.buildPayload(syntheticNode("rejected", {
@@ -2624,16 +2867,44 @@ test("generated PE runtime builds and compiles for Text, saved Outline, and reje
     editor: { schema: "pocket.nodeEditor.v1", mode: "outline", outline: [] },
   }));
   const payloads = [
-    { id: "runtime_text", title: "Text", body: "Body", mode: "text", outline: null },
+    { id: "runtime_notes", title: "Notes", body: "Notes body", mode: "text", outline: null },
     {
-      id: "runtime_outline",
-      title: "Outline",
-      body: "Parent\n  Child",
+      id: "runtime_outline_only",
+      title: "Outline only",
+      body: "",
       mode: "outline",
       outline: [
         { id: "stable_parent", text: "Parent", depth: 0, collapsed: true },
         { id: "stable_child", text: "Child", depth: 1, collapsed: false },
       ],
+    },
+    {
+      id: "runtime_both",
+      title: "Both",
+      body: "Independent Notes",
+      mode: "outline",
+      outline: [{ id: "both_outline", text: "Independent Outline", depth: 0, collapsed: false }],
+    },
+    {
+      id: "runtime_blank_depth",
+      title: "Structural depth",
+      body: "Notes",
+      mode: "outline",
+      outline: [{ id: "blank_depth", text: "", depth: 1, collapsed: false }],
+    },
+    {
+      id: "runtime_blank_collapse",
+      title: "Structural collapse",
+      body: "Notes",
+      mode: "outline",
+      outline: [{ id: "blank_collapse", text: "", depth: 0, collapsed: true }],
+    },
+    {
+      id: "runtime_absent",
+      title: "Absent Outline",
+      body: "Notes only",
+      mode: "text",
+      outline: null,
     },
     rejected,
   ];
@@ -2644,7 +2915,7 @@ test("generated PE runtime builds and compiles for Text, saved Outline, and reje
   }
 });
 
-test("generated editable Outline runtime emits the exact v1 schema on save", () => {
+test("generated editable Outline runtime emits the exact v1 schema and both independent sections on save", () => {
   const runtime = executeControlledRuntime(runtimeEditablePayload({
     id: "runtime_schema_save",
     title: "Schema save",
@@ -2660,6 +2931,7 @@ test("generated editable Outline runtime emits the exact v1 schema on save", () 
   assert.equal(runtime.saveCalls.length, 1);
   assert.equal(runtime.saveCalls[0].schema, EDITOR_SCHEMA);
   assert.equal(runtime.saveCalls[0].mode, "outline");
+  assert.equal(runtime.saveCalls[0].body, "Parent\n  Child");
   assert.equal(runtime.saveCalls[0].outline.length, 2);
 });
 
@@ -3038,13 +3310,17 @@ test("generated read-only runtime disables mutation and save paths while keeping
   assert.match(html, /readonly aria-readonly="true"/);
   assert.match(html, /id="saveBtn"[^>]* disabled/);
   assert.match(html, /id="outlineModeBtn"[^>]* disabled/);
+  assert.match(html, /aria-label="Content sections"/);
+  assert.match(html, /id="textModeBtn"[^>]*>Notes<\/button>/);
+  assert.match(html, /id="outlineModeBtn"[^>]*>Outline<\/button>/);
+  assert.match(html, /textarea id="bodyInput" aria-label="Notes"/);
   assert.match(html, /Read only · select text to copy/);
   assert.equal(html.includes("preserve-if-untouched"), false);
   assert.equal(html.includes("Future outline content"), false);
   assert.equal(html.includes(rawEditor.padding.slice(0, 128)), false);
 });
 
-test("generated PE runtime shared parser handles spaces, tabs, mixed indentation, common indentation, blanks, and depth clamp", () => {
+test("generated PE runtime structured-paste parser retains spaces, tabs, mixed indentation, blanks, and depth clamp", () => {
   const factory = loadRuntimeFactory();
   const { probe } = runtimeProbe(factory, { id: "parser", title: "Parser", body: "", mode: "text", outline: null });
   const cases = [
@@ -3057,7 +3333,7 @@ test("generated PE runtime shared parser handles spaces, tabs, mixed indentation
     ["Parent\n  Child\n                    Grandchild", [0, 1, 8]],
   ];
   for (const [input, depths] of cases) {
-    const blocks = probe.textToOutline(input);
+    const blocks = probe.outlineBlocksFromPastedText(input, 0);
     assert.deepEqual(blocks.map((block) => block.depth), depths);
     assert.equal(blocks.length, depths.length);
     assert.equal(new Set(blocks.map((block) => block.id)).size, blocks.length);
@@ -3068,30 +3344,9 @@ test("generated PE runtime shared parser handles spaces, tabs, mixed indentation
   assert.deepEqual(pasted.map((block) => block.depth), [5, 6, 7]);
 });
 
-test("generated PE runtime Text-to-Outline-to-Text round trips preserve hierarchy with two-space projection", () => {
-  const factory = loadRuntimeFactory();
-  const { probe } = runtimeProbe(factory, { id: "round_trip", title: "Round trip", body: "", mode: "text", outline: null });
-  const inputs = [
-    "Parent\n  Child\n    Grandchild",
-    "Parent\n    Child\n        Grandchild",
-    "Parent\n\tChild\n\t\tGrandchild",
-    "Parent\n\tChild\n\t  Grandchild",
-    "    Parent\n      Child\n        Grandchild",
-  ];
-  const canonical = "Parent\n  Child\n    Grandchild";
-  for (const input of inputs) {
-    const first = probe.textToOutline(input);
-    const projected = probe.outlineToText(first);
-    const second = probe.textToOutline(projected);
-    assert.equal(projected, canonical);
-    assert.deepEqual(second.map((block) => ({ text: block.text, depth: block.depth })), first.map((block) => ({ text: block.text, depth: block.depth })));
-  }
-});
-
-test("generated PE runtime renders one fresh blank row for empty or whitespace-only Text", () => {
+test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {
   const factory = loadRuntimeFactory();
   const { probe } = runtimeProbe(factory, { id: "empty_runtime", title: "Empty", body: "", mode: "text", outline: null });
-  assert.deepEqual(probe.textToOutline(" \n\t "), []);
   const pane = fakeElement("section");
   const rendered = probe.renderEmptyOutline(pane);
   assert.equal(rendered.length, 1);
@@ -3100,6 +3355,91 @@ test("generated PE runtime renders one fresh blank row for empty or whitespace-o
   assert.equal(rendered[0].collapsed, false);
   assert.ok(rendered[0].id);
   assert.equal(pane.children.length, 1);
+});
+
+test("generated PE tabs preserve independent unsaved Notes and Outline without dirtying or converting", () => {
+  const notes = "Notes stay exactly here\n  including indentation";
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    body: notes,
+    mode: "text",
+    outline: null,
+  }));
+  const body = runtime.controls.get("bodyInput");
+  const pane = runtime.controls.get("outlinePane");
+  assert.equal(runtime.classNames.has("textMode"), true);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  runtime.controls.get("outlineModeBtn").dispatch("click");
+  assert.equal(runtime.classNames.has("outlineMode"), true);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(pane.children.length, 1);
+  assert.equal(pane.children[0].children[2].textContent, "");
+  assert.equal(body.value, notes);
+
+  pane.children[0].children[2].textContent = "Independent outline";
+  pane.children[0].children[2].dispatch("input");
+  body.value = "Changed independent Notes";
+  body.dispatch("input");
+  runtime.controls.get("textModeBtn").dispatch("click");
+  runtime.controls.get("outlineModeBtn").dispatch("click");
+  assert.equal(body.value, "Changed independent Notes");
+  assert.equal(pane.children[0].children[2].textContent, "Independent outline");
+  runtime.controls.get("saveBtn").dispatch("click");
+  assert.equal(runtime.saveCalls.length, 1);
+  assert.equal(runtime.saveCalls[0].body, "Changed independent Notes");
+  assert.equal(runtime.saveCalls[0].outline[0].text, "Independent outline");
+  assert.equal(runtime.saveCalls[0].schema, EDITOR_SCHEMA);
+});
+
+test("generated PE saves submit independent clear-Notes and clear-Outline intent together with the other section", () => {
+  const payload = runtimeEditablePayload({
+    body: "Keep or clear Notes",
+    mode: "outline",
+    outline: [{ id: "clear_runtime_outline", text: "Keep or clear Outline", depth: 0, collapsed: false }],
+  });
+
+  const clearNotes = executeControlledRuntime(payload);
+  const clearNotesBody = clearNotes.controls.get("bodyInput");
+  clearNotesBody.value = " \n\t";
+  clearNotesBody.dispatch("input");
+  clearNotes.controls.get("saveBtn").dispatch("click");
+  assert.equal(clearNotes.saveCalls[0].body, " \n\t");
+  assert.equal(clearNotes.saveCalls[0].outline[0].text, "Keep or clear Outline");
+
+  const clearOutline = executeControlledRuntime(payload);
+  const outlineText = clearOutline.controls.get("outlinePane").children[0].children[2];
+  outlineText.textContent = "";
+  outlineText.dispatch("input");
+  clearOutline.controls.get("saveBtn").dispatch("click");
+  assert.equal(clearOutline.saveCalls[0].body, "Keep or clear Notes");
+  assert.equal(clearOutline.saveCalls[0].outline[0].text, "");
+  assert.equal(clearOutline.saveCalls[0].outline[0].depth, 0);
+  assert.equal(clearOutline.saveCalls[0].outline[0].collapsed, false);
+});
+
+test("generated PE tabs preserve structural-only blank Outlines and do not classify them by text alone", () => {
+  for (const [label, block] of [
+    ["depth", { id: "runtime_structural_depth", text: "", depth: 1, collapsed: false }],
+    ["collapse", { id: "runtime_structural_collapse", text: "", depth: 0, collapsed: true }],
+  ]) {
+    const runtime = executeControlledRuntime(runtimeEditablePayload({
+      id: `runtime_structural_${label}`,
+      body: "Independent Notes",
+      mode: "outline",
+      outline: [block],
+    }));
+    const pane = runtime.controls.get("outlinePane");
+    assert.equal(pane.children.length, 1, label);
+    assert.equal(pane.children[0].children[2].textContent, "", label);
+    assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false, label);
+    runtime.controls.get("textModeBtn").dispatch("click");
+    runtime.controls.get("outlineModeBtn").dispatch("click");
+    assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false, label);
+    runtime.controls.get("saveBtn").dispatch("click");
+    assert.equal(runtime.saveCalls[0].outline[0].depth, block.depth, label);
+    assert.equal(runtime.saveCalls[0].outline[0].collapsed, block.collapsed, label);
+    assert.equal(runtime.saveCalls[0].body, "Independent Notes", label);
+  }
 });
 
 test("details-first copy context ignores editor metadata and falls back only to the label", () => {

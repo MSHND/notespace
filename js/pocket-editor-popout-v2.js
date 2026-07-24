@@ -51,7 +51,7 @@
     const mode = clean(value.mode, 24).toLowerCase() === "outline" ? "outline" : "text";
     if (mode !== "outline") return null;
     const outline = Array.isArray(value.outline) ? value.outline.slice(0, 400).map(normaliseOutlineBlock) : [];
-    const meaningful = outline.some((block) => (Number(block.depth) || 0) > 0 || block.collapsed === true);
+    const meaningful = outline.some((block) => String(block.text || "").trim().length > 0 || (Number(block.depth) || 0) > 0 || block.collapsed === true);
     if (!meaningful) return null;
     return { schema: OUTLINE_EDITOR_SCHEMA, mode: "outline", outline };
   }
@@ -137,9 +137,9 @@
 </head>
 <body>
 <main class="wrap">
-  <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn">save</button><span id="state" class="state"></span><button id="textBtn" class="mode">text</button><button id="outlineBtn" class="mode">outline</button><button id="closeBtn" class="close" title="Close">×</button></div>
+  <div class="topbar"><div class="brand">pocket editor <span class="dirtyDot">*</span></div><button id="saveBtn">save</button><span id="state" class="state"></span><button id="textBtn" class="mode">Notes</button><button id="outlineBtn" class="mode">Outline</button><button id="closeBtn" class="close" title="Close">×</button></div>
   <div class="meta"><div class="metaTitle">editing</div><div class="path" title="${safePath}">${safePath}</div></div>
-  <div class="fields"><input id="title" aria-label="Item name"><textarea id="body" aria-label="Item details"></textarea><div id="outline" class="outline"></div></div>
+  <div class="fields"><input id="title" aria-label="Item name"><textarea id="body" aria-label="Notes"></textarea><div id="outline" class="outline" aria-label="Outline"></div></div>
 </main>
 <script>
 (function () {
@@ -156,23 +156,21 @@
   title.value = initial.title || "";
   body.value = initial.body || "";
   function makeBlock(text, depth) { return { id: "b_" + Math.random().toString(36).slice(2), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
-  function textToOutline(text) { return String(text || "").split("\\n").map(line => { const lead = (line.match(/^\\s*/) || [""])[0].replace(/\\t/g, "  ").length; return makeBlock(line.trimStart(), Math.floor(lead / 2)); }); }
-  function outlineToText() { return (outline || []).map(b => "  ".repeat(Math.max(0, Number(b.depth) || 0)) + String(b.text || "")).join("\\n"); }
   function subtreeEnd(index) { const base = Number(outline[index]?.depth) || 0; let end = index + 1; while (end < outline.length && (Number(outline[end]?.depth) || 0) > base) end++; return end; }
   function setState(text) { state.textContent = text || ""; }
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("dirty", dirty); }
-  function currentBody() { return mode === "outline" ? outlineToText() : body.value; }
+  function currentBody() { return body.value; }
   function draft() { return { id: initial.id, title: title.value, body: currentBody(), mode, outline, dirty, draftKey: initial.draftKey }; }
   function storeDraft() { try { localStorage.setItem(initial.draftKey, JSON.stringify(draft())); } catch(e) {} }
   function clearDraft() { try { localStorage.removeItem(initial.draftKey); } catch(e) {} }
   function markDirty() { setDirty(true); setState(""); storeDraft(); }
   function updateMode() { document.body.classList.toggle("outlineMode", mode === "outline"); document.getElementById("textBtn").classList.toggle("on", mode === "text"); document.getElementById("outlineBtn").classList.toggle("on", mode === "outline"); }
   function renderOutline(focus) { if (!outline || !outline.length) outline = [makeBlock("", 0)]; outlineEl.innerHTML = ""; outline.forEach((block, index) => { const row = document.createElement("div"); row.className = "row"; row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px"; const dot = document.createElement("div"); dot.className = "dot"; dot.textContent = "•"; dot.draggable = true; dot.addEventListener("dragstart", ev => { dragging = index; ev.dataTransfer.setData("text/plain", String(index)); }); row.addEventListener("dragover", ev => { if (dragging == null) return; ev.preventDefault(); }); row.addEventListener("drop", ev => { if (dragging == null) return; ev.preventDefault(); const from = dragging; dragging = null; const end = subtreeEnd(from); const branch = outline.slice(from, end); outline.splice(from, branch.length); let to = index > from ? index - branch.length : index; outline.splice(Math.max(0, Math.min(outline.length, to)), 0, ...branch); markDirty(); renderOutline(to); }); const text = document.createElement("div"); text.className = "text"; text.contentEditable = "true"; text.textContent = block.text || ""; text.addEventListener("input", () => { block.text = text.textContent || ""; markDirty(); }); text.addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); } else if (ev.key === "Tab") { ev.preventDefault(); const delta = ev.shiftKey ? -1 : 1; const end = subtreeEnd(index); for (let i = index; i < end; i++) outline[i].depth = Math.max(0, Math.min(8, (Number(outline[i].depth) || 0) + delta)); markDirty(); renderOutline(index); } }); row.appendChild(dot); row.appendChild(text); outlineEl.appendChild(row); }); if (Number.isFinite(focus)) requestAnimationFrame(() => { const t = outlineEl.children[focus]?.querySelector(".text"); if (t) t.focus(); }); }
-  function setMode(next) { if (next === mode) return; if (next === "outline") { outline = textToOutline(body.value); mode = "outline"; renderOutline(0); } else { body.value = outlineToText(); mode = "text"; body.focus(); } updateMode(); markDirty(); }
-  function payload() { return { id: initial.id, title: title.value, body: currentBody(), mode, outline, updatedAt: new Date().toISOString() }; }
+  function setMode(next) { mode = next === "outline" ? "outline" : "text"; if (mode === "outline") renderOutline(0); else body.focus(); updateMode(); }
+  function payload() { return { id: initial.id, title: title.value, body: currentBody(), mode, schema: "pocket.nodeEditor.v1", outline, updatedAt: new Date().toISOString() }; }
   function save() { setState("saving…"); storeDraft(); try { if (opener && !opener.closed && opener.PocketEditorPopout && typeof opener.PocketEditorPopout.apply === "function") { const ok = opener.PocketEditorPopout.apply(payload()); if (ok) { allowedClose = true; clearDraft(); setDirty(false); setState("saved"); setTimeout(() => window.close(), 80); return; } } } catch (e) { console.error(e); } setState("failed"); alert("Pocket did not accept the save. Your draft is still stored in this editor."); }
   function closeSafely() { if (!dirty) { allowedClose = true; window.close(); return; } if (confirm("Save changes before closing?")) { save(); return; } if (confirm("Close without saving?")) { clearDraft(); allowedClose = true; setDirty(false); window.close(); } }
-  title.addEventListener("input", markDirty); body.addEventListener("input", markDirty); document.getElementById("saveBtn").addEventListener("click", save); document.getElementById("closeBtn").addEventListener("click", closeSafely); document.getElementById("textBtn").addEventListener("click", () => setMode("text")); document.getElementById("outlineBtn").addEventListener("click", () => setMode("outline")); document.addEventListener("keydown", ev => { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } }); window.addEventListener("beforeunload", ev => { if (!dirty || allowedClose) return; storeDraft(); ev.preventDefault(); ev.returnValue = "Unsaved editor changes."; }); if (mode === "outline") { if (!outline) outline = textToOutline(body.value); renderOutline(0); } updateMode(); setDirty(dirty); title.focus(); title.select();
+  title.addEventListener("input", markDirty); body.addEventListener("input", markDirty); document.getElementById("saveBtn").addEventListener("click", save); document.getElementById("closeBtn").addEventListener("click", closeSafely); document.getElementById("textBtn").addEventListener("click", () => setMode("text")); document.getElementById("outlineBtn").addEventListener("click", () => setMode("outline")); document.addEventListener("keydown", ev => { if (ev.key === "Escape") { ev.preventDefault(); closeSafely(); } if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); save(); } }); window.addEventListener("beforeunload", ev => { if (!dirty || allowedClose) return; storeDraft(); ev.preventDefault(); ev.returnValue = "Unsaved editor changes."; }); if (mode === "outline") { if (!outline) outline = []; renderOutline(0); } updateMode(); setDirty(dirty); title.focus(); title.select();
 })();
 </script>
 </body>

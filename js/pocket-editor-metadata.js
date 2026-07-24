@@ -26,6 +26,19 @@
     };
   }
 
+  function isMeaningfulOutline(outline) {
+    return Array.isArray(outline) && outline.some(function (block) {
+      return !!block
+        && typeof block === "object"
+        && !Array.isArray(block)
+        && (
+          String(block.text == null ? "" : block.text).trim().length > 0
+          || (Number(block.depth) || 0) > 0
+          || block.collapsed === true
+        );
+    });
+  }
+
   function normalisePeLine(raw, index) {
     const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
     const depthRaw = Number(source.depth);
@@ -98,10 +111,7 @@
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     if (value.schema !== EDITOR_SCHEMA || value.mode !== "outline" || !Array.isArray(value.outline)) return null;
     const outline = value.outline.slice(0, 400).map(normaliseEditorBlock);
-    const meaningful = outline.some(function (block) {
-      return (Number(block.depth) || 0) > 0 || block.collapsed === true || clean(block.text, 4000);
-    });
-    if (!meaningful) return null;
+    if (!isMeaningfulOutline(outline)) return null;
     return { schema: EDITOR_SCHEMA, mode: "outline", outline };
   }
 
@@ -160,6 +170,7 @@
     EDITOR_SCHEMA,
     classifyEditorMeta,
     normaliseSupportedEditorMeta,
+    isMeaningfulOutline,
     copyFirstClassNodeFields,
     cloneJsonCompatibleValue
   });

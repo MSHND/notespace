@@ -5,6 +5,43 @@
 - Audit date: 22 July 2026
 - Status: report only. No runtime, schema, persistence, fixture or personal truth-file change was made.
 
+## P013 product decision addendum — 24 July 2026
+
+Murray selected independent Notes and Outline content rather than destructive conversion semantics.
+
+The implemented P013 current model is:
+
+- the shared title truth remains `node.label`;
+- Notes truth is `node.details`;
+- Outline truth is accepted `node.editor` using the unchanged `pocket.nodeEditor.v1` schema;
+- `node.notes` does not exist;
+- the `portal.export.v1` root shape is unchanged;
+- Notes and Outline may each be present or absent independently;
+- the visible Notes/Outline selection is runtime presentation state and is not persisted; and
+- an accepted Outline chooses the opening Outline tab, otherwise Notes opens.
+
+P013 deliberately rejects the audit's former projection model. After P013:
+
+- tab switching never converts Notes into Outline rows;
+- tab switching never projects Outline rows into Notes;
+- editing Notes does not rewrite, remove or canonicalise an unchanged Outline;
+- editing Outline does not rewrite or remove Notes;
+- both sections may be edited before one Save and persist together;
+- existing `node.details` on old Outline nodes becomes initial Notes exactly as stored, even when it looks identical to the Outline; and
+- there is no heuristic cleanup, migration, mirroring, synchronisation or copy command.
+
+This may make older nodes appear to contain duplicated Notes and Outline. That is intentional non-destructive preservation. The user may later edit or clear either section explicitly.
+
+The meaningful supported Outline rule is shared across recognition, comparison and save. An Outline is meaningful when at least one row has nonblank text, depth greater than zero, or `collapsed === true`. Null, an empty array, and rows made only of blank depth-0 uncollapsed placeholders represent absence. Therefore a blank row at depth 1, a blank collapsed row, or a hierarchy that uses blank structural rows remains meaningful.
+
+An unchanged raw supported Outline is preserved through Notes-only and title-only saves, including supported extension fields and raw values hidden by the normalised editing view. An actual Outline edit or clear still crosses P012's stored-raw and incoming non-lossy safety boundary. Empty incoming content cannot bypass row 401, 4,001-character text, duplicate-ID or other stored-raw rejection.
+
+Unsupported or malformed non-null editor metadata remains wholly read-only under P011. P013 does not selectively edit Notes around unknown metadata. P012 file-session identity, source diagnostics, node revision, failed-export retry, queued-write rejection and Save & Close persistence requirements remain unchanged.
+
+No automatic migration is required or permitted. Older Pocket versions may display `node.details` as readable Notes without understanding the independent Outline, and may not offer equivalent editing semantics. P014 remains the separate decision about retiring live `node.pe` synthesis and search use while preserving raw legacy values.
+
+The P009 audit findings below are retained as historical evidence of the pre-P010/P013 implementation. Statements describing `details` as an Outline projection document that earlier state and are superseded by this addendum for current behavior.
+
 ## How to read this report
 
 The following terms are used deliberately:
