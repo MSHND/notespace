@@ -61,6 +61,12 @@ function createBrowserContext(options = {}) {
     showSaveFilePicker: 0,
   };
   const classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const defaultDocument = {
+    body: { classList },
+    activeElement: null,
+    getElementById() { return null; },
+    addEventListener() {},
+  };
   const context = {
     URL,
     Date,
@@ -72,12 +78,7 @@ function createBrowserContext(options = {}) {
     structuredClone: globalThis.structuredClone,
     location: { href: options.href || "https://example.test/index.html" },
     console: { log() {}, info() {}, warn() {}, error() {} },
-    document: {
-      body: { classList },
-      activeElement: null,
-      getElementById() { return null; },
-      addEventListener() {},
-    },
+    document: options.document || defaultDocument,
     navigator: { clipboard: {} },
     localStorage: {
       getItem(key) { return storage.has(String(key)) ? storage.get(String(key)) : null; },
@@ -90,8 +91,8 @@ function createBrowserContext(options = {}) {
       removeItem(key) { storage.delete(String(key)); },
       clear() { storage.clear(); },
     },
-    HTMLElement: class HTMLElement {},
-    HTMLInputElement: class HTMLInputElement {},
+    HTMLElement: options.HTMLElement || class HTMLElement {},
+    HTMLInputElement: options.HTMLInputElement || class HTMLInputElement {},
     open() { return null; },
     close() {},
     confirm() { return true; },
@@ -362,6 +363,151 @@ function fakeElement(tagName = "div") {
     set() { this.children.length = 0; },
   });
   return element;
+}
+
+function createTreeRenderHarness(nodes, query = "") {
+  class TreeElement {
+    constructor(tagName = "div") {
+      this.tagName = String(tagName).toUpperCase();
+      this.nodeType = 1;
+      this.children = [];
+      this.parentNode = null;
+      this.attributes = new Map();
+      this.listeners = new Map();
+      this.style = { setProperty() {} };
+      this.className = "";
+      this.textContent = "";
+      this.title = "";
+      this.value = "";
+      this.tabIndex = 0;
+      this.scrollWidth = 0;
+      this.clientWidth = 0;
+      this.classList = {
+        add: (...names) => {
+          const classes = new Set(this.className.split(/\s+/).filter(Boolean));
+          names.forEach((name) => classes.add(name));
+          this.className = Array.from(classes).join(" ");
+        },
+        remove: (...names) => {
+          const removed = new Set(names);
+          this.className = this.className.split(/\s+/).filter((name) => name && !removed.has(name)).join(" ");
+        },
+        contains: (name) => this.className.split(/\s+/).includes(name),
+        toggle: (name, force) => {
+          const next = force === undefined ? !this.classList.contains(name) : !!force;
+          if (next) this.classList.add(name);
+          else this.classList.remove(name);
+          return next;
+        },
+      };
+    }
+
+    setAttribute(name, value) {
+      this.attributes.set(String(name), String(value));
+    }
+
+    getAttribute(name) {
+      return this.attributes.has(String(name)) ? this.attributes.get(String(name)) : null;
+    }
+
+    removeAttribute(name) {
+      this.attributes.delete(String(name));
+    }
+
+    addEventListener(type, handler) {
+      if (!this.listeners.has(type)) this.listeners.set(type, []);
+      this.listeners.get(type).push(handler);
+    }
+
+    appendChild(child) {
+      child.parentNode = this;
+      this.children.push(child);
+      return child;
+    }
+
+    contains(candidate) {
+      if (this === candidate || this.children.includes(candidate)) return true;
+      return this.children.some((child) => typeof child.contains === "function" && child.contains(candidate));
+    }
+
+    querySelectorAll(selector) {
+      const results = [];
+      const matches = (candidate) => {
+        const classes = String(candidate.className || "").split(/\s+/);
+        if (selector === ".detailBadge") return classes.includes("detailBadge");
+        if (selector === ".row") return classes.includes("row");
+        if (selector === ".label[data-full-label]") {
+          return classes.includes("label") && candidate.getAttribute("data-full-label") !== null;
+        }
+        const editId = selector.match(/^\[data-edit-id="([^"]+)"\]$/);
+        return !!editId && candidate.getAttribute("data-edit-id") === editId[1];
+      };
+      const visit = (candidate) => {
+        for (const child of candidate.children || []) {
+          if (matches(child)) results.push(child);
+          visit(child);
+        }
+      };
+      visit(this);
+      return results;
+    }
+
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null;
+    }
+
+    focus() {}
+
+    select() {}
+  }
+
+  Object.defineProperty(TreeElement.prototype, "innerHTML", {
+    get() { return ""; },
+    set() { this.children.length = 0; },
+  });
+
+  const treeRoot = new TreeElement("ul");
+  const search = new TreeElement("input");
+  search.value = query;
+  const elements = new Map([
+    ["treeRoot", treeRoot],
+    ["search", search],
+  ]);
+  const document = {
+    activeElement: null,
+    body: new TreeElement("body"),
+    documentElement: { clientWidth: 1024, clientHeight: 768 },
+    createElement(tagName) { return new TreeElement(tagName); },
+    getElementById(id) { return elements.get(id) || null; },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  const context = createBrowserContext({
+    document,
+    HTMLElement: TreeElement,
+    HTMLInputElement: TreeElement,
+  });
+  context.canShowPocketTree = () => true;
+  context.shouldCopyOnSingleClick = () => false;
+  context.getPath = (nodeId) => {
+    const node = lexicalState(context).nodes.find((candidate) => candidate.id === nodeId);
+    return node ? node.label : "";
+  };
+  context.repairVisibleSelectionAfterRender = () => {};
+  context.focusRowByNodeId = () => {};
+  context.refreshMeta = () => {};
+  context.scheduleCopyClick = () => {};
+  context.cancelPendingCopyClick = () => {};
+  loadScriptsInIndexOrder(context, CORE_INDEX_SCRIPTS.concat(["js/pocket-render.js"]));
+  const state = resetState(context, nodes);
+  context.renderTree();
+  return {
+    context,
+    state,
+    treeRoot,
+    badges: treeRoot.querySelectorAll(".detailBadge"),
+    rows: treeRoot.querySelectorAll(".row"),
+  };
 }
 
 function loadRuntimeFactory() {
@@ -3440,6 +3586,191 @@ test("generated PE tabs preserve structural-only blank Outlines and do not class
     assert.equal(runtime.saveCalls[0].outline[0].collapsed, block.collapsed, label);
     assert.equal(runtime.saveCalls[0].body, "Independent Notes", label);
   }
+});
+
+test("main-tree content indicator renders one existing badge for meaningful Notes or supported Outline without mutation", () => {
+  const cases = [
+    {
+      name: "Notes only",
+      node: syntheticNode("indicator_notes", { details: "  First Notes line  \nSecond Notes line" }),
+      count: 1,
+      title: "First Notes line",
+    },
+    {
+      name: "textual Outline only",
+      node: syntheticNode("indicator_outline", {
+        editor: outlineMeta([
+          { id: "indicator_blank_first", text: "  ", depth: 0, collapsed: false },
+          { id: "indicator_first_text", text: "  First   Outline row  ", depth: 0, collapsed: false },
+        ]),
+      }),
+      count: 1,
+      title: "First Outline row",
+    },
+    {
+      name: "Outline tooltip length",
+      node: syntheticNode("indicator_outline_limit", {
+        editor: outlineMeta([{ id: "indicator_long_row", text: "x".repeat(220), depth: 0, collapsed: false }]),
+      }),
+      count: 1,
+      title: "x".repeat(180),
+    },
+    {
+      name: "Notes and Outline",
+      node: syntheticNode("indicator_both", {
+        details: "Notes tooltip wins\nSecond line",
+        editor: outlineMeta([{ id: "indicator_both_outline", text: "Outline tooltip loses", depth: 0, collapsed: false }]),
+      }),
+      count: 1,
+      title: "Notes tooltip wins",
+    },
+    {
+      name: "structural depth Outline",
+      node: syntheticNode("indicator_depth", {
+        editor: outlineMeta([{ id: "indicator_depth_row", text: "", depth: 1, collapsed: false }]),
+      }),
+      count: 1,
+      title: "Has outline",
+    },
+    {
+      name: "structural collapsed Outline",
+      node: syntheticNode("indicator_collapsed", {
+        editor: outlineMeta([{ id: "indicator_collapsed_row", text: "", depth: 0, collapsed: true }]),
+      }),
+      count: 1,
+      title: "Has outline",
+    },
+    {
+      name: "absent content",
+      node: syntheticNode("indicator_absent"),
+      count: 0,
+      title: "",
+    },
+    {
+      name: "blank Outline placeholder",
+      node: syntheticNode("indicator_placeholder", {
+        editor: outlineMeta([{ id: "indicator_placeholder_row", text: "", depth: 0, collapsed: false }]),
+      }),
+      count: 0,
+      title: "",
+    },
+    {
+      name: "empty Outline array",
+      node: syntheticNode("indicator_empty", { editor: outlineMeta([]) }),
+      count: 0,
+      title: "",
+    },
+    {
+      name: "unsupported editor without Notes",
+      node: syntheticNode("indicator_unsupported", {
+        editor: { schema: "future.editor.v9", mode: "outline", outline: [{ text: "Do not interpret" }] },
+      }),
+      count: 0,
+      title: "",
+    },
+    {
+      name: "malformed editor without Notes",
+      node: syntheticNode("indicator_malformed", {
+        editor: { schema: EDITOR_SCHEMA, mode: "outline", outline: "not-an-array" },
+      }),
+      count: 0,
+      title: "",
+    },
+    {
+      name: "unsupported editor with Notes",
+      node: syntheticNode("indicator_unsupported_notes", {
+        details: "Supported Notes fallback",
+        editor: { schema: "future.editor.v9", mode: "outline", outline: [{ text: "Do not interpret" }] },
+      }),
+      count: 1,
+      title: "Supported Notes fallback",
+    },
+    {
+      name: "malformed editor with Notes",
+      node: syntheticNode("indicator_malformed_notes", {
+        details: "Malformed fallback Notes",
+        editor: { schema: EDITOR_SCHEMA, mode: "outline", outline: "not-an-array" },
+      }),
+      count: 1,
+      title: "Malformed fallback Notes",
+    },
+  ];
+
+  for (const expected of cases) {
+    const before = plain(expected.node);
+    const rendered = createTreeRenderHarness([expected.node]);
+    assert.equal(rendered.rows.length, 1, expected.name);
+    assert.equal(rendered.badges.length, expected.count, expected.name);
+    if (expected.count === 1) {
+      assert.equal(rendered.badges[0].className, "detailBadge", expected.name);
+      assert.equal(rendered.badges[0].textContent, "...", expected.name);
+      assert.equal(rendered.badges[0].title, expected.title, expected.name);
+    }
+    assert.deepEqual(plain(expected.node), before, `${expected.name}: source node`);
+    assert.deepEqual(plain(rendered.state.nodes[0]), before, `${expected.name}: rendered state node`);
+    assert.equal(rendered.state.ops.length, 0, expected.name);
+    assert.equal(rendered.context.__storageWrites.length, 0, expected.name);
+    assert.deepEqual(plain(rendered.context.__surfaceCalls), {
+      exportTree: 0,
+      writeTruthFile: 0,
+      showOpenFilePicker: 0,
+      showSaveFilePicker: 0,
+    }, expected.name);
+  }
+});
+
+test("successful Outline save and clear add then remove the tree indicator without creating Notes", async () => {
+  const context = createFullContractContext();
+  const state = resetState(context, [syntheticNode("indicator_save_refresh")]);
+  context.exportTree = async () => ({ ok: true });
+
+  const addResult = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, state.nodes[0], {
+    mode: "outline",
+    schema: EDITOR_SCHEMA,
+    outline: [{ id: "indicator_saved_row", text: "Saved Outline row", depth: 0, collapsed: false }],
+  }));
+  assert.equal(addResult.ok, true);
+  assert.equal(addResult.exported, true);
+  assert.equal(Object.hasOwn(state.nodes[0], "details"), false);
+  assert.equal(state.nodes[0].editor.outline[0].text, "Saved Outline row");
+
+  const afterAdd = createTreeRenderHarness([state.nodes[0]]);
+  assert.equal(afterAdd.badges.length, 1);
+  assert.equal(afterAdd.badges[0].title, "Saved Outline row");
+
+  const clearResult = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, state.nodes[0], {
+    mode: "outline",
+    schema: EDITOR_SCHEMA,
+    outline: [],
+  }));
+  assert.equal(clearResult.ok, true);
+  assert.equal(clearResult.exported, true);
+  assert.equal(Object.hasOwn(state.nodes[0], "details"), false);
+  assert.equal(Object.hasOwn(state.nodes[0], "editor"), false);
+
+  const afterClear = createTreeRenderHarness([state.nodes[0]]);
+  assert.equal(afterClear.badges.length, 0);
+});
+
+test("tree correction retains Outline search, details-first copy context, and row interaction owners", () => {
+  const searchableNode = syntheticNode("indicator_search", {
+    editor: outlineMeta([{ id: "indicator_search_row", text: "Searchable Outline needle", depth: 0, collapsed: false }]),
+  });
+  const searched = createTreeRenderHarness([searchableNode], "outline needle");
+  assert.equal(searched.rows.length, 1);
+  assert.equal(searched.badges.length, 1);
+  assert.equal(searched.rows[0].listeners.get("click")?.length, 1);
+  assert.equal(searched.rows[0].listeners.get("dblclick")?.length, 1);
+  assert.equal(searched.rows[0].listeners.get("contextmenu")?.length, 1);
+
+  const copyContext = createFullContractContext();
+  const payload = copyContext.copyContextPayloadForNode({
+    label: "Label fallback",
+    details: "Notes remain first\nSecond Notes line",
+    editor: searchableNode.editor,
+  });
+  assert.equal(payload.kind, "details");
+  assert.equal(payload.text, "Notes remain first\nSecond Notes line");
 });
 
 test("details-first copy context ignores editor metadata and falls back only to the label", () => {

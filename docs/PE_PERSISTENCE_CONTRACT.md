@@ -12,6 +12,8 @@ The terms used below are deliberate:
 
 P013 makes `node.details` the Notes truth and accepted `node.editor.outline` the Outline truth. They are independent: tab switching never converts, mirrors or projects one section into the other; both sections are submitted on every Save; and the main-window owner compares title, Notes and Outline separately. Existing details on an Outline node remain Notes, even when they look like an old compatibility projection.
 
+The P013 browser-acceptance correction makes the main-tree `...` badge a single “additional content” signal. It renders when a node has meaningful normalised Notes or a supported meaningful current-v1 Outline. Notes retain tooltip precedence; otherwise the first nonblank cleaned Outline row supplies the tooltip, with `Has outline` for structural-only depth or collapse content. Empty/placeholder Outlines and unsupported or malformed editor metadata do not create the badge. This check is render-only and uses the shared editor-recognition contract without rewriting node data.
+
 P012's safety boundary remains unchanged. Each canonical PE opening carries a JSON-safe document-session identity and the exact node revision it opened. The main window rejects switched-file, stale-node, missing-node, unsupported-editor and non-lossy preflight failures before unsafe mutation or export. Failed truth persistence remains retryable without clearing dirty state.
 
 P013 does not migrate the root or editor schema, add a `node.notes` field, persist the selected tab, or rewrite a file merely because it was opened or a tab was selected. Tests use synthetic fixtures, in-memory handles and instrumented write surfaces only. No personal Pocket truth file was read or written, and this synthetic validation does not claim Murray's physical browser acceptance.
@@ -33,7 +35,8 @@ This contract records the P013-tested behaviour that later work must change deli
 - failed-export revision handshakes, pending-operation visibility and retry;
 - root export and browser recovery representations;
 - compact load, export and reload round trips;
-- generated PE runtime compilation, independent tab state and Outline-only P008 structured-paste parsing; and
+- generated PE runtime compilation, independent tab state and Outline-only P008 structured-paste parsing;
+- main-tree meaningful-content indicator rendering without node or persistence side effects; and
 - details-first copy context.
 
 This document distinguishes opening a file from explicitly writing the selected truth file. It also distinguishes browser `localStorage` recovery writes from truth-file persistence.
@@ -61,7 +64,7 @@ The harness:
 - does not create a real `FileSystemFileHandle`, invoke a real picker, or write a truth file;
 - instruments generated runtime code in memory only.
 
-The P013 validation run reports 84 tests, 84 passes and 0 failures. The exact Node version, command and result are also recorded in `docs/CODEX_REPORT.md`.
+The P013 validation run reports 87 tests, 87 passes and 0 failures. The exact Node version, command and result are also recorded in `docs/CODEX_REPORT.md`.
 
 ## 3. Source files exercised
 
@@ -84,6 +87,7 @@ The suite parses or executes these current production sources:
 | `js/pocket-node-popout-editor.js` | Ordered identity/revision/apply gates, non-lossy preparation, retry handshake and export-result propagation |
 | `js/pocket-node-popout-runtime.js` | Generated program, bound dual-section save payload, presentation-only tabs, revision/identity adoption, dirty-state result handling, read-only guards, exact save schema and Outline structured-paste parser |
 | `js/pocket-node-popout-template.js` | Read-only fields, warning and disabled controls |
+| `js/pocket-render.js` | Single Notes-or-supported-Outline tree content badge, tooltip precedence, raw preservation, Outline search and row interaction ownership |
 | `js/pocket-editor-cutover-v3.js`, `js/pocket-editor-popout.js`, `js/pocket-editor-popout-v2.js` and `js/pocket-pe-save-dirty.js` | Canonical open/apply/save ownership, conversion-free compatibility tabs and fail-closed legacy routes |
 | `js/pocket-storage.js`, `js/pocket-import.js`, `js/pocket-editor-copy.js` and `js/pocket-vault-io-browser.js` | Active recovery, PiP and Vault state adoption as new document sessions |
 
@@ -253,6 +257,7 @@ Meaningful supported Outline content uses one shared definition across recogniti
 | Popup dirty, save generation, allowed-to-close, selection and menu state | Runtime-only |
 | Selected Notes/Outline tab | Runtime presentation state only; accepted Outline opens Outline, otherwise Notes; never persisted |
 | Absent Outline placeholder | One fresh blank depth-0 uncollapsed runtime row; not meaningful and not persisted by tab switching |
+| Main-tree `...` content badge | Derived render-only signal for meaningful Notes or a supported meaningful Outline; Notes tooltip wins and one badge renders at most |
 | Structured multiline Outline paste | Uses the P008 indentation parser only inside Outline and creates fresh row IDs |
 | Normalised supported-v1 PE copy | Derived editing view; the raw state object remains separate until a changed apply |
 | `state.ops` | Runtime operation history and dirty signal, copied into recovery representations but not the root truth payload |
@@ -283,6 +288,7 @@ P011 establishes one deliberate owner:
 - `js/pocket-pe-import-preserve.js` retains only the PE visible-version patch and does not install or wrap `normaliseNodes()`.
 - `normaliseNodes()` handles core fields and generic extras, then explicitly calls `PocketEditorMetadata.copyFirstClassNodeFields()`.
 - `editor` and `pe` are reserved in `RESERVED_NODE_KEYS`, so neither participates in the 24-extra budget or generic 8,000-character object cap.
+- `index.html` loads `js/pocket-editor-metadata.js` before `js/pocket-render.js`, so the tree indicator uses `PocketEditorMetadata.classifyEditorMeta()` and `isMeaningfulOutline()` rather than defining another recognition rule.
 
 For truth-file JSON values, the first-class copy path preserves an own `editor` or `pe` value as opaque JSON. Tests cover null, scalar, array, small object, object above 8,000 characters, unknown schema, malformed v1, current v1 extensions and large legacy `pe`. The copy path has no application-level character or property-count cap. Interpretation happens later and does not rewrite the raw state value.
 
@@ -591,6 +597,7 @@ The focused suite treats these as stable current assertions:
 - Existing details on saved Outline nodes remain independent Notes without heuristic migration.
 - Structural-only blank-text Outlines remain meaningful when depth or collapse exists.
 - A fresh blank depth-0 uncollapsed Outline placeholder remains absent unless the user creates meaningful text or structure.
+- The main tree renders exactly one existing `detailBadge` for meaningful Notes or a supported meaningful Outline, with Notes tooltip precedence and no render-time node or persistence mutation.
 - Generated editable saves carry the exact v1 schema and both content sections.
 - `buildPocketPayload()` emits guarded top-level and nested tree copies.
 - Notes normalisation retains its tested whitespace and 4,000-character policy.
@@ -719,10 +726,11 @@ Large boundaries, scalar and array metadata, raw extension objects and recovery 
 | Lexical operation helper | Read-only count supports unchanged retry without exposing mutable `state` | Stable |
 | Generated runtime | Compile states, bound dual-section payloads, presentation-only tabs, read-only, rejection, retry, revision/identity adoption, structured paste and absent renderer | Stable |
 | P006/P007 runtime regressions | Subtree Copy, Paste-after-selection, Duplicate, Delete and Escape menu/dialog/row/close ordering | Stable |
+| Main-tree content indicator | Notes-only, textual and structural Outline-only, both, absent, placeholder, empty, unsupported/malformed, raw preservation, save/rerender, search and row listener ownership | Stable P013 correction |
 | Copy context | Details first, label fallback and editor ignored | Stable |
 | Main-tree Enter ownership | Active scripts retain `handleTreeKeydown` as the sole owner | Stable |
 
-The focused P013 suite reports 84 tests, 84 passes and 0 failures.
+The focused P013 suite reports 87 tests, 87 passes and 0 failures.
 
 ## 18. Change protocol for later tasks
 

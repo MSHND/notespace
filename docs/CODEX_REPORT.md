@@ -1,5 +1,104 @@
 # Codex report
 
+## POCKET TASK P013 — TREE INDICATOR CORRECTION
+
+Title: Show Outline content in the tree indicator
+
+Status: render-only P013 browser-acceptance correction implemented and validated. Murray's physical browser acceptance remains.
+
+Commit title:
+
+- `P013 Show Outline content indicator`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- GitHub-visible and fetched `origin/main`: `b5a2efabd5cc30b689e012e336339a76e6b3356f`
+- Parent title: `P013 Separate Notes and Outline content`
+- Local branch: `main`
+- Local `main` matched `origin/main`, with a clean worktree and zero ahead/behind commits before implementation.
+- Superseded PR #6 was not merged, cherry-picked, modified or used as a working branch.
+- No personal or active Pocket truth file was inspected or modified.
+- The generated PE runtime, PE model, editor, persistence routes, schemas, search rule and copy-context implementation did not change.
+
+### Correction
+
+The existing main-tree `detailBadge` with visible text `...` now means that the node contains meaningful additional content beyond its title:
+
+- meaningful normalised Notes in `node.details`; or
+- a supported meaningful `pocket.nodeEditor.v1` Outline.
+
+Exactly one badge renders when either or both sections are meaningful. Notes keep the existing first-line tooltip and take precedence when both sections exist. An Outline-only node uses its first nonblank cleaned Outline row, limited to 180 characters. A structural-only meaningful Outline uses `Has outline`.
+
+No badge renders for absent content, `editor: null`, an empty Outline array, or rows containing only blank depth-0 uncollapsed placeholders. Unsupported and malformed editor metadata is not interpreted; meaningful Notes may still produce the normal badge.
+
+`treeContentIndicatorForNode()` is a small derived render helper in `js/pocket-render.js`. It calls the already-loaded `PocketEditorMetadata.classifyEditorMeta()` and `isMeaningfulOutline()` contract. Rendering does not mutate the node or raw editor metadata, create Notes or editor data, record an operation, write browser recovery state, export truth, open a picker or alter file-session identity.
+
+### Files changed
+
+- `js/pocket-render.js` — derives the single existing badge from meaningful Notes or a supported meaningful Outline.
+- `tests/pe-persistence-contract.test.js` — executes the actual renderer with a controlled DOM/state harness and covers every required indicator, preservation, save/rerender, search, copy and row-listener case.
+- `docs/PE_PERSISTENCE_CONTRACT.md` — records the corrected stable tree-indicator contract.
+- `docs/CODEX_REPORT.md` — records this follow-up without truncating prior P010–P013 history.
+
+No runtime, model, editor, persistence, schema, fixture, dependency, `index.html`, personal JSON or retired PE file changed.
+
+### Validation
+
+Node:
+
+~~~text
+v24.14.0
+~~~
+
+Focused command:
+
+~~~sh
+node --test tests/pe-persistence-contract.test.js
+~~~
+
+Result:
+
+~~~text
+tests 87
+pass 87
+fail 0
+cancelled 0
+skipped 0
+todo 0
+~~~
+
+The new actual-source renderer cases prove:
+
+1. Notes-only renders one badge with the first Notes line.
+2. Textual Outline-only renders one badge with the first nonblank cleaned Outline row.
+3. Notes plus Outline renders one badge and the Notes tooltip wins.
+4. Blank depth and blank collapsed structural Outlines each render one `Has outline` badge.
+5. Absent, empty and blank-placeholder Outline states render no badge.
+6. Unsupported and malformed editor metadata render no badge without Notes, while Notes still supplies the normal badge.
+7. Every rendered source node, state node, operation list, browser storage and write/picker surface remains unchanged.
+8. A successful Outline save adds the badge on rerender; a successful clear removes it; Notes remain absent and independent.
+9. Outline text remains searchable, copy context remains details-first, and click, double-click and context-menu listener ownership remains present.
+
+Targeted static checks:
+
+- `node --check js/pocket-render.js` passed.
+- `node --check tests/pe-persistence-contract.test.js` passed.
+- `git diff --check` passed.
+- The unchanged generated PE runtime continued to build, compile and pass its existing controlled tests within the 87-test suite.
+- `node tools/pocket-check.js` was not run.
+- `npm run check` was not run because it invokes the prohibited checker.
+
+### Physical browser acceptance checklist
+
+1. Confirm a Notes-only node shows `...`.
+2. Confirm an Outline-only node shows `...`.
+3. Confirm a node with both sections still shows only one `...`.
+4. Hover Notes content and confirm the first Notes line appears.
+5. Hover Outline-only content and confirm the first nonblank Outline row appears.
+6. Clear an Outline-only node's Outline, save, and confirm the badge disappears.
+7. Confirm an ordinary title-only node still has no badge.
+
 ## POCKET TASK P013
 
 Title: Separate Notes and Outline content

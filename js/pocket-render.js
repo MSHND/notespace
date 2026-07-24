@@ -281,6 +281,45 @@ function openRowActionMenu(nodeId, point) {
   return true;
 }
 
+function treeContentIndicatorForNode(node) {
+  const detailText = normaliseDetails(node && node.details, 4000);
+  if (detailText) {
+    return {
+      visible: true,
+      title: cleanText(detailText.split("\n")[0], 180) || "Has details",
+    };
+  }
+
+  const metadata = window.PocketEditorMetadata;
+  if (!metadata
+    || typeof metadata.classifyEditorMeta !== "function"
+    || typeof metadata.isMeaningfulOutline !== "function") {
+    return { visible: false, title: "" };
+  }
+
+  const present = !!node
+    && typeof node === "object"
+    && Object.prototype.hasOwnProperty.call(node, "editor");
+  const classification = metadata.classifyEditorMeta(
+    present ? node.editor : undefined,
+    { present },
+  );
+  const outline = classification.kind === "supported-v1-outline"
+    ? classification.normalised && classification.normalised.outline
+    : null;
+  if (!metadata.isMeaningfulOutline(outline)) {
+    return { visible: false, title: "" };
+  }
+
+  const firstOutlineText = outline
+    .map((block) => cleanText(block && block.text, 180))
+    .find(Boolean);
+  return {
+    visible: true,
+    title: firstOutlineText || "Has outline",
+  };
+}
+
 function renderTree() {
   if (typeof canShowPocketTree === "function" && !canShowPocketTree()) {
     if (el.treeRoot instanceof HTMLElement) {
@@ -439,12 +478,12 @@ function renderTree() {
       row.appendChild(label);
     }
 
-    const detailText = normaliseDetails(node.details, 4000);
-    if (detailText) {
+    const contentIndicator = treeContentIndicatorForNode(node);
+    if (contentIndicator.visible) {
       const detailBadge = document.createElement("span");
       detailBadge.className = "detailBadge";
       detailBadge.textContent = "...";
-      detailBadge.title = cleanText(detailText.split("\n")[0], 180) || "Has details";
+      detailBadge.title = contentIndicator.title;
       row.appendChild(detailBadge);
     }
 
