@@ -1,5 +1,148 @@
 # Codex report
 
+## POCKET TASK P017 — SHOW PENDING FILE PERMISSION OVER THE ACTIVE TREE
+
+Title: Show pending file permission over the active tree
+
+Status: implementation, documentation and focused local validation are complete against the exact accepted P016 baseline. The exact-title commit containing this report must still be pushed and confirmed on `origin/main` before P017 can be reported complete.
+
+Commit title:
+
+- `P017 Show pending file permission over active tree`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched starting `origin/main`: `eae949c6a11b8d8d7058072cda4d5b31cbc98f63`
+- Baseline title: `P016 Handle file and device changes safely`
+- Implementation date: 2026-07-26
+- Branch: `main`
+- Local `main`, `HEAD` and `origin/main` were identical, with zero ahead/behind divergence and a clean worktree before implementation.
+- No personal Pocket truth file, browser localStorage contents, real Vault, uploaded JSON or real File System Access handle was inspected.
+- No truth-file schema migration, dependency, autosave, background write, file watcher, cloud route, PE implementation or package script was added.
+
+P017 corrects the selected-file permission step only. It preserves P016's meaningful FILE/DEVICE/BASE comparison and detached adoption model, P012 PE source identity and revision protections, and all accepted P006 to P014 editor behaviour.
+
+### Confirmed root cause
+
+The selected-file loader correctly retained a candidate handle in `pendingPocketFileHandle` when Chrome reported `prompt`. Its only Continue/Cancel UI was the permission branch in `buildPocketFileGate()`. `renderTree()` builds that gate only when `canShowPocketTree()` is false, so an already-active File A kept its tree and made File B's permission choice invisible. `canModifyPocket()` also remained true for A while B was pending.
+
+The earlier async Continue path captured B, awaited permission, then cleared the shared pending state before B was read or parsed. It had no busy guard, request token or source-session recheck. Cancellation, duplicate activation or another document-session adoption could therefore leave stale async work able to load B.
+
+### Implementation contract
+
+`js/pocket-io-browser.js` remains the canonical owner of file opening, pending permission and handle adoption. It now provides `isPocketFilePermissionPromptOpen()` as the shared gate and owns one accessible permission dialog with the approved title, body, filename, support text, Continue and Cancel controls.
+
+While the dialog is open:
+
+- File A's handle, tree, document session, PE identity, operations and dirty state remain authoritative;
+- File B is only a pending object-identity candidate and has no write authority;
+- the visible background is inert and focus remains inside the dialog;
+- `canModifyPocket()` returns false;
+- tree mutation, bulk delete, undo/inline commit, Main Save, PE open/apply, popout, PiP return, Create New, another Open action, command palette and P016 review adoption are gated; and
+- no candidate or active-file write is initiated.
+
+Continue is single-flight. It captures a monotonic request token and the active source session, asks only B for read/write permission, and retains A as active while permission, `getFile()`, text reading, parsing and normalisation complete. The token and source-session check run after asynchronous boundaries and immediately before adoption. Cancel or Escape invalidates the token, so a later permission result cannot load B.
+
+Only a valid B reaches the existing `setPocketFileSession()` adoption boundary. The permission dialog and its inert state are removed immediately before that synchronous adoption, then the document session rotates. If the new selected file differs from browser-held changes, the unchanged P016 owner opens next and receives focus with its existing Combine eligibility.
+
+Denial, dismissal, permission failure, read failure, invalid JSON or another rejected load clears only B's pending state and reports:
+
+> That file was not opened. Your current Pocket file is unchanged.
+
+Cancel or Escape reports:
+
+> Open cancelled. Your current Pocket file is unchanged.
+
+A routine successful write/session refresh for already-active A does not dismiss a pending B choice. A genuine session rotation revokes it. Matching filenames never substitute for handle identity.
+
+The same modal is used when no file is active. The ordinary no-file gate remains behind it and cannot become editable until a valid file is adopted. The permission-specific branch and Continue/Cancel controls were removed from `buildPocketFileGate()`, leaving one UI and one pending owner.
+
+### Files changed
+
+Production and shell:
+
+- `index.html`
+- `file-permission.css`
+- `sw.js`
+- `js/pocket-state.js`
+- `js/pocket-render.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-device-changes.js`
+- `js/pocket-overlays-init.js`
+- `js/pocket-history-status.js`
+- `js/pocket-multi-select.js`
+- `js/pocket-node-popout-editor.js`
+
+Tests and documentation:
+
+- `tests/device-changes-resolution.test.js`
+- `docs/DEVICE_CHANGES_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No PE generated-runtime source, package file, fixture, workflow or unrelated application surface changed.
+
+### Focused validation
+
+Node:
+
+~~~text
+v23.11.0
+~~~
+
+Existing PE regression command:
+
+~~~sh
+node --test tests/pe-persistence-contract.test.js
+~~~
+
+Result:
+
+~~~text
+94 tests, 94 passed, 0 failed
+~~~
+
+Extended P016/P017 focused command:
+
+~~~sh
+node --test tests/device-changes-resolution.test.js
+~~~
+
+Result:
+
+~~~text
+69 tests, 69 passed, 0 failed
+~~~
+
+Combined focused result:
+
+~~~text
+163 tests, 163 passed, 0 failed
+~~~
+
+The 15 P017 cases execute actual production file-session, selected-file load, tree-action, canonical PE, Save, PiP and P016 comparison paths in controlled VM contexts. They cover active A/pending B ownership, all required gates, delayed single-flight adoption, denial/dismissal/failure, button and Escape cancellation, read and parse failure, initial no-file opening, valid P016 hand-off, same-name handle identity, dialog semantics and focus containment, retirement of the duplicate gate UI, in-flight cancellation revocation, preservation of a pending candidate across a routine active-file session refresh, rejection of a concurrent already-granted candidate and prevention of an in-flight File A save falling through to a picker after File B becomes pending.
+
+Static validation:
+
+- every production JavaScript file under `js/`: passed `node --check`;
+- changed test JavaScript and `sw.js`: passed `node --check`;
+- every committed JSON fixture: passed `JSON.parse`;
+- Markdown code fences: balanced;
+- `git diff --check`: passed;
+- final diff review: only the task-relevant files listed above changed.
+
+`node tools/pocket-check.js` and `npm run check` were not run.
+
+### Physical browser acceptance
+
+Murray's physical browser acceptance remains required. The exact 22-step disposable A/B checklist is in `docs/DEVICE_CHANGES_CONTRACT.md`, section 18. It covers a pending B over dirty A, filename display, interaction blocking, Cancel, Continue and Chrome grant, P016 hand-off, denial, invalid JSON, a private-window device copy and valid Combine ancestry.
+
+### Completion boundary
+
+Final parent SHA: `eae949c6a11b8d8d7058072cda4d5b31cbc98f63`
+
+The exact-title P017 commit containing this report must be pushed directly to `origin/main`, fetched again, verified as a child of the parent above and confirmed with a clean worktree before the task response may report COMPLETE.
+
 ## POCKET TASK P016 — HANDLE FILE AND DEVICE CHANGES SAFELY
 
 Title: Handle file and device changes safely

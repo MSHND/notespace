@@ -8,6 +8,7 @@ const SHELL_FILES = [
   "./phone.css",
   "./topbar.css",
   "./device-changes.css",
+  "./file-permission.css",
   "./manifest.json",
   "./js/pocket-state.js",
   "./js/pocket-data.js",

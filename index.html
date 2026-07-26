@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="editor.css">
   <link rel="stylesheet" href="pocket-ui-polish.css">
   <link rel="stylesheet" href="device-changes.css">
+  <link rel="stylesheet" href="file-permission.css">
 </head>
 <body>
   <div class="app">
@@ -79,6 +80,24 @@
         <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Review an earlier device version</span><span class="commandHint">safety</span></button>
         <button id="cmdHelp" class="commandBtn" type="button"><span>Show controls</span><span class="commandHint">?</span></button>
       </div>
+    </div>
+
+    <div id="filePermissionOverlay" class="filePermissionOverlay" hidden>
+      <section class="filePermissionCard" role="dialog" aria-modal="true" aria-labelledby="filePermissionTitle" aria-describedby="filePermissionBody filePermissionFileName filePermissionSupport">
+        <header class="filePermissionHeader">
+          <h2 id="filePermissionTitle">Let Pocket open this file</h2>
+          <p id="filePermissionBody">Chrome may ask if Pocket can save changes to the file you just chose.</p>
+        </header>
+        <div class="filePermissionIdentity">
+          <span>File</span>
+          <strong id="filePermissionFileName">Selected Pocket file</strong>
+        </div>
+        <p id="filePermissionSupport" class="filePermissionSupport">Pocket will keep your current file open unless the new file opens successfully.</p>
+        <div class="filePermissionActions">
+          <button id="filePermissionContinue" class="filePermissionPrimary" type="button">Continue</button>
+          <button id="filePermissionCancel" class="filePermissionSecondary" type="button">Cancel</button>
+        </div>
+      </section>
     </div>
 
     <div id="deviceChangesOverlay" class="deviceChangesOverlay" hidden>

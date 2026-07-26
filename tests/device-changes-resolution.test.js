@@ -19,6 +19,29 @@ function plain(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => {
+    resolve = nextResolve;
+    reject = nextReject;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function waitFor(predicate, rounds = 20) {
+  for (let index = 0; index < rounds; index += 1) {
+    if (predicate()) return true;
+    await flushMicrotasks();
+  }
+  return predicate();
+}
+
 function loadDeviceChangesApi() {
   const context = {
     URL,
@@ -80,6 +103,10 @@ function createDeviceChangesDom() {
 
     get firstChild() {
       return this.children[0] || null;
+    }
+
+    get childNodes() {
+      return this.children;
     }
 
     get textContent() {
@@ -191,10 +218,38 @@ function createDeviceChangesDom() {
   };
   const body = element("body", "body");
   const background = element("main", "syntheticPocketSurface");
+  background.appendChild(element("button", "btnLoad", "Choose Pocket file"));
   background.appendChild(element("button", "btnExportTree", "save"));
+  const permissionOverlay = element("div", "filePermissionOverlay");
+  permissionOverlay.hidden = true;
+  const permissionCard = element("section", "filePermissionCard");
+  permissionCard.setAttribute("role", "dialog");
+  permissionCard.setAttribute("aria-modal", "true");
+  permissionCard.setAttribute("aria-labelledby", "filePermissionTitle");
+  permissionCard.setAttribute(
+    "aria-describedby",
+    "filePermissionBody filePermissionFileName filePermissionSupport",
+  );
+  permissionOverlay.appendChild(permissionCard);
+  permissionCard.appendChild(element("h2", "filePermissionTitle", "Let Pocket open this file"));
+  permissionCard.appendChild(element(
+    "p",
+    "filePermissionBody",
+    "Chrome may ask if Pocket can save changes to the file you just chose.",
+  ));
+  permissionCard.appendChild(element("span", "filePermissionFileLabel", "File"));
+  permissionCard.appendChild(element("strong", "filePermissionFileName", "Selected Pocket file"));
+  permissionCard.appendChild(element(
+    "p",
+    "filePermissionSupport",
+    "Pocket will keep your current file open unless the new file opens successfully.",
+  ));
+  permissionCard.appendChild(element("button", "filePermissionContinue", "Continue"));
+  permissionCard.appendChild(element("button", "filePermissionCancel", "Cancel"));
   const overlay = element("div", "deviceChangesOverlay");
   overlay.hidden = true;
   body.appendChild(background);
+  body.appendChild(permissionOverlay);
   body.appendChild(overlay);
   const card = element("section", "deviceChangesCard");
   overlay.appendChild(card);
@@ -281,6 +336,7 @@ function createDeviceChangesDom() {
     HTMLButtonElement: UiButtonElement,
     elements,
     background,
+    permissionOverlay,
     overlay,
   };
 }
@@ -291,6 +347,8 @@ function createIntegrationContext(options = {}) {
   const storageAttempts = [];
   const surfaceCalls = {
     picker: 0,
+    openPicker: 0,
+    popupOpen: 0,
     render: 0,
     refresh: 0,
     persistPip: 0,
@@ -386,7 +444,10 @@ function createIntegrationContext(options = {}) {
       const index = listeners.indexOf(listener);
       if (index >= 0) listeners.splice(index, 1);
     },
-    open() { return null; },
+    open() {
+      surfaceCalls.popupOpen += 1;
+      return null;
+    },
     close() {},
     confirm() { return true; },
     alert() {},
@@ -412,7 +473,11 @@ function createIntegrationContext(options = {}) {
       createObjectURL() { return "blob:synthetic"; },
       revokeObjectURL() {},
     },
-    showOpenFilePicker() {
+    async showOpenFilePicker() {
+      surfaceCalls.openPicker += 1;
+      if (typeof options.pickOpenHandles === "function") {
+        return options.pickOpenHandles(surfaceCalls.openPicker);
+      }
       throw new Error("unexpected open picker");
     },
     async showSaveFilePicker() {
@@ -614,6 +679,7 @@ function safetySnapshotFor(context, deviceDocument, options = {}) {
 
 function fakeHandle(name, options = {}) {
   const calls = {
+    getFile: 0,
     queryPermission: 0,
     requestPermission: 0,
     createWritable: 0,
@@ -626,16 +692,24 @@ function fakeHandle(name, options = {}) {
     name,
     calls,
     async getFile() {
+      calls.getFile += 1;
+      if (typeof options.getFile === "function") return options.getFile(calls);
       if (options.file) return options.file;
       throw new Error("synthetic handle has no readable file");
     },
     async queryPermission() {
       calls.queryPermission += 1;
-      return "granted";
+      if (typeof options.queryPermission === "function") {
+        return options.queryPermission(calls);
+      }
+      return options.queryPermission || "granted";
     },
     async requestPermission() {
       calls.requestPermission += 1;
-      return "granted";
+      if (typeof options.requestPermission === "function") {
+        return options.requestPermission(calls);
+      }
+      return options.requestPermission || "granted";
     },
     async createWritable() {
       calls.createWritable += 1;
@@ -3362,6 +3436,717 @@ test("the modal traps focus, ignores Escape as a choice, and blocks Save shortcu
   assert.equal(save.defaultPrevented, true);
   assert.equal(context.__surfaceCalls.picker, 0);
   assert.equal(handle.calls.createWritable, 0);
+});
+
+test("P017: pending permission for File B stays visible over active File A without changing ownership", async () => {
+  const context = createUiIntegrationContext();
+  const state = resetIntegrationState(context, [
+    node("file_a", { label: "File A item", details: "Unsaved File A Notes" }),
+  ], [{ type: "file-a-edit", seq: 1 }]);
+  const fileABefore = plain(state.nodes);
+  const opsBefore = plain(state.ops);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const identityBefore = plain(context.capturePocketEditorSourceIdentity());
+  const fileBPayload = payloadFromDocument(documentWith([
+    node("file_b", { label: "File B item" }),
+  ]));
+  const fileBHandle = fakeHandle("file-b.json", {
+    queryPermission: "prompt",
+    file: {
+      name: "file-b.json",
+      async text() { return JSON.stringify(fileBPayload); },
+    },
+  });
+
+  const loaded = await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+  assert.equal(loaded, false);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  assert.equal(context.__ui.permissionOverlay.hidden, false);
+  assert.equal(context.__ui.elements.get("filePermissionFileName").textContent, "file-b.json");
+  assert.equal(context.__ui.background.inert, true);
+  assert.deepEqual(plain(state.nodes), fileABefore);
+  assert.deepEqual(plain(state.ops), opsBefore);
+  const sessionPending = context.capturePocketFileSaveSession();
+  assert.strictEqual(sessionPending.handle, fileAHandle);
+  assert.equal(sessionPending.id, sessionBefore.id);
+  assert.deepEqual(plain(context.capturePocketEditorSourceIdentity()), identityBefore);
+  assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), fileBHandle);
+  assert.equal(context.canShowPocketTree(), true);
+  assert.equal(context.canModifyPocket(), false);
+  assert.equal(fileBHandle.calls.getFile, 0);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+  assert.strictEqual(
+    context.document.activeElement,
+    context.__ui.elements.get("filePermissionContinue"),
+  );
+});
+
+test("P017: the canonical permission gate blocks tree, Save, popout, open, and create actions", async () => {
+  const context = createUiIntegrationContext({
+    pickOpenHandles() {
+      throw new Error("permission gate must block another open picker");
+    },
+    pickSaveHandle() {
+      throw new Error("permission gate must block a save picker");
+    },
+  });
+  const state = resetIntegrationState(context, [
+    node("file_a_one", { label: "File A one", order: 1001 }),
+    node("file_a_two", { label: "File A two", order: 1002 }),
+  ], [{ type: "file-a-edit", seq: 1 }]);
+  const nodesBefore = plain(state.nodes);
+  const opsBefore = plain(state.ops);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const fileBHandle = fakeHandle("file-b.json", {
+    queryPermission: "prompt",
+    file: {
+      name: "file-b.json",
+      async text() { return JSON.stringify(payloadFromDocument(documentWith([node("file_b")]))); },
+    },
+  });
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+  vm.runInContext(source("js/pocket-tree-actions.js"), context, {
+    filename: "js/pocket-tree-actions.js",
+  });
+
+  context.insertSiblingBelow("file_a_one");
+  context.moveNodeWithinSiblings("file_a_one", "down");
+  context.deleteNodeById("file_a_one", { confirm: false });
+  assert.equal(context.PocketNodePopoutEditor.open("file_a_one"), false);
+  const peApplyResult = context.PocketNodePopoutEditor.apply({}, { returnDetails: true });
+  await context.openPipWindow();
+  assert.equal(await context.openPocketFile(), false);
+  assert.equal(await context.createNewPocketFile(), false);
+  const saveResult = await context.exportTree({ returnDetails: true });
+  const saveKey = context.__dispatchWindowKey({
+    key: "s",
+    metaKey: true,
+    target: context.__ui.elements.get("filePermissionContinue"),
+  });
+
+  assert.deepEqual(plain(state.nodes), nodesBefore);
+  assert.deepEqual(plain(state.ops), opsBefore);
+  assert.equal(saveResult.ok, false);
+  assert.equal(saveResult.reason, "file-permission-pending");
+  assert.equal(peApplyResult.ok, false);
+  assert.equal(peApplyResult.reason, "file-permission-pending");
+  assert.equal(saveKey.defaultPrevented, true);
+  assert.equal(context.__surfaceCalls.openPicker, 0);
+  assert.equal(context.__surfaceCalls.picker, 0);
+  assert.equal(context.__surfaceCalls.popupOpen, 0);
+  assert.equal(context.__surfaceCalls.persistPip, 0);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+});
+
+test("P017: Continue is single-flight and File A stays active until delayed valid File B adoption", async () => {
+  const permission = deferred();
+  const fileText = deferred();
+  const context = createUiIntegrationContext();
+  const state = resetIntegrationState(context, [
+    node("file_a", { label: "File A item" }),
+  ], [{ type: "file-a-edit", seq: 1 }]);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const fileBPayload = payloadFromDocument(documentWith([
+    node("file_b", { label: "File B item", details: "File B Notes" }),
+  ]));
+  const fileBHandle = fakeHandle("file-b.json", {
+    queryPermission: "prompt",
+    requestPermission() { return permission.promise; },
+    file: {
+      name: "file-b.json",
+      text() { return fileText.promise; },
+    },
+  });
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+  let refocusCalls = 0;
+  context.refocusTreeNavigation = () => { refocusCalls += 1; };
+
+  const first = context.continuePocketFilePermissionRequest();
+  const duplicate = context.continuePocketFilePermissionRequest();
+  assert.equal(await duplicate, false);
+  assert.equal(fileBHandle.calls.requestPermission, 1);
+  assert.equal(context.__ui.elements.get("filePermissionContinue").disabled, true);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+
+  permission.resolve("granted");
+  assert.equal(await waitFor(() => fileBHandle.calls.getFile === 1), true);
+  assert.equal(fileBHandle.calls.getFile, 1);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  assert.equal(context.__ui.permissionOverlay.hidden, false);
+  assert.equal(context.canModifyPocket(), false);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+  assert.equal(state.nodes[0].label, "File A item");
+
+  fileText.resolve(JSON.stringify(fileBPayload));
+  assert.equal(await first, true);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), false);
+  assert.equal(context.__ui.permissionOverlay.hidden, true);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileBHandle);
+  assert.ok(context.capturePocketFileSaveSession().id > sessionBefore.id);
+  assert.equal(state.nodes[0].label, "File B item");
+  assert.equal(state.nodes[0].details, "File B Notes");
+  assert.equal(fileBHandle.calls.requestPermission, 1);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+  assert.equal(refocusCalls, 1);
+});
+
+test("P017: denial, dismissal, and permission failure leave File A exactly unchanged", async () => {
+  const cases = [
+    {
+      label: "denied",
+      requestPermission: "denied",
+    },
+    {
+      label: "dismissed",
+      requestPermission() {
+        throw Object.assign(new Error("synthetic permission dismissal"), { name: "AbortError" });
+      },
+    },
+    {
+      label: "failed",
+      requestPermission() {
+        throw Object.assign(new Error("synthetic permission failure"), { name: "NotAllowedError" });
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const context = createUiIntegrationContext();
+    const state = resetIntegrationState(context, [
+      node(`file_a_${scenario.label}`, { label: "File A item", details: "Unsaved A" }),
+    ], [{ type: "file-a-edit", seq: 7 }]);
+    const nodesBefore = plain(state.nodes);
+    const opsBefore = plain(state.ops);
+    const fileAHandle = fakeHandle("file-a.json");
+    context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+    const sessionBefore = context.capturePocketFileSaveSession();
+    const fileBHandle = fakeHandle("file-b.json", {
+      queryPermission: "prompt",
+      requestPermission: scenario.requestPermission,
+      file: {
+        name: "file-b.json",
+        async text() { return JSON.stringify(payloadFromDocument(documentWith([node("file_b")]))); },
+      },
+    });
+    await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+    assert.equal(
+      await context.continuePocketFilePermissionRequest(),
+      false,
+      scenario.label,
+    );
+    assert.equal(context.isPocketFilePermissionPromptOpen(), false, scenario.label);
+    assert.equal(context.__ui.permissionOverlay.hidden, true, scenario.label);
+    assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), null, scenario.label);
+    assert.equal(lexicalState(context).pocketFile.pendingName, "", scenario.label);
+    assert.deepEqual(plain(state.nodes), nodesBefore, scenario.label);
+    assert.deepEqual(plain(state.ops), opsBefore, scenario.label);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle, scenario.label);
+    assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id, scenario.label);
+    assert.equal(fileBHandle.calls.getFile, 0, scenario.label);
+    assert.equal(fileAHandle.calls.createWritable, 0, scenario.label);
+    assert.equal(fileBHandle.calls.createWritable, 0, scenario.label);
+    assert.equal(context.__surfaceCalls.picker, 0, scenario.label);
+    assert.equal(
+      context.__surfaceCalls.statuses.at(-1).message,
+      "That file was not opened. Your current Pocket file is unchanged.",
+      scenario.label,
+    );
+  }
+});
+
+test("P017: Cancel and Escape clear only pending File B and never request permission", async () => {
+  for (const action of ["button", "escape"]) {
+    const context = createUiIntegrationContext();
+    const state = resetIntegrationState(context, [
+      node(`file_a_${action}`, { label: "File A item", details: "Unsaved A" }),
+    ], [{ type: "file-a-edit", seq: 2 }]);
+    const nodesBefore = plain(state.nodes);
+    const opsBefore = plain(state.ops);
+    const fileAHandle = fakeHandle("file-a.json");
+    context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+    const sessionBefore = context.capturePocketFileSaveSession();
+    let refocusCalls = 0;
+    context.refocusTreeNavigation = () => { refocusCalls += 1; };
+    const fileBHandle = fakeHandle("file-b.json", {
+      queryPermission: "prompt",
+      requestPermission: "granted",
+    });
+    await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+    if (action === "button") {
+      context.__ui.elements.get("filePermissionCancel").click();
+    } else {
+      const event = context.__dispatchWindowKey({
+        key: "Escape",
+        target: context.__ui.elements.get("filePermissionContinue"),
+      });
+      assert.equal(event.defaultPrevented, true);
+    }
+
+    assert.equal(context.isPocketFilePermissionPromptOpen(), false, action);
+    assert.equal(context.__ui.permissionOverlay.hidden, true, action);
+    assert.equal(context.__ui.background.inert, false, action);
+    assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), null, action);
+    assert.deepEqual(plain(state.nodes), nodesBefore, action);
+    assert.deepEqual(plain(state.ops), opsBefore, action);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle, action);
+    assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id, action);
+    assert.equal(fileBHandle.calls.requestPermission, 0, action);
+    assert.equal(fileBHandle.calls.getFile, 0, action);
+    assert.equal(fileAHandle.calls.createWritable, 0, action);
+    assert.equal(fileBHandle.calls.createWritable, 0, action);
+    assert.equal(refocusCalls, 1, action);
+    assert.equal(
+      context.__surfaceCalls.statuses.at(-1).message,
+      "Open cancelled. Your current Pocket file is unchanged.",
+      action,
+    );
+  }
+});
+
+test("P017: read and parse failures after permission grant never adopt File B", async () => {
+  const cases = [
+    {
+      label: "getFile failure",
+      getFile() { throw new Error("synthetic getFile failure"); },
+    },
+    {
+      label: "file text failure",
+      file: {
+        name: "file-b.json",
+        async text() { throw new Error("synthetic read failure"); },
+      },
+    },
+    {
+      label: "invalid JSON",
+      file: {
+        name: "file-b.json",
+        async text() { return "{ definitely not Pocket JSON"; },
+      },
+    },
+  ];
+
+  for (const scenario of cases) {
+    const context = createUiIntegrationContext();
+    const state = resetIntegrationState(context, [
+      node(`file_a_${scenario.label}`, { label: "File A item", details: "Unsaved A" }),
+    ], [{ type: "file-a-edit", seq: 5 }]);
+    const nodesBefore = plain(state.nodes);
+    const opsBefore = plain(state.ops);
+    const fileAHandle = fakeHandle("file-a.json");
+    context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+    const sessionBefore = context.capturePocketFileSaveSession();
+    const fileBHandle = fakeHandle("file-b.json", {
+      queryPermission: "prompt",
+      requestPermission: "granted",
+      getFile: scenario.getFile,
+      file: scenario.file,
+    });
+    await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+    assert.equal(
+      await context.continuePocketFilePermissionRequest(),
+      false,
+      scenario.label,
+    );
+    assert.equal(context.isPocketFilePermissionPromptOpen(), false, scenario.label);
+    assert.equal(context.__ui.permissionOverlay.hidden, true, scenario.label);
+    assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), null, scenario.label);
+    assert.deepEqual(plain(state.nodes), nodesBefore, scenario.label);
+    assert.deepEqual(plain(state.ops), opsBefore, scenario.label);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle, scenario.label);
+    assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id, scenario.label);
+    assert.equal(fileBHandle.calls.getFile, 1, scenario.label);
+    assert.equal(fileAHandle.calls.createWritable, 0, scenario.label);
+    assert.equal(fileBHandle.calls.createWritable, 0, scenario.label);
+    assert.equal(context.__surfaceCalls.picker, 0, scenario.label);
+    assert.equal(
+      context.__surfaceCalls.statuses.at(-1).message,
+      "That file was not opened. Your current Pocket file is unchanged.",
+      scenario.label,
+    );
+  }
+});
+
+test("P017: initial open uses the same permission modal and exposes no editable tree before success", async () => {
+  {
+    const context = createUiIntegrationContext();
+    resetIntegrationState(context, []);
+    context.clearPocketFileSession();
+    const fileBHandle = fakeHandle("initial.json", {
+      queryPermission: "prompt",
+      requestPermission: "granted",
+    });
+
+    await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+    assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+    assert.equal(context.__ui.permissionOverlay.hidden, false);
+    assert.equal(context.canShowPocketTree(), false);
+    assert.equal(context.canModifyPocket(), false);
+    context.__ui.elements.get("filePermissionCancel").click();
+    assert.equal(context.isPocketFilePermissionPromptOpen(), false);
+    assert.equal(context.canShowPocketTree(), false);
+    assert.equal(context.canModifyPocket(), false);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, null);
+    assert.strictEqual(
+      context.document.activeElement,
+      context.__ui.elements.get("btnLoad"),
+    );
+  }
+
+  {
+    const context = createUiIntegrationContext();
+    const state = resetIntegrationState(context, []);
+    context.clearPocketFileSession();
+    const payload = payloadFromDocument(documentWith([
+      node("initial", { label: "Initial file item" }),
+    ]));
+    const fileBHandle = fakeHandle("initial.json", {
+      queryPermission: "prompt",
+      requestPermission: "granted",
+      file: {
+        name: "initial.json",
+        async text() { return JSON.stringify(payload); },
+      },
+    });
+
+    await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+    assert.equal(context.canShowPocketTree(), false);
+    assert.equal(await context.continuePocketFilePermissionRequest(), true);
+    assert.equal(context.isPocketFilePermissionPromptOpen(), false);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, fileBHandle);
+    assert.equal(context.canShowPocketTree(), true);
+    assert.equal(context.canModifyPocket(), true);
+    assert.equal(state.nodes[0].label, "Initial file item");
+    assert.equal(fileBHandle.calls.createWritable, 0);
+  }
+});
+
+test("P017: successful File B permission closes before the existing P016 decision owner takes focus", async () => {
+  const context = createUiIntegrationContext();
+  const base = documentWith([
+    node("shared", { label: "Base title", details: "Base Notes" }),
+  ]);
+  const fileB = plain(base);
+  const device = plain(base);
+  byId(fileB).get("shared").label = "File B title";
+  byId(device).get("shared").details = "Device Notes";
+  resetIntegrationState(context, [
+    node("file_a", { label: "File A currently open" }),
+  ], [{ type: "file-a-edit", seq: 4 }]);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const fileBPayload = payloadFromDocument(fileB, "2026-07-25T00:00:00.000Z");
+  const fileBHandle = fakeHandle("file-b.json", {
+    queryPermission: "prompt",
+    requestPermission: "granted",
+    file: {
+      name: "file-b.json",
+      async text() { return JSON.stringify(fileBPayload); },
+    },
+  });
+  const snapshot = safetySnapshotFor(context, device, { base });
+  context.__storage.set("pocketLite.localSafety.snapshot.v1", JSON.stringify(snapshot.parsed));
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+  assert.equal(await context.continuePocketFilePermissionRequest(), true);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), false);
+  assert.equal(context.__ui.permissionOverlay.hidden, true);
+  assert.equal(context.isPocketDeviceChangesDecisionOpen(), true);
+  assert.equal(context.__ui.overlay.hidden, false);
+  assert.strictEqual(
+    context.document.activeElement,
+    context.__ui.elements.get("deviceChangesUseFile"),
+  );
+  assert.equal(context.__ui.elements.get("deviceChangesCombine").disabled, false);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileBHandle);
+  assert.equal(lexicalState(context).nodes[0].label, "File B title");
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+});
+
+test("P017: identical filenames never make the pending handle active before successful load", async () => {
+  const context = createUiIntegrationContext();
+  const state = resetIntegrationState(context, [
+    node("file_a", { label: "Same-name File A" }),
+  ]);
+  const fileAHandle = fakeHandle("pocket-data.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const fileBPayload = payloadFromDocument(documentWith([
+    node("file_b", { label: "Same-name File B" }),
+  ]));
+  const fileBHandle = fakeHandle("pocket-data.json", {
+    queryPermission: "prompt",
+    requestPermission: "granted",
+    file: {
+      name: "pocket-data.json",
+      async text() { return JSON.stringify(fileBPayload); },
+    },
+  });
+  assert.notStrictEqual(fileAHandle, fileBHandle);
+
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+  assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), fileBHandle);
+  assert.equal(state.nodes[0].label, "Same-name File A");
+
+  assert.equal(await context.continuePocketFilePermissionRequest(), true);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileBHandle);
+  assert.ok(context.capturePocketFileSaveSession().id > sessionBefore.id);
+  assert.equal(state.nodes[0].label, "Same-name File B");
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+});
+
+test("P017: permission modal copy, focus trap, external-focus guard, and Escape are accessible and canonical", async () => {
+  const html = source("index.html");
+  const start = html.indexOf('<div id="filePermissionOverlay"');
+  const end = html.indexOf('<div id="deviceChangesOverlay"', start);
+  assert.ok(start >= 0 && end > start);
+  const overlayHtml = html.slice(start, end);
+  assert.match(overlayHtml, /role="dialog"/);
+  assert.match(overlayHtml, /aria-modal="true"/);
+  assert.match(overlayHtml, /aria-labelledby="filePermissionTitle"/);
+  assert.match(
+    overlayHtml,
+    /aria-describedby="filePermissionBody filePermissionFileName filePermissionSupport"/,
+  );
+  assert.match(overlayHtml, /Let Pocket open this file/);
+  assert.match(overlayHtml, /Chrome may ask if Pocket can save changes to the file you just chose\./);
+  assert.match(overlayHtml, />File</);
+  assert.match(overlayHtml, /id="filePermissionFileName"/);
+  assert.match(overlayHtml, /Pocket will keep your current file open unless the new file opens successfully\./);
+  assert.match(overlayHtml, />Continue</);
+  assert.match(overlayHtml, />Cancel</);
+  assert.doesNotMatch(overlayHtml, /aria-label="close"|class="[^"]*close/i);
+  assert.equal((html.match(/id="filePermissionContinue"/g) || []).length, 1);
+  assert.equal((html.match(/id="filePermissionCancel"/g) || []).length, 1);
+
+  const context = createUiIntegrationContext();
+  resetIntegrationState(context, [node("file_a")]);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const fileBHandle = fakeHandle("folder-b-file.json", {
+    queryPermission: "prompt",
+    requestPermission: "granted",
+  });
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+  const continueButton = context.__ui.elements.get("filePermissionContinue");
+  const cancelButton = context.__ui.elements.get("filePermissionCancel");
+  assert.strictEqual(context.document.activeElement, continueButton);
+
+  const tab = context.__dispatchWindowKey({ key: "Tab", target: continueButton });
+  assert.equal(tab.defaultPrevented, true);
+  assert.strictEqual(context.document.activeElement, cancelButton);
+  const wrap = context.__dispatchWindowKey({ key: "Tab", target: cancelButton });
+  assert.equal(wrap.defaultPrevented, true);
+  assert.strictEqual(context.document.activeElement, continueButton);
+  const reverse = context.__dispatchWindowKey({
+    key: "Tab",
+    shiftKey: true,
+    target: continueButton,
+  });
+  assert.equal(reverse.defaultPrevented, true);
+  assert.strictEqual(context.document.activeElement, cancelButton);
+  context.__ui.document.dispatch("focusin", { target: context.__ui.background });
+  assert.strictEqual(context.document.activeElement, continueButton);
+  const escape = context.__dispatchWindowKey({ key: "Escape", target: continueButton });
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(fileBHandle.calls.requestPermission, 0);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), false);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+});
+
+test("P017: the no-file gate has no duplicate hidden Continue or Cancel permission owner", () => {
+  const context = createUiIntegrationContext();
+  resetIntegrationState(context, []);
+  context.clearPocketFileSession();
+  vm.runInContext(source("js/pocket-render.js"), context, {
+    filename: "js/pocket-render.js",
+  });
+  const state = lexicalState(context);
+  state.pocketFile.gateMode = "permission";
+  state.pocketFile.pendingName = "pending.json";
+  const gate = context.buildPocketFileGate();
+
+  assert.match(gate.textContent, /Load your Pocket file/);
+  assert.match(gate.textContent, /Choose Pocket file/);
+  assert.match(gate.textContent, /Create new Pocket file/);
+  assert.doesNotMatch(gate.textContent, /Continue|Cancel|Chrome may ask/);
+  const renderSource = source("js/pocket-render.js");
+  assert.doesNotMatch(renderSource, /continuePocketFilePermissionRequest/);
+  assert.doesNotMatch(renderSource, /cancelPocketFilePermissionRequest/);
+  assert.doesNotMatch(renderSource, /gate\.permission/);
+});
+
+test("P017: cancelling an in-flight permission request revokes its async adoption", async () => {
+  const permission = deferred();
+  const context = createUiIntegrationContext();
+  const state = resetIntegrationState(context, [
+    node("file_a", { label: "File A remains active", details: "Unsaved A" }),
+  ], [{ type: "file-a-edit", seq: 3 }]);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const fileBHandle = fakeHandle("file-b.json", {
+    queryPermission: "prompt",
+    requestPermission() { return permission.promise; },
+    file: {
+      name: "file-b.json",
+      async text() {
+        return JSON.stringify(payloadFromDocument(documentWith([
+          node("file_b", { label: "Stale File B" }),
+        ])));
+      },
+    },
+  });
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+  const pendingRequest = context.continuePocketFilePermissionRequest();
+  assert.equal(await waitFor(() => fileBHandle.calls.requestPermission === 1), true);
+  context.cancelPocketFilePermissionRequest();
+  permission.resolve("granted");
+
+  assert.equal(await pendingRequest, false);
+  assert.equal(context.isPocketFilePermissionPromptOpen(), false);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+  assert.equal(state.nodes[0].label, "File A remains active");
+  assert.equal(state.nodes[0].details, "Unsaved A");
+  assert.equal(fileBHandle.calls.getFile, 0);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+});
+
+test("P017: a routine active-file session refresh cannot dismiss a pending candidate", async () => {
+  const context = createUiIntegrationContext();
+  resetIntegrationState(context, [node("file_a", { label: "File A" })]);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const fileBHandle = fakeHandle("file-b.json", { queryPermission: "prompt" });
+  await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name });
+
+  context.setPocketFileSession(fileAHandle, fileAHandle.name);
+
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  assert.equal(context.__ui.permissionOverlay.hidden, false);
+  assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), fileBHandle);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+});
+
+test("P017: a granted concurrent candidate cannot overtake a visible permission decision", async () => {
+  const grantedFileText = deferred();
+  const context = createUiIntegrationContext();
+  const state = resetIntegrationState(context, [
+    node("file_a", { label: "File A remains active", details: "Unsaved A" }),
+  ], [{ type: "file-a-edit", seq: 8 }]);
+  const nodesBefore = plain(state.nodes);
+  const opsBefore = plain(state.ops);
+  const fileAHandle = fakeHandle("file-a.json");
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const grantedHandle = fakeHandle("already-granted.json", {
+    queryPermission: "granted",
+    file: {
+      name: "already-granted.json",
+      text() { return grantedFileText.promise; },
+    },
+  });
+  const pendingHandle = fakeHandle("needs-permission.json", {
+    queryPermission: "prompt",
+  });
+
+  const grantedLoad = context.loadFromFileHandle(grantedHandle, {
+    displayName: grantedHandle.name,
+  });
+  assert.equal(await waitFor(() => grantedHandle.calls.getFile === 1), true);
+  assert.equal(
+    await context.loadFromFileHandle(pendingHandle, { displayName: pendingHandle.name }),
+    false,
+  );
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), pendingHandle);
+
+  grantedFileText.resolve(JSON.stringify(payloadFromDocument(documentWith([
+    node("overtaking_file", { label: "Must not overtake" }),
+  ]))));
+  assert.equal(await grantedLoad, false);
+
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), pendingHandle);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+  assert.deepEqual(plain(state.nodes), nodesBefore);
+  assert.deepEqual(plain(state.ops), opsBefore);
+  assert.equal(grantedHandle.calls.createWritable, 0);
+  assert.equal(pendingHandle.calls.getFile, 0);
+  assert.equal(pendingHandle.calls.createWritable, 0);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+});
+
+test("P017: an in-flight File A save cannot fall through to a picker after File B becomes pending", async () => {
+  const activePermission = deferred();
+  const context = createUiIntegrationContext({
+    pickSaveHandle() {
+      throw new Error("pending File B must block a fallback save picker");
+    },
+  });
+  const state = resetIntegrationState(context, [
+    node("file_a", { label: "File A", details: "Unsaved A" }),
+  ], [{ type: "file-a-edit", seq: 11 }]);
+  const opsBefore = plain(state.ops);
+  const fileAHandle = fakeHandle("file-a.json", {
+    queryPermission() { return activePermission.promise; },
+    requestPermission: "denied",
+  });
+  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
+  const sessionBefore = context.capturePocketFileSaveSession();
+  const saveAttempt = context.exportTree({ returnDetails: true });
+  assert.equal(await waitFor(() => fileAHandle.calls.queryPermission === 1), true);
+
+  const fileBHandle = fakeHandle("file-b.json", { queryPermission: "prompt" });
+  assert.equal(
+    await context.loadFromFileHandle(fileBHandle, { displayName: fileBHandle.name }),
+    false,
+  );
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  activePermission.resolve("denied");
+
+  const result = await saveAttempt;
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "file-permission-pending");
+  assert.equal(context.isPocketFilePermissionPromptOpen(), true);
+  assert.strictEqual(vm.runInContext("pendingPocketFileHandle", context), fileBHandle);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, fileAHandle);
+  assert.equal(context.capturePocketFileSaveSession().id, sessionBefore.id);
+  assert.deepEqual(plain(state.ops), opsBefore);
+  assert.equal(context.__surfaceCalls.picker, 0);
+  assert.equal(fileAHandle.calls.createWritable, 0);
+  assert.equal(fileAHandle.calls.write, 0);
+  assert.equal(fileBHandle.calls.createWritable, 0);
+  assert.equal(fileBHandle.calls.write, 0);
 });
 
 test("Phone mode invokes the shared difference review and never directly restores browser-held content", () => {

@@ -12,6 +12,27 @@ A selected file is written only after an explicit Save. If Pocket opens device c
 
 This is a document-ownership and recovery-safety change. It does not add autosave, background writes, cloud synchronisation, file watching or a general handle-free editing mode.
 
+### P017 pending-file permission correction
+
+P017 closes a permission-display gap in the selected-file path. Before P017, Chrome's additional read/write permission state was represented only by the ordinary no-file tree gate. If a Pocket file was already active, `canShowPocketTree()` correctly kept that tree visible, but the gate containing Continue and Cancel was not rendered. The candidate file therefore existed as a pending handle without a visible decision.
+
+The file-opening path now owns one dedicated accessible permission dialog. The selected active file remains visible behind it, but the background is inert and the canonical mutation gates reject tree changes, Save, PE opening or apply, popout, Create New and another Open action while the choice is unresolved.
+
+A pending candidate handle is not active file ownership:
+
+- the current handle, tree, document session, PE identity and dirty state remain unchanged while permission is requested and while the candidate is read and validated;
+- Continue is single-flight and requests permission only for that exact candidate handle;
+- a request token and captured source session prevent cancellation, session rotation or a stale async completion from adopting a candidate;
+- the candidate becomes active only after its content has been read, parsed and accepted by the existing selected-file loader;
+- successful adoption uses `setPocketFileSession()` and rotates the document session through the canonical owner;
+- the permission dialog closes before the existing P016 file/device dialog can receive focus;
+- denial or permission failure clears only the candidate and reports that the current file is unchanged;
+- Cancel, including Escape, clears only the candidate, writes nothing and returns focus to the active tree;
+- read failure, invalid JSON or another rejected load cannot adopt the candidate or rotate the current session; and
+- the initial no-file route uses the same dialog, with the ordinary no-file gate remaining behind it.
+
+The previous permission-specific Continue/Cancel branch in `buildPocketFileGate()` is retired. There is one pending-permission owner in `js/pocket-io-browser.js`; `isPocketFilePermissionPromptOpen()` is the shared interaction boundary. Every selected-file read is bound to the document session current when it begins, so an already-granted concurrent candidate cannot overtake a visible permission choice. A routine Save already in progress for the active handle cannot dismiss the pending choice or fall through to a new picker, while a real document-session change revokes it.
+
 ## 2. User-visible decision
 
 After a valid file is loaded, Pocket compares that file with the current browser safety copy. If their meaningful content is equal, Pocket opens the file without showing a decision. Export times and other transport-only differences do not trigger the screen.
@@ -473,3 +494,32 @@ Use disposable Pocket files only. Murray's physical acceptance remains required:
 This checklist is a disposable-file browser rehearsal. Passing synthetic tests does not claim that these physical checks have been completed.
 
 Save-race handling also needs a targeted disposable-browser rehearsal with an intentionally delayed fake write: start Save, make a newer edit after the frozen payload is captured, release the write, then confirm the written file contains the captured version while the newer edit remains visibly unsaved and device-safe. This supplements the exact 32-step checklist without changing it.
+
+## 18. P017 physical permission checklist
+
+Use disposable files A and B. Murray's physical browser acceptance remains required:
+
+1. Open A and grant permission if requested.
+2. Make an unsaved change in A.
+3. Choose B.
+4. Confirm a visible permission modal appears over A.
+5. Confirm B's filename is shown.
+6. Confirm A cannot be edited or saved while the modal is open.
+7. Choose Cancel.
+8. Confirm A remains open with its unsaved change.
+9. Choose B again.
+10. Choose Continue.
+11. Grant Chrome permission.
+12. Confirm B opens or the P016 file/device decision screen appears.
+13. Confirm the permission modal is no longer visible.
+14. Confirm A received no write.
+15. Repeat and deny permission.
+16. Confirm A remains unchanged.
+17. Test an invalid disposable JSON as B.
+18. Confirm A remains active.
+19. In a private window, open A, edit without saving, then open B.
+20. Confirm the visible permission step works.
+21. Continue and confirm the P016 decision screen appears.
+22. Confirm Combine is enabled where BASE and ancestry are valid.
+
+This checklist is a disposable-file browser rehearsal. Passing the synthetic P017 coverage does not claim these physical checks have been completed.

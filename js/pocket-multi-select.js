@@ -287,6 +287,7 @@
 
   function deleteMultiSelectionIfActive() {
     if (!hasActiveMultiSelection()) return false;
+    if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return true;
     const rootIds = getEffectiveMultiSelectedRootIds();
     if (!rootIds.length) return false;
     const ok = global.confirm(

@@ -110,6 +110,14 @@
   }
 
   function applyPayload(payload, options = {}) {
+    if (typeof global.isPocketFilePermissionPromptOpen === "function"
+        && global.isPocketFilePermissionPromptOpen()) {
+      return rejection(
+        "file-permission-pending",
+        "Finish opening the new file, or cancel, before saving this editor. Your editor changes are still here.",
+        "New Pocket file decision — not saved"
+      );
+    }
     if (typeof global.canModifyPocket !== "function" || !global.canModifyPocket()) {
       return rejection(
         "no-pocket-file",

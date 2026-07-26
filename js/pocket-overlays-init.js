@@ -246,6 +246,13 @@ function refreshCommandPaletteState() {
 }
 
 function openCommandPalette() {
+  if (typeof window.isPocketFilePermissionPromptOpen === "function"
+      && window.isPocketFilePermissionPromptOpen()) {
+    if (typeof showPocketFilePermissionPendingStatus === "function") {
+      showPocketFilePermissionPendingStatus();
+    }
+    return false;
+  }
   if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
       && window.isPocketDeviceChangesDecisionOpen()) return false;
   closeRowMiniMenu({ restoreFocus: false });

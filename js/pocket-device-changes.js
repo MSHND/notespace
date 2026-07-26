@@ -2524,6 +2524,13 @@
 
   function openResolution(snapshot, options) {
     if (isResolutionOpen()) return true;
+    if (typeof global.isPocketFilePermissionPromptOpen === "function"
+        && global.isPocketFilePermissionPromptOpen()) {
+      if (typeof global.showPocketFilePermissionPendingStatus === "function") {
+        global.showPocketFilePermissionPendingStatus();
+      }
+      return false;
+    }
     const opts = options || {};
     const comparisonEnvelope = isPlainObject(opts.fileDocument)
         && opts.fileDocument.schema === "pocket.deviceChanges.comparisonInput.v1"

@@ -1,0 +1,133 @@
+.filePermissionOverlay[hidden] {
+  display: none;
+}
+
+.filePermissionOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(24, 32, 28, 0.34);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.filePermissionCard {
+  width: min(440px, 100%);
+  max-height: min(620px, calc(100vh - 44px));
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid rgba(89, 109, 97, 0.22);
+  border-radius: 18px;
+  background: #fbfcfa;
+  color: #243028;
+  box-shadow: 0 24px 70px rgba(22, 31, 25, 0.24);
+}
+
+.filePermissionHeader {
+  display: grid;
+  gap: 8px;
+}
+
+.filePermissionHeader h2,
+.filePermissionHeader p,
+.filePermissionSupport {
+  margin: 0;
+}
+
+.filePermissionHeader h2 {
+  font-size: 1.22rem;
+  line-height: 1.25;
+}
+
+.filePermissionHeader p,
+.filePermissionSupport {
+  color: #59655d;
+  line-height: 1.48;
+}
+
+.filePermissionIdentity {
+  display: grid;
+  gap: 4px;
+  padding: 13px 15px;
+  border-radius: 12px;
+  background: #f0f4f1;
+}
+
+.filePermissionIdentity span {
+  color: #68756d;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.filePermissionIdentity strong {
+  overflow-wrap: anywhere;
+}
+
+.filePermissionActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.filePermissionActions button {
+  min-height: 42px;
+  padding: 9px 16px;
+  border: 1px solid rgba(76, 101, 85, 0.28);
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.filePermissionPrimary {
+  background: #365b45;
+  color: #fff;
+}
+
+.filePermissionSecondary {
+  background: #fff;
+  color: #365044;
+}
+
+.filePermissionActions button:focus-visible {
+  outline: 3px solid rgba(58, 111, 76, 0.34);
+  outline-offset: 2px;
+}
+
+.filePermissionActions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+body.filePermissionOpen {
+  overflow: hidden;
+}
+
+@media (max-width: 620px) {
+  .filePermissionOverlay {
+    align-items: end;
+    padding: 12px;
+  }
+
+  .filePermissionCard {
+    max-height: calc(100vh - 24px);
+    padding: 20px;
+    border-radius: 17px;
+  }
+
+  .filePermissionActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .filePermissionActions button {
+    width: 100%;
+  }
+}

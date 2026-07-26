@@ -255,6 +255,7 @@ function createTreeUndoSnapshot(kind = "") {
 }
 
 function restoreTreeUndoSnapshot(snapshot) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   if (!snapshot || !Array.isArray(snapshot.nodes)) return false;
   state.nodes = cloneForUndo(snapshot.nodes);
   state.tombstones = Array.isArray(snapshot.tombstones) ? cloneForUndo(snapshot.tombstones) : [];
@@ -587,6 +588,7 @@ function cancelInlineEdit(nodeId) {
 }
 
 function commitInlineEdit(nodeId, rawValue, options = {}) {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   if (!state.inlineEdit.id || state.inlineEdit.id !== nodeId) return;
   const postAction = cleanText(options.postAction, 20).toLowerCase();
   const map = nodeMap();
