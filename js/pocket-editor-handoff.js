@@ -62,8 +62,9 @@
 
     if (typeof nowIso === "function") node.updatedAt = nowIso();
     if (global.state?.detailsEdit && !global.state.detailsEdit.draftOpRecorded && typeof recordOp === "function") {
-      recordOp({ type: "details_draft", id: node.id, path: typeof getPath === "function" ? getPath(node.id) : node.id, changed: "details" });
+      const operation = recordOp({ type: "details_draft", id: node.id, path: typeof getPath === "function" ? getPath(node.id) : node.id, changed: "details" });
       global.state.detailsEdit.draftOpRecorded = true;
+      global.state.detailsEdit.draftOperationSequence = Number(operation?.seq) || 0;
     }
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();

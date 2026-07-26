@@ -83,31 +83,258 @@ function buildPocketPayload(writtenAt = nowIso()) {
   };
 }
 
-function saveLocalSafetySnapshot(reason = "change") {
-  if (!Array.isArray(state.nodes) || state.nodes.length === 0) return false;
-  try {
-    const capturedAt = nowIso();
-    const entry = {
-      schema: "pocket.localSafety.v1",
+function pocketDeviceChangesOwner() {
+  const owner = window.PocketDeviceChanges;
+  return owner && typeof owner.coerceDocument === "function" ? owner : null;
+}
+
+function pocketDocumentSourceLabels(sourceInfo = {}) {
+  return {
+    schema: cleanText(sourceInfo.schema, 80),
+    fileName: cleanText(sourceInfo.fileName, 120),
+    writtenAt: cleanText(sourceInfo.writtenAt, 40),
+  };
+}
+
+function establishPocketDocumentBaseline(input, sourceInfo = {}) {
+  const owner = pocketDeviceChangesOwner();
+  if (!owner) return false;
+  const coerced = owner.coerceDocument(input);
+  if (!coerced || !coerced.ok) return false;
+  const fingerprint = owner.fingerprintDocument(coerced.document);
+  const cloned = owner.cloneJsonCompatible(coerced.document);
+  if (!fingerprint || !cloned || !cloned.ok) return false;
+  state.documentBaseline = {
+    payload: cloned.value,
+    fingerprint,
+    source: pocketDocumentSourceLabels(sourceInfo),
+  };
+  state.detachedSafetyBase = null;
+  if (typeof resetPocketOperationAnchor === "function") {
+    resetPocketOperationAnchor(cloned.value);
+  }
+  return true;
+}
+
+function capturePocketDocumentBaseline() {
+  const owner = pocketDeviceChangesOwner();
+  const baseline = state.documentBaseline;
+  if (!owner || !baseline || typeof baseline !== "object") return null;
+  const cloned = owner.cloneJsonCompatible(baseline);
+  return cloned && cloned.ok ? cloned.value : null;
+}
+
+function normaliseStoredPocketBaseline(value) {
+  const owner = pocketDeviceChangesOwner();
+  if (!owner || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  const payload = value.payload && typeof value.payload === "object" ? value.payload : null;
+  const fingerprint = cleanText(value.fingerprint, 120);
+  if (!payload || !fingerprint || owner.fingerprintDocument(payload) !== fingerprint) return null;
+  const coerced = owner.coerceDocument(payload);
+  if (!coerced || !coerced.ok) return null;
+  const cloned = owner.cloneJsonCompatible(coerced.document);
+  if (!cloned || !cloned.ok) return null;
+  return {
+    payload: cloned.value,
+    fingerprint,
+    source: pocketDocumentSourceLabels(value.source || {}),
+  };
+}
+
+function currentPocketSafetyBaseline() {
+  const detached = normaliseStoredPocketBaseline(state.detachedSafetyBase);
+  if (state.pocketFile?.detachedDeviceChanges === true) return detached;
+  if (detached) return detached;
+  return normaliseStoredPocketBaseline(state.documentBaseline);
+}
+
+function buildLocalSafetyEntry(reason, capturedAt, options = {}) {
+  const source = options.source && typeof options.source === "object"
+    ? options.source
+    : state.source;
+  const ops = Object.prototype.hasOwnProperty.call(options, "ops")
+    ? options.ops
+    : state.ops;
+  const preparedOps = typeof normalisePocketOperations === "function"
+    ? normalisePocketOperations(ops, options.operationHighWater || state.operationHighWater)
+    : {
+        operations: JSON.parse(JSON.stringify(ops || [])),
+        highestSequence: 0,
+      };
+  if (ops === state.ops) state.ops = preparedOps.operations;
+  const baseline = options.includeBase === false
+    ? null
+    : (Object.prototype.hasOwnProperty.call(options, "base")
+      ? normaliseStoredPocketBaseline(options.base)
+      : currentPocketSafetyBaseline());
+  const entry = {
+    schema: "pocket.localSafety.v1",
+    capturedAt,
+    reason: cleanText(reason, 40),
+    source: {
+      schema: cleanText(source?.schema, 80),
+      fileName: cleanText(source?.fileName, 120),
+      writtenAt: cleanText(source?.writtenAt, 40),
+    },
+    selectedId: cleanText(options.selectedId ?? state.selectedId, 80),
+    focusRootId: cleanText(options.focusRootId ?? state.focusRootId, 80),
+    collapsedIds: Array.from(options.collapsedIds || state.collapsed || new Set()).map((id) => cleanText(id, 80)).filter(Boolean),
+    ops: JSON.parse(JSON.stringify(preparedOps.operations || [])),
+    operationHighWater: (preparedOps.operations || []).reduce((max, operation) => {
+      const sequence = Number(operation?.seq);
+      return Number.isSafeInteger(sequence) && sequence > max ? sequence : max;
+    }, 0),
+    payload: options.payload || buildPocketPayload(capturedAt),
+  };
+  if (baseline) entry.base = baseline;
+  if (options.includeDeviceChanges !== false && typeof capturePocketDeviceChangeSet === "function") {
+    const captured = capturePocketDeviceChangeSet(
       capturedAt,
-      reason: cleanText(reason, 40),
-      source: {
-        schema: cleanText(state.source?.schema, 80),
-        fileName: cleanText(state.source?.fileName, 120),
-        writtenAt: cleanText(state.source?.writtenAt, 40),
-      },
-      selectedId: cleanText(state.selectedId, 80),
-      focusRootId: cleanText(state.focusRootId, 80),
-      collapsedIds: Array.from(state.collapsed || new Set()).map((id) => cleanText(id, 80)).filter(Boolean),
-      ops: JSON.parse(JSON.stringify(state.ops || [])),
-      payload: buildPocketPayload(capturedAt),
-    };
-    localStorage.setItem(LOCAL_SAFETY_KEY, JSON.stringify(entry));
-    appendLocalSafetyTrail(entry);
-    return true;
+      source,
+      baseline,
+      preparedOps.operations
+    );
+    if (captured && typeof captured === "object") entry.deviceChanges = captured;
+  }
+  return entry;
+}
+
+function localSafetyEntryWithoutChangeMetadata(value, options = {}) {
+  try {
+    const entry = JSON.parse(JSON.stringify(value));
+    if (options.keepBase !== true) delete entry.base;
+    delete entry.deviceChanges;
+    delete entry.operationHighWater;
+    entry.ops = (Array.isArray(entry.ops) ? entry.ops : []).map((operation) => {
+      if (!operation || typeof operation !== "object" || Array.isArray(operation)) return operation;
+      const copy = { ...operation };
+      delete copy.change;
+      delete copy.changes;
+      return copy;
+    });
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+function storeLocalSafetyEntry(entry) {
+  const candidates = [];
+  const addCandidate = (candidate) => {
+    if (!candidate) return;
+    const serialised = JSON.stringify(candidate);
+    if (candidates.some((item) => item.serialised === serialised)) return;
+    candidates.push({ entry: candidate, serialised });
+  };
+  try {
+    addCandidate(JSON.parse(JSON.stringify(entry)));
+    if (Object.prototype.hasOwnProperty.call(entry, "base")) {
+      const withoutBase = JSON.parse(JSON.stringify(entry));
+      delete withoutBase.base;
+      addCandidate(withoutBase);
+    }
+    addCandidate(localSafetyEntryWithoutChangeMetadata(entry, { keepBase: false }));
+  } catch {}
+
+  let storedEntry = null;
+  for (const candidate of candidates) {
+    try {
+      localStorage.setItem(LOCAL_SAFETY_KEY, candidate.serialised);
+      storedEntry = candidate.entry;
+      break;
+    } catch {}
+  }
+  if (!storedEntry) {
+    return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
+  }
+
+  let trailStored = appendLocalSafetyTrail(storedEntry);
+  if (!trailStored) {
+    for (const candidate of candidates) {
+      if (candidate.entry === storedEntry) continue;
+      if (appendLocalSafetyTrail(candidate.entry)) {
+        trailStored = true;
+        break;
+      }
+    }
+  }
+  return {
+    ok: true,
+    baseStored: Object.prototype.hasOwnProperty.call(storedEntry, "base"),
+    deviceChangesStored: Object.prototype.hasOwnProperty.call(storedEntry, "deviceChanges"),
+    entry: storedEntry,
+    trailStored,
+  };
+}
+
+function saveLocalSafetySnapshot(reason = "change") {
+  if (!Array.isArray(state.nodes)) return false;
+  const capturedAt = nowIso();
+  let entry;
+  try {
+    entry = buildLocalSafetyEntry(reason, capturedAt, { includeBase: true });
   } catch {
     return false;
   }
+  return storeLocalSafetyEntry(entry).ok === true;
+}
+
+function saveDetachedPocketSafetySnapshot(documentInput, base, options = {}) {
+  const owner = pocketDeviceChangesOwner();
+  if (!owner) return { ok: false, baseStored: false };
+  const coerced = owner.coerceDocument(documentInput);
+  if (!coerced || !coerced.ok || !Array.isArray(coerced.document.nodes)) {
+    return { ok: false, baseStored: false };
+  }
+  const capturedAt = cleanText(options.capturedAt, 40) || nowIso();
+  let entry;
+  try {
+    const document = coerced.document;
+    const nodes = JSON.parse(JSON.stringify(document.nodes));
+    const tombstones = JSON.parse(JSON.stringify(document.tombstones));
+    const payload = {
+      ...JSON.parse(JSON.stringify(document.rootExtras || {})),
+      schema: "portal.export.v1",
+      exportedAt: capturedAt,
+      writtenAt: capturedAt,
+      mainThoughtTree: nodes,
+      mainThoughtTreeTombstones: tombstones,
+      data: {
+        ...JSON.parse(JSON.stringify(document.dataExtras || {})),
+        mainThoughtTree: nodes,
+        mainThoughtTreeTombstones: tombstones,
+      },
+    };
+    entry = buildLocalSafetyEntry(options.reason || "detached-device-changes", capturedAt, {
+      payload,
+      source: options.source || {},
+      ops: options.ops || [],
+      operationHighWater: options.operationHighWater || 0,
+      selectedId: options.selectedId || "",
+      focusRootId: options.focusRootId || "",
+      collapsedIds: options.collapsedIds || [],
+      base,
+      includeBase: true,
+    });
+  } catch {
+    return { ok: false, baseStored: false };
+  }
+  return storeLocalSafetyEntry(entry);
+}
+
+function normalisePocketSafetyPayload(payload) {
+  return normaliseInput(payload);
+}
+
+function hasPocketSafetyTree(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return false;
+  return Array.isArray(payload.mainThoughtTree)
+    || (
+      payload.data
+      && typeof payload.data === "object"
+      && !Array.isArray(payload.data)
+      && Array.isArray(payload.data.mainThoughtTree)
+    );
 }
 
 function readLocalSafetySnapshot() {
@@ -117,13 +344,22 @@ function readLocalSafetySnapshot() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return null;
     const payload = parsed.payload && typeof parsed.payload === "object" ? parsed.payload : null;
-    if (!payload) return null;
-    const norm = normaliseInput(payload);
-    if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) return null;
+    if (!hasPocketSafetyTree(payload)) return null;
+    const norm = normalisePocketSafetyPayload(payload);
+    if (!Array.isArray(norm.nodes)) return null;
     const capturedAt = cleanText(parsed.capturedAt || norm.writtenAt, 40);
     const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
     if (capturedMs <= 0) return null;
-    return { parsed, norm, capturedAt, capturedMs };
+    return {
+      parsed,
+      norm,
+      capturedAt,
+      capturedMs,
+      base: normaliseStoredPocketBaseline(parsed.base),
+      deviceChanges: parsed.deviceChanges && typeof parsed.deviceChanges === "object"
+        ? parsed.deviceChanges
+        : null,
+    };
   } catch {
     return null;
   }
@@ -138,13 +374,22 @@ function readLocalSafetyTrail() {
     for (const item of arr) {
       if (!item || typeof item !== "object") continue;
       const payload = item.payload && typeof item.payload === "object" ? item.payload : null;
-      if (!payload) continue;
-      const norm = normaliseInput(payload);
-      if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) continue;
+      if (!hasPocketSafetyTree(payload)) continue;
+      const norm = normalisePocketSafetyPayload(payload);
+      if (!Array.isArray(norm.nodes)) continue;
       const capturedAt = cleanText(item.capturedAt || norm.writtenAt, 40);
       const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
       if (capturedMs <= 0) continue;
-      out.push({ parsed: item, norm, capturedAt, capturedMs });
+      out.push({
+        parsed: item,
+        norm,
+        capturedAt,
+        capturedMs,
+        base: normaliseStoredPocketBaseline(item.base),
+        deviceChanges: item.deviceChanges && typeof item.deviceChanges === "object"
+          ? item.deviceChanges
+          : null,
+      });
     }
     out.sort((a, b) => b.capturedMs - a.capturedMs);
     return out.slice(0, LOCAL_SAFETY_TRAIL_MAX);
@@ -341,7 +586,7 @@ function appendLocalSafetyTrail(entry) {
     const latestMs = latest ? latest.capturedMs : 0;
     const compactEntry = safeJsonClone(entry, 900000);
     if (!compactEntry) return false;
-    const nextEntry = { parsed: compactEntry, norm: normaliseInput(compactEntry.payload), capturedAt, capturedMs };
+    const nextEntry = { parsed: compactEntry, norm: normalisePocketSafetyPayload(compactEntry.payload), capturedAt, capturedMs };
     if (latest && Math.abs(capturedMs - latestMs) < 30000) {
       trail[0] = nextEntry;
     } else {
@@ -362,17 +607,121 @@ function clearLocalSafetySnapshot() {
   }
 }
 
-function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot()) {
-  if (!snapshot || !snapshot.norm) return false;
-  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
+function localSafetySnapshotMatches(left, right) {
+  const owner = pocketDeviceChangesOwner();
+  if (!left || !right) return false;
+  const leftParsed = left.parsed || left;
+  const rightParsed = right.parsed || right;
+  if (cleanText(leftParsed?.capturedAt, 40) !== cleanText(rightParsed?.capturedAt, 40)) return false;
+  if (owner) return owner.documentsEqual(leftParsed?.payload, rightParsed?.payload);
+  try {
+    return JSON.stringify(leftParsed?.payload) === JSON.stringify(rightParsed?.payload);
+  } catch {
+    return false;
+  }
+}
+
+function buildDetachedPocketAdoptionDocument(snapshot) {
+  if (!snapshot || !snapshot.norm) return null;
+  const document = {
+    nodes: snapshot.norm.nodes,
+    tombstones: snapshot.norm.tombstones,
+    rootExtras: snapshot.norm.rootExtras,
+    dataExtras: snapshot.norm.dataExtras,
+  };
+  const owner = pocketDeviceChangesOwner();
+  const raw = owner && snapshot.parsed?.payload
+    ? owner.coerceDocument(snapshot.parsed.payload)
+    : null;
+  if (raw && raw.ok && raw.ambiguousTreeCopies !== true) {
+    document.dataExtras = normaliseRootExtras(raw.document.dataExtras) || {};
+  }
+  try {
+    return JSON.parse(JSON.stringify(document));
+  } catch {
+    return null;
+  }
+}
+
+function prepareLocalSafetySnapshotForDetachedAdoption(snapshot) {
+  if (!snapshot || !snapshot.norm) return { ok: false, baseStored: false };
   const parsed = snapshot.parsed || {};
-  if (typeof renewPocketDocumentSession === "function") renewPocketDocumentSession();
-  applyLoadedState(snapshot.norm, {
-    schema: snapshot.norm.schema,
-    fileName: cleanText(parsed?.source?.fileName, 120) || "local safety snapshot",
-    writtenAt: snapshot.capturedAt || snapshot.norm.writtenAt,
+  const adoptionDocument = buildDetachedPocketAdoptionDocument(snapshot);
+  if (!adoptionDocument) return { ok: false, baseStored: false };
+  const prepared = saveDetachedPocketSafetySnapshot(
+    adoptionDocument,
+    snapshot.base,
+    {
+      reason: "device-changes-opened",
+      capturedAt: snapshot.capturedAt,
+      source: parsed.source || {},
+      ops: parsed.ops || [],
+      operationHighWater: parsed.operationHighWater || 0,
+      selectedId: parsed.selectedId || "",
+      focusRootId: parsed.focusRootId || "",
+      collapsedIds: parsed.collapsedIds || [],
+    }
+  );
+  if (prepared && prepared.ok) return prepared;
+  const current = readLocalSafetySnapshot();
+  const canonicalSnapshot = {
+    parsed: {
+      capturedAt: snapshot.capturedAt,
+      payload: adoptionDocument,
+    },
+  };
+  if (localSafetySnapshotMatches(current, canonicalSnapshot)) {
+    return { ok: true, baseStored: !!current.base, entry: current.parsed };
+  }
+  return { ok: false, baseStored: false };
+}
+
+function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot(), options = {}) {
+  if (!snapshot || !snapshot.norm) return false;
+  const parsed = snapshot.parsed || {};
+  if (typeof setDetachedPocketDocumentSession !== "function") return false;
+  const prepared = options.preparedSafety && options.preparedSafety.ok === true
+    ? options.preparedSafety
+    : prepareLocalSafetySnapshotForDetachedAdoption(snapshot);
+  if (!prepared || prepared.ok !== true) {
+    setStatus("Pocket couldn’t keep those device changes safe enough to open them. Nothing was changed.", "warn", { durationMs: 7200 });
+    return false;
+  }
+  const adoptionDocument = buildDetachedPocketAdoptionDocument(snapshot);
+  if (!adoptionDocument) return false;
+  const adoptionNorm = {
+    ...snapshot.norm,
+    ...adoptionDocument,
+  };
+  setDetachedPocketDocumentSession("Device changes");
+  applyLoadedState(adoptionNorm, {
+    schema: adoptionNorm.schema,
+    fileName: cleanText(parsed?.source?.fileName, 120) || "Device changes",
+    writtenAt: snapshot.capturedAt || adoptionNorm.writtenAt,
   }, { clearOps: false, skipLocalSafetyCheck: true });
-  state.ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+  state.detachedSafetyBase = prepared.baseStored === true && snapshot.base
+    ? JSON.parse(JSON.stringify(snapshot.base))
+    : null;
+  if (typeof adoptPocketOperations === "function") {
+    const storedEntry = prepared.entry && typeof prepared.entry === "object"
+      ? prepared.entry
+      : parsed;
+    adoptPocketOperations(
+      storedEntry.ops,
+      storedEntry.operationHighWater,
+      { anchor: adoptionDocument }
+    );
+  } else {
+    try {
+      state.ops = Array.isArray(parsed.ops) ? JSON.parse(JSON.stringify(parsed.ops)) : [];
+    } catch {
+      state.ops = [];
+    }
+  }
+  if (state.ops.length === 0) {
+    if (typeof recordOp === "function") recordOp({ type: "device_changes_opened" });
+    else state.ops.push({ type: "device_changes_opened", at: nowIso() });
+  }
   const ids = new Set(state.nodes.map((node) => cleanText(node?.id, 80)).filter(Boolean));
   const selectedId = cleanText(parsed.selectedId, 80);
   const focusRootId = cleanText(parsed.focusRootId, 80);
@@ -382,13 +731,15 @@ function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot()) {
     state.collapsed = new Set(parsed.collapsedIds.map((id) => cleanText(id, 80)).filter((id) => id && ids.has(id)));
   }
   if (state.selectedId) expandPathToNode(state.selectedId);
+  clearConflictGuard();
   refreshMeta();
   renderTree();
+  persistPipSnapshot();
   requestAnimationFrame(() => {
     refocusTreeNavigation(state.selectedId);
     softlyEnsureSelectionVisible();
   });
-  setStatus("Recovery copy restored. Save when ready.", "ok", { durationMs: 5200 });
+  setStatus("Device changes opened. Save when ready.", "ok", { durationMs: 5200 });
   return true;
 }
 
@@ -423,38 +774,31 @@ function restorePreviousLocalSafetyVersion() {
   const latestMs = latest ? latest.capturedMs : 0;
   const previous = trail.find((item) => item && item.capturedMs > 0 && (!latestMs || item.capturedMs < latestMs - 1000));
   if (!previous) {
-    setStatus("No earlier recovery version found yet.", "warn", { durationMs: 5200 });
+    setStatus("No earlier device version found yet.", "warn", { durationMs: 5200 });
     refocusTreeNavigation(state.selectedId);
     return false;
   }
-  const ok = restoreLocalSafetySnapshot(previous);
-  if (ok) {
-    saveWorkspaceState();
-    requestAnimationFrame(() => {
-      if (state.selectedId) flashTouchedRow(state.selectedId);
-    });
-    setStatus(`Restored recovery version from ${formatAgoLabel(previous.capturedAt)} · ${previous.norm.nodes.length} nodes. Save when ready.`, "ok", { durationMs: 7200 });
+  if (typeof window.openPocketDeviceChangesDecision !== "function") {
+    setStatus("Device-change review is still loading.", "warn", { durationMs: 5200 });
+    return false;
   }
-  return ok;
+  return window.openPocketDeviceChangesDecision(previous, {
+    origin: "manual-trail",
+    candidateKind: "trail",
+  });
 }
 
 function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
   if (options && options.skipLocalSafetyCheck) return false;
   const snapshot = readLocalSafetySnapshot();
   if (!snapshot) return false;
-  const loadedStamp = cleanText(sourceInfo.writtenAt || state.source?.writtenAt, 40);
-  const loadedMs = Number.isFinite(Date.parse(loadedStamp)) ? Date.parse(loadedStamp) : 0;
-  const hasNewerLocal = snapshot.capturedMs > Math.max(loadedMs, 0) + 1000;
-  if (!hasNewerLocal) return false;
-  const label = formatSaveClockLabel(new Date(snapshot.capturedMs));
-  setStatus(`This file looks older. Newer recovery copy found (${label}).`, "warn", {
-    durationMs: 12000,
-    action: {
-      label: "Restore",
-      onClick: () => restoreLocalSafetySnapshot(snapshot),
-    },
+  if (typeof window.openPocketDeviceChangesDecision !== "function") return false;
+  return window.openPocketDeviceChangesDecision(snapshot, {
+    origin: "file-load",
+    candidateKind: "current-safety",
+    sourceInfo,
+    fileDocument: options.comparisonDocument || null,
   });
-  return true;
 }
 
 function applyLoadedState(norm, sourceInfo = {}, options = {}) {
@@ -463,7 +807,13 @@ function applyLoadedState(norm, sourceInfo = {}, options = {}) {
   state.tombstones = Array.isArray(norm.tombstones) ? norm.tombstones : [];
   state.rootExtras = (norm.rootExtras && typeof norm.rootExtras === "object" && !Array.isArray(norm.rootExtras)) ? norm.rootExtras : {};
   state.dataExtras = (norm.dataExtras && typeof norm.dataExtras === "object" && !Array.isArray(norm.dataExtras)) ? norm.dataExtras : {};
-  if (clearOps) state.ops = [];
+  if (clearOps) {
+    if (typeof adoptPocketOperations === "function") {
+      adoptPocketOperations([], 0, { resetAnchor: false });
+    } else {
+      state.ops = [];
+    }
+  }
   collapseAllNodes();
   state.selectedId = "";
   state.focusRootId = "";
@@ -472,6 +822,16 @@ function applyLoadedState(norm, sourceInfo = {}, options = {}) {
     fileName: cleanText(sourceInfo.fileName, 120),
     writtenAt: cleanText(sourceInfo.writtenAt || norm.writtenAt, 40),
   };
+  if (options.establishDocumentBaseline === true) {
+    const baselineInput = options.baselinePayload || {
+      nodes: state.nodes,
+      tombstones: state.tombstones,
+      rootExtras: state.rootExtras,
+      dataExtras: state.dataExtras,
+    };
+    establishPocketDocumentBaseline(baselineInput, state.source);
+  }
+  if (typeof resetPocketOperationAnchor === "function") resetPocketOperationAnchor();
   updateConflictGuardForLoadedSource(norm, state.source);
   const restoredWorkspace = restoreWorkspaceState();
   const baselinePayload = {
@@ -543,7 +903,7 @@ function saveLastSaveSnapshot(payload) {
 }
 
 function snapshotCurrentTreeForRestore() {
-  if (!Array.isArray(state.nodes) || state.nodes.length === 0) return false;
+  if (!Array.isArray(state.nodes)) return false;
   const payload = {
     ...(state.rootExtras || {}),
     schema: "portal.export.v1",

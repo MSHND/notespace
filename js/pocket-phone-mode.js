@@ -5,7 +5,7 @@
   "use strict";
 
   const STORAGE_KEY = "pocket.phoneMode.v1";
-  const AUTO_RESTORE_KEY = "pocket.phoneMode.autoRestoreSeen.v1";
+  const REVIEW_SEEN_KEY = "pocket.phoneMode.autoRestoreSeen.v1";
 
   function readSavedMode() {
     try {
@@ -57,25 +57,21 @@
     return more;
   }
 
-  function shouldAutoRestoreLocalPhoneCopy() {
+  function shouldReviewLocalPhoneChanges() {
     if (!document.body.classList.contains("phoneMode")) return false;
-    if (Array.isArray(global.state?.nodes) && global.state.nodes.length > 0) return false;
+    if (typeof global.canShowPocketTree !== "function" || !global.canShowPocketTree()) return false;
     if (typeof global.readLocalSafetySnapshot !== "function") return false;
-    if (typeof global.restoreLocalSafetySnapshot !== "function") return false;
+    if (typeof global.reviewCurrentPocketDeviceChanges !== "function") return false;
     return !!global.readLocalSafetySnapshot();
   }
 
-  function maybeAutoRestoreLocalPhoneCopy() {
-    if (!shouldAutoRestoreLocalPhoneCopy()) return false;
-    const snapshot = global.readLocalSafetySnapshot();
-    const ok = global.restoreLocalSafetySnapshot(snapshot);
-    if (ok) {
-      try { global.localStorage.setItem(AUTO_RESTORE_KEY, new Date().toISOString()); } catch (_error) {}
-      if (typeof global.setStatus === "function") {
-        global.setStatus("opened local phone copy", "ok", { durationMs: 4200 });
-      }
+  function maybeReviewLocalPhoneChanges() {
+    if (!shouldReviewLocalPhoneChanges()) return false;
+    const opened = global.reviewCurrentPocketDeviceChanges({ origin: "phone-mode" });
+    if (opened) {
+      try { global.localStorage.setItem(REVIEW_SEEN_KEY, new Date().toISOString()); } catch (_error) {}
     }
-    return ok;
+    return opened;
   }
 
   function setPhoneMode(enabled) {
@@ -84,7 +80,7 @@
     syncButton(document.getElementById("btnPhoneMode"), enabled);
     ensureMoreButton();
     if (enabled) {
-      requestAnimationFrame(() => maybeAutoRestoreLocalPhoneCopy());
+      requestAnimationFrame(() => maybeReviewLocalPhoneChanges());
     }
   }
 
@@ -103,7 +99,7 @@
     init: initPhoneMode,
     set: setPhoneMode,
     toggle: togglePhoneMode,
-    maybeAutoRestoreLocalPhoneCopy,
+    maybeReviewLocalPhoneChanges,
     ensureMoreButton
   });
 

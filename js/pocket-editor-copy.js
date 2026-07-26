@@ -121,13 +121,16 @@ function exportPocketLiteSessionState(options = {}) {
     focusRootId: cleanText(state.focusRootId, 80),
     collapsedIds: Array.from(state.collapsed || []),
     ops: JSON.parse(JSON.stringify(state.ops || [])),
+    operationHighWater: typeof getPocketHighestOperationSequence === "function"
+      ? getPocketHighestOperationSequence()
+      : 0,
   };
 }
 
 function adoptPocketLiteSessionState(snapshot) {
-  if (!snapshot || typeof snapshot !== "object") return false;
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.nodes)) return false;
   const nodes = normaliseNodes(snapshot.nodes);
-  if (!Array.isArray(nodes) || nodes.length === 0) return false;
+  if (!Array.isArray(nodes)) return false;
   if (typeof renewPocketDocumentSession === "function") renewPocketDocumentSession();
   state.nodes = nodes;
   state.tombstones = Array.isArray(snapshot.tombstones) ? snapshot.tombstones : [];
@@ -137,7 +140,11 @@ function adoptPocketLiteSessionState(snapshot) {
   state.dataExtras = (snapshot.dataExtras && typeof snapshot.dataExtras === "object" && !Array.isArray(snapshot.dataExtras))
     ? normaliseRootExtras(snapshot.dataExtras) || {}
     : {};
-  state.ops = Array.isArray(snapshot.ops) ? snapshot.ops : [];
+  if (typeof adoptPocketOperations === "function") {
+    adoptPocketOperations(snapshot.ops, snapshot.operationHighWater);
+  } else {
+    state.ops = Array.isArray(snapshot.ops) ? snapshot.ops : [];
+  }
   state.selectedId = cleanText(snapshot.selectedId, 80);
   state.focusRootId = cleanText(snapshot.focusRootId, 80);
   state.collapsed = new Set(Array.isArray(snapshot.collapsedIds) ? snapshot.collapsedIds.map((id) => cleanText(id, 80)).filter(Boolean) : []);
@@ -167,9 +174,17 @@ async function saveThroughPipHost() {
     return false;
   }
   try {
-    const result = await hostSave(exportPocketLiteSessionState({ commitDetails: true }));
+    const snapshot = exportPocketLiteSessionState({ commitDetails: true });
+    const coveredSequence = Number.isSafeInteger(Number(snapshot.operationHighWater))
+      ? Number(snapshot.operationHighWater)
+      : (Array.isArray(snapshot.ops) ? snapshot.ops.length : 0);
+    const result = await hostSave(snapshot);
     if (result && result.ok) {
-      state.ops = [];
+      if (typeof retainPocketOperationsAfterSequence === "function") {
+        retainPocketOperationsAfterSequence(coveredSequence);
+      } else {
+        state.ops = [];
+      }
       refreshMeta();
       persistPipSnapshot();
       flashSaveChip("Safe");
@@ -201,9 +216,37 @@ function restoreDetailsDraftOriginal() {
   if (normaliseCopyContextFlag(edit.originalCopyContext)) node.copyContext = true;
   else delete node.copyContext;
   node.updatedAt = nowIso();
-  const opsStart = Number(edit.opsStartLength);
-  if (Number.isFinite(opsStart) && opsStart >= 0) {
-    state.ops = Array.isArray(state.ops) ? state.ops.slice(0, opsStart) : [];
+  const draftSequence = Number(edit.draftOperationSequence);
+  const draftWasCoveredBySave = edit.draftHadCoveredSave === true
+    || (
+      Number.isSafeInteger(draftSequence)
+      && draftSequence > 0
+      && draftSequence <= (Number(state.activeSaveOperationCeiling) || 0)
+    );
+  let revertRecorded = false;
+  if (draftWasCoveredBySave) {
+    recordOp({
+      type: "details_draft_reverted",
+      id: node.id,
+      path: getPath(node.id),
+      changed: "details",
+    });
+    revertRecorded = true;
+  }
+  const discarded = typeof discardPocketOperationSequence === "function"
+    ? discardPocketOperationSequence(draftSequence)
+    : false;
+  if (!discarded && !revertRecorded) {
+    recordOp({
+      type: "details_draft_reverted",
+      id: node.id,
+      path: getPath(node.id),
+      changed: "details",
+    });
+  } else if (state.ops.length > 0) {
+    saveLocalSafetySnapshot("details-draft-reverted");
+  } else {
+    clearLocalSafetySnapshot();
   }
   refreshMeta();
   renderTree();
@@ -249,14 +292,24 @@ function stageDetailsEditorDraft() {
     return false;
   }
   node.updatedAt = nowIso();
-  if (!state.detailsEdit.draftOpRecorded) {
-    recordOp({
-      type: "details_draft",
+  const trackedDraftSequence = Number(state.detailsEdit.draftOperationSequence) || 0;
+  const trackedDraftPending = trackedDraftSequence > 0
+    && state.ops.some((operation) => Number(operation?.seq) === trackedDraftSequence);
+  const trackedDraftCoveredBySave = trackedDraftSequence > 0
+    && trackedDraftSequence <= (Number(state.activeSaveOperationCeiling) || 0);
+  if (!state.detailsEdit.draftOpRecorded || !trackedDraftPending || trackedDraftCoveredBySave) {
+    if (trackedDraftCoveredBySave) state.detailsEdit.draftHadCoveredSave = true;
+    const draftOperation = recordOp({
+      type: state.detailsEdit.draftOpRecorded ? "details_draft_continued" : "details_draft",
       id: node.id,
       path: getPath(node.id),
       changed: "details",
     });
     state.detailsEdit.draftOpRecorded = true;
+    state.detailsEdit.draftOperationSequence = Number(draftOperation?.seq) || 0;
+  } else {
+    if (typeof resetPocketOperationAnchor === "function") resetPocketOperationAnchor();
+    saveLocalSafetySnapshot("details-draft");
   }
   refreshMeta();
   renderTree();
@@ -277,6 +330,8 @@ function closeDetailsEditor(options = {}) {
     originalUrgent: false,
     originalCopyContext: false,
     draftOpRecorded: false,
+    draftOperationSequence: 0,
+    draftHadCoveredSave: false,
     opsStartLength: 0,
   };
   if (el.detailEditorUrgent instanceof HTMLInputElement) {
@@ -307,6 +362,8 @@ function openDetailsEditorForSelectedNode() {
     originalUrgent: normaliseUrgentFlag(node.urgent),
     originalCopyContext: normaliseCopyContextFlag(node.copyContext),
     draftOpRecorded: false,
+    draftOperationSequence: 0,
+    draftHadCoveredSave: false,
     opsStartLength: Array.isArray(state.ops) ? state.ops.length : 0,
   };
   if (el.detailEditorTitle) {
@@ -393,6 +450,14 @@ function saveDetailsEditor() {
   const hasFieldChanges = labelChanged || detailsChanged || urgentChanged || copyContextChanged;
   const hadDraftChanges = !!state.detailsEdit.draftOpRecorded;
   if (!hasFieldChanges && !canApplyCompletionMove) {
+    if (hadDraftChanges) {
+      recordOp({
+        type: "details_edit_committed",
+        id: node.id,
+        path: getPath(node.id),
+        changed: "details",
+      });
+    }
     closeDetailsEditor({ restoreFocus: true, nodeId });
     setStatus(
       hadDraftChanges ? `Saved details for "${nextLabel}". Save pocket to keep them.` : "No detail changes.",

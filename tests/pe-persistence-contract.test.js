@@ -22,6 +22,7 @@ const FULL_CONTRACT_SCRIPTS = CORE_INDEX_SCRIPTS.concat([
   "js/pocket-editor-copy.js",
   "js/pocket-history-status.js",
   "js/pocket-io-browser.js",
+  "js/pocket-device-changes.js",
   "js/pocket-node-popout-model.js",
   "js/pocket-node-popout-target.js",
   "js/pocket-node-popout-editor.js",
@@ -2569,7 +2570,9 @@ test("local safety, trail, auto-cache, and PiP recovery retain editor metadata w
   assertRecoveredMetadata(restoredState.nodes);
   assert.equal(restoredState.selectedId, "recovery_unknown");
   assert.equal(restoredState.collapsed.has("recovery_current"), true);
-  assert.deepEqual(plain(restoredState.ops), [{ type: "synthetic_recovery" }]);
+  assert.equal(restoredState.ops.length, 1);
+  assert.equal(restoredState.ops[0].type, "synthetic_recovery");
+  assert.ok(Number.isSafeInteger(restoredState.ops[0].seq) && restoredState.ops[0].seq > 0);
   assert.equal(context.PocketNodePopoutModel.buildPayload(restoredState.nodes.find((node) => node.id === "recovery_unknown")).readOnly, true);
   assert.equal(context.saveLocalSafetySnapshot("p014-recovered"), true);
   assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1")), "rewritten recovered safety");

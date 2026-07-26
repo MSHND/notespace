@@ -9,6 +9,7 @@ const WORKSPACE_STATE_KEY = "pocketLite.workspace.state.v1";
 const LOCAL_SAFETY_KEY = "pocketLite.localSafety.snapshot.v1";
 const LOCAL_SAFETY_TRAIL_KEY = "pocketLite.localSafety.trail.v1";
 const LOCAL_SAFETY_TRAIL_MAX = 8;
+const DEVICE_CHANGE_SEQUENCE_KEY = "pocketLite.deviceChange.sequence.v1";
 const LAST_BACKUP_META_KEY = "pocketLite.lastBackup.meta.v1";
 const LOCAL_INSTANCE_ID_KEY = "pocketLite.instanceId.v1";
 const RECENT_POCKET_FILE_DB_NAME = "pocketLite.recentFile.v1";
@@ -24,6 +25,9 @@ const state = {
   collapsed: new Set(),
   urgentCollectorExpanded: false,
   ops: [],
+  operationHighWater: 0,
+  operationDocumentAnchor: null,
+  activeSaveOperationCeiling: 0,
   source: {
     schema: "",
     fileName: "",
@@ -45,6 +49,8 @@ const state = {
     originalUrgent: false,
     originalCopyContext: false,
     draftOpRecorded: false,
+    draftOperationSequence: 0,
+    draftHadCoveredSave: false,
     opsStartLength: 0,
   },
   typeJump: {
@@ -72,6 +78,8 @@ const state = {
     loadedAt: "",
     newerAt: "",
   },
+  documentBaseline: null,
+  detachedSafetyBase: null,
   pocketFile: {
     writable: false,
     displayName: "",
@@ -79,6 +87,7 @@ const state = {
     pendingName: "",
     gateMode: "",
     pipSession: false,
+    detachedDeviceChanges: false,
   },
 };
 let titleToastTimer = null;
@@ -154,6 +163,31 @@ const el = {
   cmdHealth: document.getElementById("cmdHealth"),
   cmdRestoreRecent: document.getElementById("cmdRestoreRecent"),
   cmdHelp: document.getElementById("cmdHelp"),
+  deviceChangesOverlay: document.getElementById("deviceChangesOverlay"),
+  deviceChangesTitle: document.getElementById("deviceChangesTitle"),
+  deviceChangesIntro: document.getElementById("deviceChangesIntro"),
+  deviceChangesIdentity: document.getElementById("deviceChangesIdentity"),
+  deviceChangesFileName: document.getElementById("deviceChangesFileName"),
+  deviceChangesFileTime: document.getElementById("deviceChangesFileTime"),
+  deviceChangesDeviceTime: document.getElementById("deviceChangesDeviceTime"),
+  deviceChangesDeviceSource: document.getElementById("deviceChangesDeviceSource"),
+  deviceChangesDecisionView: document.getElementById("deviceChangesDecisionView"),
+  deviceChangesChoices: document.getElementById("deviceChangesChoices"),
+  deviceChangesReview: document.getElementById("deviceChangesReview"),
+  deviceChangesReviewList: document.getElementById("deviceChangesReviewList"),
+  deviceChangesChoiceView: document.getElementById("deviceChangesChoiceView"),
+  deviceChangesChoiceProgress: document.getElementById("deviceChangesChoiceProgress"),
+  deviceChangesChoicePath: document.getElementById("deviceChangesChoicePath"),
+  deviceChangesChoiceFields: document.getElementById("deviceChangesChoiceFields"),
+  deviceChangesFileValue: document.getElementById("deviceChangesFileValue"),
+  deviceChangesDeviceValue: document.getElementById("deviceChangesDeviceValue"),
+  deviceChangesChoiceActions: document.getElementById("deviceChangesChoiceActions"),
+  deviceChangesNotice: document.getElementById("deviceChangesNotice"),
+  deviceChangesUseFile: document.getElementById("deviceChangesUseFile"),
+  deviceChangesUseDevice: document.getElementById("deviceChangesUseDevice"),
+  deviceChangesCombine: document.getElementById("deviceChangesCombine"),
+  deviceChangesReviewBtn: document.getElementById("deviceChangesReviewBtn"),
+  deviceChangesBack: document.getElementById("deviceChangesBack"),
   detailOverlay: document.getElementById("detailOverlay"),
   detailEditorTitle: document.getElementById("detailEditorTitle"),
   detailEditorPath: document.getElementById("detailEditorPath"),

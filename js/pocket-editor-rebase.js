@@ -45,6 +45,8 @@
     global.state.detailsEdit.originalUrgent = nodeUrgent;
     global.state.detailsEdit.originalCopyContext = nodeCopyContext;
     global.state.detailsEdit.draftOpRecorded = false;
+    global.state.detailsEdit.draftOperationSequence = 0;
+    global.state.detailsEdit.draftHadCoveredSave = false;
     global.state.detailsEdit.opsStartLength = Array.isArray(global.state.ops) ? global.state.ops.length : 0;
 
     if (typeof PocketDetailDirtyState?.refresh === "function") requestAnimationFrame(PocketDetailDirtyState.refresh);

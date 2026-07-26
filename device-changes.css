@@ -1,0 +1,235 @@
+.deviceChangesOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(17, 24, 39, 0.2);
+  backdrop-filter: blur(3px);
+}
+
+.deviceChangesOverlay[hidden],
+.deviceChangesReview[hidden],
+.deviceChangesChoiceView[hidden],
+.deviceChangesChoice[hidden] {
+  display: none;
+}
+
+.deviceChangesCard {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 44px);
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--tree-panel-border);
+  border-radius: 18px;
+  background: rgba(var(--panel-rgb), 0.995);
+  box-shadow: 0 24px 54px -28px rgba(17, 24, 39, 0.55);
+}
+
+.deviceChangesHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.deviceChangesHeader h2,
+.deviceChangesReview h3,
+.deviceChangesChoiceView h3,
+.deviceChangesIdentity h3,
+.deviceChangesValues h4 {
+  margin: 0;
+  color: var(--text-strong);
+}
+
+.deviceChangesHeader h2 {
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.deviceChangesHeader p,
+.deviceChangesNotice,
+.deviceChangesChoiceProgress,
+.deviceChangesChoicePath,
+.deviceChangesChoiceFields {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.deviceChangesIdentity,
+.deviceChangesValues {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.deviceChangesIdentity section,
+.deviceChangesValues section,
+.deviceChangesReviewGroup {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--tree-panel-border);
+  border-radius: 13px;
+  background: rgba(148, 163, 184, 0.045);
+}
+
+.deviceChangesIdentity h3,
+.deviceChangesValues h4 {
+  font-size: 12px;
+}
+
+.deviceChangesIdentity strong,
+.deviceChangesIdentity span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.deviceChangesIdentity strong {
+  font-size: 13px;
+}
+
+.deviceChangesIdentity span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.deviceChangesNotice {
+  min-height: 1.45em;
+  color: var(--warn);
+}
+
+.deviceChangesChoices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.deviceChangesChoice {
+  min-height: 72px;
+  display: grid;
+  align-content: center;
+  gap: 5px;
+  padding: 11px 13px;
+  border: 1px solid var(--chip-border);
+  border-radius: 14px;
+  background: var(--chip);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.deviceChangesChoice:hover,
+.deviceChangesChoice:focus-visible,
+.deviceChangesChoiceActions button:hover,
+.deviceChangesChoiceActions button:focus-visible {
+  outline: none;
+  border-color: var(--chip-on-border);
+  background: var(--chip-on);
+}
+
+.deviceChangesChoice:disabled {
+  opacity: 0.5;
+  cursor: default;
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.deviceChangesChoice strong {
+  font-size: 13px;
+}
+
+.deviceChangesChoice span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.deviceChangesChoice.compact {
+  grid-column: 1 / -1;
+  min-height: 52px;
+}
+
+.deviceChangesReview,
+.deviceChangesChoiceView,
+.deviceChangesReviewList {
+  display: grid;
+  gap: 10px;
+}
+
+.deviceChangesReviewGroup h4 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.deviceChangesReviewGroup ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.deviceChangesValues pre {
+  max-height: 180px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.deviceChangesChoiceActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deviceChangesChoiceActions button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--chip-border);
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+body.deviceChangesOpen {
+  overflow: hidden;
+}
+
+@media (max-width: 560px) {
+  .deviceChangesIdentity,
+  .deviceChangesValues,
+  .deviceChangesChoices {
+    grid-template-columns: 1fr;
+  }
+
+  .deviceChangesCard {
+    padding: 14px;
+  }
+}
+
+body.phoneMode .deviceChangesOverlay {
+  align-items: stretch;
+  padding: 8px;
+}
+
+body.phoneMode .deviceChangesCard {
+  width: 100%;
+  max-height: none;
+  border-radius: 14px;
+}
+
+body.phoneMode .deviceChangesChoice {
+  min-height: 58px;
+}

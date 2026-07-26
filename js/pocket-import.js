@@ -101,6 +101,9 @@ function persistPipSnapshot() {
       focusRootId: state.focusRootId,
       collapsedIds: Array.from(state.collapsed),
       ops: state.ops,
+      operationHighWater: typeof getPocketHighestOperationSequence === "function"
+        ? getPocketHighestOperationSequence()
+        : 0,
     };
     localStorage.setItem(PIP_SNAPSHOT_KEY, JSON.stringify(payload));
     saveWorkspaceState();
@@ -114,9 +117,9 @@ function restoreFromPipSnapshot() {
     const raw = localStorage.getItem(PIP_SNAPSHOT_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return false;
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.nodes)) return false;
     const nodes = normaliseNodes(parsed.nodes);
-    if (!Array.isArray(nodes) || nodes.length === 0) return false;
+    if (!Array.isArray(nodes)) return false;
     state.nodes = nodes;
     state.tombstones = Array.isArray(parsed.tombstones) ? parsed.tombstones : [];
     state.rootExtras = (parsed.rootExtras && typeof parsed.rootExtras === "object" && !Array.isArray(parsed.rootExtras))
@@ -125,7 +128,11 @@ function restoreFromPipSnapshot() {
     state.dataExtras = (parsed.dataExtras && typeof parsed.dataExtras === "object" && !Array.isArray(parsed.dataExtras))
       ? normaliseRootExtras(parsed.dataExtras) || {}
       : {};
-    state.ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+    if (typeof adoptPocketOperations === "function") {
+      adoptPocketOperations(parsed.ops, parsed.operationHighWater);
+    } else {
+      state.ops = Array.isArray(parsed.ops) ? parsed.ops : [];
+    }
     state.selectedId = cleanText(parsed.selectedId, 80);
     state.focusRootId = cleanText(parsed.focusRootId, 80);
     state.collapsed = new Set(Array.isArray(parsed.collapsedIds) ? parsed.collapsedIds.map((id) => cleanText(id, 80)).filter(Boolean) : []);

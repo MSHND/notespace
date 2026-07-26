@@ -246,6 +246,8 @@ function refreshCommandPaletteState() {
 }
 
 function openCommandPalette() {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) return false;
   closeRowMiniMenu({ restoreFocus: false });
   if (!(el.commandOverlay instanceof HTMLElement)) return false;
   if (isDetailsEditorOpen()) return false;
@@ -583,6 +585,8 @@ function bind() {
     triggerStatusAction(ev);
   });
   const handleGlobalShortcuts = (ev) => {
+    if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+        && window.isPocketDeviceChangesDecisionOpen()) return;
     const key = String(ev.key || "").toLowerCase();
     const target = ev.target instanceof HTMLElement ? ev.target : null;
     const tag = target ? String(target.tagName || "").toLowerCase() : "";
@@ -717,6 +721,8 @@ function bind() {
   window.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
   document.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
   const handleWindowFocusToTree = () => {
+    if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+        && window.isPocketDeviceChangesDecisionOpen()) return;
     if (isDetailsEditorOpen()) return;
     // When the popout/browser regains focus after the user has scrolled,
     // do not pull the list back to the previously selected row.

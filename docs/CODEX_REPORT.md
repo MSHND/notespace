@@ -1,5 +1,196 @@
 # Codex report
 
+## POCKET TASK P016 — HANDLE FILE AND DEVICE CHANGES SAFELY
+
+Title: Handle file and device changes safely
+
+Status: implementation, documentation and focused local validation are complete against the exact P015 baseline. The resulting Git commit uses the exact title below; its SHA and remote confirmation are reported by the completion response because a commit cannot contain its own SHA.
+
+Commit title:
+
+- `P016 Handle file and device changes safely`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched GitHub-visible starting `origin/main`: `b5733cf7854dcae166270f72f619e4e626de9f14`
+- Baseline title: `P015 Audit architecture and failure modes`
+- Implementation date: 2026-07-26
+- Branch: `main`
+- Local `main`, `HEAD` and `origin/main` were identical, with zero ahead/behind divergence and a clean worktree before implementation.
+- PR #6 was not merged, cherry-picked, modified or used.
+- P016 resolves P015-F01. It changes recovery and browser-held device adoption only. It does not address Vault ownership, Document PiP return ownership, destructive import normalisation or external-file freshness.
+- No personal Pocket truth file, real browser handle, browser localStorage contents or uploaded user JSON was inspected.
+- No truth-file schema migration occurred.
+
+### Product behaviour
+
+When a selected file and the current browser safety copy differ in meaningful content, Pocket now presents one accessible decision screen with the approved choices:
+
+- Use the file;
+- Use the device changes;
+- Combine what can be combined; and
+- Review the differences.
+
+The comparison is content-based. Export timestamps, generated guard values, node `updatedAt` values without a content change and object key order do not create a false difference. User content, including IDs, parents, order, labels, Notes, first-class editor metadata, generic extras, root/data extras and tombstones, remains meaningful.
+
+Use the file retains the selected file handle and tree and performs no write. It clears the current safety entry only after the device version is preserved in the bounded earlier-version trail. A storage failure leaves the decision open and both versions unchanged.
+
+Use the device changes and every combined result clear the selected handle, rotate the document session and open an explicit `detachedDeviceChanges` document. The tree remains visible, editable and dirty, but has no authority to write the previously selected file. Before device adoption, Pocket stores a canonical safety document matching the exact normalised tree it will display. If that replacement cannot be made safely, adoption fails closed. Save uses the existing picker path. Cancellation leaves the detached state and browser safety intact. A successful picked-file write adopts only that destination.
+
+The same decision owner handles ordinary file opening, manual previous-version review and Phone mode. Phone mode no longer silently adopts browser-held content.
+
+### Comparison and combination owner
+
+`js/pocket-device-changes.js` owns deterministic JSON-safe comparison, stable BASE fingerprinting, direct review, conservative combination eligibility, per-field three-way combination, unresolved choices, Keep both subtree duplication and final structural validation.
+
+Combination requires:
+
+- a stored normalised BASE payload;
+- a matching deterministic BASE fingerprint;
+- credible shared node ancestry;
+- unambiguous supported document shapes with no raw-versus-normalised content difference;
+- valid node relationships; and
+- bounded processing size.
+
+The merge combines independent node fields, root-extra keys, data-extra keys and tombstone entries. Divergent values require an explicit choice. Manual node-field choices update `updatedAt` from the content sources which actually contribute to the result. Keep both retains the FILE subtree under its IDs, duplicates the DEVICE subtree and moved descendants under fresh IDs, reconciles overlapping source copies in either resolution order, deterministically places multiple sibling duplicates even when the original FILE orders are equal, restores superseded FILE tombstones and avoids duplicate nested duplication. Delete-versus-edit provides Keep the item or Leave it removed, not Keep both. Ancestor choices are presented before dependent descendants, removing an ancestor covers only descendants also removed by that side, and a descendant retained or moved by the deleting side keeps that safe placement while independently merged content survives.
+
+Before adoption, the complete result is round-tripped through the actual active node and root-extra normalisers without changing either source. If that check would drop or truncate meaningful content, including a union of otherwise valid extras which exceeds the current persistence budgets, combination fails closed.
+
+Pre-P016 and pressure-degraded safety entries without BASE remain usable for Use the file, Use the device changes and two-version review. Combination is disabled with:
+
+> Pocket doesn’t have the earlier shared version needed to combine these safely.
+
+### Baseline, browser changes and save coverage
+
+`state.documentBaseline` records the last full payload successfully loaded from or written to a truth file. It is not advanced by comparison, detached adoption, picker cancellation or a failed write.
+
+The complete DEVICE payload remains the authoritative browser-held content. Browser safety may store an optional `pocket.deviceChanges.v1` envelope beside it, never inside a node or truth JSON. The envelope records:
+
+- BASE fingerprint and source labels;
+- capture time and source filename;
+- deterministic semantic change descriptors;
+- one stable monotonic sequence per meaningful transition; and
+- the highest pending sequence.
+
+Descriptors cover add, title, Notes, Outline, first-class metadata, generic extras, urgent, copy-context, move, sibling order, node/subtree deletion, root extras, data extras and tombstones. Descriptors identify semantics without duplicating full before/after content. They do not reconstruct or override content. BASE, FILE and DEVICE remain the only authorities for comparison and combination.
+
+The sequence high-water mark survives browser safety rewrites, detached adoption, PiP snapshots and Save retries. At Save start Pocket freezes the truth payload and captures the highest covered sequence. An in-flight covered transition cannot be discarded. After confirmed persistence, Pocket:
+
+- establishes BASE from the normalised meaningful document corresponding to the exact payload written;
+- removes only operations at or below the captured sequence ceiling;
+- retains higher-sequence operations as dirty;
+- stores the current visible DEVICE against the newly written BASE; and
+- emits a new browser envelope containing only higher-sequence descriptors.
+
+The browser key `pocketLite.deviceChange.sequence.v1` persists only the monotonic sequence high-water. It contains no user content and is never serialised into truth JSON.
+
+A failed, cancelled, stale-session or otherwise rejected Save clears no sequence and advances no BASE.
+
+Valid zero-node documents remain complete DEVICE safety payloads and can be opened, combined and explicitly saved. Deleting the final item therefore remains dirty and leaves Save available. Timestamped but tree-less corrupt safety objects are rejected rather than being mistaken for an empty Pocket document.
+
+While the details editor is open, continued typing refreshes the complete DEVICE payload without allocating a new sequence for every keystroke. If a draft included in an in-flight write is later continued or cancelled, Pocket retains a higher-sequence transition and safety copy for the visible post-write state.
+
+Under storage pressure Pocket prioritises the full DEVICE payload. It first tries DEVICE plus optional BASE and change metadata, then retries with optional BASE and `pocket.deviceChanges.v1` metadata omitted. If DEVICE-only storage also fails, adoption fails closed unless the existing current entry already matches the exact visible document. Missing, incomplete or misleading change metadata never overrides DEVICE.
+
+P016 does not broaden or repair the existing selected-file normaliser. The established `portal.export.v1` root/data precedence and other destructive-normalisation risks remain P015 findings. A raw selected file or device entry which differs meaningfully after current normalisation, or has conflicting top-level and nested tree copies, cannot be combined automatically. Direct device adoption narrowly preserves safe raw data extras while ensuring its stored safety copy matches the visible canonical tree.
+
+`pocket.deviceChanges.v1` is a browser-only safety schema. It is absent from the top-level and nested truth payloads and does not constitute a truth-file schema migration.
+
+### Files changed
+
+Production and shell:
+
+- `index.html`
+- `device-changes.css`
+- `sw.js`
+- `js/pocket-device-changes.js`
+- `js/pocket-editor-copy.js`
+- `js/pocket-editor-handoff.js`
+- `js/pocket-editor-rebase.js`
+- `js/pocket-history-status.js`
+- `js/pocket-import.js`
+- `js/pocket-state.js`
+- `js/pocket-storage.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-phone-mode.js`
+- `js/pocket-overlays-init.js`
+
+Tests and documentation:
+
+- `tests/pe-persistence-contract.test.js`
+- `tests/device-changes-resolution.test.js`
+- `docs/DEVICE_CHANGES_CONTRACT.md`
+- `docs/P015_ARCHITECTURE_SECURITY_AUDIT.md`
+- `docs/CODEX_REPORT.md`
+
+The PE harness loads the new active `pocket-device-changes.js` owner in actual `index.html` order and now asserts the restored recovery operation's positive sequence as well as its type. No existing production contract was weakened. No package file, dependency, truth-file schema, PE generated runtime or personal data file changed.
+
+### Focused validation
+
+Node:
+
+~~~text
+v23.11.0
+~~~
+
+Existing PE regression command:
+
+~~~sh
+node --test tests/pe-persistence-contract.test.js
+~~~
+
+Result:
+
+~~~text
+94 tests, 94 passed, 0 failed
+~~~
+
+P016 focused command:
+
+~~~sh
+node --test tests/device-changes-resolution.test.js
+~~~
+
+Result:
+
+~~~text
+54 tests, 54 passed, 0 failed
+~~~
+
+Combined focused result:
+
+~~~text
+148 tests, 148 passed, 0 failed
+~~~
+
+The P016 suite executes actual comparison, operation-history, storage, file-session and canonical PE apply/save production source with synthetic documents, controlled VM contexts, in-memory localStorage and instrumented fake handles. It covers meaningful comparison, no-BASE review, BASE validation and pressure fallback, ambiguous and lossy-input rejection, three-way combination, differences requiring a choice, Keep both and tombstones, structural rejection, exact visible-device safety, detached session rotation, A/B same-name and different-name write isolation, picker cancellation, successful picked-destination adoption, PE source-identity rejection and detached PE Save, Phone/manual routing and user-facing focus/keyboard wording.
+
+The 54 focused cases also cover deterministic descriptors for every supported mutation category, stable per-transition sequences, high-water restoration, full-DEVICE authority over misleading metadata, no truth-JSON leakage, DEVICE-first pressure fallback, valid zero-node documents, corrupt tree-less safety rejection, continued-draft refresh, PiP decision isolation, moved-out DEVICE branches under Keep both, duplicate-order Keep both permutation stability, contributor-correct manual-choice revisions, active-normaliser extras-budget rejection, dependency-safe parent/descendant delete-versus-edit choices, ancestor restoration, and sequence-ceiling handling of newer edits during a delayed write.
+
+Static validation:
+
+- all production JavaScript under `js/`: passed `node --check`;
+- changed test JavaScript and `sw.js`: passed `node --check`;
+- every committed JSON fixture: passed `JSON.parse`;
+- Markdown code fences: balanced;
+- `git diff --check`: passed;
+- final diff review: only the task-relevant production, focused test and documentation files listed above changed.
+
+`node tools/pocket-check.js` and `npm run check` were not run.
+
+### Physical browser acceptance
+
+Murray's physical browser acceptance remains required. The exact 32-step disposable-file checklist is in `docs/DEVICE_CHANGES_CONTRACT.md`, section 17.
+
+It covers file/device decisions, cancellation safety, same-name and different-name A/B files, detached Save to a new destination, automatic and choice-required combination, Keep both with descendants/Notes/Outline, pre-P016 no-BASE handling, review, Phone mode, stale PE rejection and reopen-after-save persistence. The contract adds a separate delayed-write save-race rehearsal without changing the required 32 numbered steps.
+
+### Completion boundary
+
+Final parent SHA: `b5733cf7854dcae166270f72f619e4e626de9f14`
+
+The exact-title P016 commit containing this report must be pushed directly to `origin/main`, fetched again, verified as a child of the parent above and confirmed with a clean worktree before the task response may report COMPLETE.
+
 ## POCKET TASK P015 — AUDIT ARCHITECTURE, SECURITY AND FAILURE MODES
 
 Title: Audit architecture, security and failure modes

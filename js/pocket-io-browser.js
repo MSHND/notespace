@@ -22,6 +22,11 @@ function openPopupFallback() {
 }
 
 async function openPipWindow() {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) {
+    setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
+    return;
+  }
   if (isPipMode) {
     setStatus("Already in pop-out mode.", "warn");
     return;
@@ -100,7 +105,18 @@ function jsonFilePickerOptions() {
 
 function pocketFileState() {
   if (!state.pocketFile || typeof state.pocketFile !== "object") {
-    state.pocketFile = { writable: false, displayName: "", recentName: "", pendingName: "", gateMode: "", pipSession: false };
+    state.pocketFile = {
+      writable: false,
+      displayName: "",
+      recentName: "",
+      pendingName: "",
+      gateMode: "",
+      pipSession: false,
+      detachedDeviceChanges: false,
+    };
+  }
+  if (typeof state.pocketFile.detachedDeviceChanges !== "boolean") {
+    state.pocketFile.detachedDeviceChanges = false;
   }
   return state.pocketFile;
 }
@@ -111,20 +127,32 @@ function setPocketFileSession(handle, displayName, options = {}) {
   pendingPocketFileHandle = null;
   const nextHandle = handle || null;
   const nextName = cleanText(displayName, 120);
+  const nextDetached = options.detachedDeviceChanges === true
+    && !nextHandle
+    && options.pipSession !== true;
   const nextWritable = !!nextHandle || options.pipSession === true;
   const nextPip = options.pipSession === true;
   const session = pocketFileState();
   const targetChanged = truthFileHandle !== nextHandle
     || session.writable !== nextWritable
-    || session.pipSession !== nextPip;
+    || session.pipSession !== nextPip
+    || session.detachedDeviceChanges !== nextDetached;
   truthFileHandle = nextHandle;
   session.writable = nextWritable;
   session.displayName = nextName;
   session.pendingName = "";
   session.gateMode = "";
   session.pipSession = nextPip;
+  session.detachedDeviceChanges = nextDetached;
   if (targetChanged || options.forceNewSession === true) pocketFileSessionId += 1;
   return session;
+}
+
+function setDetachedPocketDocumentSession(displayName = "Device changes") {
+  return setPocketFileSession(null, displayName, {
+    detachedDeviceChanges: true,
+    forceNewSession: true,
+  });
 }
 
 function clearPocketFileSession(options = {}) {
@@ -133,13 +161,15 @@ function clearPocketFileSession(options = {}) {
   const targetChanged = !!truthFileHandle
     || session.writable === true
     || !!session.displayName
-    || session.pipSession === true;
+    || session.pipSession === true
+    || session.detachedDeviceChanges === true;
   truthFileHandle = null;
   session.writable = false;
   session.displayName = "";
   session.pendingName = "";
   session.gateMode = "";
   session.pipSession = false;
+  session.detachedDeviceChanges = false;
   if (options.keepRecent !== true) session.recentName = "";
   if (targetChanged) pocketFileSessionId += 1;
 }
@@ -156,13 +186,17 @@ function capturePocketFileSaveSession() {
     displayName: cleanText(session.displayName, 120),
     writable: session.writable === true,
     pipSession: session.pipSession === true,
+    detachedDeviceChanges: session.detachedDeviceChanges === true,
   };
 }
 
 function isPocketFileSaveSessionCurrent(snapshot) {
+  const session = pocketFileState();
   return !!snapshot
     && snapshot.id === pocketFileSessionId
-    && snapshot.handle === truthFileHandle;
+    && snapshot.handle === truthFileHandle
+    && snapshot.pipSession === (session.pipSession === true)
+    && snapshot.detachedDeviceChanges === (session.detachedDeviceChanges === true);
 }
 
 function capturePocketEditorSourceIdentity() {
@@ -187,25 +221,44 @@ function renewPocketDocumentSession() {
   const session = pocketFileState();
   setPocketFileSession(truthFileHandle, session.displayName || state.source?.fileName, {
     pipSession: session.pipSession === true,
+    detachedDeviceChanges: session.detachedDeviceChanges === true,
     forceNewSession: true,
   });
   return capturePocketEditorSourceIdentity();
 }
 
 function adoptPocketDocumentFromPip(snapshot) {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) {
+    setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
+    return false;
+  }
   return typeof adoptPocketLiteSessionState === "function" && adoptPocketLiteSessionState(snapshot);
 }
 
 function canShowPocketTree() {
   const session = pocketFileState();
-  return hasWritablePocketFile() || (isPipMode && session.pipSession === true);
+  return hasWritablePocketFile()
+    || (isPipMode && session.pipSession === true)
+    || session.detachedDeviceChanges === true;
 }
 
 function canModifyPocket() {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) {
+    return false;
+  }
   return canShowPocketTree();
 }
 
 function showPocketFileGatePrompt() {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) {
+    if (typeof setStatus === "function") {
+      setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
+    }
+    return;
+  }
   pocketFileState().gateMode = "blocked";
   if (typeof renderTree === "function") renderTree();
   if (typeof setStatus === "function") {
@@ -403,7 +456,10 @@ async function loadFromFileHandle(handle, options = {}) {
     if (!isPocketEditorSourceIdentityCurrent(fileSession.adoptedIdentity)) return true;
     void storeRecentPocketFileMeta(file.name || handle.name);
     pocketFileState().recentName = cleanText(file.name || handle.name, 120);
-    setStatus("Pocket file loaded. Changes will save in the right place.", "ok", { durationMs: 5200 });
+    if (!(typeof window.isPocketDeviceChangesDecisionOpen === "function"
+        && window.isPocketDeviceChangesDecisionOpen())) {
+      setStatus("Pocket file loaded. Changes will save in the right place.", "ok", { durationMs: 5200 });
+    }
     refreshMeta();
     return true;
   } catch (err) {
@@ -415,6 +471,11 @@ async function loadFromFileHandle(handle, options = {}) {
 }
 
 async function openPocketFile() {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) {
+    setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
+    return false;
+  }
   if (typeof window.showOpenFilePicker !== "function") {
     setStatus("Pocket file loading is not available in this browser.", "warn", { durationMs: 6200 });
     return false;
@@ -461,7 +522,7 @@ async function writePocketPayloadToHandle(payload, handle) {
 
 async function writeTruthFile(payload, options = {}) {
   const expectedSession = options.expectedSession || null;
-  const activeHandle = expectedSession && expectedSession.handle ? expectedSession.handle : truthFileHandle;
+  const activeHandle = expectedSession ? expectedSession.handle : truthFileHandle;
   const expectedSessionIsCurrent = () => !expectedSession || isPocketFileSaveSessionCurrent(expectedSession);
   const resolveSavePicker = () => {
     const scopes = [window];
@@ -560,6 +621,38 @@ function isPocketPayloadShape(parsed) {
   return schema === "portal.export.v1" || schema === "portal.mtt.web.v1" || schema === "portal.sync.v1";
 }
 
+function buildLoadedPocketComparisonDocument(norm, parsed) {
+  const owner = window.PocketDeviceChanges;
+  const normalised = {
+    nodes: Array.isArray(norm?.nodes) ? norm.nodes : [],
+    tombstones: Array.isArray(norm?.tombstones) ? norm.tombstones : [],
+    rootExtras: norm?.rootExtras || {},
+    dataExtras: norm?.dataExtras || {},
+  };
+  if (!owner || typeof owner.coerceDocument !== "function") {
+    return {
+      schema: "pocket.deviceChanges.comparisonInput.v1",
+      document: normalised,
+      combinationSafe: false,
+    };
+  }
+  const raw = owner.coerceDocument(parsed);
+  if (!raw || !raw.ok) {
+    return {
+      schema: "pocket.deviceChanges.comparisonInput.v1",
+      document: normalised,
+      combinationSafe: false,
+    };
+  }
+  return {
+    schema: "pocket.deviceChanges.comparisonInput.v1",
+    document: raw.document,
+    combinationSafe: raw.ambiguousTreeCopies !== true
+      && typeof owner.documentsEqual === "function"
+      && owner.documentsEqual(raw.document, normalised),
+  };
+}
+
 function payloadForNewPocketFile() {
   const recovery = typeof readLocalSafetySnapshot === "function" ? readLocalSafetySnapshot() : null;
   const recoveredPayload = recovery?.parsed?.payload;
@@ -570,6 +663,11 @@ function payloadForNewPocketFile() {
 }
 
 async function createNewPocketFile() {
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) {
+    setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
+    return false;
+  }
   if (typeof window.showSaveFilePicker !== "function") {
     setStatus("Pocket file creation is not available in this browser.", "warn", { durationMs: 6200 });
     return false;
@@ -596,9 +694,17 @@ async function createNewPocketFile() {
       schema: norm.schema,
       fileName: name,
       writtenAt: norm.writtenAt || payload.writtenAt || "",
-    }, { skipLocalSafetyCheck: true });
+    }, {
+      skipLocalSafetyCheck: true,
+      establishDocumentBaseline: true,
+      baselinePayload: payload,
+    });
     pocketFileState().recentName = name;
-    state.ops = [];
+    if (typeof adoptPocketOperations === "function") {
+      adoptPocketOperations([], 0);
+    } else {
+      state.ops = [];
+    }
     clearLocalSafetySnapshot();
     clearConflictGuard();
     markSavedNow(payload);
@@ -687,10 +793,12 @@ async function exportTree(options = {}) {
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, "no-pocket-file");
     }
-    if (state.nodes.length === 0) return exportTreeResult(options, false, "empty");
     if (shouldPauseForStaleExportGuard(options)) return exportTreeResult(options, false, "stale-guard");
     const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
-    if (opsAtSaveStart === 0) {
+    const saveStartHighestSequence = typeof getPocketHighestOperationSequence === "function"
+      ? getPocketHighestOperationSequence()
+      : opsAtSaveStart;
+    if (opsAtSaveStart === 0 && saveSession.detachedDeviceChanges !== true) {
       clearLocalSafetySnapshot();
       setStatus(backupProofLabel(readLastBackupMeta()) || "Already saved.", "ok", { durationMs: 4200 });
       flashSaveChip("Safe");
@@ -701,7 +809,13 @@ async function exportTree(options = {}) {
     // into this payload and their ops are preserved as unsaved.
     const payload = buildPocketPayload(nowIso());
     saveLastSaveSnapshot(payload);
-    const writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
+    state.activeSaveOperationCeiling = saveStartHighestSequence;
+    let writeResult;
+    try {
+      writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
+    } finally {
+      state.activeSaveOperationCeiling = 0;
+    }
     const pickedFileAdoption = !!(
       writeResult
       && writeResult.ok
@@ -714,9 +828,24 @@ async function exportTree(options = {}) {
     }
     if (writeResult.ok) {
       markSavedNow(payload);
-      // Only clear ops that existed at save start.
-      state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
-      if (state.ops.length > 0) {
+      state.source.writtenAt = cleanText(payload.writtenAt || payload.exportedAt, 40);
+      if (typeof establishPocketDocumentBaseline === "function") {
+        establishPocketDocumentBaseline(payload, state.source);
+      }
+      state.detachedSafetyBase = null;
+      // Only clear browser change records covered by the frozen payload.
+      if (typeof retainPocketOperationsAfterSequence === "function") {
+        retainPocketOperationsAfterSequence(saveStartHighestSequence);
+      } else {
+        state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
+      }
+      const newerSafetyStored = state.ops.length > 0
+        ? saveLocalSafetySnapshot("newer-change-after-save")
+        : true;
+      if (state.ops.length === 0) clearLocalSafetySnapshot();
+      if (state.ops.length > 0 && !newerSafetyStored) {
+        setStatus(`Saved to Pocket file. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain open, but Pocket could not refresh the device safety copy.`, "warn", { durationMs: 7200 });
+      } else if (state.ops.length > 0) {
         setStatus(`${backupProofLabel()}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} still local.`, "ok", { durationMs: 5600 });
       } else if (writeResult.target === "opened-file") {
         setStatus("Saved to Pocket file.", "ok", { durationMs: 5200 });
@@ -725,8 +854,7 @@ async function exportTree(options = {}) {
       } else {
         setStatus(backupProofLabel(), "ok", { durationMs: 5200 });
       }
-      flashSaveChip("Safe");
-      clearLocalSafetySnapshot();
+      flashSaveChip(newerSafetyStored ? "Safe" : "Check");
       clearConflictGuard();
       persistPipSnapshot();
       refocusTreeNavigation(state.selectedId);
@@ -745,6 +873,11 @@ async function exportTree(options = {}) {
         ? "Save access denied. Use main Save to choose a writable file."
         : "Could not save from here. Use Save in the main pocket window.";
       setStatus(message, "warn");
+      refocusTreeNavigation(state.selectedId);
+      return exportTreeResult(options, false, writeResult.reason || "write-failed");
+    }
+    if (saveSession.detachedDeviceChanges === true) {
+      setStatus("Could not save that file. Your device changes are still open.", "warn", { durationMs: 6200 });
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, writeResult.reason || "write-failed");
     }
@@ -797,6 +930,10 @@ async function loadFromFile(file, options = {}) {
     );
     pendingFileSession.adoptedIdentity = capturePocketEditorSourceIdentity();
   };
+  const loadedStateOptions = (extra = {}) => ({
+    ...extra,
+    establishDocumentBaseline: !!pendingFileSession,
+  });
   if (!canShowPocketTree() && !pendingFileSession) {
     setStatus("Use Choose Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
     return false;
@@ -821,13 +958,16 @@ async function loadFromFile(file, options = {}) {
         schema: latestChange.norm.schema || "pocket.change.v1",
         fileName: cleanText(file.name, 120),
         writtenAt: latestChange.writtenAt || latestChange.norm.writtenAt || "",
-      });
+      }, loadedStateOptions());
       saveAutoCache(latestChange.norm, {
         schema: latestChange.norm.schema || "pocket.change.v1",
         fileName: cleanText(file.name, 120),
         writtenAt: latestChange.writtenAt || latestChange.norm.writtenAt || "",
       });
-      setStatus(`pocket opened from change log.`, "ok");
+      if (!(typeof window.isPocketDeviceChangesDecisionOpen === "function"
+          && window.isPocketDeviceChangesDecisionOpen())) {
+        setStatus("pocket opened from change log.", "ok");
+      }
       return true;
     }
     if (!opts.allowImportFallback) {
@@ -856,13 +996,18 @@ async function loadFromFile(file, options = {}) {
         schema: norm.schema || "",
         fileName: cleanText(file.name, 120),
         writtenAt: norm.writtenAt || "",
-      }, { skipLocalSafetyCheck: true });
+      }, loadedStateOptions({
+        comparisonDocument: buildLoadedPocketComparisonDocument(norm, parsed),
+      }));
       saveAutoCache(norm, {
         schema: norm.schema || "",
         fileName: cleanText(file.name, 120),
         writtenAt: norm.writtenAt || "",
       });
-      setStatus("Pocket file loaded.", "ok");
+      if (!(typeof window.isPocketDeviceChangesDecisionOpen === "function"
+          && window.isPocketDeviceChangesDecisionOpen())) {
+        setStatus("Pocket file loaded.", "ok");
+      }
       return true;
     }
     if (!opts.allowImportFallback) {
@@ -887,13 +1032,18 @@ async function loadFromFile(file, options = {}) {
     schema: norm.schema || "",
     fileName: cleanText(file.name, 120),
     writtenAt: norm.writtenAt || "",
-  });
+  }, loadedStateOptions({
+    comparisonDocument: buildLoadedPocketComparisonDocument(norm, parsed),
+  }));
   saveAutoCache(norm, {
     schema: norm.schema || "",
     fileName: cleanText(file.name, 120),
     writtenAt: norm.writtenAt || "",
   });
-  setStatus(`pocket opened.`, "ok");
+  if (!(typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen())) {
+    setStatus("pocket opened.", "ok");
+  }
   return true;
 }
 

@@ -182,6 +182,8 @@ Cleanup, documentation drift, future design consideration or a hypothesis which 
 - **Suggested future test:** synthetic A/B handles with different and identical filenames, covering automatic offer, manual trail restore and Phone mode; assert B receives zero writes until the user explicitly chooses B as the recovery destination
 - **Product decision required:** whether a cross-source recovery should be rejected, opened read-only or allowed only through an explicit “restore into this file” confirmation
 
+**P016 resolution note (2026-07-26):** Addressed by the exact-title commit `P016 Handle file and device changes safely`, which contains this note. P016 replaces direct recovery adoption with an explicit file/device decision, opens device or combined content in a handle-free detached session, and requires a newly picked destination before any write.
+
 ### P015-F02: Opening a Vault retains the previous JSON truth handle
 
 - **Severity:** RED

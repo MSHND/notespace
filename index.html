@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="topbar.css">
   <link rel="stylesheet" href="editor.css">
   <link rel="stylesheet" href="pocket-ui-polish.css">
+  <link rel="stylesheet" href="device-changes.css">
 </head>
 <body>
   <div class="app">
@@ -75,9 +76,76 @@
         <button id="cmdSaveVault" class="commandBtn" type="button"><span>save vault</span><span class="commandHint">encrypted</span></button>
         <button id="cmdOpenVault" class="commandBtn" type="button"><span>open vault</span><span class="commandHint">decrypt</span></button>
         <button id="cmdHealth" class="commandBtn" type="button"><span>Health check</span><span class="commandHint">calm status</span></button>
-        <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Restore previous local version</span><span class="commandHint">safety</span></button>
+        <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Review an earlier device version</span><span class="commandHint">safety</span></button>
         <button id="cmdHelp" class="commandBtn" type="button"><span>Show controls</span><span class="commandHint">?</span></button>
       </div>
+    </div>
+
+    <div id="deviceChangesOverlay" class="deviceChangesOverlay" hidden>
+      <section class="deviceChangesCard" role="dialog" aria-modal="true" aria-labelledby="deviceChangesTitle" aria-describedby="deviceChangesIntro deviceChangesNotice">
+        <header class="deviceChangesHeader">
+          <h2 id="deviceChangesTitle">Pocket found changes on this device that aren’t in the file you opened.</h2>
+          <p id="deviceChangesIntro">How would you like to handle the difference?</p>
+        </header>
+        <div id="deviceChangesIdentity" class="deviceChangesIdentity">
+          <section>
+            <h3>File</h3>
+            <strong id="deviceChangesFileName">Selected Pocket file</strong>
+            <span id="deviceChangesFileTime"></span>
+          </section>
+          <section>
+            <h3>Device changes</h3>
+            <strong id="deviceChangesDeviceTime"></strong>
+            <span id="deviceChangesDeviceSource"></span>
+          </section>
+        </div>
+        <p id="deviceChangesNotice" class="deviceChangesNotice" role="status" aria-live="polite"></p>
+        <div id="deviceChangesDecisionView">
+          <div id="deviceChangesChoices" class="deviceChangesChoices">
+            <button id="deviceChangesUseFile" class="deviceChangesChoice" type="button">
+              <strong>Use the file</strong>
+              <span>Open the version in the file you chose.</span>
+            </button>
+            <button id="deviceChangesUseDevice" class="deviceChangesChoice" type="button">
+              <strong>Use the device changes</strong>
+              <span>Open the changes Pocket kept safe on this device.</span>
+            </button>
+            <button id="deviceChangesCombine" class="deviceChangesChoice" type="button">
+              <strong>Combine what can be combined</strong>
+              <span>Keep changes from both versions where Pocket can do that safely.</span>
+            </button>
+            <button id="deviceChangesReviewBtn" class="deviceChangesChoice" type="button">
+              <strong>Review the differences</strong>
+              <span>See what changed before deciding.</span>
+            </button>
+            <button id="deviceChangesBack" class="deviceChangesChoice compact" type="button" hidden>
+              <strong>Back</strong>
+              <span>Return to the choices.</span>
+            </button>
+          </div>
+        </div>
+        <section id="deviceChangesReview" class="deviceChangesReview" aria-labelledby="deviceChangesReviewTitle" hidden>
+          <h3 id="deviceChangesReviewTitle">Review the differences</h3>
+          <div id="deviceChangesReviewList" class="deviceChangesReviewList"></div>
+        </section>
+        <section id="deviceChangesChoiceView" class="deviceChangesChoiceView" aria-labelledby="deviceChangesChoiceTitle" hidden>
+          <h3 id="deviceChangesChoiceTitle">This item changed in both versions.</h3>
+          <p id="deviceChangesChoiceProgress" class="deviceChangesChoiceProgress" aria-live="polite"></p>
+          <div id="deviceChangesChoicePath" class="deviceChangesChoicePath"></div>
+          <div id="deviceChangesChoiceFields" class="deviceChangesChoiceFields"></div>
+          <div class="deviceChangesValues">
+            <section>
+              <h4>File version</h4>
+              <pre id="deviceChangesFileValue"></pre>
+            </section>
+            <section>
+              <h4>Device version</h4>
+              <pre id="deviceChangesDeviceValue"></pre>
+            </section>
+          </div>
+          <div id="deviceChangesChoiceActions" class="deviceChangesChoiceActions"></div>
+        </section>
+      </section>
     </div>
 
     <div id="controlsOverlay" class="controlsOverlay" hidden>
@@ -139,6 +207,7 @@
   <script src="js/pocket-scroll-polish.js"></script>
   <script src="js/pocket-render.js"></script>
   <script src="js/pocket-io-browser.js"></script>
+  <script src="js/pocket-device-changes.js"></script>
   <script src="js/pocket-crypto.js"></script>
   <script src="js/pocket-vault.js"></script>
   <script src="js/pocket-vault-io-browser.js"></script>

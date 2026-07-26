@@ -1,11 +1,235 @@
 /* Operation history, undo, status toasts, save-state labelling, inline-edit setup. */
 
-function recordOp(op) {
-  state.ops.push({
-    ...op,
-    at: nowIso(),
+function clonePocketOperationValue(value) {
+  try {
+    const owner = window.PocketDeviceChanges;
+    if (owner && typeof owner.cloneJsonCompatible === "function") {
+      const cloned = owner.cloneJsonCompatible(value);
+      if (cloned && cloned.ok) return cloned.value;
+    }
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function validPocketOperationSequence(value) {
+  const sequence = Number(value);
+  return Number.isSafeInteger(sequence) && sequence > 0 ? sequence : 0;
+}
+
+function persistedPocketOperationHighWater() {
+  try {
+    return validPocketOperationSequence(localStorage.getItem(DEVICE_CHANGE_SEQUENCE_KEY));
+  } catch {
+    return 0;
+  }
+}
+
+function rememberPocketOperationHighWater(value) {
+  const sequence = validPocketOperationSequence(value);
+  if (!sequence) return;
+  state.operationHighWater = Math.max(
+    validPocketOperationSequence(state.operationHighWater),
+    sequence
+  );
+  try {
+    localStorage.setItem(DEVICE_CHANGE_SEQUENCE_KEY, String(state.operationHighWater));
+  } catch {}
+}
+
+function allocatePocketOperationSequence() {
+  const current = Math.max(
+    validPocketOperationSequence(state.operationHighWater),
+    persistedPocketOperationHighWater()
+  );
+  const next = current < Number.MAX_SAFE_INTEGER ? current + 1 : 1;
+  rememberPocketOperationHighWater(next);
+  return next;
+}
+
+function normalisePocketOperations(rawOperations, storedHighWater = 0) {
+  const source = Array.isArray(rawOperations) ? rawOperations : [];
+  const cloned = source.map((operation) => {
+    const value = clonePocketOperationValue(operation);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value
+      : { type: "change" };
   });
-  saveLocalSafetySnapshot(op && op.type ? op.type : "change");
+  let previous = 0;
+  const validInOrder = cloned.every((operation) => {
+    const sequence = validPocketOperationSequence(operation.seq);
+    const valid = sequence > previous;
+    previous = sequence;
+    return valid;
+  });
+
+  if (validInOrder) {
+    for (const operation of cloned) {
+      operation.seq = validPocketOperationSequence(operation.seq);
+    }
+    const highest = cloned.reduce((max, operation) => {
+      return Math.max(max, validPocketOperationSequence(operation.seq));
+    }, validPocketOperationSequence(storedHighWater));
+    rememberPocketOperationHighWater(highest);
+    return { operations: cloned, highestSequence: highest };
+  }
+
+  let highest = Math.max(
+    validPocketOperationSequence(state.operationHighWater),
+    persistedPocketOperationHighWater(),
+    validPocketOperationSequence(storedHighWater)
+  );
+  for (const operation of cloned) {
+    highest = highest < Number.MAX_SAFE_INTEGER ? highest + 1 : 1;
+    operation.seq = highest;
+  }
+  rememberPocketOperationHighWater(highest);
+  return { operations: cloned, highestSequence: highest };
+}
+
+function capturePocketOperationDocument() {
+  const owner = window.PocketDeviceChanges;
+  if (!owner || typeof owner.coerceDocument !== "function") return null;
+  const result = owner.coerceDocument({
+    nodes: state.nodes,
+    tombstones: state.tombstones,
+    rootExtras: state.rootExtras,
+    dataExtras: state.dataExtras,
+  });
+  if (!result || !result.ok) return null;
+  const cloned = clonePocketOperationValue(result.document);
+  return cloned && typeof cloned === "object" ? cloned : null;
+}
+
+function resetPocketOperationAnchor(input = null) {
+  if (input) {
+    const owner = window.PocketDeviceChanges;
+    const result = owner && typeof owner.coerceDocument === "function"
+      ? owner.coerceDocument(input)
+      : null;
+    state.operationDocumentAnchor = result && result.ok
+      ? clonePocketOperationValue(result.document)
+      : capturePocketOperationDocument();
+  } else {
+    state.operationDocumentAnchor = capturePocketOperationDocument();
+  }
+  return !!state.operationDocumentAnchor;
+}
+
+function adoptPocketOperations(rawOperations, storedHighWater = 0, options = {}) {
+  const prepared = normalisePocketOperations(rawOperations, storedHighWater);
+  state.ops = prepared.operations;
+  if (options.resetAnchor !== false) resetPocketOperationAnchor(options.anchor || null);
+  return prepared;
+}
+
+function getPocketHighestOperationSequence() {
+  const prepared = normalisePocketOperations(
+    state.ops,
+    validPocketOperationSequence(state.operationHighWater)
+  );
+  state.ops = prepared.operations;
+  return state.ops.reduce((max, operation) => {
+    return Math.max(max, validPocketOperationSequence(operation.seq));
+  }, 0);
+}
+
+function retainPocketOperationsAfterSequence(sequence) {
+  const boundary = validPocketOperationSequence(sequence);
+  const prepared = normalisePocketOperations(
+    state.ops,
+    validPocketOperationSequence(state.operationHighWater)
+  );
+  state.ops = prepared.operations.filter((operation) => {
+    return validPocketOperationSequence(operation.seq) > boundary;
+  });
+  resetPocketOperationAnchor();
+  return state.ops.length;
+}
+
+function discardPocketOperationSequence(sequence) {
+  const target = validPocketOperationSequence(sequence);
+  if (!target || target <= validPocketOperationSequence(state.activeSaveOperationCeiling)) return false;
+  const before = Array.isArray(state.ops) ? state.ops.length : 0;
+  state.ops = (Array.isArray(state.ops) ? state.ops : []).filter((operation) => {
+    return validPocketOperationSequence(operation.seq) !== target;
+  });
+  if (state.ops.length === before) return false;
+  resetPocketOperationAnchor();
+  return true;
+}
+
+function capturePocketDeviceChangeSet(
+  capturedAt = nowIso(),
+  sourceInfo = state.source,
+  baselineValue = null,
+  rawOperations = state.ops
+) {
+  const prepared = normalisePocketOperations(
+    rawOperations,
+    validPocketOperationSequence(state.operationHighWater)
+  );
+  if (rawOperations === state.ops) state.ops = prepared.operations;
+  const baseline = baselineValue && typeof baselineValue === "object"
+    ? baselineValue
+    : (typeof currentPocketSafetyBaseline === "function" ? currentPocketSafetyBaseline() : null);
+  const records = [];
+  for (const operation of prepared.operations) {
+    const descriptions = Array.isArray(operation.changes)
+      ? operation.changes
+      : (operation.change && typeof operation.change === "object" ? [operation.change] : []);
+    for (const description of descriptions) {
+      const cloned = clonePocketOperationValue(description);
+      if (!cloned || typeof cloned !== "object" || Array.isArray(cloned)) continue;
+      records.push({
+        ...cloned,
+        sequence: validPocketOperationSequence(operation.seq),
+        at: cleanText(operation.at, 40),
+        operationType: cleanText(operation.type, 80),
+      });
+    }
+  }
+  const highestSequence = prepared.operations.reduce((max, operation) => {
+    return Math.max(max, validPocketOperationSequence(operation.seq));
+  }, 0);
+  return {
+    schema: "pocket.deviceChanges.v1",
+    baseFingerprint: cleanText(baseline?.fingerprint, 120),
+    baseSource: clonePocketOperationValue(baseline?.source || {}) || {},
+    capturedAt: cleanText(capturedAt, 40),
+    sourceFileName: cleanText(sourceInfo?.fileName, 120),
+    records,
+    highestSequence,
+  };
+}
+
+function recordOp(op) {
+  const supplied = clonePocketOperationValue(op);
+  const entry = supplied && typeof supplied === "object" && !Array.isArray(supplied)
+    ? supplied
+    : { type: "change" };
+  delete entry.seq;
+  delete entry.at;
+  const before = state.operationDocumentAnchor
+    ? clonePocketOperationValue(state.operationDocumentAnchor)
+    : clonePocketOperationValue(state.documentBaseline?.payload || null);
+  const after = capturePocketOperationDocument();
+  if (!entry.change && !Array.isArray(entry.changes) && before && after) {
+    const owner = window.PocketDeviceChanges;
+    const described = owner && typeof owner.describeDocumentTransition === "function"
+      ? owner.describeDocumentTransition(before, after, { operationType: entry.type })
+      : null;
+    if (described && described.ok && described.records.length > 0) {
+      entry.changes = clonePocketOperationValue(described.records) || [];
+    }
+  }
+  entry.seq = allocatePocketOperationSequence();
+  entry.at = nowIso();
+  state.ops.push(entry);
+  state.operationDocumentAnchor = after;
+  saveLocalSafetySnapshot(entry.type || "change");
+  return entry;
 }
 
 function getPocketUnsavedOperationCount() {
@@ -39,6 +263,7 @@ function restoreTreeUndoSnapshot(snapshot) {
   state.collapsed = new Set(Array.isArray(snapshot.collapsed) ? snapshot.collapsed : []);
   clearInlineEditState();
   state.moveMode = false;
+  recordOp({ type: `undo_${cleanText(snapshot.kind, 40) || "tree_change"}` });
   refreshMeta();
   renderTree();
   persistPipSnapshot();
@@ -252,7 +477,7 @@ function refreshMeta() {
   if (el.btnDeletePrimary) el.btnDeletePrimary.disabled = !hasSelection;
   if (el.btnOpenPrimary) el.btnOpenPrimary.disabled = !hasSelection;
   const isSaving = !!state.saveInProgress;
-  el.btnExportTree.disabled = !hasData || isSaving;
+  el.btnExportTree.disabled = isSaving || (!hasData && !hasUnsaved);
   el.btnExportTree.classList.remove("safetySafe", "safetyNeed", "safetyCheck");
   if (isSaving) {
     el.btnExportTree.textContent = "saving...";
