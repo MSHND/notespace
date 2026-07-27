@@ -54,6 +54,20 @@ Ownership:
 - `pocket-editor-cutover-v3.js` routes edit button, command edit, row-menu edit, and double-click into `PocketPeEditor.open`, with old popout as fallback only.
 - `pocket-pe-save-dirty.js` still wraps active PE save/apply and old-details dirty cues. Treat it carefully.
 
+### PE window ownership
+
+`js/pocket-node-popout-window.js` is the sole PE browsing-context owner. Each loaded main Pocket page creates one random in-memory owner token, and each fresh PE receives a separate random popup-instance token. Popup ownership, P012 file-session identity and node-revision identity are independent checks.
+
+New PE windows use the isolated `_blank` creation path and then receive a unique non-sensitive name derived only from the random owner/popup tokens. The former reusable fixed target is not used. Generated HTML is written once only to the newly created window after its `opener` is verified; clean replacement closes the exact owned PE and creates another fresh popup rather than rewriting its document.
+
+The generated runtime exposes its two-token identity through `PocketNodePopoutSession`. The parent validates both tokens and the exact `Window` reference before dirty inspection, attention focus, unsaved-dialog request, close completion, pending-open resumption or Save. Runtime Save reaches `PocketNodePopoutEditor.applyAndSave()` only through `PocketNodePopoutWindow.applyAndSaveFromOwnedPopup()`.
+
+A wrong owner, wrong popup token, inaccessible/navigated window, old page lifetime or lost opener fails closed with `popup-session-changed`. The popup draft remains local and dirty; no mutation, picker or truth write occurs. There is no polling, storage lock, cross-tab channel, automatic reconnection, focus loop or unload-time save.
+
+One main page owns at most one current PE and one pending-open payload. Dirty replacement shows the owned PE's unsaved dialog once; Cancel clears the pending payload, Discard closes without writing, and successful Save closes only after the existing truth persistence succeeds. Another main tab/window, Incognito session, profile or reloaded page owns a different token and can open its own PE independently.
+
+Popup tokens are transport-only. They are never added to state, recovery, truth JSON, node fields or `node.editor`. The browser safety-copy and recovery architecture remains unchanged.
+
 ## 3. Enter / Copy Route
 
 Expected Enter behaviour:

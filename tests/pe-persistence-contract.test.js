@@ -562,6 +562,11 @@ function runtimeProbe(factory, payload) {
 
 function executeControlledRuntime(payload, options = {}) {
   const factory = loadRuntimeFactory();
+  const runtimePayload = {
+    ...payload,
+    popupOwnerToken: payload.popupOwnerToken || "owner_runtime_harness",
+    popupInstanceToken: payload.popupInstanceToken || "popup_runtime_harness",
+  };
   const listeners = new Map();
   const windowListeners = new Map();
   const controls = new Map();
@@ -730,35 +735,45 @@ function executeControlledRuntime(payload, options = {}) {
   controls.get("outlineContextMenu").hidden = true;
   controls.get("unsavedDialog").hidden = true;
 
-  const window = {
-    opener: {
-      closed: false,
-      PocketNodePopoutEditor: {
-        apply(nextPayload) {
-          applyCalls.push(nextPayload);
-          return true;
-        },
-        applyAndSave(nextPayload) {
-          saveCalls.push(nextPayload);
-          if (typeof options.applyAndSave === "function") {
-            return Promise.resolve(options.applyAndSave(nextPayload, saveCalls.length));
-          }
-          return Promise.resolve({
-            ok: true,
-            applied: true,
-            changed: true,
-            exported: true,
-            reason: "exported",
-            nodeUpdatedAt: "2026-01-01T00:00:01.000Z",
-            sourceIdentity: {
-              fileSessionId: nextPayload.fileSessionId,
-              sourceFileName: nextPayload.sourceFileName,
-              sourcePipSession: nextPayload.sourcePipSession,
-            },
-          });
-        },
+  const openerBridge = {
+    closed: options.openerClosed === true,
+    PocketNodePopoutWindow: {
+      applyAndSaveFromOwnedPopup(ownerToken, popupToken, nextPayload, callerWindow) {
+        assert.equal(ownerToken, runtimePayload.popupOwnerToken);
+        assert.equal(popupToken, runtimePayload.popupInstanceToken);
+        assert.strictEqual(callerWindow, window);
+        saveCalls.push(nextPayload);
+        if (typeof options.applyAndSave === "function") {
+          return Promise.resolve(options.applyAndSave(nextPayload, saveCalls.length));
+        }
+        return Promise.resolve({
+          ok: true,
+          applied: true,
+          changed: true,
+          exported: true,
+          reason: "exported",
+          nodeUpdatedAt: "2026-01-01T00:00:01.000Z",
+          sourceIdentity: {
+            fileSessionId: nextPayload.fileSessionId,
+            sourceFileName: nextPayload.sourceFileName,
+            sourcePipSession: nextPayload.sourcePipSession,
+          },
+        });
+      },
+      completeCloseFromOwnedPopup(ownerToken, popupToken, callerWindow) {
+        assert.strictEqual(callerWindow, window);
+        return callerWindow.PocketNodePopoutSession.requestOwnedClose(ownerToken, popupToken);
+      },
+      cancelPendingOpen(ownerToken, popupToken, callerWindow) {
+        assert.equal(ownerToken, runtimePayload.popupOwnerToken);
+        assert.equal(popupToken, runtimePayload.popupInstanceToken);
+        assert.strictEqual(callerWindow, window);
+        return true;
       },
     },
+  };
+  const window = {
+    opener: openerBridge,
     innerWidth: 1024,
     innerHeight: 768,
     addEventListener(type, handler) {
@@ -779,7 +794,7 @@ function executeControlledRuntime(payload, options = {}) {
     close() { closeCalls += 1; },
     focus() {},
   };
-  const program = factory.build(JSON.stringify(payload));
+  const program = factory.build(JSON.stringify(runtimePayload));
   assert.doesNotThrow(() => new Function(program));
   new Function("window", "document", "navigator", "requestAnimationFrame", "alert", "console", program)(
     window,
@@ -810,6 +825,7 @@ function executeControlledRuntime(payload, options = {}) {
     clipboardWrites,
     classNames,
     closeCalls: () => closeCalls,
+    windowListenerCount: (type) => (windowListeners.get(type) || []).length,
   };
 }
 
@@ -3604,6 +3620,7 @@ test("generated runtime retains dirty content after applied export failure, adop
 
 test("generated runtime keeps stale, switched-file, missing-node, and lossy-save rejections dirty and open", async () => {
   const cases = [
+    ["file-permission-pending", /finish opening the new file/i],
     ["file-session-changed", /different file/i],
     ["node-revision-changed", /changed after/i],
     ["missing-node", /no longer exists/i],
@@ -3621,13 +3638,15 @@ test("generated runtime keeps stale, switched-file, missing-node, and lossy-save
           exported: false,
           reason,
           status: `${reason} — not saved`,
-          message: reason === "details-too-long"
-            ? "The readable text contains 4,001 characters. Pocket can safely save up to 4,000. Nothing was changed."
-            : reason === "outline-too-many-blocks"
-              ? "This outline has 401 rows. Pocket can safely save up to 400. Nothing was changed."
-              : reason === "duplicate-outline-block-id"
-                ? "This outline contains duplicate internal row IDs. Pocket did not save it because doing so could alter the wrong row. Nothing was changed."
-                : "",
+          message: reason === "file-permission-pending"
+            ? "Finish opening the new file, or cancel, before saving this editor. Your editor changes are still here."
+            : reason === "details-too-long"
+              ? "The readable text contains 4,001 characters. Pocket can safely save up to 4,000. Nothing was changed."
+              : reason === "outline-too-many-blocks"
+                ? "This outline has 401 rows. Pocket can safely save up to 400. Nothing was changed."
+                : reason === "duplicate-outline-block-id"
+                  ? "This outline contains duplicate internal row IDs. Pocket did not save it because doing so could alter the wrong row. Nothing was changed."
+                  : "",
         };
       },
     });
@@ -3645,6 +3664,63 @@ test("generated runtime keeps stale, switched-file, missing-node, and lossy-save
     assert.equal(runtime.controls.get("unsavedDialog").hidden, false, reason);
     assert.equal(runtime.closeCalls(), 0, reason);
   }
+});
+
+test("generated runtime exposes transient popup identity and sends saves only through the owner bridge", async () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    popupOwnerToken: "owner_transient_runtime",
+    popupInstanceToken: "popup_transient_runtime",
+  }));
+  const identity = runtime.window.PocketNodePopoutSession.getIdentity();
+  assert.deepEqual(identity, {
+    ownerToken: "owner_transient_runtime",
+    popupToken: "popup_transient_runtime",
+  });
+  assert.equal(runtime.window.PocketNodePopoutSession.matches(identity.ownerToken, identity.popupToken), true);
+  assert.equal(runtime.window.PocketNodePopoutSession.matches("owner_foreign", identity.popupToken), false);
+  assert.equal(runtime.window.PocketNodePopoutSession.matches(identity.ownerToken, "popup_foreign"), false);
+  assert.equal(runtime.program.includes("applyAndSaveFromOwnedPopup"), true);
+  assert.equal(runtime.program.includes("window.opener.PocketNodePopoutEditor"), false);
+  assert.equal(runtime.windowListenerCount("beforeunload"), 1);
+
+  const body = runtime.controls.get("bodyInput");
+  body.value = "Transient identity must not persist";
+  body.dispatch("input");
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.equal(runtime.saveCalls.length, 1);
+  assert.equal(Object.hasOwn(runtime.saveCalls[0], "popupOwnerToken"), false);
+  assert.equal(Object.hasOwn(runtime.saveCalls[0], "popupInstanceToken"), false);
+  assert.equal(JSON.stringify(runtime.saveCalls[0]).includes(identity.ownerToken), false);
+  assert.equal(JSON.stringify(runtime.saveCalls[0]).includes(identity.popupToken), false);
+});
+
+test("generated runtime remains responsive and dirty when its opener is gone", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload(), { openerClosed: true });
+  const body = runtime.controls.get("bodyInput");
+  body.value = "Keep this disconnected draft";
+  body.dispatch("input");
+
+  runtime.controls.get("saveCloseBtn").dispatch("click");
+  assert.equal(runtime.saveCalls.length, 0);
+  assert.equal(runtime.closeCalls(), 0);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.match(runtime.controls.get("saveState").textContent, /earlier Pocket window/i);
+  assert.match(runtime.alerts.at(-1), /nothing was changed/i);
+  assert.equal(runtime.windowListenerCount("beforeunload"), 1);
+  assert.equal(runtime.window.dispatch("beforeunload").defaultPrevented, true);
+
+  runtime.controls.get("closeBtn").dispatch("click");
+  assert.equal(runtime.controls.get("unsavedDialog").hidden, false);
+  runtime.controls.get("unsavedCancelBtn").dispatch("click");
+  assert.equal(runtime.controls.get("unsavedDialog").hidden, true);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(runtime.closeCalls(), 0);
+
+  runtime.controls.get("closeBtn").dispatch("click");
+  runtime.controls.get("unsavedDiscardBtn").dispatch("click");
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(runtime.closeCalls(), 1);
 });
 
 test("generated runtime rejects incomplete local save identity without calling the opener", () => {

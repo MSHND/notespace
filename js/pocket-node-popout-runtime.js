@@ -5,6 +5,10 @@
   function build(initialJson) {
     return `(function () {
   var payload = ${initialJson};
+  var ownerToken = typeof payload.popupOwnerToken === "string" ? payload.popupOwnerToken : "";
+  var popupToken = typeof payload.popupInstanceToken === "string" ? payload.popupInstanceToken : "";
+  delete payload.popupOwnerToken;
+  delete payload.popupInstanceToken;
   var readOnly = payload.readOnly === true;
   var dirty = false;
   var editGeneration = 0;
@@ -539,7 +543,9 @@
     return nextPayload;
   }
   function hasCompleteSaveContext() {
-    return Number.isSafeInteger(payload.fileSessionId)
+    return ownerToken.length > 0
+      && popupToken.length > 0
+      && Number.isSafeInteger(payload.fileSessionId)
       && payload.fileSessionId >= 0
       && typeof payload.sourceFileName === "string"
       && payload.sourceFileName.length <= 120
@@ -551,23 +557,34 @@
   function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else bodyInput.focus({ preventScroll: true }); returnFocus = null; }
   function hideUnsavedDialog() { unsavedDialog.hidden = true; }
   function openerPopoutWindow() { try { return window.opener && !window.opener.closed && window.opener.PocketNodePopoutWindow ? window.opener.PocketNodePopoutWindow : null; } catch (_error) { return null; } }
-  function resumePendingOpen() { var target = openerPopoutWindow(); try { return !!(target && typeof target.resumePendingOpen === "function" && target.resumePendingOpen()); } catch (error) { console.error(error); return false; } }
-  function cancelPendingOpen() { var target = openerPopoutWindow(); try { if (target && typeof target.cancelPendingOpen === "function") target.cancelPendingOpen(); } catch (error) { console.error(error); } }
+  function completeOwnedClose() { var target = openerPopoutWindow(); try { return !!(target && typeof target.completeCloseFromOwnedPopup === "function" && target.completeCloseFromOwnedPopup(ownerToken, popupToken, window)); } catch (error) { console.error(error); return false; } }
+  function cancelPendingOpen() { var target = openerPopoutWindow(); try { if (target && typeof target.cancelPendingOpen === "function") target.cancelPendingOpen(ownerToken, popupToken, window); } catch (error) { console.error(error); } }
   function keepEditing() { cancelPendingOpen(); hideUnsavedDialog(); focusEditor(); }
   function showUnsavedDialog() { if (readOnly) return false; returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); return true; }
-  function requestUnsavedProtection() { if (readOnly || !dirty) return false; showUnsavedDialog(); try { window.focus(); } catch (_error) {} return true; }
+  function requestUnsavedProtection() { if (readOnly || !dirty) return false; return showUnsavedDialog(); }
+  function matchesSession(candidateOwnerToken, candidatePopupToken) { return candidateOwnerToken === ownerToken && candidatePopupToken === popupToken; }
   window.PocketNodePopoutSession = Object.freeze({
+    getIdentity: function () { return { ownerToken: ownerToken, popupToken: popupToken }; },
+    matches: matchesSession,
     hasUnsavedChanges: function () { return !readOnly && dirty === true; },
-    requestUnsavedProtection: requestUnsavedProtection
+    requestUnsavedProtection: function (candidateOwnerToken, candidatePopupToken) {
+      return matchesSession(candidateOwnerToken, candidatePopupToken) && requestUnsavedProtection();
+    },
+    requestOwnedClose: function (candidateOwnerToken, candidatePopupToken) {
+      if (!matchesSession(candidateOwnerToken, candidatePopupToken) || (!readOnly && dirty)) return false;
+      allowedToClose = true;
+      window.close();
+      return true;
+    }
   });
-  function discardAndClose() { closeOutlineContextMenu({ restoreFocus: false }); allowedToClose = true; dirty = false; if (resumePendingOpen()) return; window.close(); }
+  function discardAndClose() { closeOutlineContextMenu({ restoreFocus: false }); allowedToClose = true; dirty = false; if (completeOwnedClose()) return; window.close(); }
   function finishSuccessfulSave(closeAfter, label) {
     setDirty(false);
     setSaveState(label || "saved", "saved");
     if (closeAfter) {
       closeOutlineContextMenu({ restoreFocus: false });
       allowedToClose = true;
-      if (resumePendingOpen()) return true;
+      if (completeOwnedClose()) return true;
       window.setTimeout(function () { window.close(); }, 80);
     } else {
       cancelPendingOpen();
@@ -588,6 +605,10 @@
   }
   function saveFailureDetails(result) {
     var reason = result && result.reason ? result.reason : "save-failed";
+    if (reason === "popup-session-changed") return {
+      status: "This editor belongs to an earlier Pocket window — not saved",
+      message: "Pocket could not verify that this editor still belongs to the current window. Nothing was changed. Copy anything you need, then close it and reopen the item from the current Pocket window."
+    };
     if (reason === "file-session-changed") return {
       status: "Different Pocket file — not saved",
       message: "Pocket is now using a different file. Your editor changes were not applied. Copy anything you need, close this editor, and reopen the item from the current file."
@@ -690,25 +711,29 @@
     var saveGeneration = editGeneration;
     var outgoingPayload = buildPayload();
     try {
-      if (window.opener && !window.opener.closed && window.opener.PocketNodePopoutEditor) {
-        if (typeof window.opener.PocketNodePopoutEditor.applyAndSave === "function") {
-          Promise.resolve(window.opener.PocketNodePopoutEditor.applyAndSave(outgoingPayload)).then(function (result) {
-            saveInFlight = false;
-            handleSaveResult(result, closeAfter, saveGeneration);
-          }, function (error) {
-            saveInFlight = false;
-            handleSaveError(error);
-          });
-          return true;
-        }
+      var target = openerPopoutWindow();
+      if (target && typeof target.applyAndSaveFromOwnedPopup === "function") {
+        Promise.resolve(target.applyAndSaveFromOwnedPopup(ownerToken, popupToken, outgoingPayload, window)).then(function (result) {
+          saveInFlight = false;
+          handleSaveResult(result, closeAfter, saveGeneration);
+        }, function (error) {
+          saveInFlight = false;
+          handleSaveError(error);
+        });
+        return true;
       }
     } catch (error) {
       saveInFlight = false;
-      return handleSaveError(error);
+      console.error(error);
     }
     saveInFlight = false;
-    setSaveState("failed", "failed");
-    alert("Pocket is not connected. Copy your text before closing.");
+    handleSaveResult({
+      ok: false,
+      applied: false,
+      changed: false,
+      exported: false,
+      reason: "popup-session-changed"
+    }, closeAfter, saveGeneration);
     return false;
   }
   function closeSafely() { closeOutlineContextMenu({ restoreFocus: false }); if (readOnly || !dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }

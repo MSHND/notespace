@@ -1,5 +1,7 @@
 # PE Persistence Contract
 
+P018 adds a page-private PE window ownership boundary without changing the Notes, Outline, truth-file or recovery data models. Every loaded main Pocket page creates one random in-memory owner token, and every fresh PE receives a separate random popup-instance token. `js/pocket-node-popout-window.js` is the canonical owner of both tokens, popup creation, owned-session attention/close callbacks and the only bridge from the generated runtime to `PocketNodePopoutEditor.applyAndSave()`.
+
 P014 updates the executable P010-P013 baseline by retiring the legacy `node.pe` shadow while preserving independent Notes and Outline, P012 source-identity binding, node-revision checks and non-lossy save preflight.
 
 The terms used below are deliberate:
@@ -794,3 +796,142 @@ P014 does not add or propose:
 - inspection or testing of Murray's personal Pocket files.
 
 Historical design findings and their P013/P014 resolutions remain documented in `docs/PE_DATA_MODEL_MIGRATION_PLAN.md`.
+
+## 20. P018 page-private PE window ownership
+
+P018 isolates PE window lifetime from document lifetime. The ownership identities are separate:
+
+| Identity | Owner and lifetime | Purpose |
+| --- | --- | --- |
+| Main-page owner token | Generated once by `js/pocket-node-popout-window.js` for one loaded main-page JavaScript lifetime | Prevents a reloaded page, another tab/window, Incognito session or browser profile from adopting the page's PE |
+| Popup-instance token | Generated for every fresh PE creation | Distinguishes the exact current popup from a closed, replaced, navigated or stale popup |
+| Pocket file-session identity | Existing P012 document-session boundary | Prevents a valid owned PE from applying to a different active Pocket file |
+| Node revision identity | Existing P012 `originalUpdatedAt` boundary | Prevents a valid owned PE from overwriting a node changed after opening |
+
+The owner and popup tokens:
+
+- prefer `crypto.randomUUID()` and otherwise use fresh random bytes or a multi-part random fallback;
+- are not derived from filenames, node IDs, labels, truth content or other user data;
+- are never written to `state`, `localStorage`, IndexedDB, browser recovery snapshots, node fields, `node.editor` or truth JSON;
+- are injected only into the generated popup runtime transport after the ordinary PE opening payload is built;
+- are deleted from the runtime's working payload before any Save payload is constructed; and
+- are not reused after a main-page reload or a fresh popup replacement.
+
+### Fresh-window creation
+
+The canonical owner calls `window.open("", "_blank", ...)`, which requests a fresh browsing context rather than discovering a reusable named context. After verifying that the returned window is open, has the exact current main page as `opener` and has no existing PE session API, Pocket assigns a unique non-sensitive `window.name` derived from the owner and popup tokens.
+
+Only that verified fresh window receives generated PE HTML. Its document is opened, written and closed once. Pocket records the exact `Window` reference and popup token before the generated runtime installs `PocketNodePopoutSession`, then validates the runtime's owner/popup identity before focusing or trusting it.
+
+The former fixed cross-page popup target is retired. Pocket never searches for another PE by a shared name and never rewrites an existing owned PE document in place. If `_blank` creation is blocked, returns an inaccessible/foreign value or the fresh runtime handshake fails, Pocket abandons the reference without retry or focus activity and reports a calm failure. A foreign returned window is not written, focused or closed.
+
+### One active PE and one pending open per owner
+
+Each main page retains at most one current owned PE record and one pending-open payload.
+
+- **Clean replacement:** the parent revalidates the exact `Window`, owner token and popup token, asks that runtime session to close once, clears the record only after the owned close request, creates a new popup token and writes a new fresh popup. The old document is never reused or rewritten.
+- **Dirty replacement request:** the requested item becomes the page's single pending payload. The existing owned PE receives its in-window unsaved dialog once and one verified attention focus. Repeated open requests may replace the pending payload but do not create another popup, register another dialog request or start a focus loop.
+- **Cancel:** the runtime asks the owner-bound bridge to clear that page's pending payload, hides the dialog and returns to the still-dirty PE. No popup opens and no truth write occurs.
+- **Discard:** the runtime clears its local dirty flag, asks the exact owner to close it, and the owner opens the pending item in a fresh popup. No apply or truth write occurs.
+- **Save and close:** the runtime first saves through the exact owned bridge. Only a successful truth-file persistence result, or a genuinely unchanged result with no pending operation, clears dirty state. The owner then closes the old exact popup and opens the pending item with a fresh popup token. Exactly the existing canonical save flow performs the write.
+
+If the recorded popup becomes inaccessible, loses its session surface, navigates away or presents mismatched tokens, the owner fails closed, clears its stale reference and does not write, focus, close or wait on that window. A later user open may create one new isolated popup; there is no synchronous retry, polling or cross-window coordination.
+
+### Owner-bound Save and close bridge
+
+The generated runtime does not call `window.opener.PocketNodePopoutEditor.applyAndSave()` directly. It sends its owner token, popup token, ordinary save payload and exact caller `Window` to:
+
+~~~text
+PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+  ownerToken,
+  popupToken,
+  payload,
+  callerWindow
+)
+~~~
+
+The canonical owner checks:
+
+1. the supplied owner token equals this page-lifetime owner;
+2. the supplied popup token equals the currently recorded popup;
+3. the supplied caller is the exact recorded `Window`;
+4. that window remains open and accessible;
+5. its `PocketNodePopoutSession.getIdentity()` returns both expected tokens; and
+6. only then delegates to `PocketNodePopoutEditor.applyAndSave()`.
+
+The unchanged editor owner then performs the P017/P016 permission/device gates, P012 file-session check, target lookup, node-revision check, unsupported-editor gate and non-lossy save preflight. Popup ownership does not replace or weaken any persistence identity.
+
+A wrong owner, wrong popup token, replaced popup, stale page or disconnected opener receives:
+
+~~~text
+reason: popup-session-changed
+status: This editor belongs to an earlier Pocket window — not saved
+message: Pocket could not verify that this editor still belongs to the current window. Nothing was changed. Copy anything you need, then close it and reopen the item from the current Pocket window.
+~~~
+
+That rejection applies nothing, exports nothing, opens no picker and leaves the popup draft visible and dirty.
+
+Cancel and close-completion callbacks use the same owner, popup and caller-window validation. Only a matching current popup may clear or resume that owner's pending open.
+
+### Opener loss and bounded close safety
+
+If the main page closes or reloads, the old popup retains its own UI and local draft. It does not poll, reconnect or attach to the replacement page. Save performs one bounded opener/bridge lookup and returns `popup-session-changed` quickly when the opener is absent or has a different page owner. The draft stays dirty.
+
+The Close button remains local. A dirty Close opens the existing in-window Save/Discard/Cancel dialog; Discard can close even without an opener, and Cancel returns to editing. A clean Close closes immediately.
+
+The generated runtime registers one `beforeunload` handler. It warns only for a dirty popup during browser-native close. It does not save, reopen, focus another window, poll or wait during unload.
+
+P018 adds no `BroadcastChannel`, SharedWorker, Service Worker ownership messaging, storage lock, tab polling, cross-tab autosave or profile coordination. Isolation is entirely in-memory and owner-local.
+
+### Recovery and file/device gates
+
+P018 does not change `buildPocketPayload()`, browser safety snapshots, operation tracking, device-change recovery or truth-file write ownership. Unsaved main-tree work retains the existing device recovery route observed after the incident reboot. PE remains dirty until truth persistence succeeds, and no autosave or background write is added.
+
+While the P017 file-permission modal or P016 file/device decision overlay is active, the existing `requirePocketFileForChanges()` gate prevents a new PE from opening. An already-open valid owned PE still reaches the existing apply owner only after popup ownership validation; P017 returns `file-permission-pending`, and P016/no-current-file state remains blocked. A stale popup fails at popup ownership before it can reach either file path.
+
+The P018 implementation does not claim to prove the exact Chrome freeze cause. It removes the high-risk cross-page named-window ownership path without requiring a freeze reproduction.
+
+### Automated coverage
+
+Run:
+
+~~~sh
+node --test tests/p018-popout-isolation.test.js
+node --test tests/pe-persistence-contract.test.js
+node --test tests/device-changes-resolution.test.js
+~~~
+
+`tests/p018-popout-isolation.test.js` executes the production popup owner in two independent VM main-page contexts sharing a synthetic popup broker. It verifies unique owners, fresh popup identities, simultaneous normal/Incognito-like windows, dirty independence, bounded pending opens, clean/Save/Discard/Cancel replacement, foreign-window rejection, stale reload, owner-bound Save rejection, same-filename isolation, generated-runtime compilation and P017/P016 open gates.
+
+The PE contract suite executes the generated production runtime and verifies transient identity exposure, no transport-token persistence, bridge-only Save, one `beforeunload` registration, disconnected-opener responsiveness and all existing Notes/Outline/persistence behavior. The device-change suite remains the recovery and permission-gate regression boundary.
+
+### Physical browser acceptance still required
+
+Use disposable Pocket files only. Do not use Murray's real truth file for simultaneous-session testing.
+
+1. Close unrelated Pocket tabs and PE windows.
+2. Open Pocket normally with disposable file N.
+3. Open PE for one disposable node.
+4. Make PE dirty without saving.
+5. Open a fresh Incognito Pocket session with disposable file I.
+6. Open PE in Incognito.
+7. Confirm both Chrome sessions remain responsive.
+8. Confirm the normal dirty PE remains unchanged.
+9. Confirm the Incognito PE opens independently.
+10. Edit within the Incognito PE.
+11. Close the Incognito PE using Cancel, Discard and Save paths in separate passes.
+12. Confirm no action affects the normal PE.
+13. In normal Pocket, request another node while its PE is dirty.
+14. Confirm only the normal owned PE shows its unsaved dialog.
+15. Cancel and confirm no second normal PE opens.
+16. Repeat and Discard; confirm the pending normal item opens in a fresh PE.
+17. Repeat and Save using disposable N; confirm exactly that disposable file changes.
+18. Reload the normal main Pocket page while a disposable PE is dirty.
+19. Confirm the old PE remains responsive but cannot save into the reloaded page.
+20. Confirm its Discard action can close it.
+21. Open a fresh PE from the reloaded page.
+22. Confirm it is independent.
+23. Close all disposable sessions normally.
+24. Confirm Chrome remains responsive.
+
+Stop immediately if either Chrome session becomes sluggish or unresponsive. Do not intentionally force another freeze or reboot.
