@@ -403,14 +403,15 @@ function renderTree() {
       let finished = false;
       const finishCommitWith = (value, options = {}) => {
         if (finished) return;
-        finished = true;
-        commitInlineEdit(node.id, value, options);
+        const result = commitInlineEdit(node.id, value, options);
+        if (result?.ok || state.inlineEdit.id !== node.id) finished = true;
+        return result;
       };
       const finishCommit = () => finishCommitWith(input.value);
       const finishCancel = () => {
         if (finished) return;
-        finished = true;
         cancelInlineEdit(node.id);
+        if (state.inlineEdit.id !== node.id) finished = true;
       };
       input.addEventListener("click", (ev) => ev.stopPropagation());
       input.addEventListener("dblclick", (ev) => ev.stopPropagation());

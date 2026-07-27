@@ -82,11 +82,19 @@ function hasUnsavedDetailsEditorChanges() {
   );
 }
 
-function hasUnsavedInlineTitleDraft() {
+function inspectActiveInlineTitleDraft() {
   const edit = state.inlineEdit || {};
   const id = cleanText(edit.id, 80);
-  if (!id) return false;
-  if (edit.isNew === true) return true;
+  if (!id) {
+    return {
+      active: false,
+      id: "",
+      edit,
+      input: null,
+      node: null,
+      value: "",
+    };
+  }
   const escaped = typeof window.CSS?.escape === "function"
     ? window.CSS.escape(id)
     : id.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -94,8 +102,22 @@ function hasUnsavedInlineTitleDraft() {
     ? el.treeRoot.querySelector(`[data-edit-id="${escaped}"]`)
     : null;
   const node = nodeMap().get(id) || null;
-  const currentValue = input && "value" in input ? input.value : node?.label;
-  return cleanText(currentValue, 220) !== cleanText(edit.originalLabel, 220);
+  return {
+    active: true,
+    id,
+    edit,
+    input,
+    node,
+    value: input && "value" in input ? String(input.value) : "",
+  };
+}
+
+function hasUnsavedInlineTitleDraft() {
+  const draft = inspectActiveInlineTitleDraft();
+  if (!draft.active) return false;
+  if (draft.edit.isNew === true) return true;
+  if (!draft.input || !draft.node) return true;
+  return cleanText(draft.value, 221) !== cleanText(draft.edit.originalLabel, 220);
 }
 
 function hasUnsavedPocketLiteChanges() {

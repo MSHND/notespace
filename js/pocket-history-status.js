@@ -616,9 +616,30 @@ function cancelInlineEdit(nodeId) {
   refocusTreeNavigation(nodeId);
 }
 
+function vaultSwitchInlineCommitIsCurrent(options = {}) {
+  if (!options.vaultDialogToken) return false;
+  return !!(
+    window.PocketVaultBrowserIo
+    && typeof window.PocketVaultBrowserIo.allowsDialogSave === "function"
+    && window.PocketVaultBrowserIo.allowsDialogSave(
+      options.vaultDialogToken,
+      options.sourceSession
+    )
+  );
+}
+
 function commitInlineEdit(nodeId, rawValue, options = {}) {
-  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
-  if (!state.inlineEdit.id || state.inlineEdit.id !== nodeId) return;
+  const vaultSwitchCommit = !!options.vaultDialogToken;
+  if (vaultSwitchCommit) {
+    if (!vaultSwitchInlineCommitIsCurrent(options)) {
+      return { ok: false, reason: "owner-switch-not-current" };
+    }
+  } else if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) {
+    return { ok: false, reason: "changes-blocked" };
+  }
+  if (!state.inlineEdit.id || state.inlineEdit.id !== nodeId) {
+    return { ok: false, reason: "inline-edit-not-current" };
+  }
   const postAction = cleanText(options.postAction, 20).toLowerCase();
   const map = nodeMap();
   const node = map.get(nodeId);
@@ -627,7 +648,10 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   if (slashBatch.matched) {
     if (!slashBatch.ok) {
       setStatus(slashBatch.message || "Use /path/item format, one per line.", "warn");
-      return;
+      return { ok: false, reason: "invalid-path-batch" };
+    }
+    if (vaultSwitchCommit && !vaultSwitchInlineCommitIsCurrent(options)) {
+      return { ok: false, reason: "owner-switch-not-current" };
     }
     // Safety snapshot before bulk inline import, so Restore last can recover quickly.
     const safetyPayload = {
@@ -690,7 +714,16 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
     } else {
       setStatus(`Imported ${importedCount} path line${importedCount === 1 ? "" : "s"} (no new nodes).`, "ok");
     }
-    return;
+    return {
+      ok: true,
+      reason: "",
+      kind: "path-import",
+      changed: createdIds.length > 0,
+      createdIds,
+    };
+  }
+  if (vaultSwitchCommit && !vaultSwitchInlineCommitIsCurrent(options)) {
+    return { ok: false, reason: "owner-switch-not-current" };
   }
   clearInlineEditState();
   if (!node) {
@@ -698,7 +731,7 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
     renderTree();
     persistPipSnapshot();
     refocusTreeNavigation();
-    return;
+    return { ok: false, reason: "missing-node" };
   }
   const next = cleanText(rawValue, 220);
   if (!next) {
@@ -706,14 +739,14 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
       deleteNodeById(nodeId, { confirm: false });
       setStatus("Blank item removed.", "warn");
       refocusTreeNavigation();
-      return;
+      return { ok: false, reason: "blank-title" };
     }
     refreshMeta();
     renderTree();
     persistPipSnapshot();
     setStatus("Label cannot be blank.", "warn");
     refocusTreeNavigation(nodeId);
-    return;
+    return { ok: false, reason: "blank-title" };
   }
   const prev = node.label;
   if (!edit.isNew && next !== prev) {
@@ -743,4 +776,162 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   requestAnimationFrame(() => flashTouchedRow(node.id));
   if (postAction === "indent") indentNodeById(node.id);
   if (postAction === "outdent") outdentNodeById(node.id);
+  return {
+    ok: true,
+    reason: "",
+    kind: edit.isNew ? "add" : "rename",
+    changed: edit.isNew || next !== prev,
+    id: node.id,
+    label: next,
+  };
+}
+
+function inlineDraftInputBelongsToNode(input, nodeId) {
+  if (!(input instanceof HTMLInputElement)) return false;
+  const markedId = typeof input.getAttribute === "function"
+    ? input.getAttribute("data-edit-id")
+    : input.dataset?.editId;
+  return String(markedId || "") === nodeId;
+}
+
+function validateCapturedInlineDraftValue(rawValue) {
+  const value = String(rawValue ?? "");
+  const slashBatch = parseCaptureSlashPathBatch(value);
+  if (slashBatch.matched) {
+    return slashBatch.ok
+      ? { ok: true, value, slashBatch: true }
+      : { ok: false, reason: "invalid-value" };
+  }
+  if (!cleanText(value, 220)) return { ok: false, reason: "blank-title" };
+  if (cleanText(value, 221).length > 220) {
+    return { ok: false, reason: "title-too-long" };
+  }
+  return { ok: true, value, slashBatch: false };
+}
+
+function captureActiveInlineEditForOwnerSwitch() {
+  const rawEditId = String(state.inlineEdit?.id || "");
+  if (!rawEditId) return { ok: true, active: false };
+  const draft = typeof inspectActiveInlineTitleDraft === "function"
+    ? inspectActiveInlineTitleDraft()
+    : null;
+  if (!draft?.active || draft.id !== rawEditId) {
+    return { ok: false, active: true, id: rawEditId, reason: "stale-edit-id", input: draft?.input || null };
+  }
+  if (!draft.node) {
+    return { ok: false, active: true, id: draft.id, reason: "missing-node", input: draft.input || null };
+  }
+  if (!inlineDraftInputBelongsToNode(draft.input, draft.id)) {
+    return { ok: false, active: true, id: draft.id, reason: "missing-input", input: draft.input || null };
+  }
+  const checked = validateCapturedInlineDraftValue(draft.value);
+  if (!checked.ok) {
+    return { ...checked, active: true, id: draft.id, input: draft.input };
+  }
+  return {
+    ok: true,
+    active: true,
+    id: draft.id,
+    isNew: draft.edit.isNew === true,
+    originalLabel: String(draft.edit.originalLabel || ""),
+    rawValue: checked.value,
+    slashBatch: checked.slashBatch,
+    storedLabel: String(draft.node.label || ""),
+    operationHighWater: typeof getPocketHighestOperationSequence === "function"
+      ? getPocketHighestOperationSequence()
+      : Number(state.operationHighWater) || 0,
+    editRef: state.inlineEdit,
+    nodeRef: draft.node,
+    input: draft.input,
+  };
+}
+
+function commitActiveInlineEditForOwnerSwitch(capturedDraft, options = {}) {
+  const captured = capturedDraft || captureActiveInlineEditForOwnerSwitch();
+  if (!captured?.ok) return captured || { ok: false, reason: "invalid-draft" };
+  const contextIsCurrent = typeof options.isCurrent === "function"
+    ? options.isCurrent
+    : () => true;
+  if (!contextIsCurrent()) {
+    return { ok: false, active: captured.active === true, reason: "owner-switch-not-current", input: captured.input || null };
+  }
+  if (!captured.active) {
+    return state.inlineEdit?.id
+      ? { ok: false, active: true, reason: "inline-edit-changed" }
+      : { ok: true, active: false, committed: false };
+  }
+  if (!state.inlineEdit?.id && !captured.slashBatch) {
+    const committedNode = nodeMap().get(captured.id) || null;
+    const expectedLabel = cleanText(captured.rawValue, 220);
+    const expectedType = captured.isNew
+      ? "add_below"
+      : (expectedLabel !== captured.storedLabel ? "rename" : "");
+    const operationRecorded = !expectedType || state.ops.some((operation) => (
+      operation?.type === expectedType
+      && operation?.id === captured.id
+      && Number(operation?.seq) > (Number(captured.operationHighWater) || 0)
+      && (
+        expectedType !== "rename"
+        || cleanText(operation?.to, 220) === expectedLabel
+      )
+    ));
+    if (committedNode?.label === expectedLabel && operationRecorded) {
+      return {
+        ok: true,
+        active: false,
+        committed: true,
+        kind: captured.isNew ? "add" : "rename",
+        changed: !!expectedType,
+      };
+    }
+  }
+  const draft = inspectActiveInlineTitleDraft();
+  if (!draft.active
+      || draft.id !== captured.id
+      || state.inlineEdit !== captured.editRef
+      || draft.node !== captured.nodeRef
+      || draft.edit.isNew !== captured.isNew
+      || String(draft.edit.originalLabel || "") !== captured.originalLabel
+      || !inlineDraftInputBelongsToNode(draft.input, captured.id)) {
+    return { ok: false, active: true, reason: "inline-edit-changed", input: draft.input || captured.input || null };
+  }
+  if (draft.value !== captured.rawValue) {
+    const inputWasRebuilt = draft.input !== captured.input;
+    const rebuiltFromModel = cleanText(draft.value, 220) === cleanText(draft.node.label, 220);
+    if (!inputWasRebuilt || !rebuiltFromModel) {
+      return { ok: false, active: true, reason: "inline-draft-changed", input: draft.input };
+    }
+    draft.input.value = captured.rawValue;
+  }
+  const checked = validateCapturedInlineDraftValue(draft.input.value);
+  if (!checked.ok || checked.value !== captured.rawValue || !contextIsCurrent()) {
+    return {
+      ok: false,
+      active: true,
+      reason: checked.reason || "owner-switch-not-current",
+      input: draft.input,
+    };
+  }
+  const result = commitInlineEdit(captured.id, draft.input.value, {
+    vaultDialogToken: options.vaultDialogToken,
+    sourceSession: options.sourceSession,
+  });
+  if (!result?.ok) {
+    return {
+      ok: false,
+      active: !!state.inlineEdit?.id,
+      reason: result?.reason || "commit-failed",
+      input: draft.input,
+    };
+  }
+  if (state.inlineEdit?.id) {
+    return { ok: false, active: true, reason: "draft-remains-active", input: draft.input };
+  }
+  return {
+    ok: true,
+    active: false,
+    committed: true,
+    kind: result.kind,
+    changed: result.changed === true,
+  };
 }

@@ -187,11 +187,25 @@ Unsaved Vault plaintext is not stored in browser recovery. Opening or creating a
 
 Actions:
 
-- **Save and continue** performs the canonical encrypted Vault Save and continues only after success.
-- **Discard and continue** writes nothing and permits only the already prepared candidate to be adopted.
-- **Cancel** retains the dirty Vault and clears the candidate.
+- **Save and continue** first captures the exact value in the rendered inline title input, resolves any open Details draft through `saveDetailsEditor()`, commits an active rename or new-item title through the canonical `commitInlineEdit()` path, verifies that no main-window draft remains, and then performs one canonical encrypted Vault Save. The prepared candidate may adopt only after that encrypted write succeeds.
+- **Discard and continue** writes nothing, does not commit either draft, and permits only the already prepared candidate to be adopted.
+- **Cancel** retains the dirty Vault, exact inline input value and Details draft, then clears the candidate.
 
-The dialog owns an internal token which authorises only its current Save-and-continue call through the normal `exportTree()` gate. It does not create another Save owner. Failed Save leaves the Vault and dialog open. Candidate tokens and the shared owner/save queue prevent stale unlocks, candidates and writes from overtaking a newer owner.
+The live `[data-edit-id]` input is the inline draft source. P020 does not infer the value from `originalLabel`, the stored node label or `document.activeElement`. The structured owner-switch helper preflights the exact edit ID, input, node, non-blank value and current title limit before invoking the ordinary inline commit once. Existing renames still record `rename`; valid provisional items still record one `add_below`. The operation exists before `exportTree()` freezes its payload, so an inline-only change cannot be mistaken for `no-changes`.
+
+If an inline draft is blank, over the title limit, missing its exact input or node, stale, rejected by the canonical commit, or still active afterward, Save and continue fails closed. Pocket closes and cancels the pending switch, retains the current Vault and draft, performs no file write, restores input focus where possible and says:
+
+> Finish or cancel the current rename before switching files. Nothing was saved or changed.
+
+The inline draft is captured before Details resolution because the canonical Details Save may render the tree. If that render replaces the inline input with the stored label, Pocket restores only the already captured exact draft after verifying the same edit and node remain current, then commits it canonically. Both edits enter one encrypted Save.
+
+The rendered inline input considers itself finished only after the canonical commit or cancel actually resolves the matching edit. If focus moves into a permission or Vault-switch dialog and normal mutation is temporarily unavailable, the rejected blur does not consume the input's later Enter, Tab or blur behaviour. Cancel and failed Save-and-continue therefore retain both the exact draft and a working editor.
+
+The dialog owns an internal token which authorises only its current Save-and-continue call through the normal inline commit and `exportTree()` gates. This narrow authority is checked against the exact document session, owner kind, Vault-session ID, active handle and prepared-candidate continuation. It is rechecked before draft mutation and across encryption, permission and writable boundaries. A stale token cannot bypass normal mutation gating. The dialog does not create another Save owner.
+
+The P017 permission route deliberately retires its one-use permission token immediately before dirty-owner resolution. P020 carries that exact prepared JSON candidate forward under the unchanged source session instead of treating the intentional token release as staleness. Final JSON adoption still requires both the source session and candidate continuation guard. Filename equality grants no authority.
+
+Failed encrypted persistence leaves the canonically committed rename or new item in the active Vault model with its operation still dirty. Retrying Save and continue writes it without adding another rename or add operation. Candidate tokens and the shared owner/save queue prevent stale unlocks, candidates and writes from overtaking a newer owner.
 
 Opening a Vault from a dirty JSON owner remains conservative: Pocket asks the user to save the current Pocket file rather than silently discarding or copying JSON changes into the Vault flow.
 
@@ -276,13 +290,13 @@ find js -name '*.js' -print0 | xargs -0 -n1 node --check
 git diff --check
 ~~~
 
-Final P019 commit results:
+Current P019/P020 contract results:
 
-- P019 Vault ownership suite: **87 passed, 0 failed**
+- Vault ownership and P020 inline-switch suite: **113 passed, 0 failed**
 - PE persistence suite: **96 passed, 0 failed**
 - Device-changes/P017 suite: **69 passed, 0 failed**
 - P018 popup-isolation suite: **15 passed, 0 failed**
-- Combined test result: **267 passed, 0 failed**
+- Combined test result: **293 passed, 0 failed**
 - Production JavaScript syntax checks: **PASS for every `js/*.js` file and `sw.js`**
 - Generated PE runtime `new Function(...)`, where applicable: **PASS through the PE persistence suite**
 - `git diff --check`: **PASS**
@@ -333,5 +347,18 @@ Murray's physical browser acceptance remains required. Use disposable files and 
 38. Confirm no Vault recovery offer appears over V.
 39. Confirm PiP is calmly unavailable while V is active.
 40. Stop immediately if any operation targets the wrong file or Chrome becomes unstable.
+41. Open a disposable encrypted Vault.
+42. Make and commit one ordinary change.
+43. Begin renaming another item inline and leave the input active without pressing Enter.
+44. Choose to open a disposable JSON file, then choose Save and continue.
+45. Reopen the Vault and confirm both the earlier change and inline rename were encrypted and saved.
+46. Repeat with an inline rename as the only unsaved change.
+47. Repeat with a valid inline new item and confirm exactly one item survives.
+48. Repeat with a blank rename and confirm the switch is blocked without losing the draft or writing either file.
+49. Repeat with Cancel and confirm the typed draft remains exactly as entered.
+50. Repeat with Discard and continue and confirm no Vault write occurs.
+51. Repeat with an open Details draft and an inline rename, then confirm both survive one encrypted Save.
+52. Confirm the replacement file appears only after encrypted Vault persistence has completed.
+53. Stop immediately if the wrong file changes, adoption precedes the Vault write, or any draft disappears unexpectedly.
 
 Do not ask Murray to reproduce a crash.

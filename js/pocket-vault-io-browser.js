@@ -160,6 +160,8 @@
       submit: config.submit,
       cancel: config.cancel,
       sourceSession: config.sourceSession || null,
+      canContinue: typeof config.canContinue === "function" ? config.canContinue : null,
+      inlineDraft: config.inlineDraft || null,
     };
     resetDialogSections();
     const title = dom("vaultDialogTitle");
@@ -246,9 +248,12 @@
     });
   }
 
-  function showOwnerSwitchDialog() {
+  function showOwnerSwitchDialog(candidateInfo = {}) {
     return new Promise((resolve) => {
       const sourceSession = currentSaveSession();
+      const inlineDraft = typeof global.captureActiveInlineEditForOwnerSwitch === "function"
+        ? global.captureActiveInlineEditForOwnerSwitch()
+        : { ok: !global.hasUnsavedInlineTitleDraft?.(), active: false };
       if (!showDialogShell({
         mode: "switch",
         title: "Save changes to this Vault?",
@@ -256,6 +261,8 @@
         initialFocusId: "vaultSwitchSave",
         resolve,
         sourceSession,
+        canContinue: candidateInfo.canContinue,
+        inlineDraft,
       })) {
         resolve(false);
         return;
@@ -263,6 +270,15 @@
       const actions = dom("vaultSwitchActions");
       if (actions) actions.hidden = false;
     });
+  }
+
+  function dialogCandidateIsCurrent(record) {
+    if (typeof record?.canContinue !== "function") return true;
+    try {
+      return record.canContinue() !== false;
+    } catch (_error) {
+      return false;
+    }
   }
 
   function allowsDialogSave(token, saveSession) {
@@ -273,7 +289,8 @@
       && sourceSessionIsCurrent(activeDialog.sourceSession)
       && sourceSessionIsCurrent(saveSession)
       && saveSession.ownerKind === "vault"
-      && saveSession.vaultSessionId === activeDialog.sourceSession.vaultSessionId;
+      && saveSession.vaultSessionId === activeDialog.sourceSession.vaultSessionId
+      && dialogCandidateIsCurrent(activeDialog);
   }
 
   async function submitCredentialDialog(event) {
@@ -329,23 +346,81 @@
     if (!record || record.mode !== "switch" || record.busy) return false;
     setDialogBusy(true);
     setDialogError("");
-    if (typeof global.hasUnsavedDetailsEditorChanges === "function"
-        && global.hasUnsavedDetailsEditorChanges()) {
+    const saveContextIsCurrent = () => (
+      record === activeDialog
+      && allowsDialogSave(record.token, record.sourceSession)
+    );
+    const focusInlineDraft = (draft) => {
+      requestAnimationFrame(() => {
+        const current = global.inspectActiveInlineTitleDraft?.();
+        const input = current?.input || draft?.input || null;
+        input?.focus?.({ preventScroll: true });
+      });
+    };
+    const cancelForInlineDraft = (draft) => {
+      if (record === activeDialog) {
+        setDialogBusy(false);
+        closeDialog(false, { restoreFocus: false });
+      }
+      say(
+        "Finish or cancel the current rename before switching files. Nothing was saved or changed.",
+        "warn",
+        7200
+      );
+      focusInlineDraft(draft);
+      return false;
+    };
+    const cancelStaleSwitch = (draft) => {
+      if (record === activeDialog) {
+        setDialogBusy(false);
+        closeDialog(false, { restoreFocus: false });
+      }
+      say("That file switch is no longer current. Your Vault changes remain open and were not saved.", "warn", 7200);
+      focusInlineDraft(draft);
+      return false;
+    };
+    if (!saveContextIsCurrent()) return cancelStaleSwitch();
+    const inlineDraft = record.inlineDraft
+      || (typeof global.captureActiveInlineEditForOwnerSwitch === "function"
+        ? global.captureActiveInlineEditForOwnerSwitch()
+        : { ok: !global.hasUnsavedInlineTitleDraft?.(), active: false });
+    if (!inlineDraft?.ok) return cancelForInlineDraft(inlineDraft);
+    if (typeof global.isDetailsEditorOpen === "function"
+        && global.isDetailsEditorOpen()) {
       global.saveDetailsEditor?.();
-      if (record !== activeDialog) return false;
-      if (global.hasUnsavedDetailsEditorChanges()) {
+      if (!saveContextIsCurrent()) return cancelStaleSwitch(inlineDraft);
+      if (global.isDetailsEditorOpen()
+          || global.hasUnsavedDetailsEditorChanges?.()) {
         setDialogBusy(false);
         setDialogError("Finish the open item edit before switching encrypted Vaults.");
         dom("vaultSwitchSave")?.focus?.({ preventScroll: true });
         return false;
       }
     }
+    if (!saveContextIsCurrent()) return cancelStaleSwitch(inlineDraft);
+    if (inlineDraft.active) {
+      if (typeof global.commitActiveInlineEditForOwnerSwitch !== "function") {
+        return cancelForInlineDraft(inlineDraft);
+      }
+      const committed = global.commitActiveInlineEditForOwnerSwitch(inlineDraft, {
+        vaultDialogToken: record.token,
+        sourceSession: record.sourceSession,
+        isCurrent: saveContextIsCurrent,
+      });
+      if (!committed?.ok) return cancelForInlineDraft(committed || inlineDraft);
+    }
+    if (global.hasUnsavedDetailsEditorChanges?.()
+        || global.hasUnsavedInlineTitleDraft?.()) {
+      return cancelForInlineDraft(inlineDraft);
+    }
+    if (!saveContextIsCurrent()) return cancelStaleSwitch(inlineDraft);
     const result = await global.exportTree?.({
       returnDetails: true,
       downloadFallback: false,
       vaultDialogToken: record.token,
     });
     if (record !== activeDialog) return false;
+    if (!saveContextIsCurrent()) return cancelStaleSwitch(inlineDraft);
     if (!result || result.ok !== true) {
       setDialogBusy(false);
       setDialogError("Pocket could not save the encrypted Vault. It remains open with your changes.");
@@ -524,14 +599,17 @@
 
   async function beforeAdoptPreparedDocument(candidateInfo = {}) {
     if (isDialogOpen() || preparedAdoptionLease) return false;
+    if (!dialogCandidateIsCurrent(candidateInfo)) return false;
     const session = currentSaveSession();
     if (session?.ownerKind === "vault") {
       if (!hasUnsavedChanges()) {
         return acquirePreparedDocumentAdoption();
       }
-      const choice = await showOwnerSwitchDialog();
+      const choice = await showOwnerSwitchDialog(candidateInfo);
       const allowed = choice === "save" || choice === "discard";
-      return allowed ? acquirePreparedDocumentAdoption() : false;
+      return allowed && dialogCandidateIsCurrent(candidateInfo)
+        ? acquirePreparedDocumentAdoption()
+        : false;
     }
     if (candidateInfo.kind === "vault" && hasUnsavedChanges()) {
       say("Save your current Pocket file before opening an encrypted Vault.", "warn", 6200);
@@ -605,6 +683,7 @@
     const adoptionLease = await beforeAdoptPreparedDocument({
       kind: "vault",
       displayName: clean(file?.name || candidate.handle?.name || "pocket.vault.json", 120),
+      canContinue: () => candidateIsCurrent(candidate),
     });
     if (!adoptionLease || !candidateIsCurrent(candidate)) {
       finishPreparedDocumentAdoption(adoptionLease);
@@ -721,9 +800,16 @@
 
   async function writeActiveVaultPayload(payload, options = {}) {
     const expected = options.expectedSession;
+    const requestIsCurrent = () => (
+      sourceSessionIsCurrent(expected)
+      && (
+        !options.vaultDialogToken
+        || allowsDialogSave(options.vaultDialogToken, expected)
+      )
+    );
     if (!expected
         || expected.ownerKind !== "vault"
-        || !sourceSessionIsCurrent(expected)
+        || !requestIsCurrent()
         || !expected.handle
         || !expected.vaultSessionId) {
       return { ok: false, reason: "vault-session-changed" };
@@ -738,19 +824,19 @@
     } catch (error) {
       return { ok: false, reason: "vault-encryption-failed", error };
     }
-    if (!sourceSessionIsCurrent(expected)) return { ok: false, reason: "vault-session-changed" };
+    if (!requestIsCurrent()) return { ok: false, reason: "vault-session-changed" };
     const permitted = await global.ensureWritePermission(expected.handle);
-    if (!sourceSessionIsCurrent(expected)) return { ok: false, reason: "vault-session-changed" };
+    if (!requestIsCurrent()) return { ok: false, reason: "vault-session-changed" };
     if (!permitted) return { ok: false, reason: "permission-denied", permissionDenied: true };
     let writable;
     try {
       writable = await expected.handle.createWritable();
-      if (!sourceSessionIsCurrent(expected)) {
+      if (!requestIsCurrent()) {
         try { await writable.abort?.(); } catch {}
         return { ok: false, reason: "vault-session-changed" };
       }
       await writable.write(`${JSON.stringify(envelope, null, 2)}\n`);
-      if (!sourceSessionIsCurrent(expected)) {
+      if (!requestIsCurrent()) {
         try { await writable.abort?.(); } catch {}
         return { ok: false, reason: "vault-session-changed" };
       }
@@ -759,7 +845,7 @@
       try { await writable?.abort?.(); } catch {}
       return { ok: false, reason: "vault-write-failed", error };
     }
-    if (!sourceSessionIsCurrent(expected)) return { ok: false, reason: "vault-session-changed" };
+    if (!requestIsCurrent()) return { ok: false, reason: "vault-session-changed" };
     const advanced = global.PocketVault.replaceActiveSessionRevision(
       expected.vaultSessionId,
       envelope.revision

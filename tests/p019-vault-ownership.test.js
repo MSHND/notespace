@@ -145,9 +145,18 @@ function createVaultDom() {
       this.dataset = {};
       this.className = "";
       this.classList = createClassList();
+      this.style = {
+        setProperty(name, value) {
+          this[String(name)] = String(value);
+        },
+        removeProperty(name) {
+          delete this[String(name)];
+        },
+      };
       this.attributes = new Map();
       this.listeners = new Map();
       this._textContent = "";
+      this._innerHTML = "";
     }
 
     get firstChild() {
@@ -164,6 +173,17 @@ function createVaultDom() {
 
     set textContent(value) {
       this._textContent = String(value ?? "");
+      this._innerHTML = "";
+      this.children = [];
+    }
+
+    get innerHTML() {
+      return this._innerHTML;
+    }
+
+    set innerHTML(value) {
+      this._innerHTML = String(value ?? "");
+      this._textContent = "";
       this.children = [];
     }
 
@@ -272,6 +292,23 @@ function createVaultDom() {
         return descendants.filter((element) => element.tagName === "BUTTON" && !element.disabled);
       }
       return [];
+    }
+
+    querySelector(selector) {
+      const match = String(selector || "").match(/^\[data-edit-id="((?:\\.|[^"])*)"\]$/);
+      if (!match) return null;
+      const wanted = match[1].replace(/\\(["\\])/g, "$1");
+      const descendants = [];
+      const visit = (element) => {
+        for (const child of element.children || []) {
+          descendants.push(child);
+          visit(child);
+        }
+      };
+      visit(this);
+      return descendants.find((element) => (
+        element.getAttribute?.("data-edit-id") === wanted
+      )) || null;
     }
   }
 
@@ -768,6 +805,7 @@ function createVaultContext(options = {}) {
     renderTree() {},
     refocusTreeNavigation() {},
     softlyEnsureSelectionVisible() {},
+    repairVisibleSelectionAfterRender() {},
     collapseAllNodes() {},
     expandPathToNode() {},
     focusRowByNodeId() {},
@@ -823,6 +861,7 @@ function createVaultContext(options = {}) {
     "js/pocket-import.js",
     "js/pocket-editor-copy.js",
     "js/pocket-history-status.js",
+    "js/pocket-render.js",
     "js/pocket-io-browser.js",
     "js/pocket-device-changes.js",
     "js/pocket-crypto.js",
@@ -838,6 +877,7 @@ function createVaultContext(options = {}) {
 
   context.__productionPersistPipSnapshot = context.persistPipSnapshot;
   context.__productionRefreshMeta = context.refreshMeta;
+  context.__productionRenderTree = context.renderTree;
   context.refreshMeta = () => {};
   context.renderTree = () => {};
   context.refocusTreeNavigation = () => {};
@@ -975,6 +1015,35 @@ function mutateVaultNode(context, changes = {}) {
   Object.assign(state.nodes[0], changes);
   context.recordOp({ type: "synthetic-vault-edit", id: state.nodes[0].id });
   return state.nodes[0];
+}
+
+function attachInlineDraft(context, options = {}) {
+  const state = lexicalState(context);
+  const id = String(options.id || state.nodes[0]?.id || "");
+  const node = state.nodes.find((entry) => entry.id === id) || null;
+  assert.ok(node, `synthetic inline node ${id} should exist`);
+  state.inlineEdit = {
+    id,
+    isNew: options.isNew === true,
+    originalLabel: options.originalLabel === undefined
+      ? String(node.label || "")
+      : String(options.originalLabel),
+    afterId: String(options.afterId || ""),
+    parentId: String(options.parentId || node.parentId || "root"),
+    autoFocus: false,
+  };
+  const treeRoot = context.__ui.elements.get("treeRoot");
+  treeRoot.textContent = "";
+  const input = context.document.createElement("input");
+  input.type = "text";
+  input.value = String(options.value ?? node.label ?? "");
+  input.setAttribute("data-edit-id", id);
+  treeRoot.appendChild(input);
+  return input;
+}
+
+function removeInlineDraftInput(context) {
+  context.__ui.elements.get("treeRoot").textContent = "";
 }
 
 function parseWrittenEnvelope(handle, index = handle.writes.length - 1) {
@@ -1950,18 +2019,26 @@ test("JSON A, Vault V, readable copy C, then Save V never reuses either JSON han
   assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultV);
 });
 
-async function contextWithDirtyVault(options = {}) {
+async function contextWithCleanVault(options = {}) {
   const context = createVaultContext();
   const initial = createSyntheticHandle("before-vault.json");
   installOwnerDocument(context, initial, pocketPayload());
-  const vaultHandle = createSyntheticHandle("dirty.vault.json", {
+  const vaultHandle = createSyntheticHandle(options.name || "dirty.vault.json", {
+    ...(options.handleOptions || {}),
     content: await sealForHandle(
       context,
-      pocketPayload({ nodes: [makeNode("dirty_vault_item", { details: "Before edit" })] }),
-      { vaultId: "vault_dirty_switch", revision: 5 },
+      options.payload || pocketPayload({
+        nodes: [makeNode("dirty_vault_item", { details: "Before edit" })],
+      }),
+      { vaultId: options.vaultId || "vault_dirty_switch", revision: options.revision || 5 },
     ),
   });
   assert.equal(await openVaultWithPassword(context, vaultHandle), true);
+  return { context, initial, vaultHandle };
+}
+
+async function contextWithDirtyVault(options = {}) {
+  const { context, initial, vaultHandle } = await contextWithCleanVault(options);
   mutateVaultNode(context, {
     details: "Unsaved Vault edit",
     updatedAt: "2026-07-27T06:00:00.000Z",
@@ -1978,6 +2055,19 @@ async function contextWithDirtyVault(options = {}) {
     });
   }
   return { context, initial, vaultHandle };
+}
+
+async function beginJsonOwnerSwitch(context, candidate, options = {}) {
+  const opening = context.loadFromFileHandle(candidate, {
+    permissionAlreadyGranted: true,
+    ...options,
+  });
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultSwitchActions").hidden),
+    true,
+    "dirty Vault switch dialog should open",
+  );
+  return { opening };
 }
 
 test("dirty Vault owner-switch Cancel retains the Vault and Discard adopts only a ready JSON candidate", async (t) => {
@@ -2086,6 +2176,654 @@ test("dirty Vault Save and continue waits for encrypted persistence and blocks s
     assert.equal(vaultHandle.writes.length, 0);
     assert.equal(jsonCandidate.writes.length, 0);
   });
+});
+
+test("P020 Save and continue commits the exact inline rename before encrypted persistence and adoption", async () => {
+  const writeGate = deferred();
+  const { context, vaultHandle } = await contextWithDirtyVault({
+    handleOptions: { writeDeferred: writeGate },
+  });
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  const input = attachInlineDraft(context, {
+    id: nodeId,
+    value: "Committed inline title",
+  });
+  const decoy = context.document.createElement("input");
+  decoy.value = "Wrong active-element title";
+  context.document.activeElement = decoy;
+  const candidate = createSyntheticHandle("after-inline-save.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("after_inline_candidate")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate);
+
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(
+    await waitFor(() => (
+      state.ops.some((operation) => operation.type === "rename" && operation.id === nodeId)
+      && vaultHandle.createWritableCalls === 1
+    )),
+    true,
+  );
+  assert.equal(input.value, "Committed inline title");
+  assert.equal(state.nodes[0].label, "Committed inline title");
+  assert.equal(state.ops.filter((operation) => operation.type === "rename" && operation.id === nodeId).length, 1);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+  assert.equal(state.nodes[0].details, "Unsaved Vault edit");
+  assert.equal(candidate.writes.length, 0);
+
+  writeGate.resolve();
+  assert.equal(await opening, true);
+  assert.equal(vaultHandle.writes.length, 1);
+  const decrypted = await context.PocketCrypto.openJson(
+    parseWrittenEnvelope(vaultHandle),
+    TEST_PASSPHRASE,
+  );
+  const savedNode = decrypted.mainThoughtTree.find((node) => node.id === nodeId);
+  assert.equal(savedNode.label, "Committed inline title");
+  assert.equal(savedNode.details, "Unsaved Vault edit");
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, candidate);
+});
+
+test("P020 an inline rename as the only change creates the ordinary operation and cannot become no-changes", async () => {
+  const writeGate = deferred();
+  const { context, vaultHandle } = await contextWithCleanVault({
+    handleOptions: { writeDeferred: writeGate },
+  });
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  assert.equal(state.ops.length, 0);
+  attachInlineDraft(context, {
+    id: nodeId,
+    value: "Inline-only saved title",
+  });
+  const candidate = createSyntheticHandle("inline-only-target.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("inline_only_target")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate);
+
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(
+    await waitFor(() => (
+      state.ops.filter((operation) => operation.type === "rename" && operation.id === nodeId).length === 1
+      && vaultHandle.createWritableCalls === 1
+    )),
+    true,
+  );
+  assert.equal(state.nodes[0].label, "Inline-only saved title");
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+
+  writeGate.resolve();
+  assert.equal(await opening, true);
+  const decrypted = await context.PocketCrypto.openJson(
+    parseWrittenEnvelope(vaultHandle),
+    TEST_PASSPHRASE,
+  );
+  assert.equal(
+    decrypted.mainThoughtTree.find((node) => node.id === nodeId).label,
+    "Inline-only saved title",
+  );
+  assert.equal(
+    context.__statuses.some((entry) => /already saved/i.test(entry.message)),
+    false,
+  );
+});
+
+test("P020 a valid inline new item is committed once and included in the encrypted Vault", async () => {
+  const writeGate = deferred();
+  const { context, vaultHandle } = await contextWithCleanVault({
+    handleOptions: { writeDeferred: writeGate },
+  });
+  const state = lexicalState(context);
+  const newId = "inline_new_item";
+  state.nodes.push(makeNode(newId, {
+    label: "",
+    order: 1,
+    updatedAt: "2026-07-27T07:00:00.000Z",
+  }));
+  attachInlineDraft(context, {
+    id: newId,
+    isNew: true,
+    originalLabel: "",
+    value: "One new inline item",
+    afterId: state.nodes[0].id,
+  });
+  const candidate = createSyntheticHandle("after-inline-new.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("after_inline_new")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate);
+
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(
+    await waitFor(() => (
+      state.ops.filter((operation) => operation.type === "add_below" && operation.id === newId).length === 1
+      && vaultHandle.createWritableCalls === 1
+    )),
+    true,
+  );
+  assert.equal(state.nodes.filter((node) => node.id === newId).length, 1);
+  assert.equal(state.nodes.find((node) => node.id === newId).label, "One new inline item");
+
+  writeGate.resolve();
+  assert.equal(await opening, true);
+  const decrypted = await context.PocketCrypto.openJson(
+    parseWrittenEnvelope(vaultHandle),
+    TEST_PASSPHRASE,
+  );
+  assert.equal(decrypted.mainThoughtTree.filter((node) => node.id === newId).length, 1);
+  assert.equal(
+    decrypted.mainThoughtTree.find((node) => node.id === newId).label,
+    "One new inline item",
+  );
+});
+
+test("P020 failed encrypted persistence keeps the committed rename dirty and retries without duplication", async () => {
+  const { context, vaultHandle } = await contextWithCleanVault();
+  const productionCreateWritable = vaultHandle.createWritable.bind(vaultHandle);
+  let failNextWrite = true;
+  vaultHandle.createWritable = async () => {
+    if (!failNextWrite) return productionCreateWritable();
+    vaultHandle.createWritableCalls += 1;
+    return {
+      async write() {
+        throw new Error("synthetic first inline Vault write failure");
+      },
+      async close() {},
+      async abort() {
+        vaultHandle.abortedWrites += 1;
+      },
+    };
+  };
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  attachInlineDraft(context, { id: nodeId, value: "Retryable inline title" });
+  const candidate = createSyntheticHandle("retry-inline-target.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("retry_inline_target")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate);
+
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(
+    await waitFor(() => /could not save/i.test(
+      context.__ui.elements.get("vaultDialogError").textContent,
+    )),
+    true,
+  );
+  assert.equal(state.nodes[0].label, "Retryable inline title");
+  assert.equal(state.inlineEdit.id, "");
+  assert.equal(state.ops.filter((operation) => operation.type === "rename" && operation.id === nodeId).length, 1);
+  assert.equal(vaultHandle.writes.length, 0);
+  assert.equal(candidate.writes.length, 0);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+
+  failNextWrite = false;
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(await opening, true);
+  assert.equal(vaultHandle.writes.length, 1);
+  const decrypted = await context.PocketCrypto.openJson(
+    parseWrittenEnvelope(vaultHandle),
+    TEST_PASSPHRASE,
+  );
+  assert.equal(
+    decrypted.mainThoughtTree.find((node) => node.id === nodeId).label,
+    "Retryable inline title",
+  );
+});
+
+test("P020 invalid or unresolved inline drafts cancel the switch without mutation or writes", async (t) => {
+  const cases = [
+    {
+      name: "blank existing rename",
+      prepare(context, state, input) {
+        input.value = "   ";
+        return state.inlineEdit.id;
+      },
+    },
+    {
+      name: "missing rendered input",
+      prepare(context, state) {
+        removeInlineDraftInput(context);
+        return state.inlineEdit.id;
+      },
+    },
+    {
+      name: "title over the current limit",
+      cleanVault: true,
+      prepare(_context, state, input) {
+        input.value = "x".repeat(221);
+        return state.inlineEdit.id;
+      },
+    },
+    {
+      name: "stale edit ID",
+      prepare(_context, state) {
+        state.inlineEdit.id = "stale_inline_id";
+        return state.inlineEdit.id;
+      },
+    },
+    {
+      name: "missing node",
+      prepare(_context, state) {
+        const id = state.inlineEdit.id;
+        state.nodes = state.nodes.filter((node) => node.id !== id);
+        return id;
+      },
+    },
+    {
+      name: "canonical commit reports failure",
+      prepare(context, state) {
+        context.commitInlineEdit = () => ({ ok: false, reason: "synthetic-commit-failure" });
+        return state.inlineEdit.id;
+      },
+    },
+    {
+      name: "canonical commit leaves draft active",
+      prepare(context, state) {
+        context.commitInlineEdit = () => ({ ok: true, kind: "rename", changed: true });
+        return state.inlineEdit.id;
+      },
+    },
+  ];
+
+  for (const item of cases) {
+    await t.test(item.name, async () => {
+      const { context, vaultHandle } = item.cleanVault
+        ? await contextWithCleanVault()
+        : await contextWithDirtyVault();
+      const state = lexicalState(context);
+      const nodeId = state.nodes[0].id;
+      const input = attachInlineDraft(context, {
+        id: nodeId,
+        value: "Draft must remain",
+      });
+      const expectedEditId = item.prepare(context, state, input);
+      const expectedInputValue = input.value;
+      const beforeNodes = plain(state.nodes);
+      const beforeOps = plain(state.ops);
+      const candidate = createSyntheticHandle(`blocked-${item.name}.json`, {
+        content: JSON.stringify(pocketPayload({ nodes: [makeNode("must_not_adopt")] })),
+      });
+      const { opening } = await beginJsonOwnerSwitch(context, candidate);
+
+      context.__ui.elements.get("vaultSwitchSave").click();
+      assert.equal(await opening, false);
+      assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+      assert.equal(context.capturePocketFileSaveSession().ownerKind, "vault");
+      assert.deepEqual(plain(state.nodes), beforeNodes);
+      assert.deepEqual(plain(state.ops), beforeOps);
+      assert.equal(state.inlineEdit.id, expectedEditId);
+      assert.equal(input.value, expectedInputValue);
+      assert.equal(vaultHandle.writes.length, 0);
+      assert.equal(candidate.writes.length, 0);
+      assert.equal(context.PocketVaultBrowserIo.isOwnerActionPending(), false);
+      assert.equal(
+        context.__statuses.some((entry) => (
+          /finish or cancel the current rename/i.test(entry.message)
+          && /nothing was saved or changed/i.test(entry.message)
+        )),
+        true,
+      );
+    });
+  }
+});
+
+test("P020 Cancel preserves the inline draft and Discard abandons it without a Vault write", async (t) => {
+  await t.test("Cancel", async () => {
+    const { context, vaultHandle } = await contextWithCleanVault();
+    const state = lexicalState(context);
+    const nodeId = state.nodes[0].id;
+    const input = attachInlineDraft(context, {
+      id: nodeId,
+      value: "Exact cancelled draft",
+    });
+    const candidate = createSyntheticHandle("cancel-inline-target.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("cancel_inline_target")] })),
+    });
+    const { opening } = await beginJsonOwnerSwitch(context, candidate);
+    context.__ui.elements.get("vaultSwitchCancel").click();
+
+    assert.equal(await opening, false);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+    assert.equal(state.inlineEdit.id, nodeId);
+    assert.equal(input.value, "Exact cancelled draft");
+    assert.equal(state.nodes[0].label, "Synthetic dirty_vault_item");
+    assert.equal(state.ops.length, 0);
+    assert.equal(vaultHandle.writes.length, 0);
+    assert.equal(candidate.writes.length, 0);
+  });
+
+  await t.test("Discard and continue", async () => {
+    const { context, vaultHandle } = await contextWithCleanVault();
+    const state = lexicalState(context);
+    attachInlineDraft(context, {
+      id: state.nodes[0].id,
+      value: "Explicitly discarded draft",
+    });
+    const candidate = createSyntheticHandle("discard-inline-target.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("discard_inline_target")] })),
+    });
+    const { opening } = await beginJsonOwnerSwitch(context, candidate);
+    context.__ui.elements.get("vaultSwitchDiscard").click();
+
+    assert.equal(await opening, true);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, candidate);
+    assert.equal(lexicalState(context).nodes[0].id, "discard_inline_target");
+    assert.equal(lexicalState(context).inlineEdit.id, "");
+    assert.equal(vaultHandle.writes.length, 0);
+    assert.equal(candidate.writes.length, 0);
+  });
+});
+
+test("P020 the production inline input remains committable after a Vault-switch blur and Cancel", async () => {
+  const { context, vaultHandle } = await contextWithCleanVault();
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  state.inlineEdit = {
+    id: nodeId,
+    isNew: false,
+    originalLabel: state.nodes[0].label,
+    afterId: "",
+    parentId: state.nodes[0].parentId,
+    autoFocus: false,
+  };
+  context.__productionRenderTree();
+  const input = context.__ui.elements.get("treeRoot").querySelector(
+    `[data-edit-id="${nodeId}"]`,
+  );
+  assert.ok(input, "the production renderer should create the inline input");
+  input.value = "Draft still works after Cancel";
+  context.document.activeElement = input;
+
+  const candidate = createSyntheticHandle("cancel-real-inline-target.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("cancel_real_inline_target")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate);
+  input.dispatchEvent(syntheticEvent("blur", { target: input }));
+
+  assert.equal(state.inlineEdit.id, nodeId);
+  assert.equal(state.nodes[0].label, "Synthetic dirty_vault_item");
+  assert.equal(state.ops.length, 0);
+  context.__ui.elements.get("vaultSwitchCancel").click();
+  assert.equal(await opening, false);
+
+  input.dispatchEvent(syntheticEvent("keydown", {
+    target: input,
+    key: "Enter",
+  }));
+  assert.equal(state.inlineEdit.id, "");
+  assert.equal(state.nodes[0].label, "Draft still works after Cancel");
+  assert.equal(
+    state.ops.filter((operation) => operation.type === "rename" && operation.id === nodeId).length,
+    1,
+  );
+  assert.equal(vaultHandle.writes.length, 0);
+  assert.equal(candidate.writes.length, 0);
+});
+
+test("P020 P017 permission release still allows dirty-Vault Save and continue for the prepared JSON candidate", async () => {
+  const { context, vaultHandle } = await contextWithCleanVault();
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  attachInlineDraft(context, {
+    id: nodeId,
+    value: "Saved through permission-gated switch",
+  });
+  const candidate = createSyntheticHandle("permission-gated-target.json", {
+    permission: "prompt",
+    requestedPermission: "granted",
+    content: JSON.stringify(
+      pocketPayload({ nodes: [makeNode("permission_gated_target")] }),
+    ),
+  });
+
+  assert.equal(await context.loadFromFileHandle(candidate), false);
+  assert.equal(context.__ui.permissionOverlay.hidden, false);
+  const continuing = context.continuePocketFilePermissionRequest();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultSwitchActions").hidden),
+    true,
+    "dirty Vault switch dialog should follow the granted permission",
+  );
+  assert.equal(context.__ui.permissionOverlay.hidden, true);
+
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(await continuing, true);
+  assert.equal(candidate.requestPermissionCalls, 1);
+  assert.equal(vaultHandle.writes.length, 1);
+  assert.equal(candidate.writes.length, 0);
+  const decrypted = await context.PocketCrypto.openJson(
+    parseWrittenEnvelope(vaultHandle),
+    TEST_PASSPHRASE,
+  );
+  assert.equal(
+    decrypted.mainThoughtTree.find((node) => node.id === nodeId).label,
+    "Saved through permission-gated switch",
+  );
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, candidate);
+  assert.equal(state.nodes[0].id, "permission_gated_target");
+});
+
+test("P020 Save and continue resolves live Details and inline drafts once before encryption", async (t) => {
+  const payload = pocketPayload({
+    nodes: [
+      makeNode("details_item", { order: 0, details: "Before Details" }),
+      makeNode("rename_item", { order: 1, label: "Before rename" }),
+    ],
+  });
+
+  await t.test("live-staged Details still close before inline commit", async () => {
+    const { context, vaultHandle } = await contextWithCleanVault({ payload });
+    const state = lexicalState(context);
+    state.selectedId = "details_item";
+    context.openDetailsEditorForSelectedNode();
+    context.__ui.elements.get("detailEditorBody").value = "Staged Details draft";
+    assert.equal(context.stageDetailsEditorDraft(), true);
+    assert.equal(context.isDetailsEditorOpen(), true);
+    assert.equal(context.hasUnsavedDetailsEditorChanges(), false);
+    attachInlineDraft(context, {
+      id: "rename_item",
+      value: "Inline alongside staged Details",
+    });
+    const candidate = createSyntheticHandle("after-both-staged.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("after_both_staged")] })),
+    });
+    const { opening } = await beginJsonOwnerSwitch(context, candidate);
+    context.__ui.elements.get("vaultSwitchSave").click();
+
+    assert.equal(await opening, true);
+    assert.equal(vaultHandle.writes.length, 1);
+    const decrypted = await context.PocketCrypto.openJson(
+      parseWrittenEnvelope(vaultHandle),
+      TEST_PASSPHRASE,
+    );
+    assert.equal(
+      decrypted.mainThoughtTree.find((node) => node.id === "details_item").details,
+      "Staged Details draft",
+    );
+    assert.equal(
+      decrypted.mainThoughtTree.find((node) => node.id === "rename_item").label,
+      "Inline alongside staged Details",
+    );
+  });
+
+  await t.test("Details render rebuild cannot replace the captured inline value", async () => {
+    const { context, vaultHandle } = await contextWithCleanVault({ payload });
+    const state = lexicalState(context);
+    state.selectedId = "details_item";
+    context.openDetailsEditorForSelectedNode();
+    context.__ui.elements.get("detailEditorBody").value = "Unstaged Details draft";
+    const originalInput = attachInlineDraft(context, {
+      id: "rename_item",
+      value: "Captured before Details render",
+    });
+    context.renderTree = () => {
+      const treeRoot = context.__ui.elements.get("treeRoot");
+      treeRoot.textContent = "";
+      if (!state.inlineEdit.id) return;
+      const rebuilt = context.document.createElement("input");
+      rebuilt.type = "text";
+      rebuilt.value = state.nodes.find((node) => node.id === state.inlineEdit.id)?.label || "";
+      rebuilt.setAttribute("data-edit-id", state.inlineEdit.id);
+      treeRoot.appendChild(rebuilt);
+    };
+    const candidate = createSyntheticHandle("after-both-rendered.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("after_both_rendered")] })),
+    });
+    const { opening } = await beginJsonOwnerSwitch(context, candidate);
+    context.__ui.elements.get("vaultSwitchSave").click();
+
+    assert.equal(await opening, true);
+    assert.equal(originalInput.value, "Captured before Details render");
+    assert.equal(vaultHandle.writes.length, 1);
+    const decrypted = await context.PocketCrypto.openJson(
+      parseWrittenEnvelope(vaultHandle),
+      TEST_PASSPHRASE,
+    );
+    assert.equal(
+      decrypted.mainThoughtTree.find((node) => node.id === "details_item").details,
+      "Unstaged Details draft",
+    );
+    assert.equal(
+      decrypted.mainThoughtTree.find((node) => node.id === "rename_item").label,
+      "Captured before Details render",
+    );
+  });
+});
+
+test("P020 stale owner and candidate authority fail before inline commit or export", async (t) => {
+  await t.test("source session changed", async () => {
+    const { context, vaultHandle } = await contextWithCleanVault();
+    const state = lexicalState(context);
+    const nodeId = state.nodes[0].id;
+    attachInlineDraft(context, { id: nodeId, value: "Must not commit after owner change" });
+    const candidate = createSyntheticHandle("stale-source-target.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("stale_source_target")] })),
+    });
+    const { opening } = await beginJsonOwnerSwitch(context, candidate);
+    context.renewPocketDocumentSession();
+    context.__ui.elements.get("vaultSwitchSave").click();
+
+    assert.equal(await opening, false);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+    assert.equal(state.nodes[0].label, "Synthetic dirty_vault_item");
+    assert.equal(state.inlineEdit.id, nodeId);
+    assert.equal(state.ops.length, 0);
+    assert.equal(vaultHandle.writes.length, 0);
+    assert.equal(candidate.writes.length, 0);
+  });
+
+  await t.test("prepared candidate changed", async () => {
+    const { context, vaultHandle } = await contextWithCleanVault();
+    const state = lexicalState(context);
+    const nodeId = state.nodes[0].id;
+    attachInlineDraft(context, { id: nodeId, value: "Must not commit for stale candidate" });
+    let candidateCurrent = true;
+    const candidate = createSyntheticHandle("stale-candidate-target.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("stale_candidate_target")] })),
+    });
+    const { opening } = await beginJsonOwnerSwitch(context, candidate, {
+      canContinue: () => candidateCurrent,
+    });
+    candidateCurrent = false;
+    context.__ui.elements.get("vaultSwitchSave").click();
+
+    assert.equal(await opening, false);
+    assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+    assert.equal(state.nodes[0].label, "Synthetic dirty_vault_item");
+    assert.equal(state.inlineEdit.id, nodeId);
+    assert.equal(state.ops.length, 0);
+    assert.equal(vaultHandle.writes.length, 0);
+    assert.equal(candidate.writes.length, 0);
+  });
+
+  await t.test("direct stale token cannot bypass the ordinary mutation gate", async () => {
+    const { context } = await contextWithCleanVault();
+    const state = lexicalState(context);
+    const nodeId = state.nodes[0].id;
+    attachInlineDraft(context, { id: nodeId, value: "Unauthorised title" });
+    const result = context.commitInlineEdit(nodeId, "Unauthorised title", {
+      vaultDialogToken: "not-current",
+      sourceSession: context.capturePocketFileSaveSession(),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "owner-switch-not-current");
+    assert.equal(state.nodes[0].label, "Synthetic dirty_vault_item");
+    assert.equal(state.inlineEdit.id, nodeId);
+    assert.equal(state.ops.length, 0);
+  });
+});
+
+test("P020 candidate invalidation during encrypted write aborts before persistence or adoption", async () => {
+  const writeGate = deferred();
+  const { context, vaultHandle } = await contextWithCleanVault({
+    handleOptions: { writeDeferred: writeGate },
+  });
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  attachInlineDraft(context, { id: nodeId, value: "Committed but still unsaved title" });
+  let candidateCurrent = true;
+  const candidate = createSyntheticHandle("stale-during-write.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("stale_during_write")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate, {
+    canContinue: () => candidateCurrent,
+  });
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(
+    await waitFor(() => vaultHandle.createWritableCalls === 1),
+    true,
+  );
+  candidateCurrent = false;
+  writeGate.resolve();
+
+  assert.equal(await opening, false);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+  assert.equal(state.nodes[0].label, "Committed but still unsaved title");
+  assert.equal(state.ops.filter((operation) => operation.type === "rename").length, 1);
+  assert.equal(vaultHandle.writes.length, 0);
+  assert.equal(vaultHandle.abortedWrites, 1);
+  assert.equal(candidate.writes.length, 0);
+});
+
+test("P020 final JSON adoption still honours candidate invalidation after encrypted persistence", async () => {
+  const { context, vaultHandle } = await contextWithCleanVault();
+  const state = lexicalState(context);
+  const nodeId = state.nodes[0].id;
+  attachInlineDraft(context, {
+    id: nodeId,
+    value: "Saved before queued candidate invalidation",
+  });
+  const transitionGate = deferred();
+  const originalTransition = context.enqueuePocketOwnerTransition;
+  let transitionQueued = false;
+  context.enqueuePocketOwnerTransition = async (task) => {
+    transitionQueued = true;
+    await transitionGate.promise;
+    return originalTransition(task);
+  };
+  let candidateCurrent = true;
+  const candidate = createSyntheticHandle("invalidate-before-adoption.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("must_not_be_adopted")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate, {
+    canContinue: () => candidateCurrent,
+  });
+
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(
+    await waitFor(() => vaultHandle.writes.length === 1 && transitionQueued),
+    true,
+    "encrypted persistence should finish before queued JSON adoption",
+  );
+  candidateCurrent = false;
+  transitionGate.resolve();
+
+  assert.equal(await opening, false);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, vaultHandle);
+  assert.equal(state.nodes[0].id, nodeId);
+  assert.equal(state.nodes[0].label, "Saved before queued candidate invalidation");
+  assert.equal(state.ops.length, 0);
+  assert.equal(candidate.writes.length, 0);
 });
 
 test("Create New from a dirty Vault requires Cancel, Discard, or successful encrypted Save", async (t) => {

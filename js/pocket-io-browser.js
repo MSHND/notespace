@@ -692,7 +692,6 @@ async function continuePocketFilePermissionRequest() {
     permissionAlreadyGranted: true,
     displayName: pendingName,
     permissionRequest: { token, sourceSession },
-    canContinue: () => pocketFilePermissionRequestIsCurrent(token, handle, sourceSession),
     beforeAdopt: () => {
       if (!pocketFilePermissionRequestIsCurrent(token, handle, sourceSession)) return false;
       clearPendingPocketFileHandle({ render: false, restoreFocus: false });
@@ -828,22 +827,36 @@ async function loadFromFileHandle(handle, options = {}) {
   const openingSourceSession = opts.permissionRequest?.sourceSession
     || opts.sourceSession
     || capturePocketFileSaveSession();
+  let permissionCandidateReleased = false;
   const deviceChangesDecisionIsOpen = () => (
     typeof window.isPocketDeviceChangesDecisionOpen === "function"
     && window.isPocketDeviceChangesDecisionOpen()
   );
   const openingIsCurrent = () => {
     if (opts.permissionRequest) {
-      return pocketFilePermissionRequestIsCurrent(
-        opts.permissionRequest.token,
-        handle,
-        opts.permissionRequest.sourceSession
-      );
+      return permissionCandidateReleased
+        ? (
+          isPocketFileSaveSessionCurrent(openingSourceSession)
+          && !isPocketFilePermissionPromptOpen()
+          && !deviceChangesDecisionIsOpen()
+        )
+        : pocketFilePermissionRequestIsCurrent(
+          opts.permissionRequest.token,
+          handle,
+          opts.permissionRequest.sourceSession
+        );
     }
     return isPocketFileSaveSessionCurrent(openingSourceSession)
       && !isPocketFilePermissionPromptOpen()
       && !deviceChangesDecisionIsOpen();
   };
+  const candidateIsCurrent = () => (
+    openingIsCurrent()
+    && (
+      typeof opts.canContinue !== "function"
+      || opts.canContinue() !== false
+    )
+  );
   try {
     if (!opts.permissionRequest
         && window.PocketVaultBrowserIo
@@ -862,7 +875,7 @@ async function loadFromFileHandle(handle, options = {}) {
     }
     if (!opts.permissionAlreadyGranted) {
       const permissionState = await getPocketFilePermissionState(handle);
-      if (!openingIsCurrent()) return false;
+      if (!candidateIsCurrent()) return false;
       if (permissionState === "prompt") {
         return showPocketFilePermissionExplanation(
           handle,
@@ -876,9 +889,9 @@ async function loadFromFileHandle(handle, options = {}) {
         return false;
       }
     }
-    if (!openingIsCurrent()) return false;
+    if (!candidateIsCurrent()) return false;
     const file = await handle.getFile();
-    if (!openingIsCurrent()) return false;
+    if (!candidateIsCurrent()) return false;
     const fileSession = {
       handle,
       displayName: opts.displayName || file.name || handle.name,
@@ -887,13 +900,14 @@ async function loadFromFileHandle(handle, options = {}) {
     };
     const loaded = await loadFromFile(file, {
       fileSession,
-      canContinue: () => (
-        openingIsCurrent()
-        && (typeof opts.canContinue !== "function" || opts.canContinue() !== false)
-      ),
-      beforeAdopt: () => {
-        if (!openingIsCurrent()) return false;
-        return typeof opts.beforeAdopt !== "function" || opts.beforeAdopt() !== false;
+      canContinue: candidateIsCurrent,
+      beforeAdopt: async () => {
+        if (!candidateIsCurrent()) return false;
+        const allowed = typeof opts.beforeAdopt !== "function"
+          || await opts.beforeAdopt() !== false;
+        if (!allowed) return false;
+        if (opts.permissionRequest) permissionCandidateReleased = true;
+        return candidateIsCurrent();
       },
     });
     if (!loaded) {
@@ -1199,6 +1213,7 @@ async function createNewPocketFile() {
       preparedAdoptionLease = await window.PocketVaultBrowserIo.beforeAdoptPreparedDocument({
         kind: "json",
         displayName: name,
+        canContinue: () => isPocketFileSaveSessionCurrent(sourceSession),
       });
       if (!preparedAdoptionLease) return false;
     }
@@ -1440,7 +1455,10 @@ async function exportTree(options = {}) {
       if (saveSession.ownerKind === "vault") {
         const vaultIo = window.PocketVaultBrowserIo;
         writeResult = vaultIo && typeof vaultIo.writeActiveVaultPayload === "function"
-          ? await vaultIo.writeActiveVaultPayload(payload, { expectedSession: saveSession })
+          ? await vaultIo.writeActiveVaultPayload(payload, {
+            expectedSession: saveSession,
+            vaultDialogToken: options.vaultDialogToken,
+          })
           : { ok: false, reason: "vault-locked" };
       } else {
         writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
@@ -1601,15 +1619,16 @@ async function loadFromFile(file, options = {}) {
       preparedAdoptionLease = await window.PocketVaultBrowserIo.beforeAdoptPreparedDocument({
         kind: "json",
         displayName: pendingFileSession.displayName || file.name || pendingFileSession.handle.name,
+        canContinue: fileLoadIsCurrent,
       });
       if (!preparedAdoptionLease) return false;
     }
     try {
       return await enqueuePocketOwnerTransition(async () => {
         const sourceStillCurrent = () => (
-          pendingFileSession.sourceSession
-            ? isPocketFileSaveSessionCurrent(pendingFileSession.sourceSession)
-            : fileLoadIsCurrent()
+          (!pendingFileSession.sourceSession
+            || isPocketFileSaveSessionCurrent(pendingFileSession.sourceSession))
+          && fileLoadIsCurrent()
         );
         if (!sourceStillCurrent()) return false;
         const committed = commitPreparedPocketDocument(norm, sourceInfo, {

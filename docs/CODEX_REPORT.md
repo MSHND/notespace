@@ -1,10 +1,139 @@
 # Codex report
 
+## POCKET TASK P020 — PRESERVE INLINE RENAMES DURING VAULT SWITCH
+
+Title: Preserve inline renames during Vault switch
+
+Status: the P019 dirty-Vault switch now resolves active inline renames and provisional new-item titles through the canonical inline editor before encrypted persistence. Focused local validation is complete against the exact accepted P019 baseline. Murray's physical browser acceptance remains.
+
+Commit title:
+
+- `P020 Preserve inline renames during Vault switch`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Required and confirmed starting `origin/main`: `05dd4a62b128702471a4524c0d80b8d0b9441f64`
+- Starting title: `P019 Make Vault the encrypted truth owner`
+- Implementation date: 2026-07-27
+- Branch: `main`
+- Node: `v23.11.0`
+- P020 is a narrow dirty-owner-switch correction. It does not change the Vault envelope, cryptographic parameters, truth payload schema, active owner kinds, PE implementation, browser-recovery privacy or plaintext-export policy.
+- No personal Pocket truth file, real Vault, browser storage, password, real file handle or network resource was accessed.
+
+### Confirmed defect and correction
+
+`hasUnsavedInlineTitleDraft()` already counted the live inline input as unsaved, but P019 `saveBeforeOwnerSwitch()` resolved only a Details draft before calling `exportTree()`. The inline value therefore remained outside `state.nodes` and the operation history. With an earlier operation it was omitted from the encrypted payload; as the only change it could produce `no-changes`.
+
+P020 keeps `commitInlineEdit()` as the sole inline mutation owner and adds a structured owner-switch adapter:
+
+1. inspect the exact active `[data-edit-id]` input and node;
+2. retain its full current value before any Details render;
+3. reject blank, over-limit, missing, stale or otherwise unresolved drafts without invoking the destructive ordinary blank-title path;
+4. resolve any open Details editor through `saveDetailsEditor()` and verify it closed;
+5. revalidate the exact dialog, document owner, handle, Pocket session, Vault session and prepared candidate;
+6. commit the captured value once through `commitInlineEdit()`;
+7. require the inline edit to be resolved, with the canonical commit producing its ordinary `rename` or `add_below` operation; and
+8. call canonical `exportTree()` once.
+
+If Details Save rebuilt the tree, the adapter restores only the already captured exact inline value into the newly rendered input after proving the edit object and node are unchanged. It does not read `document.activeElement`, infer from `originalLabel`, scrape text in `exportTree()` or add a second Enter/Save handler.
+
+The production inline renderer now marks its local input lifecycle finished only after the canonical commit or cancel actually resolves that edit. Focus moving into the permission or Vault-switch modal can therefore be rejected by the ordinary mutation gate without consuming the input's later Enter, Tab or blur behaviour. Cancel and failed Save-and-continue leave a genuinely usable draft, not merely visible text.
+
+### Narrow dialog authority and race safety
+
+The Vault-switch modal makes ordinary mutation unavailable while its decision is pending. P020 therefore extends the existing dialog-token pattern to authorise only the canonical inline commit for the current busy Save-and-continue action. Direct or stale tokens remain blocked.
+
+The switch dialog now carries the prepared candidate's continuation guard. JSON load, Create New and Vault-open callers supply their actual source/candidate checks. `allowsDialogSave()` verifies:
+
+- the exact dialog token and busy switch mode;
+- the active file/Vault source session;
+- owner kind and Vault-session ID; and
+- the prepared candidate's current authority.
+
+`exportTree()` passes that same token into the encrypted writer. Candidate and session identity are rechecked after encryption, permission, writable creation and data write. A stale request aborts before close where the platform still permits it. Candidate adoption remains after confirmed encrypted persistence only.
+
+For P017-selected JSON files, the candidate remains authoritative when the permission owner deliberately releases its single-use token immediately before dirty-Vault resolution. That narrow transition retains the exact source session and prepared candidate, while final adoption still requires both source-session identity and the candidate continuation guard. The permission-gated Save-and-continue flow is covered end to end.
+
+### User-visible outcomes
+
+- **Save and continue** commits an active rename or valid inline new item into the model and operation history before encryption.
+- An inline-only rename now produces an encrypted write rather than `no-changes`.
+- A valid provisional item produces one node and one ordinary `add_below` operation.
+- A failed encrypted write leaves the committed model change dirty and retryable without a duplicate rename/add operation.
+- A blank, over-limit, missing, stale or unresolved draft cancels the pending switch, retains the current Vault and draft, performs zero writes and reports: `Finish or cancel the current rename before switching files. Nothing was saved or changed.`
+- **Cancel** retains the exact typed draft and performs zero writes.
+- **Discard and continue** does not commit the draft or write the Vault; successful candidate adoption explicitly abandons the old in-memory draft.
+
+### Files changed
+
+Production:
+
+- `js/pocket-editor-copy.js`
+- `js/pocket-history-status.js`
+- `js/pocket-render.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-vault-io-browser.js`
+
+Tests:
+
+- `tests/p019-vault-ownership.test.js`
+
+Documentation:
+
+- `docs/VAULT_OWNERSHIP_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No HTML, CSS, service worker, generated PE runtime, crypto module, Vault envelope, fixture, package or dependency file changed.
+
+### Executable validation
+
+P020 extends the existing production-source VM suite rather than adding a copied implementation. The new coverage uses real synthetic inline input elements, actual source functions, fake in-memory handles and authenticated Vault envelopes. It decrypts completed writes and proves that the canonical payload contains the exact inline title and earlier tree changes.
+
+Covered P020 cases include:
+
+- prior operation plus inline rename;
+- inline rename as the only unsaved change;
+- valid inline new item with no duplicate node or operation;
+- blank, missing-input, stale-ID, missing-node, over-limit and reported/unresolved commit failures;
+- Cancel and Discard semantics;
+- live-staged and render-rebuilt Details plus inline drafts;
+- failed encrypted persistence and retry;
+- production-rendered blur followed by Cancel and a later successful Enter commit;
+- P017 permission-gated JSON preparation followed by dirty-Vault Save-and-continue;
+- stale owner/session, candidate and token rejection;
+- candidate invalidation during a deferred encrypted write; and
+- candidate invalidation after encrypted persistence but before queued adoption.
+
+Exact focused results:
+
+- `node --test tests/p019-vault-ownership.test.js`: **113 passed, 0 failed**
+- `node --test tests/pe-persistence-contract.test.js`: **96 passed, 0 failed**
+- `node --test tests/device-changes-resolution.test.js`: **69 passed, 0 failed**
+- `node --test tests/p018-popout-isolation.test.js`: **15 passed, 0 failed**
+- Combined: **293 passed, 0 failed**
+- Generated PE runtime: **unchanged by P020; actual generated-program compilation passed in all relevant PE persistence cases**
+- Production JavaScript syntax checks: **PASS for every `js/*.js` file**
+- Changed test syntax check: **PASS**
+- `git diff --check`: **PASS**
+
+The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+### P019 architecture retained
+
+P020 retains the P019 active owner model, non-extractable in-memory key, fresh AES-GCM nonce per Save, revision-after-close rule, old JSON handle isolation, no plaintext fallback, explicit readable export, Vault recovery privacy, PiP block, atomic candidate adoption, P017 permission ownership, P018 popup ownership and P012 stale-PE rejection.
+
+### Physical browser acceptance
+
+Physical acceptance remains required with disposable data and a disposable Vault password. The exact focused P020 checklist is in `docs/VAULT_OWNERSHIP_CONTRACT.md`, section 17, steps 41–53.
+
 ## POCKET TASK P019 — MAKE VAULT THE ENCRYPTED TRUTH OWNER
 
 Title: Make Vault the encrypted truth owner
 
 Status: implementation, documentation and focused local validation are complete against the exact accepted P018 baseline. Murray's physical browser acceptance remains. The exact-title commit containing this report must still be pushed and confirmed on `origin/main` before P019 can be reported complete.
+
+P020 resolution note: commit `P020 Preserve inline renames during Vault switch` corrects only the dirty-owner Save-and-continue draft boundary described above. The P019 encrypted owner, crypto, persistence and recovery architecture remains unchanged.
 
 Commit title:
 
