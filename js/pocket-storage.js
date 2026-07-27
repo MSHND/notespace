@@ -1,10 +1,20 @@
 /* Payload building, local safety, cache, startup restore, health/restore helpers. */
 
+function isPocketVaultStoragePrivate() {
+  try {
+    return typeof window.isPocketVaultOwnerActive === "function"
+      && window.isPocketVaultOwnerActive() === true;
+  } catch {
+    return true;
+  }
+}
+
 function makeId(prefix = "pl") {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function saveWorkspaceState() {
+  if (isPocketVaultStoragePrivate()) return false;
   try {
     const payload = {
       savedAt: nowIso(),
@@ -25,6 +35,7 @@ function saveWorkspaceState() {
 }
 
 function restoreWorkspaceState() {
+  if (isPocketVaultStoragePrivate()) return false;
   try {
     const raw = localStorage.getItem(WORKSPACE_STATE_KEY);
     if (!raw) return false;
@@ -219,6 +230,9 @@ function localSafetyEntryWithoutChangeMetadata(value, options = {}) {
 }
 
 function storeLocalSafetyEntry(entry) {
+  if (isPocketVaultStoragePrivate()) {
+    return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
+  }
   const candidates = [];
   const addCandidate = (candidate) => {
     if (!candidate) return;
@@ -268,6 +282,7 @@ function storeLocalSafetyEntry(entry) {
 }
 
 function saveLocalSafetySnapshot(reason = "change") {
+  if (isPocketVaultStoragePrivate()) return false;
   if (!Array.isArray(state.nodes)) return false;
   const capturedAt = nowIso();
   let entry;
@@ -280,6 +295,7 @@ function saveLocalSafetySnapshot(reason = "change") {
 }
 
 function saveDetachedPocketSafetySnapshot(documentInput, base, options = {}) {
+  if (isPocketVaultStoragePrivate()) return { ok: false, baseStored: false };
   const owner = pocketDeviceChangesOwner();
   if (!owner) return { ok: false, baseStored: false };
   const coerced = owner.coerceDocument(documentInput);
@@ -399,6 +415,7 @@ function readLocalSafetyTrail() {
 }
 
 function writeLocalSafetyTrail(entries) {
+  if (isPocketVaultStoragePrivate()) return false;
   try {
     const arr = (Array.isArray(entries) ? entries : [])
       .map((entry) => entry && entry.parsed ? entry.parsed : entry)
@@ -576,6 +593,7 @@ function startupConfidenceKind() {
 
 
 function appendLocalSafetyTrail(entry) {
+  if (isPocketVaultStoragePrivate()) return false;
   if (!entry || typeof entry !== "object") return false;
   const capturedAt = cleanText(entry.capturedAt, 40);
   const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
@@ -598,7 +616,8 @@ function appendLocalSafetyTrail(entry) {
   }
 }
 
-function clearLocalSafetySnapshot() {
+function clearLocalSafetySnapshot(options = {}) {
+  if (isPocketVaultStoragePrivate() && options.coveredDetachedVaultAdoption !== true) return false;
   try {
     localStorage.removeItem(LOCAL_SAFETY_KEY);
     return true;
@@ -677,6 +696,7 @@ function prepareLocalSafetySnapshotForDetachedAdoption(snapshot) {
 }
 
 function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot(), options = {}) {
+  if (isPocketVaultStoragePrivate()) return false;
   if (!snapshot || !snapshot.norm) return false;
   const parsed = snapshot.parsed || {};
   if (typeof setDetachedPocketDocumentSession !== "function") return false;
@@ -769,6 +789,7 @@ function showPocketHealth() {
 }
 
 function restorePreviousLocalSafetyVersion() {
+  if (isPocketVaultStoragePrivate()) return false;
   const trail = readLocalSafetyTrail();
   const latest = readLocalSafetySnapshot();
   const latestMs = latest ? latest.capturedMs : 0;
@@ -789,6 +810,7 @@ function restorePreviousLocalSafetyVersion() {
 }
 
 function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
+  if (isPocketVaultStoragePrivate()) return false;
   if (options && options.skipLocalSafetyCheck) return false;
   const snapshot = readLocalSafetySnapshot();
   if (!snapshot) return false;
@@ -799,6 +821,177 @@ function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
     sourceInfo,
     fileDocument: options.comparisonDocument || null,
   });
+}
+
+function capturePocketDocumentStateForAdoption() {
+  return {
+    nodes: state.nodes,
+    tombstones: state.tombstones,
+    rootExtras: state.rootExtras,
+    dataExtras: state.dataExtras,
+    selectedId: state.selectedId,
+    focusRootId: state.focusRootId,
+    collapsed: state.collapsed,
+    urgentCollectorExpanded: state.urgentCollectorExpanded,
+    ops: state.ops,
+    operationHighWater: state.operationHighWater,
+    operationDocumentAnchor: state.operationDocumentAnchor,
+    activeSaveOperationCeiling: state.activeSaveOperationCeiling,
+    source: state.source,
+    documentBaseline: state.documentBaseline,
+    detachedSafetyBase: state.detachedSafetyBase,
+    conflictGuard: state.conflictGuard,
+    inlineEdit: state.inlineEdit,
+    moveMode: state.moveMode,
+    detailsEdit: state.detailsEdit,
+    captureRhythm: state.captureRhythm,
+    typeJump: state.typeJump,
+    navigationMemory: state.navigationMemory,
+    rowMiniMenuOpen: state.rowMiniMenuOpen,
+    rowMiniMenuNodeId: state.rowMiniMenuNodeId,
+    lastDeleteUndoSnapshot,
+    lastMoveUndoSnapshot,
+    lastEditUndoSnapshot,
+    lastTreeUndoKind,
+    pendingDeleteConfirmNodeId,
+    pendingDeleteConfirmExpiresAt,
+    pendingPathImport,
+  };
+}
+
+function restorePocketDocumentStateAfterFailedAdoption(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  state.nodes = snapshot.nodes;
+  state.tombstones = snapshot.tombstones;
+  state.rootExtras = snapshot.rootExtras;
+  state.dataExtras = snapshot.dataExtras;
+  state.selectedId = snapshot.selectedId;
+  state.focusRootId = snapshot.focusRootId;
+  state.collapsed = snapshot.collapsed;
+  state.urgentCollectorExpanded = snapshot.urgentCollectorExpanded;
+  state.ops = snapshot.ops;
+  state.operationHighWater = snapshot.operationHighWater;
+  state.operationDocumentAnchor = snapshot.operationDocumentAnchor;
+  state.activeSaveOperationCeiling = snapshot.activeSaveOperationCeiling;
+  state.source = snapshot.source;
+  state.documentBaseline = snapshot.documentBaseline;
+  state.detachedSafetyBase = snapshot.detachedSafetyBase;
+  state.conflictGuard = snapshot.conflictGuard;
+  state.inlineEdit = snapshot.inlineEdit;
+  state.moveMode = snapshot.moveMode;
+  state.detailsEdit = snapshot.detailsEdit;
+  state.captureRhythm = snapshot.captureRhythm;
+  state.typeJump = snapshot.typeJump;
+  state.navigationMemory = snapshot.navigationMemory;
+  state.rowMiniMenuOpen = snapshot.rowMiniMenuOpen;
+  state.rowMiniMenuNodeId = snapshot.rowMiniMenuNodeId;
+  lastDeleteUndoSnapshot = snapshot.lastDeleteUndoSnapshot;
+  lastMoveUndoSnapshot = snapshot.lastMoveUndoSnapshot;
+  lastEditUndoSnapshot = snapshot.lastEditUndoSnapshot;
+  lastTreeUndoKind = snapshot.lastTreeUndoKind;
+  pendingDeleteConfirmNodeId = snapshot["pendingDeleteConfirmNodeId"];
+  pendingDeleteConfirmExpiresAt = snapshot["pendingDeleteConfirmExpiresAt"];
+  pendingPathImport = snapshot["pendingPathImport"];
+  return true;
+}
+
+function resetPocketDocumentTransientsForAdoption() {
+  if (typeof cancelPendingCopyClick === "function") {
+    cancelPendingCopyClick();
+  } else if (pendingCopyClickTimer) {
+    clearTimeout(pendingCopyClickTimer);
+    pendingCopyClickTimer = null;
+  }
+  if (importRevealTimer) {
+    clearTimeout(importRevealTimer);
+    importRevealTimer = null;
+  }
+  if (typeof clearMoveModeIdleTimer === "function") clearMoveModeIdleTimer();
+  if (typeof stopMovePadRepeat === "function") stopMovePadRepeat();
+  state.inlineEdit = {
+    id: "",
+    isNew: false,
+    originalLabel: "",
+    afterId: "",
+    parentId: "",
+    autoFocus: false,
+  };
+  state.moveMode = false;
+  state.detailsEdit = {
+    id: "",
+    originalLabel: "",
+    originalDetails: "",
+    originalUrgent: false,
+    originalCopyContext: false,
+    draftOpRecorded: false,
+    draftOperationSequence: 0,
+    draftHadCoveredSave: false,
+    opsStartLength: 0,
+  };
+  state.captureRhythm = { parentId: "", lastAddedId: "", expiresAt: 0 };
+  state.typeJump = { query: "", cycle: 0, lastAt: 0 };
+  state.navigationMemory = {
+    filterSelectedId: "",
+    filterFocusRootId: "",
+    preFocusSelectedId: "",
+  };
+  state.rowMiniMenuOpen = false;
+  state.rowMiniMenuNodeId = "";
+  lastDeleteUndoSnapshot = null;
+  lastMoveUndoSnapshot = null;
+  lastEditUndoSnapshot = null;
+  lastTreeUndoKind = "";
+  pendingDeleteConfirmNodeId = "";
+  pendingDeleteConfirmExpiresAt = 0;
+  pendingPathImport = null;
+  if (el.detailOverlay instanceof HTMLElement) el.detailOverlay.hidden = true;
+  if (el.detailEditorLabel && "value" in el.detailEditorLabel) el.detailEditorLabel.value = "";
+  if (el.detailEditorBody && "value" in el.detailEditorBody) el.detailEditorBody.value = "";
+  if (el.detailEditorUrgent && "checked" in el.detailEditorUrgent) el.detailEditorUrgent.checked = false;
+  if (el.detailEditorCopyContext && "checked" in el.detailEditorCopyContext) el.detailEditorCopyContext.checked = false;
+  if (el.detailEditorTitle) el.detailEditorTitle.textContent = "";
+  if (el.detailEditorPath) el.detailEditorPath.textContent = "";
+  if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
+  return true;
+}
+
+function finishLoadedStateAdoption(norm, sourceInfo = {}, options = {}) {
+  const vaultStoragePrivate = options.storagePrivate === "vault" || isPocketVaultStoragePrivate();
+  resetPocketDocumentTransientsForAdoption();
+  if (vaultStoragePrivate) {
+    if (typeof clearConflictGuard === "function") clearConflictGuard();
+    else state.conflictGuard = { active: false, reason: "", loadedAt: "", newerAt: "" };
+  } else {
+    updateConflictGuardForLoadedSource(norm, state.source);
+  }
+  const restoredWorkspace = vaultStoragePrivate ? false : restoreWorkspaceState();
+  const baselinePayload = {
+    ...(state.rootExtras || {}),
+    schema: "portal.export.v1",
+    exportedAt: nowIso(),
+    writtenAt: nowIso(),
+    mainThoughtTree: state.nodes,
+    mainThoughtTreeTombstones: state.tombstones,
+    data: {
+      ...(state.dataExtras || {}),
+      mainThoughtTree: state.nodes,
+      mainThoughtTreeTombstones: state.tombstones,
+    },
+  };
+  if (!vaultStoragePrivate) saveLastSaveSnapshot(baselinePayload);
+  refreshMeta();
+  renderTree();
+  if (restoredWorkspace && state.selectedId) {
+    requestAnimationFrame(() => {
+      refocusTreeNavigation(state.selectedId);
+      softlyEnsureSelectionVisible();
+    });
+  }
+  if (!vaultStoragePrivate) {
+    persistPipSnapshot();
+    maybeOfferLocalSafetyRestore(state.source, options);
+  }
+  return true;
 }
 
 function applyLoadedState(norm, sourceInfo = {}, options = {}) {
@@ -832,35 +1025,12 @@ function applyLoadedState(norm, sourceInfo = {}, options = {}) {
     establishPocketDocumentBaseline(baselineInput, state.source);
   }
   if (typeof resetPocketOperationAnchor === "function") resetPocketOperationAnchor();
-  updateConflictGuardForLoadedSource(norm, state.source);
-  const restoredWorkspace = restoreWorkspaceState();
-  const baselinePayload = {
-    ...(state.rootExtras || {}),
-    schema: "portal.export.v1",
-    exportedAt: nowIso(),
-    writtenAt: nowIso(),
-    mainThoughtTree: state.nodes,
-    mainThoughtTreeTombstones: state.tombstones,
-    data: {
-      ...(state.dataExtras || {}),
-      mainThoughtTree: state.nodes,
-      mainThoughtTreeTombstones: state.tombstones,
-    },
-  };
-  saveLastSaveSnapshot(baselinePayload);
-  refreshMeta();
-  renderTree();
-  if (restoredWorkspace && state.selectedId) {
-    requestAnimationFrame(() => {
-      refocusTreeNavigation(state.selectedId);
-      softlyEnsureSelectionVisible();
-    });
-  }
-  persistPipSnapshot();
-  maybeOfferLocalSafetyRestore(state.source, options);
+  if (options.deferEffects === true) return true;
+  return finishLoadedStateAdoption(norm, sourceInfo, options);
 }
 
 function saveAutoCache(norm, sourceInfo = {}) {
+  if (isPocketVaultStoragePrivate()) return false;
   try {
     const payload = {
       ...(state.rootExtras || {}),
@@ -877,10 +1047,14 @@ function saveAutoCache(norm, sourceInfo = {}) {
       },
     };
     localStorage.setItem(AUTO_CACHE_KEY, JSON.stringify(payload));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function saveLastSaveSnapshot(payload) {
+  if (isPocketVaultStoragePrivate()) return false;
   if (!payload || typeof payload !== "object") return false;
   const clone = safeJsonClone(payload, 5000000);
   if (!clone) return false;
@@ -922,6 +1096,7 @@ function snapshotCurrentTreeForRestore() {
 }
 
 function restoreAutoCache() {
+  if (isPocketVaultStoragePrivate()) return null;
   try {
     const raw = localStorage.getItem(AUTO_CACHE_KEY);
     if (!raw) return null;

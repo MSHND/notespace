@@ -419,6 +419,11 @@ function markSavedNow(payload = null) {
   lastSavedLabel = meta?.label || formatSaveClockLabel(new Date());
 }
 
+function markVaultSavedNow() {
+  lastSavedLabel = formatSaveClockLabel(new Date());
+  return lastSavedLabel;
+}
+
 function flashSaveChip(label = "saved") {
   if (!el.btnExportTree) return;
   const nextLabel = cleanText(label, 40) || "saved";
@@ -455,6 +460,18 @@ function refreshMeta() {
   const unsavedCount = Array.isArray(state.ops) ? state.ops.length : 0;
   const hasUnsavedDetails = hasUnsavedDetailsEditorChanges();
   const hasUnsaved = unsavedCount > 0 || hasUnsavedDetails;
+  const vaultActive = typeof isPocketVaultOwnerActive === "function"
+    && isPocketVaultOwnerActive();
+  if (el.activeDocumentSource instanceof HTMLElement) {
+    const vaultName = vaultActive
+      ? cleanText(state.pocketFile?.displayName || state.source?.fileName, 120)
+      : "";
+    el.activeDocumentSource.textContent = vaultName ? `Encrypted Vault · ${vaultName}` : "";
+    el.activeDocumentSource.hidden = !vaultName;
+  }
+  if (el.vaultRecoveryNotice instanceof HTMLElement) {
+    el.vaultRecoveryNotice.hidden = !(vaultActive && hasUnsaved);
+  }
   const hasSelection = !!state.selectedId;
   const expandableIds = getExpandableIds();
   const anyCollapsed = expandableIds.some((id) => state.collapsed.has(id));
@@ -477,12 +494,21 @@ function refreshMeta() {
   if (el.btnRenamePrimary) el.btnRenamePrimary.disabled = !hasSelection;
   if (el.btnDeletePrimary) el.btnDeletePrimary.disabled = !hasSelection;
   if (el.btnOpenPrimary) el.btnOpenPrimary.disabled = !hasSelection;
+  if (el.btnPip instanceof HTMLButtonElement) {
+    el.btnPip.disabled = vaultActive;
+    el.btnPip.title = vaultActive
+      ? "Document PiP is not available for encrypted Vaults yet"
+      : "Open pocket in a small pop-out window";
+    el.btnPip.setAttribute("aria-label", vaultActive
+      ? "Document PiP unavailable for encrypted Vault"
+      : "Pop out pocket");
+  }
   const isSaving = !!state.saveInProgress;
   el.btnExportTree.disabled = isSaving || (!hasData && !hasUnsaved);
   el.btnExportTree.classList.remove("safetySafe", "safetyNeed", "safetyCheck");
   if (isSaving) {
     el.btnExportTree.textContent = "saving...";
-    el.btnExportTree.title = "Writing pocket file";
+    el.btnExportTree.title = vaultActive ? "Writing encrypted Vault" : "Writing pocket file";
   } else if (!saveChipTimer) {
     const backupMeta = readLastBackupMeta();
     const hasConflictRisk = !!(state.conflictGuard && state.conflictGuard.active);
@@ -498,13 +524,16 @@ function refreshMeta() {
     } else {
       el.btnExportTree.textContent = "save";
     }
-    el.btnExportTree.title = hasConflictRisk
+    el.btnExportTree.title = vaultActive
+      ? "Save encrypted Vault"
+      : (hasConflictRisk
       ? "This file looks older than a local/saved copy; save carefully"
       : (hasUnsavedDetails
       ? "Detail edit not saved yet"
       : (hasUnsaved
       ? `Local changes only; save ${unsavedCount} change${unsavedCount === 1 ? "" : "s"} to your pocket file`
-      : (backupMeta ? `${backupProofLabel(backupMeta)} saved ${formatAgoLabel(backupMeta.exportedAt)}` : "Save a portable pocket copy")));
+      : (backupMeta ? `${backupProofLabel(backupMeta)} saved ${formatAgoLabel(backupMeta.exportedAt)}` : "Save a portable pocket copy"))));
+    el.btnExportTree.setAttribute("aria-label", vaultActive ? "Save encrypted Vault" : "Save Pocket file");
   }
   const movePadEnabled = !!state.moveMode && !!state.selectedId;
   if (el.btnMovePadUp) el.btnMovePadUp.disabled = !movePadEnabled;

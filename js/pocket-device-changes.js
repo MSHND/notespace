@@ -728,7 +728,10 @@
       reason: errors[0] || "",
       errors: Array.from(new Set(errors)),
       document,
-      normalisationChecked: normalisation.checked === true
+      normalisationChecked: normalisation.checked === true,
+      normalisedDocument: normalisation.ok && normalisation.document
+        ? cloneValue(normalisation.document)
+        : null
     };
   }
 
@@ -2523,6 +2526,8 @@
   }
 
   function openResolution(snapshot, options) {
+    if (typeof global.isPocketVaultOwnerActive === "function"
+        && global.isPocketVaultOwnerActive()) return false;
     if (isResolutionOpen()) return true;
     if (typeof global.isPocketFilePermissionPromptOpen === "function"
         && global.isPocketFilePermissionPromptOpen()) {
@@ -2609,6 +2614,8 @@
   }
 
   function reviewCurrentDeviceChanges(options) {
+    if (typeof global.isPocketVaultOwnerActive === "function"
+        && global.isPocketVaultOwnerActive()) return false;
     if (typeof global.readLocalSafetySnapshot !== "function") return false;
     const snapshot = global.readLocalSafetySnapshot();
     if (!snapshot) return false;

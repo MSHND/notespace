@@ -35,6 +35,10 @@ async function openPipWindow() {
     setStatus("Already in pop-out mode.", "warn");
     return;
   }
+  if (isPocketVaultOwnerActive()) {
+    setStatus("Document PiP is not available for encrypted Vaults yet because its transfer is not encrypted.", "warn", { durationMs: 6200 });
+    return;
+  }
   persistPipSnapshot();
   const dpip = window.documentPictureInPicture;
   if (!dpip || typeof dpip.requestWindow !== "function") {
@@ -110,6 +114,8 @@ function jsonFilePickerOptions() {
 function pocketFileState() {
   if (!state.pocketFile || typeof state.pocketFile !== "object") {
     state.pocketFile = {
+      ownerKind: "none",
+      vaultSessionId: "",
       writable: false,
       displayName: "",
       recentName: "",
@@ -122,6 +128,12 @@ function pocketFileState() {
   if (typeof state.pocketFile.detachedDeviceChanges !== "boolean") {
     state.pocketFile.detachedDeviceChanges = false;
   }
+  if (!["none", "json", "vault", "detached"].includes(state.pocketFile.ownerKind)) {
+    state.pocketFile.ownerKind = state.pocketFile.detachedDeviceChanges === true
+      ? "detached"
+      : (truthFileHandle ? "json" : "none");
+  }
+  if (typeof state.pocketFile.vaultSessionId !== "string") state.pocketFile.vaultSessionId = "";
   return state.pocketFile;
 }
 
@@ -132,6 +144,21 @@ let pocketFilePermissionRequestBusy = false;
 let pocketFilePermissionUiBound = false;
 let pocketFilePermissionInertRecords = [];
 let pocketFilePermissionReturnFocus = null;
+let pendingPocketFilePermissionContinuation = null;
+let pendingPocketFilePermissionKind = "json";
+let pendingPocketFilePermissionCancel = null;
+
+function pocketDocumentOwnerKind() {
+  return pocketFileState().ownerKind;
+}
+
+function isPocketVaultOwnerActive() {
+  const session = pocketFileState();
+  return session.ownerKind === "vault"
+    && !!truthFileHandle
+    && session.writable === true
+    && !!cleanText(session.vaultSessionId, 120);
+}
 
 function isPocketFilePermissionPromptOpen() {
   return !!pendingPocketFileHandle && pocketFileState().gateMode === "permission";
@@ -293,19 +320,45 @@ function setPocketFileSession(handle, displayName, options = {}) {
   const nextDetached = options.detachedDeviceChanges === true
     && !nextHandle
     && options.pipSession !== true;
-  const nextWritable = !!nextHandle || options.pipSession === true;
   const nextPip = options.pipSession === true;
+  const requestedKind = cleanText(options.ownerKind, 24);
+  const nextOwnerKind = requestedKind === "vault"
+    ? "vault"
+    : (nextDetached ? "detached" : ((nextHandle || nextPip) ? "json" : "none"));
+  const vaultContract = window.PocketVault;
+  if (nextOwnerKind === "vault") {
+    if (!nextHandle || !vaultContract || typeof vaultContract.activateUnlockedSession !== "function") {
+      throw new Error("A writable Vault owner needs an unlocked Vault session.");
+    }
+    if (options.vaultSession) vaultContract.activateUnlockedSession(options.vaultSession);
+  }
+  const vaultIdentity = nextOwnerKind === "vault"
+    && vaultContract
+    && typeof vaultContract.captureActiveSessionIdentity === "function"
+    ? vaultContract.captureActiveSessionIdentity()
+    : null;
+  const nextVaultSessionId = nextOwnerKind === "vault"
+    ? cleanText(vaultIdentity?.vaultSessionId, 120)
+    : "";
+  if (nextOwnerKind === "vault" && !nextVaultSessionId) {
+    throw new Error("Pocket could not verify the unlocked Vault session.");
+  }
+  const nextWritable = !!nextHandle || nextPip;
   const session = pocketFileState();
   const targetChanged = truthFileHandle !== nextHandle
     || session.writable !== nextWritable
     || session.pipSession !== nextPip
-    || session.detachedDeviceChanges !== nextDetached;
+    || session.detachedDeviceChanges !== nextDetached
+    || session.ownerKind !== nextOwnerKind
+    || session.vaultSessionId !== nextVaultSessionId;
   const routineWriteToCurrentHandle = isPocketFilePermissionPromptOpen()
     && nextHandle === truthFileHandle
     && !targetChanged
     && options.forceNewSession !== true;
   if (isPocketFilePermissionPromptOpen() && !routineWriteToCurrentHandle) {
+    const cancelCandidate = pendingPocketFilePermissionCancel;
     clearPendingPocketFileHandle({ render: false, restoreFocus: false });
+    if (typeof cancelCandidate === "function") cancelCandidate("owner-changed");
   }
   truthFileHandle = nextHandle;
   session.writable = nextWritable;
@@ -316,12 +369,20 @@ function setPocketFileSession(handle, displayName, options = {}) {
   }
   session.pipSession = nextPip;
   session.detachedDeviceChanges = nextDetached;
+  session.ownerKind = nextOwnerKind;
+  session.vaultSessionId = nextVaultSessionId;
   if (targetChanged || options.forceNewSession === true) pocketFileSessionId += 1;
+  if (nextOwnerKind !== "vault"
+      && vaultContract
+      && typeof vaultContract.clearActiveSession === "function") {
+    vaultContract.clearActiveSession();
+  }
   return session;
 }
 
 function setDetachedPocketDocumentSession(displayName = "Device changes") {
   return setPocketFileSession(null, displayName, {
+    ownerKind: "detached",
     detachedDeviceChanges: true,
     forceNewSession: true,
   });
@@ -334,7 +395,9 @@ function clearPocketFileSession(options = {}) {
     || session.writable === true
     || !!session.displayName
     || session.pipSession === true
-    || session.detachedDeviceChanges === true;
+    || session.detachedDeviceChanges === true
+    || session.ownerKind !== "none"
+    || !!session.vaultSessionId;
   truthFileHandle = null;
   session.writable = false;
   session.displayName = "";
@@ -342,6 +405,11 @@ function clearPocketFileSession(options = {}) {
   session.gateMode = "";
   session.pipSession = false;
   session.detachedDeviceChanges = false;
+  session.ownerKind = "none";
+  session.vaultSessionId = "";
+  if (window.PocketVault && typeof window.PocketVault.clearActiveSession === "function") {
+    window.PocketVault.clearActiveSession();
+  }
   if (options.keepRecent !== true) session.recentName = "";
   if (targetChanged) pocketFileSessionId += 1;
 }
@@ -355,6 +423,8 @@ function capturePocketFileSaveSession() {
   return {
     id: pocketFileSessionId,
     handle: truthFileHandle,
+    ownerKind: session.ownerKind,
+    vaultSessionId: cleanText(session.vaultSessionId, 120),
     displayName: cleanText(session.displayName, 120),
     writable: session.writable === true,
     pipSession: session.pipSession === true,
@@ -362,11 +432,44 @@ function capturePocketFileSaveSession() {
   };
 }
 
+function capturePocketFileOwnerForAdoption() {
+  const session = pocketFileState();
+  return {
+    handle: truthFileHandle,
+    sessionId: pocketFileSessionId,
+    session: { ...session },
+    vaultSessionRollback: window.PocketVault?.captureActiveSessionForRollback?.() || null,
+  };
+}
+
+function restorePocketFileOwnerAfterFailedAdoption(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") return false;
+  truthFileHandle = snapshot.handle || null;
+  const restoredSession = snapshot.session && typeof snapshot.session === "object"
+    ? { ...snapshot.session }
+    : null;
+  if (!restoredSession) return false;
+  state.pocketFile = restoredSession;
+  pocketFileSessionId = Number.isSafeInteger(snapshot.sessionId)
+    ? snapshot.sessionId
+    : pocketFileSessionId;
+  if (restoredSession.ownerKind === "vault") {
+    if (!snapshot.vaultSessionRollback
+        || typeof window.PocketVault?.restoreActiveSessionForRollback !== "function") return false;
+    window.PocketVault.restoreActiveSessionForRollback(snapshot.vaultSessionRollback);
+  } else {
+    window.PocketVault?.clearActiveSession?.();
+  }
+  return true;
+}
+
 function isPocketFileSaveSessionCurrent(snapshot) {
   const session = pocketFileState();
   return !!snapshot
     && snapshot.id === pocketFileSessionId
     && snapshot.handle === truthFileHandle
+    && snapshot.ownerKind === session.ownerKind
+    && cleanText(snapshot.vaultSessionId, 120) === cleanText(session.vaultSessionId, 120)
     && snapshot.pipSession === (session.pipSession === true)
     && snapshot.detachedDeviceChanges === (session.detachedDeviceChanges === true);
 }
@@ -377,21 +480,32 @@ function capturePocketEditorSourceIdentity() {
     fileSessionId: pocketFileSessionId,
     sourceFileName: cleanText(session.displayName || state.source?.fileName, 120),
     sourcePipSession: session.pipSession === true,
+    sourceOwnerKind: session.ownerKind,
+    sourceVaultSessionId: cleanText(session.vaultSessionId, 120),
   };
 }
 
 function isPocketEditorSourceIdentityCurrent(identity) {
+  const session = pocketFileState();
   return !!identity
     && typeof identity === "object"
     && !Array.isArray(identity)
     && Number.isSafeInteger(identity.fileSessionId)
     && identity.fileSessionId >= 0
-    && identity.fileSessionId === pocketFileSessionId;
+    && identity.fileSessionId === pocketFileSessionId
+    && identity.sourceOwnerKind === session.ownerKind
+    && cleanText(identity.sourceVaultSessionId, 120) === cleanText(session.vaultSessionId, 120);
 }
 
 function renewPocketDocumentSession() {
   const session = pocketFileState();
   setPocketFileSession(truthFileHandle, session.displayName || state.source?.fileName, {
+    ownerKind: session.ownerKind,
+    vaultSession: session.ownerKind === "vault"
+      && window.PocketVault
+      && typeof window.PocketVault.getActiveSession === "function"
+      ? window.PocketVault.getActiveSession()
+      : null,
     pipSession: session.pipSession === true,
     detachedDeviceChanges: session.detachedDeviceChanges === true,
     forceNewSession: true,
@@ -400,6 +514,16 @@ function renewPocketDocumentSession() {
 }
 
 function adoptPocketDocumentFromPip(snapshot) {
+  if (isPocketVaultOwnerActive()) {
+    setStatus("Document PiP is not available for encrypted Vaults yet because its transfer is not encrypted.", "warn", { durationMs: 6200 });
+    return false;
+  }
+  if (window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
+      && window.PocketVaultBrowserIo.isOwnerActionPending()) {
+    setStatus("Finish the encrypted Vault action before returning another document.", "warn", { durationMs: 6200 });
+    return false;
+  }
   if (isPocketFilePermissionPromptOpen()) {
     showPocketFilePermissionPendingStatus();
     return false;
@@ -421,6 +545,9 @@ function canShowPocketTree() {
 
 function canModifyPocket() {
   if (isPocketFilePermissionPromptOpen()) return false;
+  if (window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
+      && window.PocketVaultBrowserIo.isOwnerActionPending()) return false;
   if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
       && window.isPocketDeviceChangesDecisionOpen()) {
     return false;
@@ -438,6 +565,12 @@ function showPocketFileGatePrompt() {
     if (typeof setStatus === "function") {
       setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
     }
+    return;
+  }
+  if (window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
+      && window.PocketVaultBrowserIo.isOwnerActionPending()) {
+    setStatus("Finish the encrypted Vault decision before continuing.", "warn", { durationMs: 5200 });
     return;
   }
   pocketFileState().gateMode = "blocked";
@@ -473,6 +606,9 @@ function clearPendingPocketFileHandle(options = {}) {
   pendingPocketFileHandle = null;
   pendingPocketFilePermissionSourceSession = null;
   pocketFilePermissionRequestBusy = false;
+  pendingPocketFilePermissionContinuation = null;
+  pendingPocketFilePermissionKind = "json";
+  pendingPocketFilePermissionCancel = null;
   const session = pocketFileState();
   session.pendingName = "";
   if (session.gateMode === "permission") session.gateMode = "";
@@ -495,6 +631,13 @@ function showPocketFilePermissionExplanation(handle, displayName = "", options =
   pendingPocketFilePermissionToken += 1;
   pendingPocketFileHandle = handle || null;
   pendingPocketFilePermissionSourceSession = sourceSession;
+  pendingPocketFilePermissionContinuation = typeof options.continueAfterPermission === "function"
+    ? options.continueAfterPermission
+    : null;
+  pendingPocketFilePermissionKind = cleanText(options.candidateKind, 24) || "json";
+  pendingPocketFilePermissionCancel = typeof options.cancelCandidate === "function"
+    ? options.cancelCandidate
+    : null;
   pocketFilePermissionRequestBusy = false;
   const session = pocketFileState();
   session.pendingName = cleanText(displayName || handle?.name, 120);
@@ -510,6 +653,9 @@ async function continuePocketFilePermissionRequest() {
   const pendingName = cleanText(pocketFileState().pendingName || handle?.name, 120);
   const token = pendingPocketFilePermissionToken;
   const sourceSession = pendingPocketFilePermissionSourceSession;
+  const continuation = pendingPocketFilePermissionContinuation;
+  const candidateKind = pendingPocketFilePermissionKind;
+  const cancelCandidate = pendingPocketFilePermissionCancel;
   if (!handle) {
     clearPendingPocketFileHandle({ restoreFocus: true });
     setStatus("Choose a Pocket file to continue.", "warn");
@@ -523,8 +669,24 @@ async function continuePocketFilePermissionRequest() {
   if (!pocketFilePermissionRequestIsCurrent(token, handle, sourceSession)) return false;
   if (!canWrite) {
     clearPendingPocketFileHandle({ restoreFocus: true });
+    if (typeof cancelCandidate === "function") cancelCandidate("permission-denied");
     setStatus("That file was not opened. Your current Pocket file is unchanged.", "warn", { durationMs: 6200 });
     return false;
+  }
+  if (typeof continuation === "function") {
+    clearPendingPocketFileHandle({ render: false, restoreFocus: false });
+    try {
+      return await continuation({
+        handle,
+        displayName: pendingName,
+        sourceSession,
+        candidateKind,
+      });
+    } catch (error) {
+      console.warn("[pocket-lite] candidate continuation failed", error);
+      setStatus("That file was not opened. Your current Pocket file is unchanged.", "warn", { durationMs: 6200 });
+      return false;
+    }
   }
   const loaded = await loadFromFileHandle(handle, {
     permissionAlreadyGranted: true,
@@ -547,7 +709,9 @@ async function continuePocketFilePermissionRequest() {
 
 function cancelPocketFilePermissionRequest() {
   if (!isPocketFilePermissionPromptOpen()) return false;
+  const cancelCandidate = pendingPocketFilePermissionCancel;
   clearPendingPocketFileHandle({ restoreFocus: true });
+  if (typeof cancelCandidate === "function") cancelCandidate("cancelled");
   setStatus("Open cancelled. Your current Pocket file is unchanged.", "warn");
   return false;
 }
@@ -681,6 +845,13 @@ async function loadFromFileHandle(handle, options = {}) {
       && !deviceChangesDecisionIsOpen();
   };
   try {
+    if (!opts.permissionRequest
+        && window.PocketVaultBrowserIo
+        && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
+        && window.PocketVaultBrowserIo.isOwnerActionPending()) {
+      setStatus("Finish the encrypted Vault action before opening another file.", "warn", { durationMs: 5200 });
+      return false;
+    }
     if (isPocketFilePermissionPromptOpen() && !opts.permissionRequest) {
       showPocketFilePermissionPendingStatus();
       return false;
@@ -711,6 +882,7 @@ async function loadFromFileHandle(handle, options = {}) {
     const fileSession = {
       handle,
       displayName: opts.displayName || file.name || handle.name,
+      sourceSession: openingSourceSession,
       adoptedIdentity: null,
     };
     const loaded = await loadFromFile(file, {
@@ -756,6 +928,12 @@ async function openPocketFile() {
     setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
     return false;
   }
+  if (window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
+      && window.PocketVaultBrowserIo.isOwnerActionPending()) {
+    setStatus("Finish the encrypted Vault action before opening another file.", "warn", { durationMs: 5200 });
+    return false;
+  }
   if (typeof window.showOpenFilePicker !== "function") {
     setStatus("Pocket file loading is not available in this browser.", "warn", { durationMs: 6200 });
     return false;
@@ -782,17 +960,29 @@ async function openPocketFile() {
   }
 }
 
-async function writePocketPayloadToHandle(payload, handle) {
+async function writePocketPayloadToHandle(payload, handle, options = {}) {
   const data = `${JSON.stringify(payload, null, 2)}\n`;
   if (!handle || typeof handle.createWritable !== "function") {
     return { ok: false, reason: "unsupported" };
   }
+  const isCurrent = typeof options.isCurrent === "function" ? options.isCurrent : () => true;
+  if (!isCurrent()) return { ok: false, reason: "file-session-changed" };
   const permitted = await ensureWritePermission(handle);
+  if (!isCurrent()) return { ok: false, reason: "file-session-changed" };
   if (!permitted) return { ok: false, reason: "permission-denied", permissionDenied: true };
   const writable = await handle.createWritable();
   try {
+    if (!isCurrent()) {
+      try { await writable.abort?.(); } catch {}
+      return { ok: false, reason: "file-session-changed" };
+    }
     await writable.write(data);
+    if (!isCurrent()) {
+      try { await writable.abort?.(); } catch {}
+      return { ok: false, reason: "file-session-changed" };
+    }
     await writable.close();
+    if (!isCurrent()) return { ok: false, reason: "file-session-changed" };
     return { ok: true };
   } catch (err) {
     try { await writable.abort?.(); } catch {}
@@ -805,6 +995,10 @@ async function writeTruthFile(payload, options = {}) {
     return { ok: false, reason: "file-permission-pending" };
   }
   const expectedSession = options.expectedSession || null;
+  const ownerKind = expectedSession?.ownerKind || pocketDocumentOwnerKind();
+  if (ownerKind === "vault") {
+    return { ok: false, reason: "vault-encrypted-owner" };
+  }
   const activeHandle = expectedSession ? expectedSession.handle : truthFileHandle;
   const expectedSessionIsCurrent = () => !expectedSession || isPocketFileSaveSessionCurrent(expectedSession);
   const resolveSavePicker = () => {
@@ -958,10 +1152,18 @@ async function createNewPocketFile() {
     setStatus("Choose how to handle the file and device changes first.", "warn", { durationMs: 5200 });
     return false;
   }
+  if (window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
+      && window.PocketVaultBrowserIo.isOwnerActionPending()) {
+    setStatus("Finish the encrypted Vault action before creating another file.", "warn", { durationMs: 5200 });
+    return false;
+  }
   if (typeof window.showSaveFilePicker !== "function") {
     setStatus("Pocket file creation is not available in this browser.", "warn", { durationMs: 6200 });
     return false;
   }
+  const sourceSession = capturePocketFileSaveSession();
+  let preparedAdoptionLease = null;
   try {
     const handle = await window.showSaveFilePicker({
       ...jsonFilePickerOptions(),
@@ -971,35 +1173,63 @@ async function createNewPocketFile() {
       setStatus("Create cancelled.", "warn");
       return false;
     }
-    const payload = payloadForNewPocketFile();
-    const written = await writePocketPayloadToHandle(payload, handle);
-    if (!written.ok) {
-      setStatus("Pocket could not save changes in that file. Choose another Pocket file.", "warn", { durationMs: 7200 });
+    if (!isPocketFileSaveSessionCurrent(sourceSession)) return false;
+    const relationship = await comparePocketFileHandles(handle, sourceSession.handle);
+    if (!isPocketFileSaveSessionCurrent(sourceSession)) return false;
+    if (sourceSession.handle && (!relationship.verified || relationship.same)) {
+      setStatus(
+        relationship.same
+          ? "Choose a different file for the new Pocket document."
+          : "Pocket could not verify that destination is a different file. Choose another file.",
+        "warn",
+        { durationMs: 7200 }
+      );
       return false;
     }
+    const payload = payloadForNewPocketFile();
     const name = cleanText(handle.name || "pocket-data.json", 120);
     const norm = normaliseInput(payload);
-    setPocketFileSession(handle, name, { forceNewSession: true });
-    applyLoadedState(norm, {
+    const sourceInfo = {
       schema: norm.schema,
       fileName: name,
       writtenAt: norm.writtenAt || payload.writtenAt || "",
-    }, {
-      skipLocalSafetyCheck: true,
-      establishDocumentBaseline: true,
-      baselinePayload: payload,
-    });
-    pocketFileState().recentName = name;
-    if (typeof adoptPocketOperations === "function") {
-      adoptPocketOperations([], 0);
-    } else {
-      state.ops = [];
+    };
+    if (window.PocketVaultBrowserIo
+        && typeof window.PocketVaultBrowserIo.beforeAdoptPreparedDocument === "function") {
+      preparedAdoptionLease = await window.PocketVaultBrowserIo.beforeAdoptPreparedDocument({
+        kind: "json",
+        displayName: name,
+      });
+      if (!preparedAdoptionLease) return false;
     }
+    const result = await enqueuePocketOwnerTransition(async () => {
+      const sourceIsCurrent = () => isPocketFileSaveSessionCurrent(sourceSession);
+      if (!sourceIsCurrent()) return { ok: false, reason: "file-session-changed" };
+      const written = await writePocketPayloadToHandle(payload, handle, {
+        isCurrent: sourceIsCurrent,
+      });
+      if (!written.ok || !sourceIsCurrent()) return written;
+      return commitPreparedPocketDocument(norm, sourceInfo, {
+        handle,
+        displayName: name,
+        ownerKind: "json",
+        forceNewSession: true,
+        canContinue: sourceIsCurrent,
+        loadedStateOptions: {
+          skipLocalSafetyCheck: true,
+          establishDocumentBaseline: true,
+          baselinePayload: payload,
+        },
+      });
+    });
+    if (!result.ok) {
+      setStatus("Pocket could not create that file. Your current document is unchanged.", "warn", { durationMs: 7200 });
+      return false;
+    }
+    pocketFileState().recentName = name;
     clearLocalSafetySnapshot();
     clearConflictGuard();
     markSavedNow(payload);
-    refreshMeta();
-    renderTree();
     setStatus("Pocket file created. Changes will save in the right place.", "ok", { durationMs: 5200 });
     void storeRecentPocketFileMeta(name);
     return true;
@@ -1011,6 +1241,8 @@ async function createNewPocketFile() {
     console.warn("[pocket-lite] create pocket file failed", err);
     setStatus("Could not create that Pocket file.", "warn");
     return false;
+  } finally {
+    window.PocketVaultBrowserIo?.finishPreparedDocumentAdoption?.(preparedAdoptionLease);
   }
 }
 
@@ -1028,6 +1260,90 @@ function enqueueTreeSave(task) {
   const queued = exportTreeQueue.then(run, run);
   exportTreeQueue = queued.catch(() => {});
   return queued;
+}
+
+function enqueuePocketOwnerTransition(task) {
+  const run = async () => task();
+  const queued = exportTreeQueue.then(run, run);
+  exportTreeQueue = queued.catch(() => {});
+  return queued;
+}
+
+async function comparePocketFileHandles(left, right) {
+  if (!left || !right) return { verified: true, same: false };
+  if (left === right) return { verified: true, same: true };
+  try {
+    if (typeof left.isSameEntry === "function") {
+      return { verified: true, same: await left.isSameEntry(right) === true };
+    }
+    if (typeof right.isSameEntry === "function") {
+      return { verified: true, same: await right.isSameEntry(left) === true };
+    }
+  } catch {
+    return { verified: false, same: false };
+  }
+  return { verified: false, same: false };
+}
+
+function commitPreparedPocketDocument(norm, sourceInfo = {}, options = {}) {
+  const canContinue = typeof options.canContinue === "function"
+    ? options.canContinue
+    : () => true;
+  if (!canContinue()) return { ok: false, reason: "candidate-changed" };
+  if (typeof capturePocketDocumentStateForAdoption !== "function"
+      || typeof restorePocketDocumentStateAfterFailedAdoption !== "function") {
+    return { ok: false, reason: "adoption-unavailable" };
+  }
+  const rollback = capturePocketDocumentStateForAdoption();
+  const ownerRollback = capturePocketFileOwnerForAdoption();
+  const loadedStateOptions = {
+    ...(options.loadedStateOptions || {}),
+    deferEffects: true,
+  };
+  try {
+    applyLoadedState(norm, sourceInfo, loadedStateOptions);
+    if (!canContinue()) {
+      restorePocketDocumentStateAfterFailedAdoption(rollback);
+      return { ok: false, reason: "candidate-changed" };
+    }
+    setPocketFileSession(options.handle || null, options.displayName || sourceInfo.fileName, {
+      ownerKind: options.ownerKind,
+      vaultSession: options.vaultSession || null,
+      pipSession: options.pipSession === true,
+      detachedDeviceChanges: options.detachedDeviceChanges === true,
+      forceNewSession: options.forceNewSession !== false,
+    });
+  } catch (error) {
+    restorePocketDocumentStateAfterFailedAdoption(rollback);
+    restorePocketFileOwnerAfterFailedAdoption(ownerRollback);
+    try {
+      refreshMeta();
+      renderTree();
+      refocusTreeNavigation(state.selectedId || "");
+    } catch {}
+    return { ok: false, reason: "adoption-failed", error };
+  }
+  try {
+    if (typeof finishLoadedStateAdoption === "function") {
+      const finished = finishLoadedStateAdoption(norm, sourceInfo, loadedStateOptions);
+      if (finished !== true) {
+        throw new Error("Pocket could not finish adopting the prepared document.");
+      }
+    }
+  } catch (error) {
+    restorePocketDocumentStateAfterFailedAdoption(rollback);
+    restorePocketFileOwnerAfterFailedAdoption(ownerRollback);
+    try {
+      refreshMeta();
+      renderTree();
+      refocusTreeNavigation(state.selectedId || "");
+    } catch {}
+    return { ok: false, reason: "adoption-failed", error };
+  }
+  return {
+    ok: true,
+    sourceIdentity: capturePocketEditorSourceIdentity(),
+  };
 }
 
 function downloadPocketBackupCopy(payload = buildPocketPayload(nowIso()), reason = "copy") {
@@ -1078,7 +1394,13 @@ async function exportTree(options = {}) {
     if (!isPocketFileSaveSessionCurrent(saveSession)) {
       return exportTreeResult(options, false, "file-session-changed");
     }
-    if (!canModifyPocket()) {
+    const vaultDialogSaveAllowed = !!(
+      options.vaultDialogToken
+      && window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.allowsDialogSave === "function"
+      && window.PocketVaultBrowserIo.allowsDialogSave(options.vaultDialogToken, saveSession)
+    );
+    if (!canModifyPocket() && !vaultDialogSaveAllowed) {
       const permissionPending = isPocketFilePermissionPromptOpen();
       showPocketFileGatePrompt();
       if (!permissionPending) refocusTreeNavigation(state.selectedId);
@@ -1088,14 +1410,22 @@ async function exportTree(options = {}) {
         permissionPending ? "file-permission-pending" : "no-pocket-file"
       );
     }
-    if (shouldPauseForStaleExportGuard(options)) return exportTreeResult(options, false, "stale-guard");
+    if (saveSession.ownerKind !== "vault" && shouldPauseForStaleExportGuard(options)) {
+      return exportTreeResult(options, false, "stale-guard");
+    }
     const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
     const saveStartHighestSequence = typeof getPocketHighestOperationSequence === "function"
       ? getPocketHighestOperationSequence()
       : opsAtSaveStart;
     if (opsAtSaveStart === 0 && saveSession.detachedDeviceChanges !== true) {
       clearLocalSafetySnapshot();
-      setStatus(backupProofLabel(readLastBackupMeta()) || "Already saved.", "ok", { durationMs: 4200 });
+      setStatus(
+        saveSession.ownerKind === "vault"
+          ? "Encrypted Vault is already saved."
+          : (backupProofLabel(readLastBackupMeta()) || "Already saved."),
+        "ok",
+        { durationMs: 4200 }
+      );
       flashSaveChip("Safe");
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, "no-changes");
@@ -1103,11 +1433,18 @@ async function exportTree(options = {}) {
     // Freeze a point-in-time snapshot so edits during save are not mixed
     // into this payload and their ops are preserved as unsaved.
     const payload = buildPocketPayload(nowIso());
-    saveLastSaveSnapshot(payload);
+    if (saveSession.ownerKind !== "vault") saveLastSaveSnapshot(payload);
     state.activeSaveOperationCeiling = saveStartHighestSequence;
     let writeResult;
     try {
-      writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
+      if (saveSession.ownerKind === "vault") {
+        const vaultIo = window.PocketVaultBrowserIo;
+        writeResult = vaultIo && typeof vaultIo.writeActiveVaultPayload === "function"
+          ? await vaultIo.writeActiveVaultPayload(payload, { expectedSession: saveSession })
+          : { ok: false, reason: "vault-locked" };
+      } else {
+        writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
+      }
     } finally {
       state.activeSaveOperationCeiling = 0;
     }
@@ -1122,7 +1459,11 @@ async function exportTree(options = {}) {
       return exportTreeResult(options, false, "file-session-changed");
     }
     if (writeResult.ok) {
-      markSavedNow(payload);
+      if (saveSession.ownerKind === "vault") {
+        if (typeof markVaultSavedNow === "function") markVaultSavedNow();
+      } else {
+        markSavedNow(payload);
+      }
       state.source.writtenAt = cleanText(payload.writtenAt || payload.exportedAt, 40);
       if (typeof establishPocketDocumentBaseline === "function") {
         establishPocketDocumentBaseline(payload, state.source);
@@ -1134,14 +1475,18 @@ async function exportTree(options = {}) {
       } else {
         state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
       }
-      const newerSafetyStored = state.ops.length > 0
-        ? saveLocalSafetySnapshot("newer-change-after-save")
-        : true;
+      const newerSafetyStored = saveSession.ownerKind === "vault"
+        ? true
+        : (state.ops.length > 0 ? saveLocalSafetySnapshot("newer-change-after-save") : true);
       if (state.ops.length === 0) clearLocalSafetySnapshot();
-      if (state.ops.length > 0 && !newerSafetyStored) {
+      if (saveSession.ownerKind === "vault" && state.ops.length > 0) {
+        setStatus(`Encrypted Vault saved. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain in memory.`, "warn", { durationMs: 6200 });
+      } else if (state.ops.length > 0 && !newerSafetyStored) {
         setStatus(`Saved to Pocket file. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain open, but Pocket could not refresh the device safety copy.`, "warn", { durationMs: 7200 });
       } else if (state.ops.length > 0) {
         setStatus(`${backupProofLabel()}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} still local.`, "ok", { durationMs: 5600 });
+      } else if (saveSession.ownerKind === "vault") {
+        setStatus("Encrypted Vault saved.", "ok", { durationMs: 5200 });
       } else if (writeResult.target === "opened-file") {
         setStatus("Saved to Pocket file.", "ok", { durationMs: 5200 });
       } else if (writeResult.target === "picked-file") {
@@ -1151,10 +1496,10 @@ async function exportTree(options = {}) {
       }
       flashSaveChip(newerSafetyStored ? "Safe" : "Check");
       clearConflictGuard();
-      persistPipSnapshot();
+      if (saveSession.ownerKind !== "vault") persistPipSnapshot();
       refocusTreeNavigation(state.selectedId);
-      return exportTreeResult(options, true, "truth-file", {
-        target: writeResult.target || "truth-file",
+      return exportTreeResult(options, true, saveSession.ownerKind === "vault" ? "vault-truth-file" : "truth-file", {
+        target: writeResult.target || (saveSession.ownerKind === "vault" ? "vault" : "truth-file"),
         sourceIdentity: writeResult.sourceIdentity || capturePocketEditorSourceIdentity(),
       });
     }
@@ -1166,6 +1511,17 @@ async function exportTree(options = {}) {
     if (writeResult.reason === "file-permission-pending") {
       showPocketFilePermissionPendingStatus();
       return exportTreeResult(options, false, "file-permission-pending");
+    }
+    if (saveSession.ownerKind === "vault") {
+      const reason = writeResult.reason || "vault-write-failed";
+      const message = reason === "vault-session-changed" || reason === "file-session-changed"
+        ? "This Vault changed while Save was running. Nothing else was written."
+        : (writeResult.permissionDenied
+          ? "Pocket could not get permission to save this encrypted Vault. Your changes remain in memory."
+          : "Pocket could not save the encrypted Vault. Your changes remain in memory.");
+      setStatus(message, "warn", { durationMs: 7200 });
+      refocusTreeNavigation(state.selectedId);
+      return exportTreeResult(options, false, reason);
     }
     if (options.downloadFallback === false) {
       const message = writeResult.permissionDenied
@@ -1226,17 +1582,6 @@ async function loadFromFile(file, options = {}) {
     && typeof opts.fileSession.handle === "object"
     ? opts.fileSession
     : null;
-  const adoptLoadedFileSession = () => {
-    if (!pendingFileSession) return true;
-    if (typeof opts.beforeAdopt === "function" && opts.beforeAdopt() === false) return false;
-    setPocketFileSession(
-      pendingFileSession.handle,
-      pendingFileSession.displayName || file.name || pendingFileSession.handle.name,
-      { forceNewSession: true }
-    );
-    pendingFileSession.adoptedIdentity = capturePocketEditorSourceIdentity();
-    return true;
-  };
   const loadedStateOptions = (extra = {}) => ({
     ...extra,
     establishDocumentBaseline: !!pendingFileSession,
@@ -1244,6 +1589,45 @@ async function loadFromFile(file, options = {}) {
   const fileLoadIsCurrent = () => (
     typeof opts.canContinue !== "function" || opts.canContinue() !== false
   );
+  const commitLoadedState = async (norm, sourceInfo, extraOptions = {}) => {
+    if (!pendingFileSession) {
+      applyLoadedState(norm, sourceInfo, loadedStateOptions(extraOptions));
+      return true;
+    }
+    if (typeof opts.beforeAdopt === "function" && await opts.beforeAdopt() === false) return false;
+    let preparedAdoptionLease = null;
+    if (window.PocketVaultBrowserIo
+        && typeof window.PocketVaultBrowserIo.beforeAdoptPreparedDocument === "function") {
+      preparedAdoptionLease = await window.PocketVaultBrowserIo.beforeAdoptPreparedDocument({
+        kind: "json",
+        displayName: pendingFileSession.displayName || file.name || pendingFileSession.handle.name,
+      });
+      if (!preparedAdoptionLease) return false;
+    }
+    try {
+      return await enqueuePocketOwnerTransition(async () => {
+        const sourceStillCurrent = () => (
+          pendingFileSession.sourceSession
+            ? isPocketFileSaveSessionCurrent(pendingFileSession.sourceSession)
+            : fileLoadIsCurrent()
+        );
+        if (!sourceStillCurrent()) return false;
+        const committed = commitPreparedPocketDocument(norm, sourceInfo, {
+          handle: pendingFileSession.handle,
+          displayName: pendingFileSession.displayName || file.name || pendingFileSession.handle.name,
+          ownerKind: "json",
+          forceNewSession: true,
+          canContinue: sourceStillCurrent,
+          loadedStateOptions: loadedStateOptions(extraOptions),
+        });
+        if (!committed.ok) return false;
+        pendingFileSession.adoptedIdentity = committed.sourceIdentity;
+        return true;
+      });
+    } finally {
+      window.PocketVaultBrowserIo?.finishPreparedDocumentAdoption?.(preparedAdoptionLease);
+    }
+  };
   if (!canShowPocketTree() && !pendingFileSession) {
     setStatus("Use Choose Pocket file so changes save in the right place.", "warn", { durationMs: 6200 });
     return false;
@@ -1264,12 +1648,11 @@ async function loadFromFile(file, options = {}) {
     const latestChange = pickLatestChangeSnapshot(ndjsonEntries);
     if (opts.allowImportFallback && latestChange && latestChange.norm && Array.isArray(latestChange.norm.nodes) && latestChange.norm.nodes.length > 0) {
       snapshotCurrentTreeForRestore();
-      if (!adoptLoadedFileSession()) return false;
-      applyLoadedState(latestChange.norm, {
+      if (!await commitLoadedState(latestChange.norm, {
         schema: latestChange.norm.schema || "pocket.change.v1",
         fileName: cleanText(file.name, 120),
         writtenAt: latestChange.writtenAt || latestChange.norm.writtenAt || "",
-      }, loadedStateOptions());
+      })) return false;
       saveAutoCache(latestChange.norm, {
         schema: latestChange.norm.schema || "pocket.change.v1",
         fileName: cleanText(file.name, 120),
@@ -1303,14 +1686,13 @@ async function loadFromFile(file, options = {}) {
   if (!Array.isArray(norm.nodes) || norm.nodes.length === 0) {
     if (isPocketPayloadShape(parsed)) {
       snapshotCurrentTreeForRestore();
-      if (!adoptLoadedFileSession()) return false;
-      applyLoadedState(norm, {
+      if (!await commitLoadedState(norm, {
         schema: norm.schema || "",
         fileName: cleanText(file.name, 120),
         writtenAt: norm.writtenAt || "",
-      }, loadedStateOptions({
+      }, {
         comparisonDocument: buildLoadedPocketComparisonDocument(norm, parsed),
-      }));
+      })) return false;
       saveAutoCache(norm, {
         schema: norm.schema || "",
         fileName: cleanText(file.name, 120),
@@ -1339,14 +1721,13 @@ async function loadFromFile(file, options = {}) {
     return false;
   }
   snapshotCurrentTreeForRestore();
-  if (!adoptLoadedFileSession()) return false;
-  applyLoadedState(norm, {
+  if (!await commitLoadedState(norm, {
     schema: norm.schema || "",
     fileName: cleanText(file.name, 120),
     writtenAt: norm.writtenAt || "",
-  }, loadedStateOptions({
+  }, {
     comparisonDocument: buildLoadedPocketComparisonDocument(norm, parsed),
-  }));
+  })) return false;
   saveAutoCache(norm, {
     schema: norm.schema || "",
     fileName: cleanText(file.name, 120),

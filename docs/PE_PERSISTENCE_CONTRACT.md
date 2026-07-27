@@ -1,5 +1,7 @@
 # PE Persistence Contract
 
+P019 extends the transient P012 source binding with an explicit document-owner kind and Vault-session ID. A PE opened from an encrypted Vault may apply only while the same page-private P018 popup owner, Pocket document session, `vault` owner kind, Vault session and node revision remain current. The applied change is persisted through the same canonical Main Save dispatcher, and the PE becomes clean only after the encrypted Vault write succeeds. No password, key or full Vault session enters the popup or persisted Pocket data.
+
 P018 adds a page-private PE window ownership boundary without changing the Notes, Outline, truth-file or recovery data models. Every loaded main Pocket page creates one random in-memory owner token, and every fresh PE receives a separate random popup-instance token. `js/pocket-node-popout-window.js` is the canonical owner of both tokens, popup creation, owned-session attention/close callbacks and the only bridge from the generated runtime to `PocketNodePopoutEditor.applyAndSave()`.
 
 P014 updates the executable P010-P013 baseline by retiring the legacy `node.pe` shadow while preserving independent Notes and Outline, P012 source-identity binding, node-revision checks and non-lossy save preflight.
@@ -41,7 +43,9 @@ This contract records the P014-tested behaviour that later work must change deli
 - compact load, export and reload round trips;
 - generated PE runtime compilation, independent tab state and Outline-only P008 structured-paste parsing;
 - main-tree meaningful-content indicator rendering without node or persistence side effects; and
-- details-first copy context.
+- details-first copy context;
+- transient P019 owner-kind and Vault-session binding; and
+- encrypted PE persistence through the canonical Main Save dispatcher.
 
 This document distinguishes opening a file from explicitly writing the selected truth file. It also distinguishes browser `localStorage` recovery writes from truth-file persistence.
 
@@ -94,6 +98,7 @@ The suite parses or executes these current production sources:
 | `js/pocket-render.js` | Single Notes-or-supported-Outline tree content badge, tooltip precedence, raw preservation, Outline search and row interaction ownership |
 | `js/pocket-editor-cutover-v3.js`, `js/pocket-editor-popout.js`, `js/pocket-editor-popout-v2.js` and `js/pocket-pe-save-dirty.js` | Canonical open/apply/save ownership, conversion-free compatibility tabs and fail-closed legacy routes |
 | `js/pocket-storage.js`, `js/pocket-import.js`, `js/pocket-editor-copy.js` and `js/pocket-vault-io-browser.js` | Active recovery, PiP and Vault state adoption as new document sessions |
+| `js/pocket-vault.js`, `js/pocket-vault-io-browser.js` and `js/pocket-io-browser.js` | In-memory Vault-session identity, encrypted owner dispatch and exact-handle persistence |
 
 `js/pocket-io-browser.js` remains the production truth-write owner. Tests of rejection paths assert that no export, picker, writable, workspace safety write or PiP snapshot is reached. Export and retry tests use controlled return values and fake handles only.
 
@@ -935,3 +940,56 @@ Use disposable Pocket files only. Do not use Murray's real truth file for simult
 24. Confirm Chrome remains responsive.
 
 Stop immediately if either Chrome session becomes sluggish or unresponsive. Do not intentionally force another freeze or reboot.
+
+## 21. P019 encrypted Vault PE persistence
+
+P019 does not change the persisted Notes, Outline or node schemas. It adds two runtime-only opening fields:
+
+| Field | Meaning | Persisted |
+| --- | --- | --- |
+| `sourceOwnerKind` | Opening owner kind: `json`, `vault` or `detached` | No |
+| `sourceVaultSessionId` | Random page-lifetime identity of the exact unlocked Vault session; required only for `vault` | No |
+
+These fields supplement rather than replace:
+
+- P018 main-page owner and popup-instance tokens;
+- P012 `fileSessionId`;
+- P012 `originalUpdatedAt`; and
+- P011 supported-editor classification.
+
+`PocketNodePopoutModel.buildPayload()` copies the safe owner identity into the opening payload. The generated runtime retains only those safe strings and returns them unchanged on every Save attempt. It does not receive the Vault password, `CryptoKey`, salt, envelope, Vault ID or full owner object.
+
+The main-window apply boundary validates:
+
+1. P018 popup ownership;
+2. shape of the transient source fields;
+3. current Pocket document session;
+4. exact current owner kind;
+5. exact current Vault-session ID when the owner is `vault`;
+6. node existence and original revision;
+7. editor support; and
+8. the P012 non-lossy preflight.
+
+A PE from JSON cannot apply after Vault adoption. A Vault PE cannot apply after JSON, detached or another Vault adoption, page reload or replacement of the unlocked session. A stale rejection changes no node, records no operation and reaches no writer.
+
+After a valid Vault PE change is applied, `PocketNodePopoutEditor.applyAndSave()` calls the existing canonical `exportTree({ returnDetails: true })` path. `exportTree()` dispatches from its captured owner:
+
+- JSON retains the ordinary explicit truth-file path.
+- Vault seals the full canonical payload with the active non-extractable key and writes only the exact active Vault handle.
+- Detached retains the P016 new-destination path.
+
+For Vault persistence, the popup stays dirty until the encrypted writable stream closes and the owner/session still matches. If in-memory apply succeeds but encryption, permission or physical write fails, the popup adopts the returned node revision for a safe retry but remains dirty. There is no JSON, picker, download or plaintext fallback.
+
+On successful encrypted persistence, the result carries the still-current safe source identity. The runtime adopts it, clears dirty state and permits Save & Close. The Vault revision advances only after success.
+
+All owner and Vault-session fields are transport-only. They are excluded from:
+
+- `node.editor`;
+- Notes and Outline;
+- truth JSON;
+- decrypted Vault payload content;
+- localStorage and IndexedDB;
+- browser recovery and PiP snapshots; and
+- popup ownership tokens.
+
+The complete active-document, crypto, recovery-privacy and physical-acceptance contract is in `docs/VAULT_OWNERSHIP_CONTRACT.md`.

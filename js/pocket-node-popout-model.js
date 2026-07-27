@@ -318,6 +318,8 @@
       fileSessionId: Number.isSafeInteger(sourceIdentity?.fileSessionId) ? sourceIdentity.fileSessionId : null,
       sourceFileName: clean(sourceIdentity?.sourceFileName, 120),
       sourcePipSession: sourceIdentity?.sourcePipSession === true,
+      sourceOwnerKind: clean(sourceIdentity?.sourceOwnerKind, 24),
+      sourceVaultSessionId: clean(sourceIdentity?.sourceVaultSessionId, 120),
       originalUpdatedAt
     };
     if (editor) payload.schema = OUTLINE_EDITOR_SCHEMA;

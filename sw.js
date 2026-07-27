@@ -1,6 +1,6 @@
 /* pocket service worker: cache the app shell for a more app-like phone/PWA launch. */
 
-const CACHE_NAME = "pocket-shell-v1";
+const CACHE_NAME = "pocket-shell-v2";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const SHELL_FILES = [
   "./topbar.css",
   "./device-changes.css",
   "./file-permission.css",
+  "./vault.css",
   "./manifest.json",
   "./js/pocket-state.js",
   "./js/pocket-data.js",
@@ -21,6 +22,8 @@ const SHELL_FILES = [
   "./js/pocket-io-browser.js",
   "./js/pocket-device-changes.js",
   "./js/pocket-crypto.js",
+  "./js/pocket-vault.js",
+  "./js/pocket-vault-io-browser.js",
   "./js/pocket-phone-mode.js",
   "./js/pocket-phone-tap.js",
   "./js/pocket-overlays-init.js",

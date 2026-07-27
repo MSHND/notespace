@@ -11,11 +11,13 @@
   <link rel="stylesheet" href="pocket-ui-polish.css">
   <link rel="stylesheet" href="device-changes.css">
   <link rel="stylesheet" href="file-permission.css">
+  <link rel="stylesheet" href="vault.css">
 </head>
 <body>
   <div class="app">
     <div class="topbar">
       <div class="title">pocket</div>
+      <span id="activeDocumentSource" class="activeDocumentSource" aria-live="polite" hidden></span>
       <input id="search" class="search topbarSearch" placeholder="Filter">
       <button id="btnLoad" class="chip utilityChip" title="Choose Pocket file" aria-label="Choose Pocket file">Choose file</button>
       <button id="btnExportTree" class="chip utilityChip">save</button>
@@ -37,6 +39,7 @@
         <div id="titleToast" class="topStatusToast" aria-live="polite"></div>
       </div>
     </div>
+    <p id="vaultRecoveryNotice" class="vaultRecoveryNotice" role="status" aria-live="polite" hidden>Vault changes are not kept in browser recovery. Save the Vault to protect them.</p>
 
     <div class="layout">
       <section class="panel treePanel">
@@ -74,8 +77,9 @@
         <button id="cmdFocus" class="commandBtn" type="button"><span>Focus here</span><span class="commandHint">Shift + F</span></button>
         <button id="cmdSearch" class="commandBtn" type="button"><span>Filter</span><span class="commandHint">Ctrl/Cmd + F</span></button>
         <button id="cmdSave" class="commandBtn" type="button"><span>save</span><span class="commandHint">Ctrl/Cmd + S</span></button>
-        <button id="cmdSaveVault" class="commandBtn" type="button"><span>save vault</span><span class="commandHint">encrypted</span></button>
-        <button id="cmdOpenVault" class="commandBtn" type="button"><span>open vault</span><span class="commandHint">decrypt</span></button>
+        <button id="cmdOpenVault" class="commandBtn" type="button"><span>Open encrypted Vault…</span><span class="commandHint">local encrypted file</span></button>
+        <button id="cmdCreateVault" class="commandBtn" type="button"><span>Save as encrypted Vault…</span><span class="commandHint">new encrypted file</span></button>
+        <button id="cmdExportVaultJson" class="commandBtn" type="button" hidden disabled><span>Export unencrypted JSON copy…</span><span class="commandHint">readable copy</span></button>
         <button id="cmdHealth" class="commandBtn" type="button"><span>Health check</span><span class="commandHint">calm status</span></button>
         <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Review an earlier device version</span><span class="commandHint">safety</span></button>
         <button id="cmdHelp" class="commandBtn" type="button"><span>Show controls</span><span class="commandHint">?</span></button>
@@ -97,6 +101,43 @@
           <button id="filePermissionContinue" class="filePermissionPrimary" type="button">Continue</button>
           <button id="filePermissionCancel" class="filePermissionSecondary" type="button">Cancel</button>
         </div>
+      </section>
+    </div>
+
+    <div id="vaultDialogOverlay" class="vaultDialogOverlay" hidden>
+      <section id="vaultDialogCard" class="vaultDialogCard" role="dialog" aria-modal="true" aria-labelledby="vaultDialogTitle" aria-describedby="vaultDialogBody vaultDialogError">
+        <header class="vaultDialogHeader">
+          <h2 id="vaultDialogTitle"></h2>
+          <p id="vaultDialogBody"></p>
+        </header>
+
+        <form id="vaultCredentialForm" class="vaultCredentialForm" novalidate hidden>
+          <div class="vaultDialogField">
+            <label id="vaultPasswordLabel" for="vaultPassword">Password</label>
+            <input id="vaultPassword" type="password" minlength="8" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+          </div>
+          <div id="vaultPasswordConfirmGroup" class="vaultDialogField" hidden>
+            <label for="vaultPasswordConfirm">Confirm password</label>
+            <input id="vaultPasswordConfirm" type="password" minlength="8" autocomplete="off" autocapitalize="none" spellcheck="false" required disabled>
+          </div>
+          <div class="vaultDialogActions">
+            <button id="vaultCredentialSubmit" class="vaultDialogPrimary" type="submit">Unlock</button>
+            <button id="vaultCredentialCancel" class="vaultDialogSecondary" type="button">Cancel</button>
+          </div>
+        </form>
+
+        <div id="vaultExportActions" class="vaultDialogActions" hidden>
+          <button id="vaultExportConfirm" class="vaultDialogPrimary" type="button">Export copy</button>
+          <button id="vaultExportCancel" class="vaultDialogSecondary" type="button">Cancel</button>
+        </div>
+
+        <div id="vaultSwitchActions" class="vaultDialogActions vaultDialogSwitchActions" hidden>
+          <button id="vaultSwitchSave" class="vaultDialogPrimary" type="button">Save and continue</button>
+          <button id="vaultSwitchDiscard" class="vaultDialogSecondary" type="button">Discard and continue</button>
+          <button id="vaultSwitchCancel" class="vaultDialogSecondary" type="button">Cancel</button>
+        </div>
+
+        <p id="vaultDialogError" class="vaultDialogError" role="status" aria-live="polite"></p>
       </section>
     </div>
 
@@ -179,7 +220,7 @@
           <div class="controlRow"><span class="controlKey">Space</span><span class="controlMeaning">fold or unfold children</span></div>
           <div class="controlRow"><span class="controlKey">Esc</span><span class="controlMeaning">close, clear, or return to the tree</span></div>
           <div class="controlRow"><span class="controlKey">Right-click / .</span><span class="controlMeaning">open row actions, including Edit and Delete</span></div>
-          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + S</span><span class="controlMeaning">export backup</span></div>
+          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + S</span><span class="controlMeaning">save the active Pocket file or encrypted Vault</span></div>
         </div>
         <div class="controlsFooter">
           <button id="btnControlsClose" class="chip" type="button">Done</button>

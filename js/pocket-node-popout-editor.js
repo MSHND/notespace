@@ -36,13 +36,13 @@
     const node = popoutTarget().get(input);
     if (!node) {
       if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
-      console.warn("[node popout editor] no node", { input, selectedId: global.state?.selectedId });
+      console.warn("[node popout editor] no node");
       return false;
     }
 
     const payload = popoutModel().buildPayload(node);
     if (!popoutWindow().open(payload)) return false;
-    console.info("[node popout editor] opened", { id: payload.id, title: payload.title });
+    console.info("[node popout editor] opened");
     return true;
   }
 
@@ -70,6 +70,8 @@
       fileSessionId: payload?.fileSessionId,
       sourceFileName: payload?.sourceFileName,
       sourcePipSession: payload?.sourcePipSession,
+      sourceOwnerKind: payload?.sourceOwnerKind,
+      sourceVaultSessionId: payload?.sourceVaultSessionId,
     };
   }
 
@@ -79,7 +81,11 @@
       && identity.fileSessionId >= 0
       && typeof identity.sourceFileName === "string"
       && identity.sourceFileName.length <= 120
-      && typeof identity.sourcePipSession === "boolean";
+      && typeof identity.sourcePipSession === "boolean"
+      && ["json", "vault", "detached"].includes(identity.sourceOwnerKind)
+      && typeof identity.sourceVaultSessionId === "string"
+      && identity.sourceVaultSessionId.length <= 120
+      && (identity.sourceOwnerKind !== "vault" || identity.sourceVaultSessionId.length > 0);
     if (!validShape || typeof global.isPocketEditorSourceIdentityCurrent !== "function") {
       return rejection(
         "missing-source-identity",
@@ -235,7 +241,7 @@
     if (typeof saveWorkspaceState === "function") saveWorkspaceState();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
     if (options.quiet !== true && typeof setStatus === "function") setStatus(`Saved editor content for "${clean(node.label, 80)}".`, "ok");
-    console.info("[node popout editor] saved", { id: id, changed: changedSection });
+    console.info("[node popout editor] saved", { changed: changedSection });
     return {
       ok: true,
       changed: true,

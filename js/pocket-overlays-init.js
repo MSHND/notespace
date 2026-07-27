@@ -231,7 +231,8 @@ function refreshCommandPaletteState() {
   setDisabled(el.cmdEdit, !hasSelection);
   setDisabled(el.cmdMove, !hasSelection);
   setDisabled(el.cmdFocus, !hasSelection);
-  const trail = readLocalSafetyTrail();
+  const vaultActive = typeof isPocketVaultOwnerActive === "function" && isPocketVaultOwnerActive();
+  const trail = vaultActive ? [] : readLocalSafetyTrail();
   const latest = readLocalSafetySnapshot();
   const latestMs = latest ? latest.capturedMs : 0;
   const previousLocalVersion = trail.find((item) => item && item.capturedMs > 0 && (!latestMs || item.capturedMs < latestMs - 1000));
@@ -243,6 +244,10 @@ function refreshCommandPaletteState() {
       : "safety";
   }
   setDisabled(el.cmdRestoreRecent, !hasPreviousLocalVersion);
+  if (el.cmdExportVaultJson instanceof HTMLButtonElement) {
+    el.cmdExportVaultJson.hidden = !vaultActive;
+    setDisabled(el.cmdExportVaultJson, !vaultActive);
+  }
 }
 
 function openCommandPalette() {
@@ -255,6 +260,9 @@ function openCommandPalette() {
   }
   if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
       && window.isPocketDeviceChangesDecisionOpen()) return false;
+  if (window.PocketVaultBrowserIo
+      && typeof window.PocketVaultBrowserIo.isDialogOpen === "function"
+      && window.PocketVaultBrowserIo.isDialogOpen()) return false;
   closeRowMiniMenu({ restoreFocus: false });
   if (!(el.commandOverlay instanceof HTMLElement)) return false;
   if (isDetailsEditorOpen()) return false;
@@ -262,7 +270,7 @@ function openCommandPalette() {
   state.commandPaletteOpen = true;
   el.commandOverlay.hidden = false;
   requestAnimationFrame(() => {
-    const first = el.commandOverlay?.querySelector(".commandBtn:not([disabled])");
+    const first = el.commandOverlay?.querySelector(".commandBtn:not([disabled]):not([hidden])");
     if (first instanceof HTMLElement) first.focus({ preventScroll: true });
   });
   return true;
@@ -310,6 +318,18 @@ function runCommandPaletteAction(action) {
         el.search.select();
       }
     } else if (action === "save") saveCurrentContext();
+    else if (action === "open_vault") {
+      shouldReturnToTree = false;
+      void window.PocketVaultBrowserIo?.openVault?.();
+    }
+    else if (action === "create_vault") {
+      shouldReturnToTree = false;
+      void window.PocketVaultBrowserIo?.createActiveVault?.();
+    }
+    else if (action === "export_vault_json") {
+      shouldReturnToTree = false;
+      void window.PocketVaultBrowserIo?.exportUnencryptedJsonCopy?.();
+    }
     else if (action === "delete") deleteSelected();
     else if (action === "health") showPocketHealth();
     else if (action === "restore_recent") restorePreviousLocalSafetyVersion();
@@ -344,7 +364,7 @@ function runCommandPaletteAction(action) {
 
 function moveCommandPaletteFocus(delta) {
   if (!isCommandPaletteOpen()) return false;
-  const buttons = Array.from(el.commandOverlay.querySelectorAll(".commandBtn:not([disabled])"))
+  const buttons = Array.from(el.commandOverlay.querySelectorAll(".commandBtn:not([disabled]):not([hidden])"))
     .filter((item) => item instanceof HTMLElement);
   if (buttons.length === 0) return false;
   const active = document.activeElement;
@@ -440,6 +460,9 @@ function bind() {
   el.cmdFocus?.addEventListener("click", () => runCommandPaletteAction("focus"));
   el.cmdSearch?.addEventListener("click", () => runCommandPaletteAction("search"));
   el.cmdSave?.addEventListener("click", () => runCommandPaletteAction("save"));
+  el.cmdOpenVault?.addEventListener("click", () => runCommandPaletteAction("open_vault"));
+  el.cmdCreateVault?.addEventListener("click", () => runCommandPaletteAction("create_vault"));
+  el.cmdExportVaultJson?.addEventListener("click", () => runCommandPaletteAction("export_vault_json"));
   el.cmdHealth?.addEventListener("click", () => runCommandPaletteAction("health"));
   el.cmdRestoreRecent?.addEventListener("click", () => runCommandPaletteAction("restore_recent"));
   el.cmdHelp?.addEventListener("click", () => runCommandPaletteAction("help"));
@@ -742,7 +765,6 @@ function bind() {
   };
   window.addEventListener("focus", handleWindowFocusToTree);
   window.addEventListener("beforeunload", handlePocketLiteBeforeUnload);
-  window.onbeforeunload = handlePocketLiteBeforeUnload;
 }
 
 bind();

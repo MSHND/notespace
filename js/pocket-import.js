@@ -88,7 +88,17 @@ async function autoLoadAtStartup() {
   return false;
 }
 
+function isPocketVaultPipPrivate() {
+  try {
+    return typeof window.isPocketVaultOwnerActive === "function"
+      && window.isPocketVaultOwnerActive() === true;
+  } catch {
+    return true;
+  }
+}
+
 function persistPipSnapshot() {
+  if (isPocketVaultPipPrivate()) return false;
   try {
     const payload = {
       savedAt: nowIso(),
@@ -107,10 +117,14 @@ function persistPipSnapshot() {
     };
     localStorage.setItem(PIP_SNAPSHOT_KEY, JSON.stringify(payload));
     saveWorkspaceState();
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function restoreFromPipSnapshot() {
+  if (isPocketVaultPipPrivate()) return false;
   if (!isPipMode) return false;
   if (state.nodes.length > 0) return false;
   try {

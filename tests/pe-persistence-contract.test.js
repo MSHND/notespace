@@ -757,6 +757,8 @@ function executeControlledRuntime(payload, options = {}) {
             fileSessionId: nextPayload.fileSessionId,
             sourceFileName: nextPayload.sourceFileName,
             sourcePipSession: nextPayload.sourcePipSession,
+            sourceOwnerKind: nextPayload.sourceOwnerKind,
+            sourceVaultSessionId: nextPayload.sourceVaultSessionId,
           },
         });
       },
@@ -844,6 +846,8 @@ function runtimeEditablePayload(overrides = {}) {
     fileSessionId: 7,
     sourceFileName: "runtime.json",
     sourcePipSession: false,
+    sourceOwnerKind: "json",
+    sourceVaultSessionId: "",
     originalUpdatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
@@ -2068,7 +2072,9 @@ test("PE opening payload carries safe file-session identity and the exact origin
     "outline",
     "path",
     "sourceFileName",
+    "sourceOwnerKind",
     "sourcePipSession",
+    "sourceVaultSessionId",
     "title",
     "updatedAt",
   ]);
@@ -2080,12 +2086,16 @@ test("PE opening payload carries safe file-session identity and the exact origin
   assert.equal(Number.isSafeInteger(payload.fileSessionId), true);
   assert.equal(payload.sourceFileName, "synthetic.json");
   assert.equal(payload.sourcePipSession, false);
+  assert.equal(payload.sourceOwnerKind, "json");
+  assert.equal(payload.sourceVaultSessionId, "");
   assert.equal(payload.originalUpdatedAt, node.updatedAt);
   assert.equal(payload.updatedAt, node.updatedAt);
   assert.equal(context.isPocketEditorSourceIdentityCurrent({
     fileSessionId: payload.fileSessionId,
     sourceFileName: payload.sourceFileName,
     sourcePipSession: payload.sourcePipSession,
+    sourceOwnerKind: payload.sourceOwnerKind,
+    sourceVaultSessionId: payload.sourceVaultSessionId,
   }), true);
   assert.ok(Number.isFinite(Date.parse(payload.openedAt)));
   assert.equal(Object.values(payload).includes(context.__syntheticTruthHandle), false);
@@ -2646,7 +2656,7 @@ test("local safety, trail, auto-cache, and PiP recovery retain editor metadata w
   assert.equal(pipContext.__surfaceCalls.showSaveFilePicker, 0);
 });
 
-test("returned PiP and active Vault whole-document adoption renew the editor source session", async () => {
+test("returned PiP whole-document adoption renews the editor source session", async () => {
   const pipContext = createFullContractContext();
   resetState(pipContext, [syntheticNode("pip_before", { details: "Before PiP return" })]);
   const pipBefore = plain(pipContext.capturePocketEditorSourceIdentity());
@@ -2671,45 +2681,6 @@ test("returned PiP and active Vault whole-document adoption renew the editor sou
   assert.equal(lexicalState(pipContext).nodes[0].id, "pip_after");
   assert.equal(pipContext.__surfaceCalls.writeTruthFile, 0);
   assert.equal(pipContext.__surfaceCalls.showSaveFilePicker, 0);
-
-  const vaultContext = createFullContractContext();
-  resetState(vaultContext, [syntheticNode("vault_before", { details: "Before Vault open" })]);
-  vaultContext.prompt = () => "synthetic-passphrase";
-  vaultContext.FileReader = class SyntheticFileReader {
-    readAsText(file) {
-      this.result = file.syntheticText;
-      this.onload();
-    }
-  };
-  vaultContext.PocketVault = {
-    isVaultEnvelope(value) {
-      return value && value.schema === "pocket.vault.v1";
-    },
-    async openVaultEnvelope() {
-      return {
-        schema: "portal.export.v1",
-        writtenAt: "2026-02-02T00:00:00.000Z",
-        mainThoughtTree: [syntheticNode("vault_after", { details: "After Vault open" })],
-        mainThoughtTreeTombstones: [],
-      };
-    },
-  };
-  runScript(vaultContext, "js/pocket-vault-io-browser.js");
-  const vaultBefore = plain(vaultContext.capturePocketEditorSourceIdentity());
-  const vaultOpened = await vaultContext.PocketVaultBrowserIo.openVaultFile({
-    name: "synthetic-vault.json",
-    syntheticText: JSON.stringify({
-      schema: "pocket.vault.v1",
-      revision: 2,
-      createdAt: "2026-02-02T00:00:00.000Z",
-    }),
-  });
-  const vaultAfter = plain(vaultContext.capturePocketEditorSourceIdentity());
-  assert.equal(vaultOpened, true);
-  assert.ok(vaultAfter.fileSessionId > vaultBefore.fileSessionId);
-  assert.equal(lexicalState(vaultContext).nodes[0].id, "vault_after");
-  assert.equal(vaultContext.__surfaceCalls.writeTruthFile, 0);
-  assert.equal(vaultContext.__surfaceCalls.showSaveFilePicker, 0);
 });
 
 test("document sessions renew on each successful load but not on a routine same-handle session refresh", async () => {
@@ -2861,6 +2832,8 @@ test("PiP editor identity is JSON-safe and authoritative without exposing a file
     fileSessionId: payload.fileSessionId,
     sourceFileName: payload.sourceFileName,
     sourcePipSession: payload.sourcePipSession,
+    sourceOwnerKind: payload.sourceOwnerKind,
+    sourceVaultSessionId: payload.sourceVaultSessionId,
   }), true);
   assert.equal(JSON.stringify(payload).includes("createWritable"), false);
 });
@@ -3393,6 +3366,7 @@ test("successful picked and newly created truth-file targets establish new edito
   let writes = 0;
   const pickedHandle = {
     name: "picked.json",
+    async isSameEntry(other) { return other === this; },
     async queryPermission() { return "granted"; },
     async createWritable() {
       return {
@@ -3423,6 +3397,7 @@ test("successful picked and newly created truth-file targets establish new edito
   let createdWrites = 0;
   const createdHandle = {
     name: "created.json",
+    async isSameEntry(other) { return other === this; },
     async queryPermission() { return "granted"; },
     async createWritable() {
       return {
@@ -3537,8 +3512,8 @@ test("generated runtime carries source identity, adopts successful revision and 
         reason: "exported",
         nodeUpdatedAt: revisions[callCount - 1],
         sourceIdentity: callCount === 1
-          ? { fileSessionId: 8, sourceFileName: "picked.json", sourcePipSession: false }
-          : { fileSessionId: 8, sourceFileName: "picked.json", sourcePipSession: false },
+          ? { fileSessionId: 8, sourceFileName: "picked.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "" }
+          : { fileSessionId: 8, sourceFileName: "picked.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "" },
       };
     },
   });
@@ -3584,7 +3559,7 @@ test("generated runtime retains dirty content after applied export failure, adop
           exported: false,
           reason: "cancelled",
           nodeUpdatedAt: "2026-01-01T00:00:01.000Z",
-          sourceIdentity: { fileSessionId: 99, sourceFileName: "must-not-adopt.json", sourcePipSession: false },
+          sourceIdentity: { fileSessionId: 99, sourceFileName: "must-not-adopt.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "" },
         };
       }
       return {
@@ -3594,7 +3569,7 @@ test("generated runtime retains dirty content after applied export failure, adop
         exported: true,
         reason: "exported",
         nodeUpdatedAt: "2026-01-01T00:00:01.000Z",
-        sourceIdentity: { fileSessionId: 7, sourceFileName: "runtime.json", sourcePipSession: false },
+        sourceIdentity: { fileSessionId: 7, sourceFileName: "runtime.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "" },
       };
     },
   });

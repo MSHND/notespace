@@ -95,12 +95,30 @@ Current design:
 - `recordOp()` and operation tracking should not be bypassed.
 - Future features must not silently write files unless an explicit auto-sync design pass is approved and tested.
 
+### Active document ownership and encrypted Vaults
+
+`js/pocket-io-browser.js` owns one explicit active-document kind: `none`, `json`, `vault` or `detached`. The owner kind, exact handle, Pocket document-session ID and transient Vault-session ID are captured together for Save. Filenames are diagnostic only.
+
+- `json` preserves the selected local JSON handle and the P016 FILE/DEVICE/BASE recovery contract.
+- `vault` requires an exact writable Vault handle and one unlocked, non-extractable in-memory key session. Main Save and PE Save route through the canonical `exportTree()` owner and may write only an encrypted Vault v1 envelope to that handle.
+- `detached` is the existing P016 handle-free adopted document and requires a new destination on Save.
+- `none` preserves the no-file editing gate.
+
+Vault opening is atomic. Permission, envelope validation, password unlock, authenticated decrypt, lossless decrypted-document validation and dirty-owner resolution complete while the old owner remains authoritative. The replacement state is staged without UI/storage side effects before ownership rotates, and successful commit clears old document-bound drafts and undo state. Only a fully prepared candidate may rotate the document session, install its exact handle/key session and replace the tree. Failure or cancellation writes nothing and leaves the old owner unchanged. New Vault and readable-copy destinations must be proven distinct from the current exact file entry; uncertain comparison fails closed.
+
+`js/pocket-vault.js` owns only the page-lifetime unlocked Vault session. Vault ID and revision come from the exact envelope, not origin-global localStorage. Revision advances only after a successful encrypted write, and every Save uses a fresh AES-GCM nonce.
+
+Vault plaintext is deliberately excluded from ordinary browser recovery, workspace/cache snapshots, P016 device-change resolution and Document PiP. Existing JSON recovery data is left intact. Unsaved Vault edits therefore exist only in memory until encrypted persistence succeeds. `docs/VAULT_OWNERSHIP_CONTRACT.md` is the durable P019 contract and physical acceptance checklist.
+
 Relevant files/functions:
 
 - `js/pocket-io-browser.js`: `exportTree()`, `enqueueTreeSave()`, `writeTruthFile()`, `saveCurrentContext()`.
 - `js/pocket-storage.js`: `buildPocketPayload()`, `saveLocalSafetySnapshot()`, `readLocalSafetySnapshot()`, conflict guard helpers and restore helpers. It no longer synthesises legacy `node.pe` on load.
 - `js/pocket-tree-actions.js`: tree mutation functions call `recordOp()` for delete/move operations.
 - `js/pocket-node-popout-editor.js`: PE apply calls `recordOp({ type: "details_edit", ... })` and persists state after applying popup changes.
+- `js/pocket-crypto.js`: Vault v1 validation, key derivation, unlock and fresh-nonce sealing.
+- `js/pocket-vault.js`: active in-memory unlocked Vault session and post-write revision advancement.
+- `js/pocket-vault-io-browser.js`: Vault candidate, accessible credential/switch/export dialogs, atomic adoption, encrypted handle writes and explicit readable-copy export.
 
 ## 5. Sync-Readiness / Health Status
 

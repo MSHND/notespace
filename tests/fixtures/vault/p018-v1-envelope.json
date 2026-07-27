@@ -1,0 +1,17 @@
+{
+  "kind": "pocket.vault",
+  "version": 1,
+  "vaultId": "vault_p018_fixture",
+  "revision": 7,
+  "createdAt": "2026-07-27T11:03:50.643Z",
+  "contentType": "portal.export.v1+json",
+  "crypto": {
+    "cipher": "AES-GCM",
+    "kdf": "PBKDF2-SHA-256",
+    "iterations": 310000,
+    "salt": "6TJwDKQDZ2oXegTZoxN6HA",
+    "nonce": "Y-yPMXK5sV49blnY",
+    "encoding": "base64url"
+  },
+  "payload": "XbTfGNt1Rr_Qa8cLxEVsNH2QVbwchE_17JZNhXvXYOajZcSG38sAgoOk1fMIPPtNPHOxxpTA3taFX0DD7I8-cZApd81ffVEUdW9GB0tminGIskv6JXekRcauLvly9QyOSqzhOWQUVrFGHgKzv-iwI7-LgnhywGeJozs1IjXS7101Lg9GbXozhXlfo32pa0HCuh3oXQnWst4AeXVj-9ItUWK-h2cXcs5z86GOyf1xsJDC-4fVeA0zCJoNZfWhNn-mGuSEL8utMtovU6UV1SaJNyMPtFl4JuP9Apptpg3GVkll_a3-iZo1wXdGsPmhV6_vgLarTeVI4zBAJ1sTGoh0Pb0frTReY7K5xtys6a1L-NvY_F44PsMz7wA67X4cyegfMkE-Wiz7dIku5v5mzAmpSYzPuymXxrjvMyHEE-ywf0lTI3YZTx7aHgY1k5Dy2YXlQVGqFAgYVMq3PzA17HkBoOYT18RBRWOV6eWFmZHZe8wu4tTPwdXN1Y7dSSuT1v1gCMX0xqWwV1AZXEdihRxi_4UN-HLWLbn3xj1SAVarCyAWB5WrNvGwjv64ddtXALAldeVlG-vS9IdWusBLiFLlbAQy5ErEwp7FAngHCIE2yf5xwDTXq4aZgayyZj-Z8_EuToeDqVyHM7DZu9Mcfr8t-0phYsl6hFw55QEObkM4y5pNOUWf-SRpGYjN5FhWZy0ksCA3IarDkg4UcroagZWaFRwwTtWlO3hoIdwDb846OifbkKUFC9fLnoLR4gCMetMDQ5v783tDqXQKyDPAjlQeVYwyNFkIsXYUrCJRPcsJsSS2FyePl3_CALHusqgGXGT2iNuDRctcNk7g3pk-Olvz6SxclPd2tgVi7CIl71Mt8xRq7x4uVc5ssiEitDn9jrdx1Lal4R2cc_LGIkYLxt4ERFh2POf7az9L80XD-iTpLiQnQZmCuJ-_scTIEJVa5iOXC-SFn1nYayCjUkHk4aVUfV8KU_UThNjSm3Vg"
+}

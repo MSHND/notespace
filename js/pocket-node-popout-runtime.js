@@ -537,6 +537,8 @@
       fileSessionId: payload.fileSessionId,
       sourceFileName: payload.sourceFileName,
       sourcePipSession: payload.sourcePipSession,
+      sourceOwnerKind: payload.sourceOwnerKind,
+      sourceVaultSessionId: payload.sourceVaultSessionId,
       originalUpdatedAt: payload.originalUpdatedAt
     };
     nextPayload.schema = "pocket.nodeEditor.v1";
@@ -550,6 +552,12 @@
       && typeof payload.sourceFileName === "string"
       && payload.sourceFileName.length <= 120
       && typeof payload.sourcePipSession === "boolean"
+      && (payload.sourceOwnerKind === "json"
+        || payload.sourceOwnerKind === "vault"
+        || payload.sourceOwnerKind === "detached")
+      && typeof payload.sourceVaultSessionId === "string"
+      && payload.sourceVaultSessionId.length <= 120
+      && (payload.sourceOwnerKind !== "vault" || payload.sourceVaultSessionId.length > 0)
       && typeof payload.originalUpdatedAt === "string"
       && payload.originalUpdatedAt.length > 0
       && payload.originalUpdatedAt.length <= 40;
@@ -602,6 +610,8 @@
     payload.fileSessionId = identity.fileSessionId;
     payload.sourceFileName = typeof identity.sourceFileName === "string" ? identity.sourceFileName : "";
     payload.sourcePipSession = identity.sourcePipSession === true;
+    payload.sourceOwnerKind = typeof identity.sourceOwnerKind === "string" ? identity.sourceOwnerKind : "";
+    payload.sourceVaultSessionId = typeof identity.sourceVaultSessionId === "string" ? identity.sourceVaultSessionId : "";
   }
   function saveFailureDetails(result) {
     var reason = result && result.reason ? result.reason : "save-failed";

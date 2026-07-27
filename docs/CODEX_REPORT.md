@@ -1,5 +1,239 @@
 # Codex report
 
+## POCKET TASK P019 — MAKE VAULT THE ENCRYPTED TRUTH OWNER
+
+Title: Make Vault the encrypted truth owner
+
+Status: implementation, documentation and focused local validation are complete against the exact accepted P018 baseline. Murray's physical browser acceptance remains. The exact-title commit containing this report must still be pushed and confirmed on `origin/main` before P019 can be reported complete.
+
+Commit title:
+
+- `P019 Make Vault the encrypted truth owner`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Required starting `origin/main`: `91b8c9f5a45579445918e513eb2dbf9c4f705bc1`
+- Baseline title: `P018 Isolate PE popout sessions`
+- Implementation date: 2026-07-27
+- Branch: `main`
+- P019 is a local encrypted-truth ownership task. It adds no cloud synchronisation, account, key escrow, password recovery, OS keychain integration, encrypted browser crash recovery, shared Vault or encrypted Document PiP.
+- No truth-file or Vault envelope version migration, dependency, autosave, background write, file watcher, cross-tab channel or second PE implementation is introduced.
+- No personal Pocket truth file, real Vault, browser localStorage, IndexedDB contents, real password or real File System Access handle may be inspected by the implementation or focused tests.
+
+### Active owner model
+
+The active document now has one explicit owner kind:
+
+- `none`;
+- `json`;
+- `vault`; or
+- `detached`.
+
+`js/pocket-io-browser.js` keeps the exact handle, Pocket document-session ID, owner kind and transient Vault-session ID in one captured Save identity. Filenames are diagnostic only. JSON and Vault handles with the same name, and two same-name Vault handles, remain distinct owners.
+
+`setPocketFileSession()` is the canonical ownership transition. A Vault owner requires an exact writable handle plus an activated unlocked Vault session. Moving to JSON, detached or none clears the old Vault key/session reference. A successful owner change rotates the Pocket document session, invalidating P012/P018 PE contexts and queued work.
+
+The previous reachable wrong-file path is closed: successful Vault adoption removes the old JSON handle's authority, `writeTruthFile()` rejects a Vault owner, and canonical `exportTree()` sends Vault persistence only to the encrypted Vault writer.
+
+### Vault v1 crypto and unlocked session
+
+The P018 Vault v1 format remains compatible:
+
+- AES-GCM;
+- PBKDF2-SHA-256;
+- 310,000 iterations;
+- 16-byte salt;
+- 12-byte nonce;
+- base64url encoding; and
+- `portal.export.v1+json` content.
+
+`js/pocket-crypto.js` now validates the supported envelope settings, canonical encodings and fixed lengths before use. `unlockEnvelope()` returns decrypted payload plus a non-extractable AES key and exact envelope metadata. `sealWithUnlockedKey()` reuses that page-lifetime non-extractable key with a fresh random nonce for every Save.
+
+`js/pocket-vault.js` retains one unlocked session in memory. It owns Vault ID, current successful revision and a fresh random Vault-session identity. The old origin-global `pocket.vault.state.v1` helpers are neutralised and cannot determine owner or revision.
+
+Raw passwords are passed only to key derivation, not installed in Pocket state, owner labels, PE payload, truth payload or storage. Credential strings and both password fields are cleared immediately after unlock/key derivation, before create sealing, file writing or queued adoption; encoded password bytes are zeroed after Web Crypto imports the key material. The session and `CryptoKey` disappear on owner replacement or page reload. Revision advances by exactly one only after a successful encrypted write.
+
+### Atomic open, creation and owner switching
+
+`js/pocket-vault-io-browser.js` is the canonical browser Vault owner.
+
+An opened Vault remains a pending candidate while Pocket:
+
+1. completes shared P017 read/write permission;
+2. reads and validates the envelope;
+3. collects the password through an accessible dialog;
+4. derives the key and authenticates/decrypts the payload;
+5. validates decrypted structure before normalisation;
+6. prepares the normalised document; and
+7. resolves dirty-current-owner switching.
+
+Only a fully ready candidate is serialised with the Save queue and adopted. The shared commit boundary stages state without rendering or storage effects while the old owner/key remain authoritative, rechecks the candidate, then rotates ownership once. A staging failure rolls state back without clearing the Vault key. Successful adoption clears document-bound Notes/rename drafts, undo snapshots, pending imports and menus so stale actions cannot mutate a same-ID item in the new owner. Cancellation, denial, read failure, invalid envelope, wrong password, authentication failure, invalid decrypted content, structural rejection or stale candidate leaves the old owner, tree, operations, dirty state, handle, key and document session unchanged with zero writes.
+
+Vault decrypted data uses the active node/root normalisers through a lossless validation view. Root and nested data extras must survive meaningfully; ambiguous or destructively normalised content is rejected rather than opened with loss. Ordinary JSON root precedence remains unchanged.
+
+The production Vault flow no longer uses `prompt()`, hidden file input or download-only adoption. **Open encrypted Vault…** uses `showOpenFilePicker()`. **Save as encrypted Vault…** uses `showSaveFilePicker()`, password confirmation, a new Vault ID, revision 1 and a completed encrypted write before it installs the new owner. Vault creation and readable JSON export require a destination proven distinct from the active file through exact-entry comparison; same-entry, unavailable and failed comparisons all fail closed.
+
+A dirty Vault switch uses one accessible **Save changes to this Vault?** dialog:
+
+- Save and continue waits for canonical encrypted persistence;
+- Discard and continue writes nothing and adopts only the already prepared candidate;
+- Cancel retains the dirty Vault and clears the candidate.
+
+The current candidate token, dialog token, opaque prepared-adoption lease, document session and serial owner/save queue stop stale async work from adopting or writing after a newer decision. Only the flow which acquired a lease may release it. Create New rechecks its source session after asynchronous exact-handle comparison and before any dirty-owner decision.
+
+### Main Save and readable export
+
+Main Save remains `exportTree()`.
+
+For a Vault owner it freezes the canonical payload and operation ceiling, verifies exact owner/session/handle/key identity, generates a fresh nonce, seals the next revision, checks the session around asynchronous permission and writable stages, writes only the captured Vault handle, closes the stream, and only then updates revision, baseline and covered operations.
+
+Vault Save never falls back to:
+
+- an old JSON handle;
+- another Vault;
+- a picker;
+- a download;
+- detached mode; or
+- plaintext.
+
+Failure retains the active Vault and dirty operations in memory.
+
+**Export unencrypted JSON copy…** is a separate confirmed command. It always selects a new JSON handle, writes one readable copy, leaves the Vault owner/key/session unchanged and never grants the exported handle future Save authority.
+
+The UI identifies the active source as `Encrypted Vault · <filename>`, gives Main Save the accessible name **Save encrypted Vault**, and reports encrypted Save status without exposing internal identifiers.
+
+### PE ownership and encrypted persistence
+
+P019 extends the transient P012 opening identity with:
+
+- `sourceOwnerKind`; and
+- `sourceVaultSessionId`.
+
+The P018 page/popup bridge still validates first. The main-window apply owner then validates the Pocket document session, exact owner kind, Vault-session ID where required, node revision, editor support and non-lossy payload before mutation.
+
+A PE opened under JSON cannot apply after Vault adoption. A Vault PE cannot apply after JSON, detached, another Vault, page reload or Vault-session replacement. The popup receives no password, key, salt, envelope or full Vault session.
+
+After valid in-memory apply, PE Save invokes canonical `exportTree()`. It becomes clean only after encrypted Vault persistence succeeds. Applied-but-not-persisted retry keeps the updated node revision and dirty popup state, with no JSON or plaintext fallback.
+
+### Recovery privacy and PiP
+
+While Vault owns the document, decrypted content is excluded from:
+
+- workspace state;
+- local-safety current and trail writes;
+- automatic cache;
+- last-save snapshot;
+- P016 FILE/DEVICE/BASE resolution;
+- PiP snapshot persistence/restoration;
+- PiP session export/adoption; and
+- PiP-host Save.
+
+Opening a Vault does not delete existing ordinary JSON recovery data. Recovery offers are suppressed over the Vault and resume only in an ordinary JSON context.
+
+Unsaved Vault edits remain only in memory. A persistent notice says:
+
+> Vault changes are not kept in browser recovery. Save the Vault to protect them.
+
+The existing single `beforeunload` guard may warn for dirty work but does not save, encrypt or persist during unload. Document PiP is disabled with the explanation that its current transfer is not encrypted.
+
+This deliberately leaves encrypted browser crash recovery for later work.
+
+### Files changed
+
+Production implementation observed in the shared P019 worktree:
+
+- `index.html`
+- `vault.css`
+- `sw.js`
+- `js/pocket-crypto.js`
+- `js/pocket-device-changes.js`
+- `js/pocket-editor-cutover-v3.js`
+- `js/pocket-editor-copy.js`
+- `js/pocket-history-status.js`
+- `js/pocket-import.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-node-popout-editor.js`
+- `js/pocket-node-popout-model.js`
+- `js/pocket-node-popout-runtime.js`
+- `js/pocket-overlays-init.js`
+- `js/pocket-pe-save-dirty.js`
+- `js/pocket-state.js`
+- `js/pocket-storage.js`
+- `js/pocket-vault-io-browser.js`
+- `js/pocket-vault.js`
+
+Tests:
+
+- `tests/p019-vault-ownership.test.js`
+- `tests/pe-persistence-contract.test.js`
+- `tests/fixtures/vault/p018-v1-envelope.json`
+
+Documentation:
+
+- `docs/VAULT_OWNERSHIP_CONTRACT.md`
+- `docs/ARCHITECTURE.md`
+- `docs/P015_ARCHITECTURE_SECURITY_AUDIT.md`
+- `docs/PE_PERSISTENCE_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+### Focused validation
+
+Required commands:
+
+~~~sh
+node --test tests/p019-vault-ownership.test.js
+node --test tests/pe-persistence-contract.test.js
+node --test tests/device-changes-resolution.test.js
+node --test tests/p018-popout-isolation.test.js
+find js -name '*.js' -print0 | xargs -0 -n1 node --check
+git diff --check
+~~~
+
+Final results:
+
+- Node version: **v23.11.0**
+- P019 Vault ownership suite: **87 passed, 0 failed**
+- Existing PE persistence suite: **96 passed, 0 failed**
+- P016/P017 device-changes suite: **69 passed, 0 failed**
+- P018 popup-isolation suite: **15 passed, 0 failed**
+- Combined total/pass/fail: **267 passed, 0 failed**
+- Existing P018 Vault v1 compatibility: **PASS**
+- Non-extractable key assertion: **PASS**
+- Encrypt/decrypt round trip: **PASS**
+- Fresh-nonce repeated-Save assertion: **PASS**
+- Wrong-password and ciphertext-tamper rejection: **PASS**
+- Distinctive plaintext absent from written Vault bytes: **PASS**
+- Generated runtime `new Function(...)`, where applicable: **PASS through the PE persistence suite**
+- Production JavaScript syntax checks: **PASS for every `js/*.js` file and `sw.js`**
+- Changed test JavaScript syntax checks: **PASS**
+- JSON fixture parse checks, where applicable: **PASS, 7 fixtures parsed**
+- `git diff --check`: **PASS**
+
+Security review confirmations:
+
+- old JSON handle cannot receive Vault plaintext: **PASS**
+- passwords and keys absent from browser storage and payloads: **PASS**
+- Vault browser recovery and PiP plaintext writes suppressed: **PASS**
+- no Save failure falls back to download, picker or JSON: **PASS**
+- stale queued owner/session writes rejected: **PASS**
+- every successful encrypted Save uses a fresh nonce: **PASS**
+- no prohibited checker command was run: **CONFIRMED**
+
+### Physical browser acceptance
+
+Murray's physical browser acceptance remains required. The exact 40-step disposable-file checklist is in `docs/VAULT_OWNERSHIP_CONTRACT.md`, section 17.
+
+It covers active Vault creation, encrypted Main and PE Save, reopening, old-JSON protection, explicit readable-copy export, no later writes to the copy, wrong-password preservation, dirty-switch Cancel/Discard/Save, page-lifetime key loss, JSON recovery preservation and Vault PiP blocking.
+
+Use disposable JSON/Vault files and a disposable password only. Do not use Murray's real truth file or a future real Vault. Do not ask Murray to reproduce a crash.
+
+### Completion boundary
+
+Final parent SHA: `91b8c9f5a45579445918e513eb2dbf9c4f705bc1`
+
+The exact-title P019 commit containing this report must be pushed directly to `origin/main`, fetched again, verified as the only child of the parent above and confirmed with a clean worktree before the task response may report COMPLETE.
+
 ## POCKET TASK P018 — ISOLATE PE POPOUT SESSIONS
 
 Title: Isolate PE popout sessions

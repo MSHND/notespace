@@ -82,9 +82,26 @@ function hasUnsavedDetailsEditorChanges() {
   );
 }
 
+function hasUnsavedInlineTitleDraft() {
+  const edit = state.inlineEdit || {};
+  const id = cleanText(edit.id, 80);
+  if (!id) return false;
+  if (edit.isNew === true) return true;
+  const escaped = typeof window.CSS?.escape === "function"
+    ? window.CSS.escape(id)
+    : id.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const input = typeof el.treeRoot?.querySelector === "function"
+    ? el.treeRoot.querySelector(`[data-edit-id="${escaped}"]`)
+    : null;
+  const node = nodeMap().get(id) || null;
+  const currentValue = input && "value" in input ? input.value : node?.label;
+  return cleanText(currentValue, 220) !== cleanText(edit.originalLabel, 220);
+}
+
 function hasUnsavedPocketLiteChanges() {
   return (Array.isArray(state.ops) && state.ops.length > 0)
-    || hasUnsavedDetailsEditorChanges();
+    || hasUnsavedDetailsEditorChanges()
+    || hasUnsavedInlineTitleDraft();
 }
 
 function handlePocketLiteBeforeUnload(ev) {
@@ -106,7 +123,17 @@ function notifyPipDirtyState() {
 
 window.__pocketLiteHasUnsavedChanges = hasUnsavedPocketLiteChanges;
 
+function isPocketVaultPipTransferBlocked() {
+  try {
+    return typeof window.isPocketVaultOwnerActive === "function"
+      && window.isPocketVaultOwnerActive() === true;
+  } catch {
+    return true;
+  }
+}
+
 function exportPocketLiteSessionState(options = {}) {
+  if (isPocketVaultPipTransferBlocked()) return null;
   if (options.commitDetails === true && hasUnsavedDetailsEditorChanges()) {
     saveDetailsEditor();
   }
@@ -128,6 +155,7 @@ function exportPocketLiteSessionState(options = {}) {
 }
 
 function adoptPocketLiteSessionState(snapshot) {
+  if (isPocketVaultPipTransferBlocked()) return false;
   if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.nodes)) return false;
   const nodes = normaliseNodes(snapshot.nodes);
   if (!Array.isArray(nodes)) return false;
@@ -163,6 +191,10 @@ function adoptPocketLiteSessionState(snapshot) {
 window.__pocketLiteExportSessionState = exportPocketLiteSessionState;
 
 async function saveThroughPipHost() {
+  if (isPocketVaultPipTransferBlocked()) {
+    setStatus("Document PiP is not available for encrypted Vaults yet because its transfer is not encrypted.", "warn", { durationMs: 6200 });
+    return false;
+  }
   let hostSave = null;
   try {
     hostSave = window.parent && window.parent !== window

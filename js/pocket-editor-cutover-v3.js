@@ -123,11 +123,7 @@
   function openDirect(input) {
     const node = selectedNode(input);
     console.info("[editor cutover v3] edit requested", {
-      requested: clean(input?.id || input, 80),
-      selectedId: clean(global.state?.selectedId, 80),
-      detailsEditId: clean(global.state?.detailsEdit?.id, 80),
-      nodeId: clean(node?.id, 80),
-      label: clean(node?.label, 80),
+      foundNode: !!node,
       hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
       hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
       hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
@@ -153,7 +149,7 @@
     if (!ok && !readOnlyCompatibility) {
       setStatusSafe("The safe editor could not open. Nothing was changed. Allow popups, then try again.", "warn");
     }
-    console.info("[editor cutover v3] editor open result", { ok, id: node.id });
+    console.info("[editor cutover v3] editor open result", { ok });
     return ok;
   }
 

@@ -202,6 +202,8 @@ Cleanup, documentation drift, future design consideration or a hypothesis which 
 - **Suggested future test:** open a synthetic Vault while fake handle A is active, edit, press Main Save and assert zero A writes; then exercise the explicitly approved export path
 - **Product decision required:** whether an opened Vault is editable only through a future Vault save, read-only, or exportable to a newly chosen JSON file
 
+**P019 resolution note:** P019 establishes `vault` as an explicit active-document owner with the exact writable Vault handle, Pocket document session and in-memory unlocked Vault-session identity. Atomic Vault adoption removes the previous JSON handle's Save authority only after permission, unlock, authenticated decrypt and structural validation succeed. Main Save and PE Save dispatch through the canonical encrypted Vault writer, while readable JSON requires a separately confirmed new-handle export that never becomes the active destination. P019 also suppresses plaintext browser recovery and PiP routes while Vault owns the document. See `docs/VAULT_OWNERSHIP_CONTRACT.md`; the historical baseline evidence above remains unchanged.
+
 ### P015-F03: Document PiP return is not bound to its opening document
 
 - **Severity:** RED

@@ -59,11 +59,11 @@
     );
     if (!ok) {
       if (typeof setStatus === "function") setStatus("Still unsaved — save before switching items.", "warn");
-      console.warn("[pe switch guard] blocked", { nextNodeId });
+      console.warn("[pe switch guard] blocked");
       return false;
     }
     dirtyWin.__pocketPeDirty = false;
-    console.warn("[pe switch guard] user discarded unsaved editor edits", { nextNodeId });
+    console.warn("[pe switch guard] user discarded unsaved editor edits");
     return true;
   }
 
@@ -176,7 +176,7 @@
         }
       });
       saveBtn.insertAdjacentElement("afterend", btn);
-      console.info("[pe old details] button bound", { id: boundNodeId });
+      console.info("[pe old details] button bound");
       return true;
     } catch (_error) {
       return false;
