@@ -471,6 +471,10 @@ function refreshMeta() {
   }
   if (el.vaultRecoveryNotice instanceof HTMLElement) {
     el.vaultRecoveryNotice.hidden = !(vaultActive && hasUnsaved);
+    if (vaultActive && hasUnsaved) {
+      el.vaultRecoveryNotice.textContent = window.PocketVaultRecovery?.recoveryStatusText?.()
+        || "Unsaved Vault changes are being encrypted for browser recovery.";
+    }
   }
   const hasSelection = !!state.selectedId;
   const expandableIds = getExpandableIds();

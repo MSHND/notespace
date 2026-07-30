@@ -1,5 +1,131 @@
 # Codex report
 
+## POCKET TASK P022 — ENCRYPTED BROWSER RECOVERY FOR UNSAVED VAULT STATE
+
+Title: Add encrypted Vault browser recovery
+
+Status: unsaved changes under an active encrypted Vault now receive a separately encrypted browser safety copy. A retained copy is handled through the canonical, synchronously gated Vault dialog and can be unlocked only for an explicit output action. Focused automated and isolated synthetic-browser validation is complete against the accepted P021 baseline. Murray's physical browser acceptance remains.
+
+Commit title:
+
+- `P022 Add encrypted Vault browser recovery`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Required and confirmed starting `origin/main`: `5fc1b031b7df18301e88ab95f76b73a6c4bb8655`
+- Starting title: `P021 Reset Vault dialog controls between actions`
+- Implementation date: 2026-07-30
+- Branch: `main`
+- Node: `v23.11.0`
+- P022 adds an encrypted recovery layer for dirty Vault-owned state. It does not change the Pocket Vault v1 envelope, the Pocket truth payload schema, the canonical Main Save or PE Save owners, P012 source/revision checks, or ordinary JSON recovery.
+- No personal Pocket truth file, Vault, password, file handle or browser storage was inspected. Browser interaction used only an isolated in-app-browser origin populated with synthetic encrypted test data.
+
+### Encrypted-only capture and ownership
+
+`PocketVaultRecovery` is the single owner of the new browser record at `pocketLite.vaultRecovery.encrypted.v1`. The stored outer record contains only its recovery schema/version, capture time, covered operation sequence and a standard authenticated Vault envelope. The complete canonical Pocket payload is inside the ciphertext. No readable title, Notes, Outline/editor content, root/data extras, tombstones, password, `CryptoKey`, original filename or writable handle is persisted.
+
+`recordOp()` retains operation ownership. Its existing safety call now schedules a serial encrypted capture when the current truth owner is a Vault. The capture freezes the current canonical payload, current highest operation sequence, exact Pocket document session and exact active Vault identity; seals with the active non-extractable in-memory Vault key and a fresh nonce; then rechecks both identities before storage. Latest-current capture wins only within the exact record chain created by that page. A retained recovery from startup, another page/session or another Vault is preserved instead of silently overwritten or cleared. Capture failure leaves the document dirty and reports that encrypted recovery could not be updated.
+
+The recovery record is browser safety data only. It has no file authority, does not remember the original Vault, and cannot adopt a tree or destination. Ordinary non-Vault local-safety records retain their established keys and behaviour. Vault capture does not create plaintext workspace, trail, auto-cache, last-save or PiP content.
+
+### Live Save and stable save-race refresh
+
+A successful encrypted truth write notifies the recovery owner only after the writable stream closes and Vault/session ownership remains current. If the write covers all operations, only the exact matching encrypted recovery is removed. If newer operations arose during the write, the exact payload written becomes the new Vault revision and the newest visible dirty state is immediately recaptured against that advanced session. Covered operations retire while newer operations and their encrypted recovery remain.
+
+Failed encryption, permission, picker, write, close or stale-session outcomes retain the previous encrypted recovery. If refreshing recovery after a successful truth write fails, the truth write remains successful, newer operations remain dirty and Pocket warns rather than claiming those changes have browser recovery. Exact raw-record ownership prevents an older completion or another page/session from clearing a changed recovery.
+
+### Synchronous startup gate and password boundary
+
+The new script loads directly after the canonical Vault IO owner. During initialisation it synchronously detects a retained record and opens the permanent accessible Vault dialog before ordinary document actions can proceed. `pocket-overlays-init.js` explicitly defers its normal file-gate or PiP startup adoption callback until the recovery choice finishes, avoiding a hidden source-session rotation behind the modal. The shared modal continues to own `role="dialog"`, `aria-modal="true"`, focus containment, inert background state and its P021 control reset. File open/create, Vault create/export, PiP opening, tree mutation and whole-document shortcuts remain gated while the flow is active.
+
+The first view offers exactly:
+
+- **Unlock recovery**
+- **Delete recovery**
+- **Not now**
+
+Delete requires confirmation but no password and affects only the exact browser record opened by the flow. Not now closes the modal without decrypting or deleting. Unlock uses the original Vault password to authenticate and decrypt the envelope in memory. A wrong password reveals nothing and leaves the blob, retry and Cancel intact. Decryption also validates the recovered Pocket structure, but never adopts it as the visible tree or active document.
+
+After a correct password, the dialog offers exactly:
+
+- **Save as new encrypted Vault**
+- **Save as plain JSON**
+- **Add to an existing Pocket file**
+- **Keep for later**
+- **Discard recovery**
+
+Keep for later releases the decrypted in-memory flow state and leaves the encrypted record. Discard uses the same explicit-delete confirmation. The plain JSON action presents a readable-content warning before its picker.
+
+### Explicit output destinations
+
+All three output routes are bound to the exact recovery-flow token and starting Pocket session. Each asks the user for its destination and is output-only: neither successful decryption nor a successful recovery write adopts the output handle, payload or file session.
+
+- **Save as new encrypted Vault** asks for a new destination and new confirmed password, creates a fresh Vault identity and writes revision 1.
+- **Save as plain JSON** writes a canonical readable Pocket payload only after its explicit confidentiality warning.
+- **Add to an existing Pocket file** reads and validates an explicitly selected plain JSON destination, fresh-remaps every recovered node ID and parent, places the recovered tree beneath one `Recovered <date/time>` top-level wrapper, asks for final confirmation, then rereads the exact destination bytes immediately before writing. Any intervening change fails closed.
+
+Full Vault and JSON outputs preserve the complete recovered document. The contained add-to-existing route preserves recovered nodes, Notes, supported or opaque editor metadata, generic node extras and order, while deliberately retaining the destination's document metadata and tombstones instead of attempting a broad merge. Cancellation, failure or stale ownership writes nothing and preserves recovery. Successful output clears only the exact recovery record; cleanup failure is reported rather than hidden.
+
+### Files changed
+
+Production:
+
+- `index.html`
+- `vault.css`
+- `sw.js`
+- `js/pocket-state.js`
+- `js/pocket-storage.js`
+- `js/pocket-history-status.js`
+- `js/pocket-io-browser.js`
+- `js/pocket-vault-io-browser.js`
+- `js/pocket-vault-recovery.js`
+- `js/pocket-overlays-init.js`
+
+Tests:
+
+- `tests/p019-vault-ownership.test.js`
+
+Documentation:
+
+- `docs/VAULT_RECOVERY_CONTRACT.md`
+- `docs/VAULT_OWNERSHIP_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No package, dependency, fixture, Pocket truth schema, Vault crypto module, generated PE runtime or personal data file changed.
+
+### Executable validation
+
+- `node --test tests/p019-vault-ownership.test.js`: **133 passed, 0 failed**
+- `node --test tests/pe-persistence-contract.test.js`: **96 passed, 0 failed**
+- `node --test tests/device-changes-resolution.test.js`: **69 passed, 0 failed**
+- `node --test tests/p018-popout-isolation.test.js`: **15 passed, 0 failed**
+- Combined focused result: **313 passed, 0 failed**
+- Production JavaScript syntax checks: **PASS for every `js/*.js` file**
+- Changed test JavaScript syntax check: **PASS**
+- Service-worker syntax check: **PASS**
+- Generated PE runtime: **unchanged by P022**
+- `git diff --check`: **PASS**
+
+The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+### Isolated browser validation
+
+An isolated local in-app-browser origin exercised the real startup dialog with synthetic encrypted data. The warning appeared with initial focus on **Unlock recovery**; Delete opened confirmation and Cancel returned safely; a wrong password showed the calm error without revealing or deleting content; the correct synthetic password exposed all five required actions; the plain JSON warning opened and cancelled safely; **Keep for later** survived a reload; and final confirmed Delete removed the synthetic record. No console warning or error appeared.
+
+This browser pass did not invoke a real file picker or perform a recovery output write. It did not inspect Murray's personal browser storage, Pocket file or Vault.
+
+### Known limits and physical acceptance
+
+- Browser localStorage is finite and may be cleared by the browser or user.
+- P022 retains one encrypted Vault recovery record. A waiting record from another Vault is preserved, which can temporarily prevent the newly active Vault from establishing its own recovery.
+- Recovery output validation is bounded to 10,000 nodes and approximately 5,000,000 serialised characters.
+- Add to existing imports only the recovered node tree; it does not merge recovered root/data extras or tombstones.
+- The final destination reread narrows but cannot eliminate a platform-level external-write race after the freshness check.
+- Password recovery, key escrow, multi-device recovery, cloud backup, automatic adoption, automatic merge and rollback detection remain out of scope.
+
+Physical browser acceptance remains required for real picker permissions, File System Access write/close behaviour, reload persistence, focus containment and storage/quota behaviour. The exact P022 checklist is in `docs/VAULT_RECOVERY_CONTRACT.md`, section 14.
+
 ## POCKET TASK P021 — RESET VAULT DIALOG CONTROLS BETWEEN ACTIONS
 
 Title: Reset Vault dialog controls between actions

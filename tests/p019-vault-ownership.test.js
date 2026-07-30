@@ -18,6 +18,8 @@ const P018_FIXTURE_PATH = path.join(
 );
 const FIXTURE_PASSPHRASE = "fixture-only-passphrase";
 const TEST_PASSPHRASE = "synthetic-vault-password";
+const RECOVERY_OUTPUT_PASSPHRASE = "synthetic-recovered-vault-password";
+const VAULT_RECOVERY_STORAGE_KEY = "pocketLite.vaultRecovery.encrypted.v1";
 
 function source(relativePath) {
   return fs.readFileSync(path.join(REPO_ROOT, relativePath), "utf8");
@@ -457,6 +459,25 @@ function createVaultDom() {
   switchActions.appendChild(element("button", "vaultSwitchDiscard", "Discard and continue"));
   switchActions.appendChild(element("button", "vaultSwitchCancel", "Cancel"));
   vaultCard.appendChild(switchActions);
+  const recoveryWarningActions = element("div", "vaultRecoveryWarningActions");
+  recoveryWarningActions.hidden = true;
+  recoveryWarningActions.appendChild(element("button", "vaultRecoveryUnlock", "Unlock recovery"));
+  recoveryWarningActions.appendChild(element("button", "vaultRecoveryDelete", "Delete recovery"));
+  recoveryWarningActions.appendChild(element("button", "vaultRecoveryLater", "Not now"));
+  vaultCard.appendChild(recoveryWarningActions);
+  const recoveryUnlockedActions = element("div", "vaultRecoveryUnlockedActions");
+  recoveryUnlockedActions.hidden = true;
+  recoveryUnlockedActions.appendChild(element("button", "vaultRecoverySaveVault", "Save as new encrypted Vault"));
+  recoveryUnlockedActions.appendChild(element("button", "vaultRecoverySaveJson", "Save as plain JSON"));
+  recoveryUnlockedActions.appendChild(element("button", "vaultRecoveryAddExisting", "Add to an existing Pocket file"));
+  recoveryUnlockedActions.appendChild(element("button", "vaultRecoveryKeep", "Keep for later"));
+  recoveryUnlockedActions.appendChild(element("button", "vaultRecoveryDiscard", "Discard recovery"));
+  vaultCard.appendChild(recoveryUnlockedActions);
+  const recoveryConfirmActions = element("div", "vaultRecoveryConfirmActions");
+  recoveryConfirmActions.hidden = true;
+  recoveryConfirmActions.appendChild(element("button", "vaultRecoveryConfirm", "Continue"));
+  recoveryConfirmActions.appendChild(element("button", "vaultRecoveryConfirmCancel", "Cancel"));
+  vaultCard.appendChild(recoveryConfirmActions);
 
   body.appendChild(surface);
   body.appendChild(permissionOverlay);
@@ -867,6 +888,7 @@ function createVaultContext(options = {}) {
     "js/pocket-crypto.js",
     "js/pocket-vault.js",
     "js/pocket-vault-io-browser.js",
+    "js/pocket-vault-recovery.js",
     "js/pocket-node-popout-model.js",
     "js/pocket-node-popout-target.js",
     "js/pocket-node-popout-editor.js",
@@ -1007,6 +1029,16 @@ const VAULT_DIALOG_BUTTON_IDS = Object.freeze([
   "vaultSwitchSave",
   "vaultSwitchDiscard",
   "vaultSwitchCancel",
+  "vaultRecoveryUnlock",
+  "vaultRecoveryDelete",
+  "vaultRecoveryLater",
+  "vaultRecoverySaveVault",
+  "vaultRecoverySaveJson",
+  "vaultRecoveryAddExisting",
+  "vaultRecoveryKeep",
+  "vaultRecoveryDiscard",
+  "vaultRecoveryConfirm",
+  "vaultRecoveryConfirmCancel",
 ]);
 
 function assertVaultDialogButtons(context, disabled) {
@@ -1033,6 +1065,9 @@ function assertVaultDialogClosedNeutral(context) {
   assert.equal(ui.elements.get("vaultCredentialForm").hidden, true);
   assert.equal(ui.elements.get("vaultExportActions").hidden, true);
   assert.equal(ui.elements.get("vaultSwitchActions").hidden, true);
+  assert.equal(ui.elements.get("vaultRecoveryWarningActions").hidden, true);
+  assert.equal(ui.elements.get("vaultRecoveryUnlockedActions").hidden, true);
+  assert.equal(ui.elements.get("vaultRecoveryConfirmActions").hidden, true);
   assert.equal(ui.elements.get("vaultDialogError").textContent, "");
 }
 
@@ -1057,6 +1092,71 @@ async function createVaultWithPassword(context, handle, passphrase = TEST_PASSPH
   const created = context.PocketVaultBrowserIo.createActiveVault();
   await submitCredential(context, passphrase, passphrase);
   return created;
+}
+
+async function recoveryRecordForPayload(payload, options = {}) {
+  const context = loadCryptoContext();
+  const envelope = await context.PocketCrypto.sealJson(
+    payload,
+    options.passphrase || TEST_PASSPHRASE,
+    {
+      vaultId: options.vaultId || "vault_recovery_fixture",
+      revision: options.revision || 2,
+    },
+  );
+  return JSON.stringify({
+    schema: "pocket.vaultRecovery.encrypted.v1",
+    version: 1,
+    capturedAt: options.capturedAt || "2026-07-30T06:30:00.000Z",
+    highestSequence: options.highestSequence || 1,
+    envelope,
+  });
+}
+
+function storedRecoveryRaw(context) {
+  return context.__localStorage.values.get(VAULT_RECOVERY_STORAGE_KEY) || "";
+}
+
+async function waitForStoredRecovery(context) {
+  await context.PocketVaultRecovery.whenIdle();
+  assert.equal(
+    await waitFor(() => !!storedRecoveryRaw(context)),
+    true,
+    "encrypted Vault recovery should be stored",
+  );
+  return JSON.parse(storedRecoveryRaw(context));
+}
+
+async function decryptStoredRecovery(context, passphrase = TEST_PASSPHRASE) {
+  const record = await waitForStoredRecovery(context);
+  return context.PocketCrypto.openJson(record.envelope, passphrase);
+}
+
+async function waitForRecoverySection(context, id) {
+  assert.equal(
+    await waitFor(() => (
+      !context.__ui.vaultOverlay.hidden
+      && context.__ui.elements.get(id)?.hidden === false
+    )),
+    true,
+    `${id} should be visible`,
+  );
+}
+
+async function chooseRecoveryWarningAction(context, id, expectedSection = "") {
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  context.__ui.elements.get(id).click();
+  if (expectedSection) await waitForRecoverySection(context, expectedSection);
+}
+
+async function unlockStoredRecovery(context, passphrase = TEST_PASSPHRASE) {
+  await chooseRecoveryWarningAction(
+    context,
+    "vaultRecoveryUnlock",
+    "vaultCredentialForm",
+  );
+  await submitCredential(context, passphrase, "");
+  await waitForRecoverySection(context, "vaultRecoveryUnlockedActions");
 }
 
 async function confirmReadableExport(context, handle) {
@@ -3106,7 +3206,7 @@ test("P017 permission Cancel and stale completion clear only the Vault candidate
   });
 });
 
-test("Vault plaintext, password, key, extras, and operations never enter browser recovery storage", async () => {
+test("P022 dirty Vault operations create only authenticated encrypted browser recovery", async () => {
   const currentSafetyKey = "pocketLite.localSafety.snapshot.v1";
   const jsonRecovery = JSON.stringify({
     schema: "pocket.localSafety.v2",
@@ -3162,9 +3262,11 @@ test("Vault plaintext, password, key, extras, and operations never enter browser
     type: "private-vault-edit",
     diagnostic: secrets.operation,
   });
+  const encryptedRecord = await waitForStoredRecovery(context);
 
   assert.equal(context.saveWorkspaceState(), false);
-  assert.equal(context.saveLocalSafetySnapshot("private-vault-edit"), false);
+  assert.equal(context.saveLocalSafetySnapshot("private-vault-edit"), true);
+  await context.PocketVaultRecovery.whenIdle();
   assert.equal(
     context.saveAutoCache(
       {
@@ -3180,6 +3282,10 @@ test("Vault plaintext, password, key, extras, and operations never enter browser
   assert.equal(context.__productionPersistPipSnapshot(), false);
   assert.equal(context.__localStorage.values.get(currentSafetyKey), jsonRecovery);
   assert.equal(context.__indexedDbCalls.length, 0);
+  assert.equal(encryptedRecord.schema, "pocket.vaultRecovery.encrypted.v1");
+  assert.equal(encryptedRecord.version, 1);
+  assert.ok(Number.isSafeInteger(encryptedRecord.highestSequence));
+  assert.equal(context.PocketCrypto.isVaultEnvelope(encryptedRecord.envelope), true);
 
   const persisted = JSON.stringify([
     [...context.__localStorage.values.entries()],
@@ -3199,6 +3305,22 @@ test("Vault plaintext, password, key, extras, and operations never enter browser
   assert.equal(Object.hasOwn(state.pocketFile, "passphrase"), false);
   assert.equal(context.PocketVault.getActiveSession().cryptoKey.extractable, false);
   assert.equal(context.PocketVault.getActiveSession().revision, 4);
+
+  const recovered = await context.PocketCrypto.openJson(
+    JSON.parse(storedRecoveryRaw(context)).envelope,
+    TEST_PASSPHRASE,
+  );
+  assert.equal(recovered.mainThoughtTree[0].label, secrets.label);
+  assert.equal(recovered.mainThoughtTree[0].details, `${secrets.details} edited`);
+  assert.equal(recovered.mainThoughtTree[0].editor.outline[0].text, secrets.outline);
+  assert.equal(recovered.privateRootExtra, secrets.rootExtra);
+  assert.equal(recovered.data.privateDataExtra, secrets.dataExtra);
+  assert.equal(
+    context.__localStorage.calls.some((call) => (
+      call.type === "set" && call.key === VAULT_RECOVERY_STORAGE_KEY
+    )),
+    true,
+  );
 });
 
 test("opening a Vault suppresses but does not delete existing ordinary JSON recovery", async () => {
@@ -3235,7 +3357,7 @@ test("opening a Vault suppresses but does not delete existing ordinary JSON reco
   assert.equal(context.__localStorage.values.get(trailKey), jsonTrail);
 });
 
-test("dirty Vault beforeunload warns synchronously without saving or writing recovery", async () => {
+test("P022 dirty Vault beforeunload warns synchronously without starting another recovery or truth write", async () => {
   const context = createVaultContext();
   installOwnerDocument(context, createSyntheticHandle("initial.json"), pocketPayload());
   const vaultHandle = createSyntheticHandle("beforeunload.vault.json", {
@@ -3246,6 +3368,9 @@ test("dirty Vault beforeunload warns synchronously without saving or writing rec
   });
   assert.equal(await openVaultWithPassword(context, vaultHandle), true);
   mutateVaultNode(context, { details: "Unsaved in-memory Vault edit" });
+  await context.PocketVaultRecovery.whenIdle();
+  const recoveryBefore = storedRecoveryRaw(context);
+  assert.ok(recoveryBefore);
   const storageCallsBefore = context.__localStorage.calls.length;
   const event = syntheticEvent("beforeunload");
 
@@ -3256,6 +3381,417 @@ test("dirty Vault beforeunload warns synchronously without saving or writing rec
   assert.equal(vaultHandle.createWritableCalls, 0);
   assert.equal(vaultHandle.writes.length, 0);
   assert.equal(context.__localStorage.calls.length, storageCallsBefore);
+  assert.equal(storedRecoveryRaw(context), recoveryBefore);
+});
+
+test("P022 startup recovery blocks normal work, rejects a wrong password, unlocks without adopting, and keeps for later", async () => {
+  const recoveredPayload = pocketPayload({
+    nodes: [
+      makeNode("startup_recovered", {
+        label: "Startup recovered item",
+        details: "Readable only after the right password",
+      }),
+    ],
+  });
+  const recoveryRaw = await recoveryRecordForPayload(recoveredPayload);
+  const context = createVaultContext({
+    localStorageSeed: {
+      [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw,
+    },
+  });
+  const state = lexicalState(context);
+
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  assert.equal(context.PocketVaultRecovery.isFlowOpen(), true);
+  assert.equal(context.canModifyPocket(), false);
+  assert.equal(state.nodes.length, 0);
+  assert.equal(context.capturePocketFileSaveSession().ownerKind, "none");
+  assert.equal(context.__ui.surface.inert, true);
+  assert.equal(context.__openPickerQueue.length, 0);
+  assert.equal(context.__savePickerQueue.length, 0);
+  let resumedNormalStartup = 0;
+  assert.equal(
+    context.PocketVaultRecovery.deferNormalStartup(() => {
+      resumedNormalStartup += 1;
+    }),
+    true,
+  );
+  assert.equal(resumedNormalStartup, 0);
+  assert.match(
+    source("js/pocket-overlays-init.js"),
+    /PocketVaultRecovery\?\.deferNormalStartup\?\.\(initialisePocketStartupOwner\)/,
+  );
+
+  await chooseRecoveryWarningAction(
+    context,
+    "vaultRecoveryUnlock",
+    "vaultCredentialForm",
+  );
+  context.__ui.elements.get("vaultPassword").value = "wrong-recovery-password";
+  await context.__ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", {
+      target: context.__ui.elements.get("vaultCredentialForm"),
+    }),
+  );
+  assert.match(
+    context.__ui.elements.get("vaultDialogError").textContent,
+    /did not unlock the recovery/i,
+  );
+  assert.equal(context.__ui.elements.get("vaultCredentialSubmit").disabled, false);
+  assert.equal(context.__ui.elements.get("vaultCredentialCancel").disabled, false);
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  assert.equal(state.nodes.length, 0);
+
+  await submitCredential(context, TEST_PASSPHRASE, "");
+  await waitForRecoverySection(context, "vaultRecoveryUnlockedActions");
+  assert.equal(state.nodes.length, 0, "decryption must not silently adopt recovered content");
+  assert.equal(context.capturePocketFileSaveSession().ownerKind, "none");
+  assert.equal(context.__ui.elements.get("vaultRecoverySaveVault").textContent.includes("Save as new encrypted Vault"), true);
+  assert.equal(context.__ui.elements.get("vaultRecoverySaveJson").textContent.includes("Save as plain JSON"), true);
+  assert.equal(context.__ui.elements.get("vaultRecoveryAddExisting").textContent.includes("Add to an existing Pocket file"), true);
+  assert.equal(context.__ui.elements.get("vaultRecoveryKeep").textContent.includes("Keep for later"), true);
+  assert.equal(context.__ui.elements.get("vaultRecoveryDiscard").textContent.includes("Discard recovery"), true);
+
+  context.__ui.elements.get("vaultRecoveryKeep").click();
+  assert.equal(await waitFor(() => context.__ui.vaultOverlay.hidden), true);
+  assert.equal(
+    await waitFor(() => !context.PocketVaultRecovery.isFlowOpen()),
+    true,
+  );
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  assert.equal(state.nodes.length, 0);
+  assert.equal(context.__ui.surface.inert, false);
+  assert.equal(resumedNormalStartup, 1);
+  assert.equal(context.PocketVaultRecovery.showStartupWarning(), true);
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  assert.equal(context.__ui.elements.get("vaultRecoveryUnlock") === context.__ui.document.activeElement, true);
+  context.__ui.elements.get("vaultRecoveryLater").click();
+  assert.equal(await waitFor(() => context.__ui.vaultOverlay.hidden), true);
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+});
+
+test("P022 Delete recovery needs confirmation, no password, and changes no saved file", async () => {
+  const recoveryRaw = await recoveryRecordForPayload(pocketPayload({
+    nodes: [makeNode("delete_only_recovery", { details: "Encrypted delete test" })],
+  }));
+  const context = createVaultContext({
+    localStorageSeed: {
+      [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw,
+      "pocketLite.localSafety.snapshot.v1": "ordinary-json-safety",
+    },
+  });
+  const savedHandle = createSyntheticHandle("saved-never-touched.json", {
+    content: JSON.stringify(pocketPayload()),
+  });
+
+  await chooseRecoveryWarningAction(
+    context,
+    "vaultRecoveryDelete",
+    "vaultRecoveryConfirmActions",
+  );
+  assert.match(context.__ui.elements.get("vaultDialogTitle").textContent, /delete encrypted recovery/i);
+  assert.match(context.__ui.elements.get("vaultDialogBody").textContent, /does not change or delete any saved/i);
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  assert.equal(context.__ui.elements.get("vaultCredentialForm").hidden, true);
+
+  context.__ui.elements.get("vaultRecoveryConfirmCancel").click();
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  context.__ui.elements.get("vaultRecoveryDelete").click();
+  await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+  context.__ui.elements.get("vaultRecoveryConfirm").click();
+  assert.equal(await waitFor(() => !storedRecoveryRaw(context)), true);
+  assert.equal(context.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), "ordinary-json-safety");
+  assert.equal(savedHandle.writes.length, 0);
+  assert.equal(savedHandle.createWritableCalls, 0);
+  assert.equal(context.__openPickerQueue.length, 0);
+  assert.equal(context.__savePickerQueue.length, 0);
+  assert.equal(context.PocketVaultRecovery.isFlowOpen(), false);
+});
+
+test("P022 unlocked Discard recovery requires confirmation and removes only the browser blob", async () => {
+  const recoveryRaw = await recoveryRecordForPayload(pocketPayload({
+    nodes: [makeNode("discard_unlocked_recovery", { details: "Encrypted discard test" })],
+  }));
+  const context = createVaultContext({
+    localStorageSeed: {
+      [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw,
+      "pocketLite.localSafety.snapshot.v1": "ordinary-json-safety",
+    },
+  });
+
+  await unlockStoredRecovery(context);
+  context.__ui.elements.get("vaultRecoveryDiscard").click();
+  await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+  assert.match(context.__ui.elements.get("vaultDialogTitle").textContent, /discard encrypted recovery/i);
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  context.__ui.elements.get("vaultRecoveryConfirmCancel").click();
+  await waitForRecoverySection(context, "vaultRecoveryUnlockedActions");
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+
+  context.__ui.elements.get("vaultRecoveryDiscard").click();
+  await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+  context.__ui.elements.get("vaultRecoveryConfirm").click();
+  assert.equal(await waitFor(() => !storedRecoveryRaw(context)), true);
+  assert.equal(
+    context.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"),
+    "ordinary-json-safety",
+  );
+  assert.equal(context.__openPickerQueue.length, 0);
+  assert.equal(context.__savePickerQueue.length, 0);
+  assert.equal(context.PocketVaultRecovery.isFlowOpen(), false);
+});
+
+test("P022 a kept earlier recovery cannot be overwritten or cleared by a later same-Vault session", async () => {
+  const vaultId = "vault_kept_recovery";
+  const keptPayload = pocketPayload({
+    nodes: [makeNode("kept_recovery", { details: "Earlier unsaved Vault work" })],
+  });
+  const recoveryRaw = await recoveryRecordForPayload(keptPayload, {
+    vaultId,
+    revision: 2,
+  });
+  const context = createVaultContext({
+    localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+  });
+
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  context.__ui.elements.get("vaultRecoveryLater").click();
+  assert.equal(
+    await waitFor(() => !context.PocketVaultRecovery.isFlowOpen()),
+    true,
+  );
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+
+  const currentVaultPayload = pocketPayload({
+    nodes: [makeNode("current_vault", { details: "Saved Vault content" })],
+  });
+  const currentVault = createSyntheticHandle("same-vault-later-session.vault.json", {
+    content: await sealForHandle(context, currentVaultPayload, {
+      vaultId,
+      revision: 1,
+    }),
+  });
+  assert.equal(await openVaultWithPassword(context, currentVault), true);
+  mutateVaultNode(context, { details: "A later same-Vault session edit" });
+  const capture = await context.PocketVaultRecovery.whenIdle();
+  assert.equal(capture.ok, false);
+  assert.equal(capture.reason, "different-recovery-waiting");
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+
+  const saveResult = await context.exportTree({ returnDetails: true });
+  assert.equal(saveResult.ok, true);
+  assert.equal(currentVault.writes.length, 1);
+  assert.equal(lexicalState(context).ops.length, 0);
+  assert.equal(
+    storedRecoveryRaw(context),
+    recoveryRaw,
+    "a successful later Vault Save must not clear an earlier unowned recovery",
+  );
+});
+
+test("P022 explicit recovery outputs clear only after successful Vault, JSON, or under-root import writes", async (t) => {
+  const recoveredPayload = pocketPayload({
+    nodes: [
+      makeNode("shared", {
+        label: "Recovered parent",
+        details: "Recovered Notes",
+        editor: outlineEditor([
+          { id: "recovered_outline", text: "Recovered Outline", depth: 0, collapsed: true },
+        ]),
+      }),
+      makeNode("recovered_child", {
+        parentId: "shared",
+        order: 0,
+        label: "Recovered child",
+        details: "Child Notes",
+      }),
+    ],
+  });
+  const recoveryRaw = await recoveryRecordForPayload(recoveredPayload);
+
+  await t.test("cancelled plain JSON output keeps encrypted recovery", async () => {
+    const context = createVaultContext({
+      localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+    });
+    await unlockStoredRecovery(context);
+    context.__ui.elements.get("vaultRecoverySaveJson").click();
+    await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+    assert.match(context.__ui.elements.get("vaultDialogBody").textContent, /readable plain JSON/i);
+    context.__ui.elements.get("vaultRecoveryConfirm").click();
+    await waitForRecoverySection(context, "vaultRecoveryUnlockedActions");
+    assert.equal(storedRecoveryRaw(context), recoveryRaw);
+    context.__ui.elements.get("vaultRecoveryKeep").click();
+    await waitFor(() => context.__ui.vaultOverlay.hidden);
+  });
+
+  await t.test("failed plain JSON output keeps encrypted recovery and source ownership", async () => {
+    const context = createVaultContext({
+      localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+    });
+    const sourceBefore = context.capturePocketFileSaveSession();
+    const stateBefore = JSON.stringify(lexicalState(context).nodes);
+    const output = createSyntheticHandle("recovered-output-fails.json", {
+      writeError: new Error("synthetic recovery output failure"),
+    });
+    await unlockStoredRecovery(context);
+    context.__savePickerQueue.push(output);
+    context.__ui.elements.get("vaultRecoverySaveJson").click();
+    await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+    context.__ui.elements.get("vaultRecoveryConfirm").click();
+    await waitForRecoverySection(context, "vaultRecoveryUnlockedActions");
+    assert.equal(storedRecoveryRaw(context), recoveryRaw);
+    assert.equal(output.writes.length, 0);
+    assert.equal(output.abortedWrites, 1);
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(context.capturePocketFileSaveSession())),
+      JSON.parse(JSON.stringify(sourceBefore)),
+    );
+    assert.equal(JSON.stringify(lexicalState(context).nodes), stateBefore);
+    context.__ui.elements.get("vaultRecoveryKeep").click();
+    await waitFor(() => context.__ui.vaultOverlay.hidden);
+  });
+
+  await t.test("plain JSON output writes the chosen destination and clears recovery", async () => {
+    const context = createVaultContext({
+      localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+    });
+    const output = createSyntheticHandle("recovered-output.json");
+    await unlockStoredRecovery(context);
+    const ownerBefore = currentOwnerSnapshot(context);
+    context.__savePickerQueue.push(output);
+    context.__ui.elements.get("vaultRecoverySaveJson").click();
+    await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+    context.__ui.elements.get("vaultRecoveryConfirm").click();
+    assert.equal(await waitFor(() => output.writes.length === 1), true);
+    assert.equal(await waitFor(() => !storedRecoveryRaw(context)), true);
+    const written = JSON.parse(output.writes[0]);
+    assert.deepEqual(
+      written.mainThoughtTree.map((node) => node.label),
+      ["Recovered parent", "Recovered child"],
+    );
+    assertOwnerUnchanged(context, ownerBefore);
+    assert.notStrictEqual(context.capturePocketFileSaveSession().handle, output);
+  });
+
+  await t.test("new encrypted Vault output uses a fresh password and clears recovery", async () => {
+    const context = createVaultContext({
+      localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+    });
+    const output = createSyntheticHandle("recovered-output.vault.json");
+    await unlockStoredRecovery(context);
+    const ownerBefore = currentOwnerSnapshot(context);
+    context.__savePickerQueue.push(output);
+    context.__ui.elements.get("vaultRecoverySaveVault").click();
+    await waitForRecoverySection(context, "vaultCredentialForm");
+    await submitCredential(
+      context,
+      RECOVERY_OUTPUT_PASSPHRASE,
+      RECOVERY_OUTPUT_PASSPHRASE,
+    );
+    assert.equal(await waitFor(() => output.writes.length === 1), true);
+    assert.equal(await waitFor(() => !storedRecoveryRaw(context)), true);
+    const written = await context.PocketCrypto.openJson(
+      JSON.parse(output.writes[0]),
+      RECOVERY_OUTPUT_PASSPHRASE,
+    );
+    assert.deepEqual(
+      written.mainThoughtTree.map((node) => node.label),
+      ["Recovered parent", "Recovered child"],
+    );
+    assertOwnerUnchanged(context, ownerBefore);
+    assert.notStrictEqual(context.capturePocketFileSaveSession().handle, output);
+  });
+
+  await t.test("existing Pocket import preserves destination and nests fresh recovered IDs under one root", async () => {
+    const context = createVaultContext({
+      localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+    });
+    const destinationPayload = pocketPayload({
+      nodes: [
+        makeNode("shared", {
+          label: "Destination item",
+          details: "Destination Notes",
+        }),
+      ],
+      tombstones: [{ id: "destination_removed", deletedAt: "2026-07-30T00:00:00.000Z" }],
+      rootExtras: { destinationRootExtra: "kept" },
+      dataExtras: { destinationDataExtra: "kept" },
+    });
+    const destination = createSyntheticHandle("existing-pocket.json", {
+      content: `${JSON.stringify(destinationPayload, null, 2)}\n`,
+    });
+    const importProbe = context.PocketVaultRecovery.buildRecoveredImport(
+      destinationPayload,
+      recoveredPayload,
+      "2026-07-30T06:30:00.000Z",
+    );
+    assert.equal(importProbe.ok, true, importProbe.reason);
+    await unlockStoredRecovery(context);
+    const ownerBefore = currentOwnerSnapshot(context);
+    context.__openPickerQueue.push(destination);
+    context.__ui.elements.get("vaultRecoveryAddExisting").click();
+    await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+    assert.match(context.__ui.elements.get("vaultDialogBody").textContent, /one new top-level Recovered item/i);
+    context.__ui.elements.get("vaultRecoveryConfirm").click();
+    assert.equal(await waitFor(() => destination.writes.length === 1), true);
+    assert.equal(await waitFor(() => !storedRecoveryRaw(context)), true);
+
+    const written = JSON.parse(destination.writes[0]);
+    const ids = written.mainThoughtTree.map((node) => node.id);
+    assert.equal(new Set(ids).size, ids.length);
+    const original = written.mainThoughtTree.find((node) => node.id === "shared");
+    assert.equal(original.label, "Destination item");
+    assert.equal(original.details, "Destination Notes");
+    const wrapper = written.mainThoughtTree.find((node) => (
+      node.parentId === "root" && /^Recovered /.test(node.label)
+    ));
+    assert.ok(wrapper);
+    const recoveredParent = written.mainThoughtTree.find((node) => (
+      node.parentId === wrapper.id && node.label === "Recovered parent"
+    ));
+    assert.ok(recoveredParent);
+    assert.notEqual(recoveredParent.id, "shared");
+    assert.equal(recoveredParent.details, "Recovered Notes");
+    assert.equal(recoveredParent.editor.outline[0].text, "Recovered Outline");
+    const recoveredChild = written.mainThoughtTree.find((node) => node.label === "Recovered child");
+    assert.equal(recoveredChild.parentId, recoveredParent.id);
+    assert.equal(written.destinationRootExtra, "kept");
+    assert.equal(written.data.destinationDataExtra, "kept");
+    assert.equal(written.mainThoughtTreeTombstones[0].id, "destination_removed");
+    assertOwnerUnchanged(context, ownerBefore);
+    assert.notStrictEqual(context.capturePocketFileSaveSession().handle, destination);
+  });
+
+  await t.test("existing Pocket destination changing during confirmation is not overwritten", async () => {
+    const context = createVaultContext({
+      localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+    });
+    const firstDestination = pocketPayload({
+      nodes: [makeNode("first_destination", { label: "First destination version" })],
+    });
+    const laterDestination = pocketPayload({
+      nodes: [makeNode("later_destination", { label: "Changed outside Pocket" })],
+    });
+    const destination = createSyntheticHandle("changing-pocket.json", {
+      content: `${JSON.stringify(firstDestination, null, 2)}\n`,
+    });
+    await unlockStoredRecovery(context);
+    const ownerBefore = currentOwnerSnapshot(context);
+    context.__openPickerQueue.push(destination);
+    context.__ui.elements.get("vaultRecoveryAddExisting").click();
+    await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
+    destination.content = `${JSON.stringify(laterDestination, null, 2)}\n`;
+    context.__ui.elements.get("vaultRecoveryConfirm").click();
+    await waitForRecoverySection(context, "vaultRecoveryUnlockedActions");
+    assert.equal(destination.getFileCalls, 2);
+    assert.equal(destination.writes.length, 0);
+    assert.equal(JSON.parse(destination.content).mainThoughtTree[0].id, "later_destination");
+    assert.equal(storedRecoveryRaw(context), recoveryRaw);
+    assertOwnerUnchanged(context, ownerBefore);
+    context.__ui.elements.get("vaultRecoveryKeep").click();
+    await waitFor(() => context.__ui.vaultOverlay.hidden);
+  });
 });
 
 test("Vault owner blocks Document PiP and plaintext PiP snapshots while JSON behaviour remains", async () => {
@@ -3998,6 +4534,16 @@ test("P021 repeated initialisation and dialog reuse do not duplicate bindings", 
     vaultSwitchSave: 1,
     vaultSwitchDiscard: 1,
     vaultSwitchCancel: 1,
+    vaultRecoveryUnlock: 1,
+    vaultRecoveryDelete: 1,
+    vaultRecoveryLater: 1,
+    vaultRecoverySaveVault: 1,
+    vaultRecoverySaveJson: 1,
+    vaultRecoveryAddExisting: 1,
+    vaultRecoveryKeep: 1,
+    vaultRecoveryDiscard: 1,
+    vaultRecoveryConfirm: 1,
+    vaultRecoveryConfirmCancel: 1,
   });
 
   context.PocketVaultBrowserIo.init();
@@ -4223,6 +4769,18 @@ test("Vault Save race advances BASE only to written payload and retains newer in
   assert.equal(context.__ui.elements.get("vaultRecoveryNotice").hidden, false);
   const stored = JSON.stringify([...context.__localStorage.values.entries()]);
   assert.equal(stored.includes("Newer edit while encrypted Save is closing"), false);
+  const recovered = await decryptStoredRecovery(context);
+  assert.equal(
+    recovered.mainThoughtTree[0].details,
+    "Newer edit while encrypted Save is closing",
+  );
+
+  const finalSave = await context.exportTree({ returnDetails: true });
+  assert.equal(finalSave.ok, true);
+  assert.equal(vaultHandle.writes.length, 2);
+  assert.equal(context.PocketVault.getActiveSession().revision, 3);
+  assert.equal(state.ops.length, 0);
+  assert.equal(storedRecoveryRaw(context), "");
 });
 
 test("delayed handle comparison plus owner change clears the stale Vault candidate", async () => {

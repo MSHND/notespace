@@ -251,6 +251,8 @@ function refreshCommandPaletteState() {
 }
 
 function openCommandPalette() {
+  if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
+      && window.isPocketVaultRecoveryFlowOpen()) return false;
   if (typeof window.isPocketFilePermissionPromptOpen === "function"
       && window.isPocketFilePermissionPromptOpen()) {
     if (typeof showPocketFilePermissionPendingStatus === "function") {
@@ -615,6 +617,8 @@ function bind() {
     triggerStatusAction(ev);
   });
   const handleGlobalShortcuts = (ev) => {
+    if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
+        && window.isPocketVaultRecoveryFlowOpen()) return;
     if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
         && window.isPocketDeviceChangesDecisionOpen()) return;
     const key = String(ev.key || "").toLowerCase();
@@ -751,6 +755,8 @@ function bind() {
   window.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
   document.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
   const handleWindowFocusToTree = () => {
+    if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
+        && window.isPocketVaultRecoveryFlowOpen()) return;
     if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
         && window.isPocketDeviceChangesDecisionOpen()) return;
     if (isDetailsEditorOpen()) return;
@@ -770,8 +776,15 @@ function bind() {
 bind();
 refreshMeta();
 renderTree();
-if (isPipMode) {
-  if (!restoreFromPipSnapshot() && typeof initialisePocketFileGate === "function") void initialisePocketFileGate();
-} else if (typeof initialisePocketFileGate === "function") {
-  void initialisePocketFileGate();
+const initialisePocketStartupOwner = () => {
+  if (isPipMode) {
+    if (!restoreFromPipSnapshot() && typeof initialisePocketFileGate === "function") {
+      void initialisePocketFileGate();
+    }
+  } else if (typeof initialisePocketFileGate === "function") {
+    void initialisePocketFileGate();
+  }
+};
+if (window.PocketVaultRecovery?.deferNormalStartup?.(initialisePocketStartupOwner) !== true) {
+  initialisePocketStartupOwner();
 }

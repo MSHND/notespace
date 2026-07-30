@@ -282,7 +282,9 @@ function storeLocalSafetyEntry(entry) {
 }
 
 function saveLocalSafetySnapshot(reason = "change") {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketVaultStoragePrivate()) {
+    return window.PocketVaultRecovery?.scheduleCapture?.(reason) === true;
+  }
   if (!Array.isArray(state.nodes)) return false;
   const capturedAt = nowIso();
   let entry;
@@ -617,7 +619,10 @@ function appendLocalSafetyTrail(entry) {
 }
 
 function clearLocalSafetySnapshot(options = {}) {
-  if (isPocketVaultStoragePrivate() && options.coveredDetachedVaultAdoption !== true) return false;
+  if (isPocketVaultStoragePrivate() && options.coveredDetachedVaultAdoption !== true) {
+    void window.PocketVaultRecovery?.clearActiveVaultRecoveryIfClean?.();
+    return true;
+  }
   try {
     localStorage.removeItem(LOCAL_SAFETY_KEY);
     return true;

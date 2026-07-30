@@ -3,7 +3,8 @@
 .vaultDialogOverlay[hidden],
 .vaultCredentialForm[hidden],
 .vaultDialogField[hidden],
-.vaultDialogActions[hidden] {
+.vaultDialogActions[hidden],
+.vaultRecoveryUnlockedActions[hidden] {
   display: none;
 }
 
@@ -137,6 +138,10 @@
   color: #fff;
 }
 
+.vaultDialogPrimary.danger {
+  background: #7d3e28;
+}
+
 .vaultDialogSecondary {
   background: #fff;
   color: #365044;
@@ -148,6 +153,51 @@
 }
 
 .vaultDialogActions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.vaultRecoveryUnlockedActions {
+  display: grid;
+  gap: 9px;
+}
+
+.vaultRecoveryAction {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 54px;
+  padding: 11px 13px;
+  border: 1px solid rgba(76, 101, 85, 0.26);
+  border-radius: 11px;
+  background: #fff;
+  color: #30453a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vaultRecoveryAction strong {
+  color: #2f503d;
+  font-size: 0.94rem;
+}
+
+.vaultRecoveryAction span {
+  color: #667169;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.vaultRecoveryAction.danger strong {
+  color: #7d3e28;
+}
+
+.vaultRecoveryAction:focus-visible {
+  outline: 3px solid rgba(58, 111, 76, 0.34);
+  outline-offset: 2px;
+}
+
+.vaultRecoveryAction:disabled {
   cursor: wait;
   opacity: 0.62;
 }
@@ -185,6 +235,10 @@ body.vaultDialogOpen {
   }
 
   .vaultDialogSwitchActions {
+    grid-template-columns: 1fr;
+  }
+
+  .vaultRecoveryWarningActions {
     grid-template-columns: 1fr;
   }
 

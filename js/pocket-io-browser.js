@@ -22,6 +22,10 @@ function openPopupFallback() {
 }
 
 async function openPipWindow() {
+  if (isPocketVaultRecoveryFlowOpen()) {
+    setStatus("Finish the encrypted recovery action before continuing.", "warn", { durationMs: 5200 });
+    return;
+  }
   if (isPocketFilePermissionPromptOpen()) {
     showPocketFilePermissionPendingStatus();
     return;
@@ -158,6 +162,10 @@ function isPocketVaultOwnerActive() {
     && !!truthFileHandle
     && session.writable === true
     && !!cleanText(session.vaultSessionId, 120);
+}
+
+function isPocketVaultRecoveryFlowOpen() {
+  return window.PocketVaultRecovery?.isFlowOpen?.() === true;
 }
 
 function isPocketFilePermissionPromptOpen() {
@@ -545,6 +553,7 @@ function canShowPocketTree() {
 
 function canModifyPocket() {
   if (isPocketFilePermissionPromptOpen()) return false;
+  if (isPocketVaultRecoveryFlowOpen()) return false;
   if (window.PocketVaultBrowserIo
       && typeof window.PocketVaultBrowserIo.isOwnerActionPending === "function"
       && window.PocketVaultBrowserIo.isOwnerActionPending()) return false;
@@ -556,6 +565,10 @@ function canModifyPocket() {
 }
 
 function showPocketFileGatePrompt() {
+  if (isPocketVaultRecoveryFlowOpen()) {
+    setStatus("Finish the encrypted recovery action before continuing.", "warn", { durationMs: 5200 });
+    return;
+  }
   if (isPocketFilePermissionPromptOpen()) {
     showPocketFilePermissionPendingStatus();
     return;
@@ -815,6 +828,10 @@ async function ensureWritePermission(handle) {
 
 async function loadFromFileHandle(handle, options = {}) {
   if (!handle || typeof handle.getFile !== "function") return false;
+  if (isPocketVaultRecoveryFlowOpen()) {
+    setStatus("Finish the encrypted recovery action before opening another file.", "warn", { durationMs: 5200 });
+    return false;
+  }
   const opts = {
     permissionAlreadyGranted: false,
     displayName: "",
@@ -933,6 +950,10 @@ async function loadFromFileHandle(handle, options = {}) {
 }
 
 async function openPocketFile() {
+  if (isPocketVaultRecoveryFlowOpen()) {
+    setStatus("Finish the encrypted recovery action before opening another file.", "warn", { durationMs: 5200 });
+    return false;
+  }
   if (isPocketFilePermissionPromptOpen()) {
     showPocketFilePermissionPendingStatus();
     return false;
@@ -1157,6 +1178,10 @@ function payloadForNewPocketFile() {
 }
 
 async function createNewPocketFile() {
+  if (isPocketVaultRecoveryFlowOpen()) {
+    setStatus("Finish the encrypted recovery action before creating another file.", "warn", { durationMs: 5200 });
+    return false;
+  }
   if (isPocketFilePermissionPromptOpen()) {
     showPocketFilePermissionPendingStatus();
     return false;
@@ -1494,11 +1519,16 @@ async function exportTree(options = {}) {
         state.ops = Array.isArray(state.ops) ? state.ops.slice(opsAtSaveStart) : [];
       }
       const newerSafetyStored = saveSession.ownerKind === "vault"
-        ? true
+        ? await window.PocketVaultRecovery?.handleVaultTruthSaveSuccess?.({
+          writtenPayload: payload,
+          coveredSequence: saveStartHighestSequence,
+        }) === true
         : (state.ops.length > 0 ? saveLocalSafetySnapshot("newer-change-after-save") : true);
-      if (state.ops.length === 0) clearLocalSafetySnapshot();
-      if (saveSession.ownerKind === "vault" && state.ops.length > 0) {
-        setStatus(`Encrypted Vault saved. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain in memory.`, "warn", { durationMs: 6200 });
+      if (saveSession.ownerKind !== "vault" && state.ops.length === 0) clearLocalSafetySnapshot();
+      if (saveSession.ownerKind === "vault" && state.ops.length > 0 && newerSafetyStored) {
+        setStatus(`Encrypted Vault saved. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain encrypted in browser recovery.`, "warn", { durationMs: 6200 });
+      } else if (saveSession.ownerKind === "vault" && !newerSafetyStored) {
+        setStatus("Encrypted Vault saved, but Pocket could not update encrypted browser recovery.", "warn", { durationMs: 7200 });
       } else if (state.ops.length > 0 && !newerSafetyStored) {
         setStatus(`Saved to Pocket file. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain open, but Pocket could not refresh the device safety copy.`, "warn", { durationMs: 7200 });
       } else if (state.ops.length > 0) {

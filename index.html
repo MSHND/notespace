@@ -39,7 +39,7 @@
         <div id="titleToast" class="topStatusToast" aria-live="polite"></div>
       </div>
     </div>
-    <p id="vaultRecoveryNotice" class="vaultRecoveryNotice" role="status" aria-live="polite" hidden>Vault changes are not kept in browser recovery. Save the Vault to protect them.</p>
+    <p id="vaultRecoveryNotice" class="vaultRecoveryNotice" role="status" aria-live="polite" hidden>Unsaved Vault changes are being encrypted for browser recovery.</p>
 
     <div class="layout">
       <section class="panel treePanel">
@@ -135,6 +135,40 @@
           <button id="vaultSwitchSave" class="vaultDialogPrimary" type="button">Save and continue</button>
           <button id="vaultSwitchDiscard" class="vaultDialogSecondary" type="button">Discard and continue</button>
           <button id="vaultSwitchCancel" class="vaultDialogSecondary" type="button">Cancel</button>
+        </div>
+
+        <div id="vaultRecoveryWarningActions" class="vaultDialogActions vaultRecoveryWarningActions" hidden>
+          <button id="vaultRecoveryUnlock" class="vaultDialogPrimary" type="button">Unlock recovery</button>
+          <button id="vaultRecoveryDelete" class="vaultDialogSecondary" type="button">Delete recovery</button>
+          <button id="vaultRecoveryLater" class="vaultDialogSecondary" type="button">Not now</button>
+        </div>
+
+        <div id="vaultRecoveryUnlockedActions" class="vaultRecoveryUnlockedActions" hidden>
+          <button id="vaultRecoverySaveVault" class="vaultRecoveryAction" type="button">
+            <strong>Save as new encrypted Vault</strong>
+            <span>Choose a new encrypted file and password.</span>
+          </button>
+          <button id="vaultRecoverySaveJson" class="vaultRecoveryAction" type="button">
+            <strong>Save as plain JSON</strong>
+            <span>Choose a readable, unencrypted Pocket file.</span>
+          </button>
+          <button id="vaultRecoveryAddExisting" class="vaultRecoveryAction" type="button">
+            <strong>Add to an existing Pocket file</strong>
+            <span>Place the recovered items beneath one new top-level item.</span>
+          </button>
+          <button id="vaultRecoveryKeep" class="vaultRecoveryAction" type="button">
+            <strong>Keep for later</strong>
+            <span>Leave the encrypted browser recovery intact.</span>
+          </button>
+          <button id="vaultRecoveryDiscard" class="vaultRecoveryAction danger" type="button">
+            <strong>Discard recovery</strong>
+            <span>Delete only the browser-held encrypted recovery.</span>
+          </button>
+        </div>
+
+        <div id="vaultRecoveryConfirmActions" class="vaultDialogActions" hidden>
+          <button id="vaultRecoveryConfirm" class="vaultDialogPrimary" type="button">Continue</button>
+          <button id="vaultRecoveryConfirmCancel" class="vaultDialogSecondary" type="button">Cancel</button>
         </div>
 
         <p id="vaultDialogError" class="vaultDialogError" role="status" aria-live="polite"></p>
@@ -271,6 +305,7 @@
   <script src="js/pocket-crypto.js"></script>
   <script src="js/pocket-vault.js"></script>
   <script src="js/pocket-vault-io-browser.js"></script>
+  <script src="js/pocket-vault-recovery.js"></script>
   <script src="js/pocket-phone-mode.js"></script>
   <script src="js/pocket-phone-tap.js"></script>
   <script src="js/pocket-detail-drag.js"></script>

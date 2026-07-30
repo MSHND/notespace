@@ -10,6 +10,7 @@ const LOCAL_SAFETY_KEY = "pocketLite.localSafety.snapshot.v1";
 const LOCAL_SAFETY_TRAIL_KEY = "pocketLite.localSafety.trail.v1";
 const LOCAL_SAFETY_TRAIL_MAX = 8;
 const DEVICE_CHANGE_SEQUENCE_KEY = "pocketLite.deviceChange.sequence.v1";
+const VAULT_RECOVERY_KEY = "pocketLite.vaultRecovery.encrypted.v1";
 const LAST_BACKUP_META_KEY = "pocketLite.lastBackup.meta.v1";
 const LOCAL_INSTANCE_ID_KEY = "pocketLite.instanceId.v1";
 const RECENT_POCKET_FILE_DB_NAME = "pocketLite.recentFile.v1";
@@ -192,6 +193,19 @@ const el = {
   vaultSwitchSave: document.getElementById("vaultSwitchSave"),
   vaultSwitchDiscard: document.getElementById("vaultSwitchDiscard"),
   vaultSwitchCancel: document.getElementById("vaultSwitchCancel"),
+  vaultRecoveryWarningActions: document.getElementById("vaultRecoveryWarningActions"),
+  vaultRecoveryUnlock: document.getElementById("vaultRecoveryUnlock"),
+  vaultRecoveryDelete: document.getElementById("vaultRecoveryDelete"),
+  vaultRecoveryLater: document.getElementById("vaultRecoveryLater"),
+  vaultRecoveryUnlockedActions: document.getElementById("vaultRecoveryUnlockedActions"),
+  vaultRecoverySaveVault: document.getElementById("vaultRecoverySaveVault"),
+  vaultRecoverySaveJson: document.getElementById("vaultRecoverySaveJson"),
+  vaultRecoveryAddExisting: document.getElementById("vaultRecoveryAddExisting"),
+  vaultRecoveryKeep: document.getElementById("vaultRecoveryKeep"),
+  vaultRecoveryDiscard: document.getElementById("vaultRecoveryDiscard"),
+  vaultRecoveryConfirmActions: document.getElementById("vaultRecoveryConfirmActions"),
+  vaultRecoveryConfirm: document.getElementById("vaultRecoveryConfirm"),
+  vaultRecoveryConfirmCancel: document.getElementById("vaultRecoveryConfirmCancel"),
   deviceChangesOverlay: document.getElementById("deviceChangesOverlay"),
   deviceChangesTitle: document.getElementById("deviceChangesTitle"),
   deviceChangesIntro: document.getElementById("deviceChangesIntro"),
