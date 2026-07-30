@@ -872,7 +872,23 @@ function createVaultContext(options = {}) {
     "js/pocket-node-popout-editor.js",
   ];
   for (const relativePath of productionSources) {
-    vm.runInContext(source(relativePath), context, { filename: relativePath });
+    let script = source(relativePath);
+    if (relativePath === "js/pocket-vault-io-browser.js"
+        && options.exposeVaultDialogTestControl === true) {
+      const marker = "  global.PocketVaultBrowserIo = Object.freeze({";
+      assert.equal(script.includes(marker), true, "Vault dialog test control marker should exist");
+      script = script.replace(
+        marker,
+        [
+          "  global.__closeVaultDialogForTest = function closeVaultDialogForTest() {",
+          "    return closeDialog(false, { restoreFocus: false });",
+          "  };",
+          "",
+          marker,
+        ].join("\n"),
+      );
+    }
+    vm.runInContext(script, context, { filename: relativePath });
   }
 
   context.__productionPersistPipSnapshot = context.persistPipSnapshot;
@@ -981,6 +997,52 @@ async function submitCredential(context, passphrase = TEST_PASSPHRASE, confirmat
   if (!ui.vaultOverlay.hidden && error) {
     throw new Error(`Synthetic Vault credential action failed: ${error}`);
   }
+}
+
+const VAULT_DIALOG_BUTTON_IDS = Object.freeze([
+  "vaultCredentialSubmit",
+  "vaultCredentialCancel",
+  "vaultExportConfirm",
+  "vaultExportCancel",
+  "vaultSwitchSave",
+  "vaultSwitchDiscard",
+  "vaultSwitchCancel",
+]);
+
+function assertVaultDialogButtons(context, disabled) {
+  for (const id of VAULT_DIALOG_BUTTON_IDS) {
+    assert.equal(
+      context.__ui.elements.get(id).disabled,
+      disabled,
+      `${id} disabled state`,
+    );
+  }
+}
+
+function assertVaultDialogClosedNeutral(context) {
+  const ui = context.__ui;
+  assert.equal(ui.vaultOverlay.hidden, true);
+  assert.equal(context.PocketVaultBrowserIo.isDialogOpen(), false);
+  assert.equal(context.PocketVaultBrowserIo.isOwnerActionPending(), false);
+  assertVaultDialogButtons(context, false);
+  assert.equal(ui.elements.get("vaultPassword").disabled, false);
+  assert.equal(ui.elements.get("vaultPassword").value, "");
+  assert.equal(ui.elements.get("vaultPasswordConfirm").disabled, true);
+  assert.equal(ui.elements.get("vaultPasswordConfirm").value, "");
+  assert.equal(ui.elements.get("vaultPasswordConfirmGroup").hidden, true);
+  assert.equal(ui.elements.get("vaultCredentialForm").hidden, true);
+  assert.equal(ui.elements.get("vaultExportActions").hidden, true);
+  assert.equal(ui.elements.get("vaultSwitchActions").hidden, true);
+  assert.equal(ui.elements.get("vaultDialogError").textContent, "");
+}
+
+function pressVaultEscape(context) {
+  const event = syntheticEvent("keydown", {
+    key: "Escape",
+    target: context.__ui.document.activeElement,
+  });
+  for (const listener of context.__windowListeners.get("keydown") || []) listener(event);
+  return event;
 }
 
 async function openVaultWithPassword(context, handle, passphrase = TEST_PASSPHRASE) {
@@ -3545,6 +3607,433 @@ test("Vault credential dialog is accessible, modal, keyboard-cancellable, and cl
   assert.equal(context.__ui.elements.get("vaultPassword").value, "");
   assert.equal(context.__ui.elements.get("vaultPasswordConfirm").value, "");
   assert.equal(candidate.writes.length, 0);
+});
+
+test("P021 Create completion resets the permanent dialog controls before Unlock", async () => {
+  const sealGate = deferred();
+  const sealStarted = deferred();
+  const context = createVaultContext();
+  const jsonHandle = createSyntheticHandle("p021-create-source.json");
+  installOwnerDocument(context, jsonHandle, pocketPayload());
+  const vaultHandle = createSyntheticHandle("p021-created.vault.json");
+  const productionVault = context.PocketVault;
+  let sealCalls = 0;
+  context.PocketVault = Object.freeze({
+    ...productionVault,
+    async sealWithUnlockedKey(...args) {
+      sealCalls += 1;
+      sealStarted.resolve();
+      await sealGate.promise;
+      return productionVault.sealWithUnlockedKey(...args);
+    },
+  });
+
+  context.__savePickerQueue.push(vaultHandle);
+  const creating = context.PocketVaultBrowserIo.createActiveVault();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  const ui = context.__ui;
+  const password = ui.elements.get("vaultPassword");
+  const confirmation = ui.elements.get("vaultPasswordConfirm");
+  const submit = ui.elements.get("vaultCredentialSubmit");
+  const cancel = ui.elements.get("vaultCredentialCancel");
+  assertVaultDialogButtons(context, false);
+  assert.equal(password.disabled, false);
+  assert.equal(confirmation.disabled, false);
+  assert.equal(ui.elements.get("vaultPasswordConfirmGroup").hidden, false);
+  assert.equal(submit.textContent, "Create Vault");
+  assert.strictEqual(ui.document.activeElement, password);
+
+  password.value = TEST_PASSPHRASE;
+  confirmation.value = TEST_PASSPHRASE;
+  const submitting = ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", { target: ui.elements.get("vaultCredentialForm") }),
+  );
+  await sealStarted.promise;
+  assertVaultDialogButtons(context, true);
+  assert.equal(submit.disabled, true);
+  assert.equal(cancel.disabled, true);
+  await ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", { target: ui.elements.get("vaultCredentialForm") }),
+  );
+  assert.equal(sealCalls, 1);
+  assert.equal(vaultHandle.createWritableCalls, 0);
+
+  sealGate.resolve();
+  await submitting;
+  assert.equal(await creating, true);
+  assert.equal(vaultHandle.writes.length, 1);
+  assertVaultDialogClosedNeutral(context);
+
+  const laterJson = createSyntheticHandle("p021-after-create.json");
+  installOwnerDocument(context, laterJson, pocketPayload({
+    nodes: [makeNode("p021_after_create")],
+  }));
+  context.__openPickerQueue.push(vaultHandle);
+  const opening = context.PocketVaultBrowserIo.openVault();
+  assert.equal(
+    await waitFor(() => !ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  assertVaultDialogButtons(context, false);
+  assert.equal(password.disabled, false);
+  assert.equal(confirmation.disabled, true);
+  assert.equal(ui.elements.get("vaultPasswordConfirmGroup").hidden, true);
+  assert.equal(submit.textContent, "Unlock");
+  assert.strictEqual(ui.document.activeElement, password);
+  password.value = TEST_PASSPHRASE;
+  password.dispatchEvent(syntheticEvent("input", { target: password }));
+  assert.equal(submit.disabled, false);
+  assert.equal(cancel.disabled, false);
+  await ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", { target: ui.elements.get("vaultCredentialForm") }),
+  );
+  assert.equal(await opening, true);
+  assert.equal(vaultHandle.writes.length, 1);
+  assertVaultDialogClosedNeutral(context);
+});
+
+test("P021 Unlock can reopen, Cancel and Escape after an earlier successful action", async () => {
+  const { context, vaultHandle } = await contextWithCleanVault({
+    name: "p021-reusable-unlock.vault.json",
+    vaultId: "vault_p021_reusable_unlock",
+  });
+  assertVaultDialogClosedNeutral(context);
+  const jsonHandle = createSyntheticHandle("p021-unlock-owner.json");
+  installOwnerDocument(context, jsonHandle, pocketPayload({
+    nodes: [makeNode("p021_unlock_owner")],
+  }));
+  const before = currentOwnerSnapshot(context);
+
+  context.__openPickerQueue.push(vaultHandle);
+  const cancelled = context.PocketVaultBrowserIo.openVault();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  assertVaultDialogButtons(context, false);
+  context.__ui.elements.get("vaultCredentialCancel").click();
+  assert.equal(await cancelled, false);
+  assertOwnerUnchanged(context, before);
+  assertVaultDialogClosedNeutral(context);
+
+  context.__openPickerQueue.push(vaultHandle);
+  const escaped = context.PocketVaultBrowserIo.openVault();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  assertVaultDialogButtons(context, false);
+  const escape = pressVaultEscape(context);
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(await escaped, false);
+  assertOwnerUnchanged(context, before);
+  assertVaultDialogClosedNeutral(context);
+
+  assert.equal(await openVaultWithPassword(context, vaultHandle), true);
+  assertVaultDialogClosedNeutral(context);
+  assert.equal(vaultHandle.writes.length, 0);
+});
+
+test("P021 failed Unlock re-enables retry and blocks duplicate submission while busy", async () => {
+  const unlockGate = deferred();
+  const context = createVaultContext();
+  const jsonHandle = createSyntheticHandle("p021-retry-owner.json");
+  installOwnerDocument(context, jsonHandle, pocketPayload());
+  const vaultHandle = createSyntheticHandle("p021-retry.vault.json", {
+    content: await sealForHandle(
+      context,
+      pocketPayload({ nodes: [makeNode("p021_retry_target")] }),
+      { vaultId: "vault_p021_retry", revision: 1 },
+    ),
+  });
+  const productionVault = context.PocketVault;
+  let unlockCalls = 0;
+  context.PocketVault = Object.freeze({
+    ...productionVault,
+    async unlockEnvelope(...args) {
+      unlockCalls += 1;
+      if (unlockCalls === 1) await unlockGate.promise;
+      return productionVault.unlockEnvelope(...args);
+    },
+  });
+
+  context.__openPickerQueue.push(vaultHandle);
+  const opening = context.PocketVaultBrowserIo.openVault();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  const ui = context.__ui;
+  const password = ui.elements.get("vaultPassword");
+  password.value = "wrong-password-for-p021";
+  const firstSubmit = ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", { target: ui.elements.get("vaultCredentialForm") }),
+  );
+  assert.equal(await waitFor(() => unlockCalls === 1), true);
+  assertVaultDialogButtons(context, true);
+  await ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", { target: ui.elements.get("vaultCredentialForm") }),
+  );
+  assert.equal(unlockCalls, 1);
+
+  unlockGate.resolve();
+  await firstSubmit;
+  assert.equal(context.PocketVaultBrowserIo.isDialogOpen(), true);
+  assert.match(ui.elements.get("vaultDialogError").textContent, /did not unlock/i);
+  assertVaultDialogButtons(context, false);
+  assert.equal(password.value, "");
+  assert.equal(ui.elements.get("vaultPasswordConfirm").value, "");
+  assert.strictEqual(ui.document.activeElement, password);
+
+  await submitCredential(context);
+  assert.equal(await opening, true);
+  assert.equal(unlockCalls, 2);
+  assertVaultDialogClosedNeutral(context);
+  assert.equal(vaultHandle.writes.length, 0);
+});
+
+test("P021 Export and owner-switch modes reset hidden and visible controls", async (t) => {
+  await t.test("Export controls are isolated", async () => {
+    const { context } = await contextWithCleanVault({
+      name: "p021-export-owner.vault.json",
+      vaultId: "vault_p021_export_owner",
+    });
+    for (const id of VAULT_DIALOG_BUTTON_IDS) {
+      context.__ui.elements.get(id).disabled = true;
+    }
+    const exporting = context.PocketVaultBrowserIo.exportUnencryptedJsonCopy();
+    assert.equal(
+      await waitFor(() => !context.__ui.elements.get("vaultExportActions").hidden),
+      true,
+    );
+    assertVaultDialogButtons(context, false);
+    assert.strictEqual(
+      context.__ui.document.activeElement,
+      context.__ui.elements.get("vaultExportConfirm"),
+    );
+    context.__ui.elements.get("vaultSwitchDiscard").click();
+    assert.equal(context.PocketVaultBrowserIo.isDialogOpen(), true);
+    context.__ui.elements.get("vaultExportCancel").click();
+    assert.equal(await exporting, false);
+    assertVaultDialogClosedNeutral(context);
+  });
+
+  await t.test("owner-switch controls are isolated across repeated opens", async () => {
+    const { context } = await contextWithDirtyVault({
+      name: "p021-switch-owner.vault.json",
+      vaultId: "vault_p021_switch_owner",
+    });
+    for (const id of VAULT_DIALOG_BUTTON_IDS) {
+      context.__ui.elements.get(id).disabled = true;
+    }
+    const firstCandidate = createSyntheticHandle("p021-switch-first.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("p021_switch_first")] })),
+    });
+    const first = await beginJsonOwnerSwitch(context, firstCandidate);
+    assertVaultDialogButtons(context, false);
+    assert.strictEqual(
+      context.__ui.document.activeElement,
+      context.__ui.elements.get("vaultSwitchSave"),
+    );
+    context.__ui.elements.get("vaultExportConfirm").click();
+    assert.equal(context.PocketVaultBrowserIo.isDialogOpen(), true);
+    context.__ui.elements.get("vaultSwitchCancel").click();
+    assert.equal(await first.opening, false);
+    assertVaultDialogClosedNeutral(context);
+
+    const secondCandidate = createSyntheticHandle("p021-switch-second.json", {
+      content: JSON.stringify(pocketPayload({ nodes: [makeNode("p021_switch_second")] })),
+    });
+    const second = await beginJsonOwnerSwitch(context, secondCandidate);
+    assertVaultDialogButtons(context, false);
+    context.__ui.elements.get("vaultSwitchCancel").click();
+    assert.equal(await second.opening, false);
+    assertVaultDialogClosedNeutral(context);
+  });
+});
+
+test("P021 failed busy owner-switch re-enables its controls and permits Cancel", async () => {
+  const writeGate = deferred();
+  const { context, vaultHandle } = await contextWithDirtyVault({
+    name: "p021-switch-failure.vault.json",
+    vaultId: "vault_p021_switch_failure",
+    handleOptions: {
+      writeDeferred: writeGate,
+      writeError: new Error("synthetic P021 Vault write failure"),
+    },
+  });
+  const before = currentOwnerSnapshot(context);
+  const candidate = createSyntheticHandle("p021-switch-failure-target.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("p021_switch_failure_target")] })),
+  });
+  const { opening } = await beginJsonOwnerSwitch(context, candidate);
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(await waitFor(() => vaultHandle.createWritableCalls === 1), true);
+  assertVaultDialogButtons(context, true);
+  context.__ui.elements.get("vaultSwitchSave").click();
+  assert.equal(vaultHandle.createWritableCalls, 1);
+
+  writeGate.resolve();
+  assert.equal(
+    await waitFor(() => /could not save/i.test(
+      context.__ui.elements.get("vaultDialogError").textContent,
+    )),
+    true,
+  );
+  assertVaultDialogButtons(context, false);
+  assert.equal(context.PocketVaultBrowserIo.isDialogOpen(), true);
+  assert.strictEqual(
+    context.__ui.document.activeElement,
+    context.__ui.elements.get("vaultSwitchSave"),
+  );
+  context.__ui.elements.get("vaultSwitchCancel").click();
+  assert.equal(await opening, false);
+  assertOwnerUnchanged(context, before);
+  assert.equal(vaultHandle.writes.length, 0);
+  assert.equal(candidate.writes.length, 0);
+  assertVaultDialogClosedNeutral(context);
+
+  const retryCandidate = createSyntheticHandle("p021-switch-after-failure.json", {
+    content: JSON.stringify(pocketPayload({ nodes: [makeNode("p021_switch_after_failure")] })),
+  });
+  const retry = await beginJsonOwnerSwitch(context, retryCandidate);
+  assertVaultDialogButtons(context, false);
+  context.__ui.elements.get("vaultSwitchCancel").click();
+  assert.equal(await retry.opening, false);
+  assertVaultDialogClosedNeutral(context);
+});
+
+test("P021 stale credential completion cannot mutate a newer dialog", async () => {
+  const unlockGate = deferred();
+  const context = createVaultContext({ exposeVaultDialogTestControl: true });
+  const jsonHandle = createSyntheticHandle("p021-stale-owner.json");
+  installOwnerDocument(context, jsonHandle, pocketPayload());
+  const vaultA = createSyntheticHandle("p021-stale-a.vault.json", {
+    content: await sealForHandle(
+      context,
+      pocketPayload({ nodes: [makeNode("p021_stale_a")] }),
+      { vaultId: "vault_p021_stale_a", revision: 1 },
+    ),
+  });
+  const vaultB = createSyntheticHandle("p021-stale-b.vault.json", {
+    content: await sealForHandle(
+      context,
+      pocketPayload({ nodes: [makeNode("p021_stale_b")] }),
+      { vaultId: "vault_p021_stale_b", revision: 1 },
+    ),
+  });
+  const productionVault = context.PocketVault;
+  let unlockCalls = 0;
+  context.PocketVault = Object.freeze({
+    ...productionVault,
+    async unlockEnvelope(...args) {
+      unlockCalls += 1;
+      if (unlockCalls === 1) await unlockGate.promise;
+      return productionVault.unlockEnvelope(...args);
+    },
+  });
+
+  context.__openPickerQueue.push(vaultA);
+  const openingA = context.PocketVaultBrowserIo.openVault();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  context.__ui.elements.get("vaultPassword").value = TEST_PASSPHRASE;
+  const submittingA = context.__ui.elements.get("vaultCredentialForm").dispatchAsync(
+    syntheticEvent("submit", { target: context.__ui.elements.get("vaultCredentialForm") }),
+  );
+  assert.equal(await waitFor(() => unlockCalls === 1), true);
+  assertVaultDialogButtons(context, true);
+  assert.equal(context.__closeVaultDialogForTest(), true);
+  assert.equal(await openingA, false);
+  assertVaultDialogClosedNeutral(context);
+
+  context.__openPickerQueue.push(vaultB);
+  const openingB = context.PocketVaultBrowserIo.openVault();
+  assert.equal(
+    await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+    true,
+  );
+  const newerPassword = "newer-dialog-password";
+  context.__ui.elements.get("vaultPassword").value = newerPassword;
+  assertVaultDialogButtons(context, false);
+  assert.equal(context.__ui.elements.get("vaultDialogError").textContent, "");
+
+  unlockGate.resolve();
+  await submittingA;
+  assert.equal(context.PocketVaultBrowserIo.isDialogOpen(), true);
+  assert.equal(context.__ui.elements.get("vaultPassword").value, newerPassword);
+  assert.equal(context.__ui.elements.get("vaultDialogError").textContent, "");
+  assertVaultDialogButtons(context, false);
+  context.__ui.elements.get("vaultCredentialCancel").click();
+  assert.equal(await openingB, false);
+  assertVaultDialogClosedNeutral(context);
+  assert.equal(vaultA.writes.length, 0);
+  assert.equal(vaultB.writes.length, 0);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, jsonHandle);
+});
+
+test("P021 repeated initialisation and dialog reuse do not duplicate bindings", async () => {
+  const context = createVaultContext();
+  const form = context.__ui.elements.get("vaultCredentialForm");
+  const initial = {
+    submit: (form.listeners.get("submit") || []).length,
+    buttons: Object.fromEntries(VAULT_DIALOG_BUTTON_IDS.map((id) => [
+      id,
+      (context.__ui.elements.get(id).listeners.get("click") || []).length,
+    ])),
+    keydown: (context.__windowListeners.get("keydown") || []).length,
+    focusin: (context.__ui.documentListeners.get("focusin") || []).length,
+  };
+  assert.equal(initial.submit, 1);
+  assert.deepEqual(initial.buttons, {
+    vaultCredentialSubmit: 0,
+    vaultCredentialCancel: 1,
+    vaultExportConfirm: 1,
+    vaultExportCancel: 1,
+    vaultSwitchSave: 1,
+    vaultSwitchDiscard: 1,
+    vaultSwitchCancel: 1,
+  });
+
+  context.PocketVaultBrowserIo.init();
+  context.PocketVaultBrowserIo.init();
+  context.PocketVaultBrowserIo.init();
+  assert.equal((form.listeners.get("submit") || []).length, initial.submit);
+  for (const [id, count] of Object.entries(initial.buttons)) {
+    assert.equal((context.__ui.elements.get(id).listeners.get("click") || []).length, count);
+  }
+  assert.equal((context.__windowListeners.get("keydown") || []).length, initial.keydown);
+  assert.equal(
+    (context.__ui.documentListeners.get("focusin") || []).length,
+    initial.focusin,
+  );
+
+  const jsonHandle = createSyntheticHandle("p021-binding-owner.json");
+  installOwnerDocument(context, jsonHandle, pocketPayload());
+  const vaultHandle = createSyntheticHandle("p021-binding.vault.json", {
+    content: await sealForHandle(
+      context,
+      pocketPayload({ nodes: [makeNode("p021_binding")] }),
+      { vaultId: "vault_p021_binding", revision: 1 },
+    ),
+  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    context.__openPickerQueue.push(vaultHandle);
+    const opening = context.PocketVaultBrowserIo.openVault();
+    assert.equal(
+      await waitFor(() => !context.__ui.elements.get("vaultCredentialForm").hidden),
+      true,
+    );
+    assertVaultDialogButtons(context, false);
+    context.__ui.elements.get("vaultCredentialCancel").click();
+    assert.equal(await opening, false);
+    assertVaultDialogClosedNeutral(context);
+  }
 });
 
 test("create Vault forgets raw password fields immediately after key derivation, before sealing or writing", async () => {

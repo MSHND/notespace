@@ -12,6 +12,15 @@
   let dialogBound = false;
   let dialogInertRecords = [];
   let dialogReturnFocus = null;
+  const VAULT_DIALOG_BUTTON_IDS = Object.freeze([
+    "vaultCredentialSubmit",
+    "vaultCredentialCancel",
+    "vaultExportConfirm",
+    "vaultExportCancel",
+    "vaultSwitchSave",
+    "vaultSwitchDiscard",
+    "vaultSwitchCancel"
+  ]);
 
   function dom(id) {
     return document.getElementById(id);
@@ -115,21 +124,28 @@
     if (error) error.textContent = clean(message, 500);
   }
 
-  function setDialogBusy(busy) {
-    if (!activeDialog) return;
-    activeDialog.busy = busy === true;
-    for (const id of [
-      "vaultCredentialSubmit",
-      "vaultCredentialCancel",
-      "vaultExportConfirm",
-      "vaultExportCancel",
-      "vaultSwitchSave",
-      "vaultSwitchDiscard",
-      "vaultSwitchCancel"
-    ]) {
+  function setDialogBusy(busy, record = activeDialog) {
+    if (!record || record !== activeDialog) return false;
+    record.busy = busy === true;
+    for (const id of VAULT_DIALOG_BUTTON_IDS) {
       const control = dom(id);
-      if (control && !control.closest("[hidden]")) control.disabled = activeDialog.busy;
+      if (control) control.disabled = record.busy;
     }
+    return true;
+  }
+
+  function resetDialogControls(record) {
+    if (record !== activeDialog) return false;
+    for (const id of VAULT_DIALOG_BUTTON_IDS) {
+      const control = dom(id);
+      if (control) control.disabled = false;
+    }
+    const password = dom("vaultPassword");
+    const confirm = dom("vaultPasswordConfirm");
+    if (password) password.disabled = false;
+    if (confirm) confirm.disabled = true;
+    if (record) record.busy = false;
+    return true;
   }
 
   function resetDialogSections() {
@@ -150,6 +166,8 @@
   function showDialogShell(config) {
     const overlay = dom("vaultDialogOverlay");
     if (!(overlay instanceof HTMLElement) || activeDialog) return false;
+    resetDialogControls(null);
+    resetDialogSections();
     dialogReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     activeDialog = {
       token: `vault_dialog_${++dialogSequence}`,
@@ -163,7 +181,6 @@
       canContinue: typeof config.canContinue === "function" ? config.canContinue : null,
       inlineDraft: config.inlineDraft || null,
     };
-    resetDialogSections();
     const title = dom("vaultDialogTitle");
     const body = dom("vaultDialogBody");
     if (title) title.textContent = config.title || "";
@@ -177,13 +194,14 @@
 
   function closeDialog(result, options = {}) {
     const record = activeDialog;
-    if (!record) return false;
-    activeDialog = null;
+    if (!record || (options.record && options.record !== record)) return false;
+    resetDialogControls(record);
     resetDialogSections();
     const overlay = dom("vaultDialogOverlay");
     if (overlay) overlay.hidden = true;
     document.body?.classList?.remove("vaultDialogOpen");
     setDialogBackgroundInert(false);
+    activeDialog = null;
     const returnFocus = dialogReturnFocus;
     dialogReturnFocus = null;
     if (options.restoreFocus !== false) {
@@ -201,7 +219,13 @@
     const record = activeDialog;
     if (!record || record.busy) return false;
     record.cancel?.();
-    return closeDialog(false);
+    return closeDialog(false, { record });
+  }
+
+  function closeDialogForMode(mode, result, options = {}) {
+    const record = activeDialog;
+    if (!record || record.mode !== mode || record.busy) return false;
+    return closeDialog(result, { ...options, record });
   }
 
   function showCredentialDialog(config) {
@@ -304,6 +328,7 @@
     const forgetCredentials = () => {
       password = "";
       confirmation = "";
+      if (record !== activeDialog) return;
       if (passwordInput) passwordInput.value = "";
       if (confirmInput) confirmInput.value = "";
     };
@@ -320,7 +345,7 @@
       return false;
     }
     setDialogError("");
-    setDialogBusy(true);
+    setDialogBusy(true, record);
     let result;
     try {
       const submission = record.submit?.(password, forgetCredentials);
@@ -332,19 +357,19 @@
     }
     if (record !== activeDialog) return false;
     if (!result || result.ok !== true) {
-      setDialogBusy(false);
+      setDialogBusy(false, record);
       setDialogError(result?.message || "Pocket could not complete that encrypted Vault action.");
       passwordInput?.focus?.({ preventScroll: true });
       return false;
     }
-    closeDialog(result, { restoreFocus: false });
+    closeDialog(result, { restoreFocus: false, record });
     return true;
   }
 
   async function saveBeforeOwnerSwitch() {
     const record = activeDialog;
     if (!record || record.mode !== "switch" || record.busy) return false;
-    setDialogBusy(true);
+    setDialogBusy(true, record);
     setDialogError("");
     const saveContextIsCurrent = () => (
       record === activeDialog
@@ -359,8 +384,8 @@
     };
     const cancelForInlineDraft = (draft) => {
       if (record === activeDialog) {
-        setDialogBusy(false);
-        closeDialog(false, { restoreFocus: false });
+        setDialogBusy(false, record);
+        closeDialog(false, { restoreFocus: false, record });
       }
       say(
         "Finish or cancel the current rename before switching files. Nothing was saved or changed.",
@@ -372,8 +397,8 @@
     };
     const cancelStaleSwitch = (draft) => {
       if (record === activeDialog) {
-        setDialogBusy(false);
-        closeDialog(false, { restoreFocus: false });
+        setDialogBusy(false, record);
+        closeDialog(false, { restoreFocus: false, record });
       }
       say("That file switch is no longer current. Your Vault changes remain open and were not saved.", "warn", 7200);
       focusInlineDraft(draft);
@@ -391,7 +416,7 @@
       if (!saveContextIsCurrent()) return cancelStaleSwitch(inlineDraft);
       if (global.isDetailsEditorOpen()
           || global.hasUnsavedDetailsEditorChanges?.()) {
-        setDialogBusy(false);
+        setDialogBusy(false, record);
         setDialogError("Finish the open item edit before switching encrypted Vaults.");
         dom("vaultSwitchSave")?.focus?.({ preventScroll: true });
         return false;
@@ -422,12 +447,12 @@
     if (record !== activeDialog) return false;
     if (!saveContextIsCurrent()) return cancelStaleSwitch(inlineDraft);
     if (!result || result.ok !== true) {
-      setDialogBusy(false);
+      setDialogBusy(false, record);
       setDialogError("Pocket could not save the encrypted Vault. It remains open with your changes.");
       dom("vaultSwitchSave")?.focus?.({ preventScroll: true });
       return false;
     }
-    closeDialog("save", { restoreFocus: false });
+    closeDialog("save", { restoreFocus: false, record });
     return true;
   }
 
@@ -436,10 +461,14 @@
     dialogBound = true;
     dom("vaultCredentialForm")?.addEventListener("submit", submitCredentialDialog);
     dom("vaultCredentialCancel")?.addEventListener("click", cancelDialog);
-    dom("vaultExportConfirm")?.addEventListener("click", () => closeDialog(true, { restoreFocus: false }));
+    dom("vaultExportConfirm")?.addEventListener("click", () => (
+      closeDialogForMode("export", true, { restoreFocus: false })
+    ));
     dom("vaultExportCancel")?.addEventListener("click", cancelDialog);
     dom("vaultSwitchSave")?.addEventListener("click", () => { void saveBeforeOwnerSwitch(); });
-    dom("vaultSwitchDiscard")?.addEventListener("click", () => closeDialog("discard", { restoreFocus: false }));
+    dom("vaultSwitchDiscard")?.addEventListener("click", () => (
+      closeDialogForMode("switch", "discard", { restoreFocus: false })
+    ));
     dom("vaultSwitchCancel")?.addEventListener("click", cancelDialog);
     global.addEventListener?.("keydown", (event) => {
       if (!isDialogOpen()) return;

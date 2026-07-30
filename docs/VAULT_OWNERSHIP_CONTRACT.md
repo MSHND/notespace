@@ -105,6 +105,18 @@ Create mode:
 
 Password inputs use `type="password"`, require at least eight characters and are cleared after submission or closure. Return submits a valid form. Escape cancels an idle dialog. Wrong passwords remain inside the unlock dialog and do not alter the active document.
 
+The credential, readable-export and dirty-switch modes reuse one permanent DOM control set. P021 gives that shared set one canonical lifecycle:
+
+1. before a new dialog record is created, every reusable action button is enabled, both credential values are cleared, the password field is enabled and confirmation returns to its neutral hidden/disabled state;
+2. the selected mode then reveals only its own section and explicitly configures confirmation for Create or Unlock;
+3. while an asynchronous action is pending, all reusable action buttons are disabled so neither visible nor hidden controls can submit a second or cross-mode action;
+4. a failed action re-enables the full set, retains the current error, restores useful focus and permits retry or Cancel; and
+5. success, Cancel, Escape and every ordinary close reset all seven buttons and both credential fields before the active record is cleared and its Promise resolves.
+
+The seven reset controls are credential Submit/Cancel, readable-export Confirm/Cancel and dirty-switch Save/Discard/Cancel. Create shows an enabled confirmation field. Unlock keeps it hidden and disabled. Typing is never required to repair a stale disabled Submit button.
+
+Async completion is bound to the exact dialog record which started it. An older completion cannot clear credentials, change busy/error state or close a newer dialog which reuses the same elements. Hidden Export or Switch actions are also mode-gated. `bindDialogUi()` remains single-owner and repeated initialisation or opening does not add duplicate listeners.
+
 Only one candidate and one Vault dialog are active at a time. Owner-changing actions and ordinary mutations are gated while either the permission or Vault dialog is unresolved.
 
 ## 7. Encrypted Main Save
@@ -290,13 +302,13 @@ find js -name '*.js' -print0 | xargs -0 -n1 node --check
 git diff --check
 ~~~
 
-Current P019/P020 contract results:
+Current P019/P020/P021 contract results:
 
-- Vault ownership and P020 inline-switch suite: **113 passed, 0 failed**
+- Vault ownership, P020 inline-switch and P021 dialog-reuse suite: **122 passed, 0 failed**
 - PE persistence suite: **96 passed, 0 failed**
 - Device-changes/P017 suite: **69 passed, 0 failed**
 - P018 popup-isolation suite: **15 passed, 0 failed**
-- Combined test result: **293 passed, 0 failed**
+- Combined test result: **302 passed, 0 failed**
 - Production JavaScript syntax checks: **PASS for every `js/*.js` file and `sw.js`**
 - Generated PE runtime `new Function(...)`, where applicable: **PASS through the PE persistence suite**
 - `git diff --check`: **PASS**
@@ -360,5 +372,18 @@ Murray's physical browser acceptance remains required. Use disposable files and 
 51. Repeat with an open Details draft and an inline rename, then confirm both survive one encrypted Save.
 52. Confirm the replacement file appears only after encrypted Vault persistence has completed.
 53. Stop immediately if the wrong file changes, adoption precedes the Vault write, or any draft disappears unexpectedly.
+54. Open disposable JSON A.
+55. Choose **Save as encrypted Vault…**.
+56. Create a disposable Vault using `PocketTest2026!`.
+57. Save a PE edit into the Vault.
+58. Choose **Open encrypted Vault…**.
+59. Select the created Vault.
+60. Confirm **Unlock** and **Cancel** are enabled.
+61. Enter `PocketTest2026!`.
+62. Confirm Unlock works.
+63. Confirm the PE edit survived.
+64. Cancel a later Unlock dialog and confirm it closes normally.
+65. Try a wrong password and confirm the controls become available again, Cancel works and the current document remains unchanged.
+66. Resume the remaining P019 and P020 checklist above.
 
-Do not ask Murray to reproduce a crash.
+Stop immediately if the wrong file changes, buttons remain disabled after reopening, a stale dialog closes a newer one or Chrome becomes unstable. Do not ask Murray to reproduce a crash.

@@ -1,5 +1,125 @@
 # Codex report
 
+## POCKET TASK P021 — RESET VAULT DIALOG CONTROLS BETWEEN ACTIONS
+
+Title: Reset Vault dialog controls between actions
+
+Status: the permanent shared Vault dialog controls now start every Create, Unlock, readable-export and dirty-switch action in a known interactive state. Focused local validation is complete against the exact accepted P020 baseline. Murray's physical browser acceptance remains.
+
+Commit title:
+
+- `P021 Reset Vault dialog controls between actions`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Required and confirmed starting `origin/main`: `35fa30783e9aeceed75b619cd7918ec51f539911`
+- Starting title: `P020 Preserve inline renames during Vault switch`
+- Implementation date: 2026-07-30
+- Branch: `main`
+- Node: `v23.11.0`
+- P021 changes only the lifecycle of the existing permanent Vault dialog controls. It does not change the Vault envelope, cryptography, file/session ownership, candidate adoption, encrypted Save, readable-export destination, dirty-switch decision, PE implementation, P016 recovery policy or P020 inline-draft handling.
+- No personal Pocket truth file, real Vault, browser storage, password, real file handle or network resource was accessed.
+
+### Confirmed defect
+
+`js/pocket-vault-io-browser.js` uses one permanent DOM control set for Create, Unlock, readable export and dirty-owner switching.
+
+The old `setDialogBusy(true)` disabled only controls inside the currently visible section. A successful Create or Unlock then called `closeDialog()`, whose section reset hid and cleared content but did not re-enable the buttons. The next dialog created a fresh logical record with `busy: false` while the reused Submit and Cancel elements could remain physically disabled. `vault.css` correctly renders disabled Vault actions with reduced opacity and a wait cursor, producing the observed stuck Unlock dialog.
+
+The earlier production-source tests dispatched the credential form listener directly. That correctly exercised submit logic but bypassed the browser button's disabled-click behaviour, so the persistent DOM state was not characterised.
+
+### Canonical control reset
+
+P021 defines one exact list containing all seven reusable action buttons:
+
+- credential Submit and Cancel;
+- readable-export Confirm and Cancel; and
+- dirty-switch Save, Discard and Cancel.
+
+Before a dialog record is created, `resetDialogControls()` unconditionally enables that full set, enables the password field and returns confirmation to its neutral disabled state. The section reset then hides all modes, clears both credential values and clears the error. Only after this neutral reset does the selected mode establish its record, reveal its section and apply mode-specific presentation.
+
+While an asynchronous action is pending, `setDialogBusy()` updates the exact active record and disables the full shared button set regardless of hidden ancestry. This blocks duplicate submissions and hidden cross-mode actions. A failed credential or switch action re-enables the full set, retains the current error and restores useful focus so retry or Cancel is immediately available.
+
+Success, Cancel, Escape and ordinary close synchronously:
+
+1. reset the originating record to non-busy;
+2. enable every reusable action;
+3. clear and neutralise the credential fields and sections;
+4. hide the overlay and remove background inertness;
+5. clear the active record; and
+6. resolve the originating Promise once.
+
+No CSS or markup change was required.
+
+### Mode and asynchronous isolation
+
+Create explicitly shows and enables confirmation. Unlock explicitly hides and disables confirmation. Both modes start with an enabled password field, enabled Submit and enabled Cancel. Readable-export and dirty-switch actions receive the same fresh neutral reset before their own controls are revealed.
+
+Direct Export-confirm and Switch-discard actions are mode-gated, so a hidden control cannot close another dialog mode. `bindDialogUi()` remains guarded by its one existing owner and repeated `init()` calls do not duplicate form, button, keyboard or focus listeners.
+
+Every asynchronous completion continues to compare its captured dialog record with the exact current record before changing busy/error/close state. P021 also changes credential forgetting so local password variables are always released, while shared permanent input elements are cleared only if their originating record is still active. A deliberately invalidated old completion therefore cannot erase text or reset controls in a newer dialog.
+
+### Production-source test coverage
+
+`tests/p019-vault-ownership.test.js` now checks physical `disabled`, `hidden`, focus and credential-field state against the actual production module. It no longer relies only on direct form dispatch for the regression.
+
+New P021 coverage includes:
+
+- successful Create followed by Unlock in the same DOM;
+- a second successful Unlock plus later Cancel and Escape;
+- pending Create and Unlock duplicate-submit blocking;
+- failed Unlock re-enable, retry and success;
+- readable-export isolation;
+- repeated dirty-switch isolation;
+- failed encrypted Save re-enable and Cancel;
+- confirmation-field Create/Unlock isolation;
+- deliberate old-dialog invalidation followed by a newer dialog, using a narrow VM-only exposure of the real private close function;
+- stale completion leaving the newer password, error and controls untouched; and
+- repeated initialisation/opening with unchanged listener counts.
+
+All pre-existing P019 ownership, P020 inline-draft, P018 popup, P017 permission, P016 recovery, P012 PE binding and cryptographic cases remain in their existing focused suites.
+
+### Files changed
+
+Production:
+
+- `js/pocket-vault-io-browser.js`
+
+Tests:
+
+- `tests/p019-vault-ownership.test.js`
+
+Documentation:
+
+- `docs/VAULT_OWNERSHIP_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No HTML, CSS, service worker, generated PE runtime, crypto module, Vault envelope, fixture, package, dependency or other production file changed.
+
+### Executable validation
+
+- `node --test tests/p019-vault-ownership.test.js`: **122 passed, 0 failed**
+- `node --test tests/pe-persistence-contract.test.js`: **96 passed, 0 failed**
+- `node --test tests/device-changes-resolution.test.js`: **69 passed, 0 failed**
+- `node --test tests/p018-popout-isolation.test.js`: **15 passed, 0 failed**
+- Combined focused result: **302 passed, 0 failed**
+- Production JavaScript syntax checks: **PASS for every `js/*.js` file**
+- Changed test JavaScript syntax check: **PASS**
+- Service-worker syntax check: **PASS**
+- Generated PE runtime: **unchanged by P021**
+- `git diff --check`: **PASS**
+
+The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+### Architecture and regression boundary
+
+P021 preserves the P019 encrypted truth owner, the P020 canonical inline-draft commit boundary, exact handle/session checks, Vault candidate single-flight ownership, P017 permission modal, P018 popup isolation, P012 PE source/revision validation, explicit readable-copy export and no plaintext browser recovery for Vault owners. It introduces no autosave, background write, file watcher, cloud path, alternate Save owner, duplicate binding or truth-file migration.
+
+### Physical browser acceptance
+
+Physical browser acceptance remains required with disposable JSON/Vault files and the disposable password specified by the task. The exact P021 checklist is in `docs/VAULT_OWNERSHIP_CONTRACT.md`, section 17, steps 54–66. It covers Create then Unlock, PE persistence, idle button state, Cancel, wrong-password retry, readable-export and switch isolation.
+
 ## POCKET TASK P020 — PRESERVE INLINE RENAMES DURING VAULT SWITCH
 
 Title: Preserve inline renames during Vault switch
