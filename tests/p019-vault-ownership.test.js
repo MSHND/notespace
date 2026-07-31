@@ -463,6 +463,7 @@ function createVaultDom() {
   recoveryWarningActions.hidden = true;
   recoveryWarningActions.appendChild(element("button", "vaultRecoveryUnlock", "View recovery"));
   recoveryWarningActions.appendChild(element("button", "vaultRecoveryDelete", "Discard recovery"));
+  recoveryWarningActions.appendChild(element("button", "vaultRecoveryNotNow", "Not now"));
   vaultCard.appendChild(recoveryWarningActions);
   const recoveryConfirmActions = element("div", "vaultRecoveryConfirmActions");
   recoveryConfirmActions.hidden = true;
@@ -1046,6 +1047,7 @@ const VAULT_DIALOG_BUTTON_IDS = Object.freeze([
   "vaultSwitchCancel",
   "vaultRecoveryUnlock",
   "vaultRecoveryDelete",
+  "vaultRecoveryNotNow",
   "vaultRecoveryConfirm",
   "vaultRecoveryConfirmCancel",
 ]);
@@ -3395,7 +3397,79 @@ test("P022 dirty Vault beforeunload warns synchronously without starting another
   assert.equal(storedRecoveryRaw(context), recoveryBefore);
 });
 
-test("P023 startup recovery offers only View or Discard, rejects a wrong password, previews read-only, and keeps for later", async () => {
+test("P025 Not now preserves encrypted recovery, releases startup once, and offers it again after reload", async () => {
+  const recoveredPayload = pocketPayload({
+    nodes: [makeNode("deferred_recovery", {
+      label: "Deferred recovery item",
+      details: "Must remain encrypted and inactive",
+    })],
+  });
+  const recoveryRaw = await recoveryRecordForPayload(recoveredPayload);
+  const context = createVaultContext({
+    localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+  });
+  const state = lexicalState(context);
+  const sourceBefore = plain(context.capturePocketFileSaveSession());
+  const productionCrypto = context.PocketCrypto;
+  let decryptCalls = 0;
+  context.PocketCrypto = Object.freeze({
+    ...productionCrypto,
+    async unlockEnvelope(...args) {
+      decryptCalls += 1;
+      return productionCrypto.unlockEnvelope(...args);
+    },
+  });
+  let resumedNormalStartup = 0;
+
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  assert.deepEqual(
+    context.__ui.elements.get("vaultRecoveryWarningActions").children.map((button) => button.textContent),
+    ["View recovery", "Discard recovery", "Not now"],
+  );
+  assert.equal(
+    context.PocketVaultRecovery.deferNormalStartup(() => {
+      resumedNormalStartup += 1;
+    }),
+    true,
+  );
+  const storageCallsBefore = context.__localStorage.calls.length;
+
+  context.__ui.elements.get("vaultRecoveryNotNow").click();
+  assert.equal(await waitFor(() => !context.PocketVaultRecovery.isFlowOpen()), true);
+  assert.equal(context.__ui.vaultOverlay.hidden, true);
+  assert.equal(context.__ui.recoveryViewerOverlay.hidden, true);
+  assert.equal(context.__ui.surface.inert, false);
+  assert.equal(decryptCalls, 0);
+  assert.equal(context.__ui.elements.get("vaultCredentialForm").hidden, true);
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  assert.equal(context.__localStorage.calls.length, storageCallsBefore);
+  assert.equal(resumedNormalStartup, 1);
+  assert.equal(state.nodes.length, 0);
+  assert.equal(state.ops.length, 0);
+  assert.deepEqual(plain(context.capturePocketFileSaveSession()), sourceBefore);
+  assert.equal(context.PocketVault.getActiveSession(), null);
+  assert.equal(context.__openPickerQueue.length, 0);
+  assert.equal(context.__savePickerQueue.length, 0);
+  assert.match(context.__statuses.at(-1).message, /kept for later.*offer it again next time/i);
+  assertVaultDialogClosedNeutral(context);
+
+  const reloaded = createVaultContext({
+    localStorageSeed: { [VAULT_RECOVERY_STORAGE_KEY]: recoveryRaw },
+  });
+  await waitForRecoverySection(reloaded, "vaultRecoveryWarningActions");
+  assert.deepEqual(
+    reloaded.__ui.elements.get("vaultRecoveryWarningActions").children.map((button) => button.textContent),
+    ["View recovery", "Discard recovery", "Not now"],
+  );
+  assert.equal(reloaded.PocketVaultRecovery.isFlowOpen(), true);
+  assert.equal(storedRecoveryRaw(reloaded), recoveryRaw);
+  reloaded.__ui.elements.get("vaultRecoveryNotNow").click();
+  assert.equal(await waitFor(() => !reloaded.PocketVaultRecovery.isFlowOpen()), true);
+  assert.equal(storedRecoveryRaw(reloaded), recoveryRaw);
+  assertVaultDialogClosedNeutral(reloaded);
+});
+
+test("P025 startup recovery offers View, Discard, or Not now while P023 preview remains read-only", async () => {
   const recoveredPayload = pocketPayload({
     nodes: [
       makeNode("startup_recovered", {
@@ -3416,7 +3490,7 @@ test("P023 startup recovery offers only View or Discard, rejects a wrong passwor
   await waitForRecoverySection(context, "vaultRecoveryWarningActions");
   assert.deepEqual(
     context.__ui.elements.get("vaultRecoveryWarningActions").children.map((button) => button.textContent),
-    ["View recovery", "Discard recovery"],
+    ["View recovery", "Discard recovery", "Not now"],
   );
   assert.equal(context.PocketVaultRecovery.isFlowOpen(), true);
   assert.equal(context.canModifyPocket(), false);
@@ -3449,6 +3523,18 @@ test("P023 startup recovery offers only View or Discard, rejects a wrong passwor
     "vaultRecoveryUnlock",
     "vaultCredentialForm",
   );
+  context.__ui.elements.get("vaultCredentialCancel").click();
+  await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  assert.equal(storedRecoveryRaw(context), recoveryRaw);
+  assert.equal(context.PocketVaultRecovery.isFlowOpen(), true);
+  assert.equal(resumedNormalStartup, 0);
+  assertVaultDialogButtons(context, false);
+
+  await chooseRecoveryWarningAction(
+    context,
+    "vaultRecoveryUnlock",
+    "vaultCredentialForm",
+  );
   context.__ui.elements.get("vaultPassword").value = "wrong-recovery-password";
   await context.__ui.elements.get("vaultCredentialForm").dispatchAsync(
     syntheticEvent("submit", {
@@ -3461,6 +3547,7 @@ test("P023 startup recovery offers only View or Discard, rejects a wrong passwor
   );
   assert.equal(context.__ui.elements.get("vaultCredentialSubmit").disabled, false);
   assert.equal(context.__ui.elements.get("vaultCredentialCancel").disabled, false);
+  assertVaultDialogButtons(context, false);
   assert.equal(storedRecoveryRaw(context), recoveryRaw);
   assert.equal(state.nodes.length, 0);
 
@@ -3524,6 +3611,7 @@ test("P023 initial Discard recovery needs confirmation, no password, and changes
 
   context.__ui.elements.get("vaultRecoveryConfirmCancel").click();
   await waitForRecoverySection(context, "vaultRecoveryWarningActions");
+  assertVaultDialogButtons(context, false);
   assert.equal(storedRecoveryRaw(context), recoveryRaw);
   context.__ui.elements.get("vaultRecoveryDelete").click();
   await waitForRecoverySection(context, "vaultRecoveryConfirmActions");
@@ -3885,9 +3973,9 @@ test("P023 one smart Choose file path classifies and opens plain JSON or Vault b
   assert.match(indexSource, /id="btnLoad"[^>]*>Choose file<\/button>/);
 });
 
-test("P024 offline shell refreshes the polished Vault markup and styles", () => {
+test("P025 offline shell refreshes the three-choice recovery markup", () => {
   const serviceWorkerSource = source("sw.js");
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v5";/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v6";/);
   assert.equal(
     (serviceWorkerSource.match(/\.\/vault\.css/g) || []).length,
     1,
@@ -3916,7 +4004,7 @@ test("P024 offline shell refreshes the polished Vault markup and styles", () => 
   );
 });
 
-test("P024 Vault surfaces keep the canonical controls in a compact Pocket-native layout", () => {
+test("P025 three-choice startup retains the P024 compact layout", () => {
   const indexSource = source("index.html");
   const vaultStyles = source("vault.css");
   const recoveryActionLabels = new Map([
@@ -3942,12 +4030,15 @@ test("P024 Vault surfaces keep the canonical controls in a compact Pocket-native
   const initialPrompt = indexSource.match(
     /<div id="vaultRecoveryWarningActions"[\s\S]*?<\/div>/,
   )?.[0] || "";
-  assert.equal((initialPrompt.match(/<button\b/g) || []).length, 2);
+  assert.equal((initialPrompt.match(/<button\b/g) || []).length, 3);
   assert.match(initialPrompt, /id="vaultRecoveryUnlock"/);
   assert.match(initialPrompt, /id="vaultRecoveryDelete"/);
+  assert.match(initialPrompt, /id="vaultRecoveryNotNow"/);
+  assert.equal((indexSource.match(/id="vaultRecoveryNotNow"/g) || []).length, 1);
 
   assert.match(vaultStyles, /\.vaultDialogOverlay\s*{[\s\S]*?place-items:\s*start center;/);
   assert.match(vaultStyles, /\.vaultDialogCard\s*{[\s\S]*?overflow:\s*auto;/);
+  assert.match(vaultStyles, /\.vaultDialogActions\s*{[\s\S]*?flex-wrap:\s*wrap;/);
   assert.match(vaultStyles, /\.vaultDialogField input\s*{[\s\S]*?font-size:\s*16px;/);
   assert.match(vaultStyles, /\.vaultRecoveryUnlockedActions\s*{[\s\S]*?flex-wrap:\s*wrap;/);
   assert.match(vaultStyles, /\.vaultRecoveryViewerBody\s*{[\s\S]*?min-height:\s*0;/);
@@ -4967,6 +5058,7 @@ test("P021 repeated initialisation and dialog reuse do not duplicate bindings", 
     vaultSwitchCancel: 1,
     vaultRecoveryUnlock: 1,
     vaultRecoveryDelete: 1,
+    vaultRecoveryNotNow: 1,
     vaultRecoveryConfirm: 1,
     vaultRecoveryConfirmCancel: 1,
   });

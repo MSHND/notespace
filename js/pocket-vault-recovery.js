@@ -1006,6 +1006,13 @@
       const action = await global.PocketVaultBrowserIo?.showRecoveryWarning?.();
       if (!flowIsCurrent(flow)) return false;
       if (!action) continue;
+      if (action === "not-now") {
+        finishFlow(flow, {
+          status: "Encrypted browser recovery kept for later. Pocket will offer it again next time.",
+          tone: "ok",
+        });
+        return true;
+      }
       if (action === "discard") {
         if (await confirmRecoveryDeletion(flow, false)) return true;
         continue;

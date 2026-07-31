@@ -238,7 +238,7 @@ Plaintext persistence and restoration remain suppressed through:
 
 Opening a Vault does not delete or reinterpret a pre-existing ordinary JSON recovery copy. JSON recovery remains intact and becomes relevant again after returning to ordinary JSON ownership. Vault recovery uses a separate browser-storage key and does not participate in P016 FILE/DEVICE/BASE comparison or Document PiP.
 
-When an encrypted recovery record exists at startup, Pocket gates normal startup behind exactly **View recovery** and **Discard recovery**. View asks for the password and, after authentication and structural validation, opens a dedicated read-only tree/content viewer. The viewer has no truth handle, Vault session, mutation commands, PE route or operation writes.
+When an encrypted recovery record exists at startup, Pocket gates normal startup behind exactly **View recovery**, **Discard recovery** and **Not now**. View asks for the password and, after authentication and structural validation, opens a dedicated read-only tree/content viewer. The viewer has no truth handle, Vault session, mutation commands, PE route or operation writes. Not now performs no decryption, deletion, adoption or write; it preserves the exact encrypted record, releases the current startup gate and lets Pocket offer recovery again after the next reload.
 
 Recovery output requires one explicit action and destination. New Vault and plain JSON outputs become the active owner only after successful persistence. Add to existing uses the same content-based JSON/Vault classifier as the main Choose file route. Same-Vault identity is determined by the stable envelope Vault ID, not filename. An unchanged base revision permits confirmed whole-document restore; a divergent original Vault is preserved and offers the contained timestamped Recovered-node fallback. Different Vault and plain JSON destinations receive that contained import with fresh IDs.
 
@@ -297,7 +297,7 @@ find js -name '*.js' -print0 | xargs -0 -n1 node --check
 git diff --check
 ~~~
 
-P023 exact results, including the expanded Vault/recovery suite, are recorded in `docs/CODEX_REPORT.md`.
+P025 exact results, including the expanded Vault/recovery suite, are recorded in `docs/CODEX_REPORT.md`.
 
 The focused tests must use synthetic data, fake handles and browser-like VM contexts. They must not read Murray's real truth file, real Vault, browser storage or password.
 
@@ -305,7 +305,7 @@ The focused tests must use synthetic data, fake handles and browser-like VM cont
 
 Murray's physical browser acceptance remains required. Use disposable files and a disposable password only. Do not use Murray's real truth file or a future real Vault.
 
-The steps below preserve the accumulated ownership, inline-rename and dialog-reset checks with P023 labels. Run the current view-first recovery, smart file opening, contained import and conversion checklist in [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md) in addition to the still-applicable steps below.
+The steps below preserve the accumulated ownership, inline-rename and dialog-reset checks with P023 labels. Run the current three-choice startup, view-first recovery, smart file opening, contained import and conversion checklist in [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md) in addition to the still-applicable steps below.
 
 1. Create disposable JSON A.
 2. Add a distinctive item and Save A.

@@ -1,5 +1,89 @@
 # Codex report
 
+## POCKET TASK P025 - ALLOW DEFERRING VAULT RECOVERY
+
+Title: Add Not now to Vault recovery startup
+
+Status: the encrypted-recovery startup gate now offers **View recovery**, **Discard recovery** and **Not now**. Not now ends only the current startup interaction, preserves the exact encrypted browser record, performs no password/decrypt/delete/adopt/write action, and resumes normal Pocket startup once. The retained record is offered again on the next reload.
+
+Commit title:
+
+- `P025 Allow deferring Vault recovery`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `077a5604be2e37349eebf136e98950dead958e65`
+- Starting title: `P024 Polish Vault recovery UI`
+- Implementation date: 2026-07-31
+- Branch: `main`
+- P025 extends the existing shared Vault dialog and existing `PocketVaultRecovery.runStartupFlow()` owner. It does not add another modal, recovery owner, startup route or truth-file path.
+- No personal Pocket file, Vault, password, file handle or browser storage was inspected. Automated and browser checks used synthetic encrypted content and a disposable password only.
+
+### Implementation
+
+The existing `vaultRecoveryWarningActions` row gains one neutral secondary `vaultRecoveryNotNow` control. It is included in the canonical dialog button list, so the established busy/reset, focus-containment and one-listener lifecycle applies to all three startup actions.
+
+The shared dialog resolves the new choice as `not-now`. The recovery state machine handles that result by calling its existing `finishFlow()` once. That clears only transient flow references and the active startup gate, then consumes the deferred normal-startup callback once. It does not call unlock/decrypt, `clearRecovery()`, output/adoption or any writer, and it does not change `ownedRecordRaw` or browser storage.
+
+The warning body explains that the choice may be deferred. The status after selection is:
+
+> Encrypted browser recovery kept for later. Pocket will offer it again next time.
+
+P024's existing flexible action row already wraps the third neutral button at narrow widths, so `vault.css` remains unchanged. The offline shell advances from `pocket-shell-v5` to `pocket-shell-v6` so cached startup markup and JavaScript cannot retain the two-button gate.
+
+### Files changed
+
+Production:
+
+- `index.html`
+- `js/pocket-state.js`
+- `js/pocket-vault-io-browser.js`
+- `js/pocket-vault-recovery.js`
+- `sw.js`
+
+Tests:
+
+- `tests/p019-vault-ownership.test.js`
+
+Documentation:
+
+- `docs/VAULT_RECOVERY_CONTRACT.md`
+- `docs/VAULT_OWNERSHIP_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No CSS, package, dependency, fixture, generated PE runtime, crypto primitive, Vault envelope, Pocket truth schema or personal-data file changed.
+
+### Automated validation
+
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 328 passed, 0 failed.
+- `node --check` passed for every changed JavaScript file and `sw.js`.
+- `git diff --check` passed.
+
+The new executable case proves exact-record retention, zero decrypt calls, zero browser-storage writes/removals, no recovered-tree or owner adoption, no picker activity, one startup resumption, clean dialog release and warning return in a fresh reload context. Existing tests additionally prove View/Cancel, wrong-password, read-only preview, Discard/Cancel/confirm, one canonical listener, reset/busy reuse, compact wrapping and the refreshed service-worker cache generation.
+
+The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+### Disposable browser validation
+
+An isolated local Pocket origin was seeded with one synthetic authenticated encrypted recovery. The startup prompt showed the three required actions with initial focus on View. Tab moved View to Discard to Not now and wrapped back to View without leaving the dialog.
+
+Selecting Not now showed no password or viewer, left no modal/body-class/inert lock, returned focus to Choose file and displayed the normal no-file startup screen. A SHA-256 fingerprint and length of the exact synthetic browser record were unchanged before and after selection. Reload presented the three-choice warning again.
+
+View still opened the password dialog. A wrong disposable password revealed nothing and retained the record; Cancel returned to the three choices; the correct disposable password opened the accepted read-only viewer. Keep retained the same fingerprint. Initial Discard still required confirmation, Cancel retained the record, and confirmed Discard removed only that browser record.
+
+At 390px the prompt remained a 370px upper panel with no horizontal overflow; at 320px it remained a 300px upper panel with no horizontal overflow. All three actions wrapped into a 94px neutral action area. The normal top-level production page recorded zero console warnings or errors. The narrow-width iframe harness itself recorded the repository's pre-existing missing-node `MutationObserver` error, which was absent from top-level Pocket and is unrelated to the P025 recovery files.
+
+Temporary seed/frame pages and the synthetic browser record were removed after validation.
+
+### Remaining physical acceptance
+
+Murray's physical browser acceptance remains required for real installed/offline cache replacement, top-level 320px/390px Chrome layout, focus return across Chrome reloads and interaction alongside real file permissions. The exact P025-inclusive disposable checklist is in `docs/VAULT_RECOVERY_CONTRACT.md`, section 13.
+
 ## POCKET TASK P024 - POLISH VAULT RECOVERY UI
 
 Title: Polish Vault recovery UI

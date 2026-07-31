@@ -22,6 +22,7 @@
     "vaultSwitchCancel",
     "vaultRecoveryUnlock",
     "vaultRecoveryDelete",
+    "vaultRecoveryNotNow",
     "vaultRecoveryConfirm",
     "vaultRecoveryConfirmCancel"
   ]);
@@ -284,7 +285,7 @@
       if (!showDialogShell({
         mode: "recovery-warning",
         title: "Unsaved encrypted Vault changes found",
-        body: config.body || "Pocket kept unsaved Vault changes encrypted in this browser. View them before choosing what to do, or discard only this browser recovery.",
+        body: config.body || "Pocket kept unsaved Vault changes encrypted in this browser. View them, discard only this browser recovery, or continue for now and decide next time.",
         initialFocusId: "vaultRecoveryUnlock",
         resolve,
       })) {
@@ -573,6 +574,9 @@
     ));
     dom("vaultRecoveryDelete")?.addEventListener("click", () => (
       closeDialogForMode("recovery-warning", "discard", { restoreFocus: false })
+    ));
+    dom("vaultRecoveryNotNow")?.addEventListener("click", () => (
+      closeDialogForMode("recovery-warning", "not-now", { restoreFocus: false })
     ));
     dom("vaultRecoveryConfirm")?.addEventListener("click", () => {
       const record = activeDialog;

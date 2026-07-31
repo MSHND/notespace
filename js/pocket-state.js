@@ -195,6 +195,7 @@ const el = {
   vaultRecoveryWarningActions: document.getElementById("vaultRecoveryWarningActions"),
   vaultRecoveryUnlock: document.getElementById("vaultRecoveryUnlock"),
   vaultRecoveryDelete: document.getElementById("vaultRecoveryDelete"),
+  vaultRecoveryNotNow: document.getElementById("vaultRecoveryNotNow"),
   vaultRecoveryViewerOverlay: document.getElementById("vaultRecoveryViewerOverlay"),
   vaultRecoveryTree: document.getElementById("vaultRecoveryTree"),
   vaultRecoverySelectedLabel: document.getElementById("vaultRecoverySelectedLabel"),

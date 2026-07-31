@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-P022 introduced authenticated encrypted browser recovery for unsaved changes made while an encrypted Pocket Vault is the active truth owner. P023 completes the user-facing recovery flow.
+P022 introduced authenticated encrypted browser recovery for unsaved changes made while an encrypted Pocket Vault is the active truth owner. P023 completed the user-facing recovery flow, P024 refined its presentation, and P025 adds a password-free **Not now** choice at the initial startup gate.
 
 The recovery record is safety data, not a document owner. Viewing it never creates a truth-file owner, never replaces the active tree and never authorises a write. A selected local JSON file or encrypted Vault becomes authoritative only after Pocket has validated it and, for a recovery output, persisted the intended result successfully.
 
@@ -15,6 +15,7 @@ Main Save and PE Save continue to write only through the exact current owner and
 - The browser record contains no readable node labels, Notes, Outline/editor content, password, `CryptoKey`, original filename or writable handle.
 - The recovery password is used only in live memory to authenticate and decrypt the record.
 - Wrong-password, cancellation, validation and output failure reveal or delete nothing.
+- Deferring the startup offer reveals, adopts, saves and deletes nothing; it only releases the current startup gate.
 - Viewing recovery does not adopt a document, create an owner, mark Pocket dirty or open PE.
 - Every output destination is explicitly selected.
 - A recovery destination is adopted only after its write closes successfully.
@@ -58,12 +59,15 @@ When any encrypted recovery record exists, Pocket blocks ordinary startup behind
 
 - **View recovery**
 - **Discard recovery**
+- **Not now**
 
-There is no initial password-free bypass. The normal file gate and PiP startup adoption remain deferred while this decision is unresolved.
+The normal file gate and PiP startup adoption remain deferred while this decision is unresolved.
 
 **Discard recovery** requires confirmation, needs no password, deletes only the exact encrypted browser record and then returns to normal no-file startup. It does not touch a saved JSON file or Vault.
 
-**View recovery** opens the password dialog. Cancel returns to the initial two choices. A wrong password reveals no content and leaves the record byte-for-byte intact.
+**View recovery** opens the password dialog. Cancel returns to the initial three choices. A wrong password reveals no content and leaves the record byte-for-byte intact.
+
+**Not now** requires no password or confirmation. It does not call the decrypt or deletion path, alter the exact encrypted browser record, adopt recovered content, create a truth owner or write a file. It closes only the current recovery interaction, releases the gate and resumes ordinary startup exactly once. Because the record remains byte-for-byte intact, Pocket offers the same three choices again on the next reload or startup.
 
 ## 6. Read-only recovery viewer
 
@@ -204,7 +208,9 @@ node --test tests/device-changes-resolution.test.js
 node --test tests/p018-popout-isolation.test.js
 ```
 
-P023 adds coverage for content-based JSON/Vault classification, one smart Choose file action, unsupported content, the two-choice startup gate, wrong passwords, read-only tree/content inspection, Keep, exact discard, same-Vault revision restore, divergent same-Vault contained fallback, different-Vault import, plain-JSON import, post-write adoption, both conversion directions and cancellation/failure retention.
+P023 adds coverage for content-based JSON/Vault classification, one smart Choose file action, unsupported content, wrong passwords, read-only tree/content inspection, Keep, exact discard, same-Vault revision restore, divergent same-Vault contained fallback, different-Vault import, plain-JSON import, post-write adoption, both conversion directions and cancellation/failure retention.
+
+P025 adds executable coverage for the exact three-choice startup gate, one canonical Not-now control/listener, byte-for-byte record retention, no decryption or deletion, no recovered-tree or owner adoption, single startup resumption, warning return after reload, reset/busy lifecycle reuse, compact wrapping layout and the refreshed offline shell.
 
 Exact results for the completed implementation are recorded in `docs/CODEX_REPORT.md`.
 
@@ -213,31 +219,38 @@ Exact results for the completed implementation are recorded in `docs/CODEX_REPOR
 Use disposable synthetic files and disposable passwords only.
 
 1. Create a disposable encrypted recovery and reload Pocket.
-2. Confirm the startup prompt shows only **View recovery** and **Discard recovery**.
-3. Choose View and Cancel the password dialog; confirm the initial choice returns.
-4. Enter a wrong password; confirm no recovered content appears and the record remains.
-5. Enter the correct password.
-6. Confirm the read-only viewer shows capture time, tree, branch toggles, node selection, Notes and supported Outline.
-7. Confirm no active filename/owner appears, editing commands remain unavailable and PE cannot open.
-8. Choose Keep for later, reload and confirm the recovery offer returns.
-9. Confirm initial and post-view Discard delete only browser recovery after confirmation.
-10. Use the main **Choose file** control to open a plain JSON file.
-11. Use the same control to open a Vault and confirm the password prompt.
-12. Confirm no separate Open Vault control exists.
-13. Add recovery to a plain JSON destination and confirm one Recovered root and active JSON ownership after Save.
-14. Add recovery to a different Vault and confirm one Recovered root, unchanged destination Vault ID and active Vault ownership.
-15. Select the original Vault under a different filename and confirm same-Vault detection uses Vault ID.
-16. Confirm an unchanged-base original Vault offers clean restore.
-17. Confirm a newer original Vault is not overwritten and offers the contained Recovered fallback.
-18. Cancel or fail each output route and confirm recovery remains.
-19. Convert current JSON to a new Vault; confirm the JSON is untouched and the new Vault becomes active only after Save.
-20. Convert current Vault to a new plain JSON; confirm the Vault is untouched, the warning is clear and the new JSON becomes active only after Save.
-21. Confirm Main Save, PE Save and File A/File B stale-session protection still target only the active owner.
-22. At desktop width, confirm every shared Vault prompt appears as a compact panel in the upper part of Pocket and remains internally scrollable at short heights.
-23. At approximately 320px and 390px, confirm prompts remain upper-positioned with outer margins and do not become bottom sheets or routine full-screen cards.
-24. Confirm the viewer resembles a read-only Pocket tree, avoids excess empty space for a small document and gives larger tree/content panes independent scrolling.
-25. Confirm the five recovery operations form a compact wrapping strip and that Discard is visibly destructive without dominating the viewer.
-26. Keyboard through both modal surfaces; confirm visible focus, contained Tab navigation, announced errors and the accepted Escape behaviour.
+2. Confirm the startup prompt shows **View recovery**, **Discard recovery** and **Not now**.
+3. Confirm initial focus is on View and Tab remains contained while reaching all three actions.
+4. Choose Not now and confirm no password prompt or recovery viewer appears.
+5. Confirm the exact encrypted browser record remains unchanged, no recovered tree or truth owner is adopted, and no file is written.
+6. Confirm normal Pocket startup resumes once, focus returns sensibly to **Choose file**, and the recovery modal, focus trap and interaction gate are gone.
+7. Reload and confirm the same three-choice recovery warning returns.
+8. Choose View and Cancel the password dialog; confirm the initial three choices return with neutral enabled controls.
+9. Enter a wrong password; confirm no recovered content appears and the record remains.
+10. Enter the correct password.
+11. Confirm the read-only viewer shows capture time, tree, branch toggles, node selection, Notes and supported Outline.
+12. Confirm no active filename/owner appears, editing commands remain unavailable and PE cannot open.
+13. Choose Keep for later, reload and confirm the recovery offer returns.
+14. Confirm initial and post-view Discard delete only browser recovery after confirmation.
+15. Use the main **Choose file** control to open a plain JSON file.
+16. Use the same control to open a Vault and confirm the password prompt.
+17. Confirm no separate Open Vault control exists.
+18. Add recovery to a plain JSON destination and confirm one Recovered root and active JSON ownership after Save.
+19. Add recovery to a different Vault and confirm one Recovered root, unchanged destination Vault ID and active Vault ownership.
+20. Select the original Vault under a different filename and confirm same-Vault detection uses Vault ID.
+21. Confirm an unchanged-base original Vault offers clean restore.
+22. Confirm a newer original Vault is not overwritten and offers the contained Recovered fallback.
+23. Cancel or fail each output route and confirm recovery remains.
+24. Convert current JSON to a new Vault; confirm the JSON is untouched and the new Vault becomes active only after Save.
+25. Convert current Vault to a new plain JSON; confirm the Vault is untouched, the warning is clear and the new JSON becomes active only after Save.
+26. Confirm Main Save, PE Save and File A/File B stale-session protection still target only the active owner.
+27. At desktop width, confirm every shared Vault prompt appears as a compact panel in the upper part of Pocket and remains internally scrollable at short heights.
+28. At approximately 320px and 390px, confirm prompts remain upper-positioned with outer margins and do not become bottom sheets or routine full-screen cards.
+29. Confirm the viewer resembles a read-only Pocket tree, avoids excess empty space for a small document and gives larger tree/content panes independent scrolling.
+30. Confirm the five recovery operations form a compact wrapping strip and that Discard is visibly destructive without dominating the viewer.
+31. Keyboard through both modal surfaces; confirm visible focus, contained Tab navigation, announced errors and the accepted Escape behaviour.
+32. With an installed/offline copy, refresh the service-worker shell and confirm the three-choice startup prompt replaces any cached two-choice prompt.
+33. Confirm the P025 flow adds no new console warning or error on the top-level Pocket page.
 
 Stop immediately if the wrong file changes or an owner rotates before successful persistence.
 
