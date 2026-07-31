@@ -1,5 +1,88 @@
 # Codex report
 
+## POCKET TASK P024 - POLISH VAULT RECOVERY UI
+
+Title: Polish Vault recovery UI
+
+Status: the accepted P023 recovery and Vault flows now use Pocket's compact neutral panel, row and chip language. Shared Vault prompts sit near the upper part of the app instead of becoming narrow-screen bottom sheets. The read-only recovery viewer is smaller, tree-first and free of a forced large body, and its five existing operations form a compact wrapping strip. Recovery ownership, encryption, output, conversion and file-opening behaviour is unchanged.
+
+Commit title:
+
+- `P024 Polish Vault recovery UI`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `78ca58853ed6b419f1c4dc2a8afd6f61df1ca512`
+- Starting title: `P023 Complete Vault recovery flow`
+- Implementation date: 2026-07-31
+- Branch: `main`
+- P024 changes presentation and restrained recovery-action markup only. It does not change the recovery state machine, canonical dialog owner, Vault envelope, crypto, truth payload, file owner, Main Save, PE Save, conversion, Add-to-existing or startup-gate logic.
+- Browser validation used only disposable synthetic documents, encrypted recoveries, passwords and in-memory file handles. No personal Pocket file, Vault, password, file handle or browser recovery was inspected.
+
+### Compact shared Vault prompts
+
+The canonical Vault overlay now aligns a 430px maximum-width Pocket panel toward the upper part of the visible app. Its responsive top spacing, safe-area-aware margins, remaining-viewport maximum height and internal scrolling keep startup recovery, unlock, new-password, conversion, confirmation and dirty-owner-switch modes usable without a bottom-sheet or routine full-screen phone treatment.
+
+Panel surfaces, borders, text, muted copy, rows and controls reuse Pocket variables. Padding, gaps, radii, headings and shadows are lighter. Buttons retain practical 40px desktop and 44px narrow touch heights, and both password fields remain 16px.
+
+### Pocket-native recovery viewer and action strip
+
+The viewer maximum width is reduced from 980px to 760px and its forced 360px body minimum is removed. A small document therefore produces a small panel. A large document uses independently scrolling tree and content panes. Wide viewports retain a compact two-column layout; narrow viewports stack the bounded tree before bounded Notes/Outline content without horizontal overflow.
+
+The viewer reuses Pocket panel, row, hover, selected-row, text and muted tokens. Tree spacing, branch controls, selected content and Notes/Outline typography are denser while preserving the isolated read-only renderer and all focus and accessibility relationships.
+
+The five canonical action IDs remain unchanged. Their concise visible labels are **Keep for later**, **Save as Vault**, **Save as JSON**, **Add to file** and **Discard recovery**. Longer descriptions remain in visually hidden text and pointer titles. The controls wrap as a compact chip-like strip; Discard uses a quiet destructive treatment.
+
+The service-worker shell advances to `pocket-shell-v5`, with `vault.css` still present exactly once, so installed/offline copies cannot retain stale P023 CSS or markup.
+
+### Files changed
+
+- `vault.css`
+- `index.html`
+- `sw.js`
+- `tests/p019-vault-ownership.test.js`
+- `docs/VAULT_RECOVERY_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No production JavaScript module, generated PE runtime, crypto code, recovery owner, file owner, fixture, dependency or truth schema changed.
+
+### Automated validation
+
+Targeted production-module results:
+
+- `node --test tests/p019-vault-ownership.test.js` - 147 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 327 passed, 0 failed.
+- `node --check sw.js` and `node --check tests/p019-vault-ownership.test.js` - passed.
+- `git diff --check` - passed.
+
+P024 adds focused assertions that the five action IDs remain single and canonical, the visible labels are concise, the initial startup gate still has only View and Discard, the shared overlays are top-aligned and internally scrollable, password text remains 16px, the viewer has no forced body minimum, the action strip wraps, the Pocket surface/selected-row tokens are used, deliberate mobile bottom/stretch rules are absent, and the `pocket-shell-v5` asset list remains coherent.
+
+The existing executable P023 tests continue to prove read-only preview, focus containment, reset behaviour, wrong-password safety, Keep, exact Discard, all three output routes, atomic adoption, conversion and owner/session protections. The P018 and PE suites continue to prove the unchanged popup and persistence boundaries.
+
+The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+### Disposable production-browser validation
+
+- Desktop 1280x800: the small viewer was 760px wide, 312px high and 62px from the top; its five actions fitted one 40px strip.
+- Desktop large recovery: a 20-node document with long Notes produced a 760px by 482px panel. The tree (`618px` scroll height within `331px`) and content (`987px` within `331px`) scrolled independently while the outer card did not.
+- 390x800: the startup choice panel was 370px wide and 72px from the top; the password panel used the same placement and a 16px field. The small viewer was 370px wide and 528px high at 44px from the top.
+- 390x800 large recovery: tree and content stacked in one column, both scrolled independently, the five actions wrapped into a compact strip, and the page had no horizontal overflow.
+- 320x640/700: the prompt retained 10px outer margins at 64px from the top. The large viewer remained inset, had no horizontal overflow and used bounded internal/card scrolling where its content required it.
+- 390x360 and a 320px-high embedded production viewport: prompts moved to a safe 10px top inset. The one-password prompt fit; the two-password Vault-creation panel was limited to 296px and scrolled internally (`379px` content), with both fields still 16px.
+- Keyboard focus remained inside both modal surfaces, useful initial focus and visible focus styling remained, Escape kept recovery for later, and reloading offered the encrypted recovery again.
+- A wrong recovery password remained in the shared dialog and announced the existing calm error through the live status region.
+- Disposable Keep, confirmed Discard, Save as Vault, Save as JSON and Add to file flows all completed. Each successful output wrote exactly its queued disposable destination and produced the accepted status; dirty-Vault Cancel retained the Vault, and Discard-and-continue opened only the queued disposable file.
+- The same shared compact owner was observed for startup recovery, recovery unlock, Vault unlock, JSON-to-Vault password creation, Vault-to-JSON confidentiality warning, recovery confirmation and dirty-Vault switching.
+- A fresh production load recorded zero console warnings or errors.
+
+### Remaining physical acceptance
+
+Physical browser acceptance is still required for actual phone safe-area rendering, touch ergonomics and native File System Access pickers. Use only disposable Pocket/Vault files and passwords. The checklist is in `docs/VAULT_RECOVERY_CONTRACT.md` section 13. Manual Vault lock/padlock work and unrelated command/menu cleanup remain out of scope for P024.
+
 ## POCKET TASK P023 — COMPLETE VAULT RECOVERY FLOW
 
 Title: Complete Vault recovery flow

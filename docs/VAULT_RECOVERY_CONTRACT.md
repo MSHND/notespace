@@ -85,23 +85,29 @@ The viewer works from an isolated cloned recovery document. It does not replace 
 
 Closing the viewer clears its cloned tree and selection references. **Keep for later** also clears the recovery flow's decrypted document and payload references where practical.
 
+Vault prompts use the one shared modal owner and appear as compact Pocket panels near the upper part of the visible app. They retain inert-background and focus-containment behaviour, use internal scrolling when height is constrained, respect narrow-screen safe areas and keep password text at 16px to avoid touch-browser zoom. Narrow and phone-mode layouts do not turn them into bottom sheets or routine full-screen cards.
+
+The read-only viewer uses Pocket's normal panel, row, selected-row and text tokens. It is a compact two-column tree/content surface when space permits and becomes a bounded one-column surface on narrow screens, with the tree first and independent tree/content scrolling. Small recovered documents do not force an artificial large body height.
+
 ## 7. Actions after viewing
 
-The viewer offers:
+The viewer presents the same five operations as a compact, wrapping action strip:
 
 - **Keep for later**
-- **Save as new encrypted Vault**
-- **Save as plain JSON**
-- **Add to existing Pocket file**
+- **Save as Vault**
+- **Save as JSON**
+- **Add to file**
 - **Discard recovery**
+
+The concise visible labels retain longer descriptive text for assistive technology and pointer hints. The action IDs and recovery state-machine meanings are unchanged.
 
 **Keep for later** closes the viewer, retains the encrypted record and continues to normal startup.
 
 **Discard recovery** uses the same confirmed exact-record deletion as the initial discard.
 
-**Save as new encrypted Vault** asks for a new destination and a new confirmed password, creates a new Vault ID and revision 1, writes only the selected new file, then adopts it as the active Vault. The record is cleared only after that succeeds.
+**Save as Vault** asks for a new destination and a new confirmed password, creates a new Vault ID and revision 1, writes only the selected new file, then adopts it as the active Vault. The record is cleared only after that succeeds.
 
-**Save as plain JSON** first warns that the output is readable and unencrypted, asks for a new destination, writes only that file, then adopts it as the active JSON owner. The record is cleared only after that succeeds.
+**Save as JSON** first warns that the output is readable and unencrypted, asks for a new destination, writes only that file, then adopts it as the active JSON owner. The record is cleared only after that succeeds.
 
 Picker cancellation, password cancellation, encryption failure, permission failure, stale flow, write failure or unsafe adoption retains the encrypted recovery.
 
@@ -227,6 +233,11 @@ Use disposable synthetic files and disposable passwords only.
 19. Convert current JSON to a new Vault; confirm the JSON is untouched and the new Vault becomes active only after Save.
 20. Convert current Vault to a new plain JSON; confirm the Vault is untouched, the warning is clear and the new JSON becomes active only after Save.
 21. Confirm Main Save, PE Save and File A/File B stale-session protection still target only the active owner.
+22. At desktop width, confirm every shared Vault prompt appears as a compact panel in the upper part of Pocket and remains internally scrollable at short heights.
+23. At approximately 320px and 390px, confirm prompts remain upper-positioned with outer margins and do not become bottom sheets or routine full-screen cards.
+24. Confirm the viewer resembles a read-only Pocket tree, avoids excess empty space for a small document and gives larger tree/content panes independent scrolling.
+25. Confirm the five recovery operations form a compact wrapping strip and that Discard is visibly destructive without dominating the viewer.
+26. Keyboard through both modal surfaces; confirm visible focus, contained Tab navigation, announced errors and the accepted Escape behaviour.
 
 Stop immediately if the wrong file changes or an owner rotates before successful persistence.
 

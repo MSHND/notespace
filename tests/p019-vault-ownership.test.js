@@ -3885,9 +3885,13 @@ test("P023 one smart Choose file path classifies and opens plain JSON or Vault b
   assert.match(indexSource, /id="btnLoad"[^>]*>Choose file<\/button>/);
 });
 
-test("P023 offline shell installs both new canonical owners with a fresh cache generation", () => {
+test("P024 offline shell refreshes the polished Vault markup and styles", () => {
   const serviceWorkerSource = source("sw.js");
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v4";/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v5";/);
+  assert.equal(
+    (serviceWorkerSource.match(/\.\/vault\.css/g) || []).length,
+    1,
+  );
   assert.equal(
     (serviceWorkerSource.match(/\.\/js\/pocket-file-opening\.js/g) || []).length,
     1,
@@ -3910,6 +3914,47 @@ test("P023 offline shell installs both new canonical owners with a fresh cache g
     indexSource.indexOf('src="js/pocket-vault-recovery-viewer.js"')
       < indexSource.indexOf('src="js/pocket-vault-recovery.js"'),
   );
+});
+
+test("P024 Vault surfaces keep the canonical controls in a compact Pocket-native layout", () => {
+  const indexSource = source("index.html");
+  const vaultStyles = source("vault.css");
+  const recoveryActionLabels = new Map([
+    ["vaultRecoveryKeep", "Keep for later"],
+    ["vaultRecoverySaveVault", "Save as Vault"],
+    ["vaultRecoverySaveJson", "Save as JSON"],
+    ["vaultRecoveryAddExisting", "Add to file"],
+    ["vaultRecoveryDiscard", "Discard recovery"],
+  ]);
+
+  for (const [id, label] of recoveryActionLabels) {
+    assert.equal(
+      (indexSource.match(new RegExp(`id="${id}"`, "g")) || []).length,
+      1,
+      `${id} remains a single canonical action`,
+    );
+    assert.match(
+      indexSource,
+      new RegExp(`id="${id}"[^>]*>[\\s\\S]*?<strong>${label}</strong>`),
+    );
+  }
+
+  const initialPrompt = indexSource.match(
+    /<div id="vaultRecoveryWarningActions"[\s\S]*?<\/div>/,
+  )?.[0] || "";
+  assert.equal((initialPrompt.match(/<button\b/g) || []).length, 2);
+  assert.match(initialPrompt, /id="vaultRecoveryUnlock"/);
+  assert.match(initialPrompt, /id="vaultRecoveryDelete"/);
+
+  assert.match(vaultStyles, /\.vaultDialogOverlay\s*{[\s\S]*?place-items:\s*start center;/);
+  assert.match(vaultStyles, /\.vaultDialogCard\s*{[\s\S]*?overflow:\s*auto;/);
+  assert.match(vaultStyles, /\.vaultDialogField input\s*{[\s\S]*?font-size:\s*16px;/);
+  assert.match(vaultStyles, /\.vaultRecoveryUnlockedActions\s*{[\s\S]*?flex-wrap:\s*wrap;/);
+  assert.match(vaultStyles, /\.vaultRecoveryViewerBody\s*{[\s\S]*?min-height:\s*0;/);
+  assert.match(vaultStyles, /var\(--tree-panel-surface/);
+  assert.match(vaultStyles, /var\(--row-on/);
+  assert.doesNotMatch(vaultStyles, /align-items:\s*(?:end|stretch)\s*;/);
+  assert.doesNotMatch(vaultStyles, /max-height:\s*none\s*;/);
 });
 
 test("P023 read-only recovery viewer expands, selects and displays Notes and Outline without adopting", async () => {
