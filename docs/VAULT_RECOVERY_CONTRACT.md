@@ -2,290 +2,240 @@
 
 ## 1. Purpose
 
-P022 adds encrypted browser recovery for unsaved changes made while an encrypted Pocket Vault is the active truth owner.
+P022 introduced authenticated encrypted browser recovery for unsaved changes made while an encrypted Pocket Vault is the active truth owner. P023 completes the user-facing recovery flow.
 
-The recovery copy is a safety aid, not a document owner. It does not replace the selected Vault, remember or regain a writable handle, open itself as the working document, or write to any file without an explicit user action. Main Save and PE Save continue to write only through the current active owner and remain subject to the existing document-session, Vault-session and node-revision protections.
+The recovery record is safety data, not a document owner. Viewing it never creates a truth-file owner, never replaces the active tree and never authorises a write. A selected local JSON file or encrypted Vault becomes authoritative only after Pocket has validated it and, for a recovery output, persisted the intended result successfully.
 
-This contract supersedes the P019 trade-off that unsaved Vault edits existed only in memory. It does not change the Pocket Vault v1 envelope, the Pocket truth payload schema, ordinary JSON recovery, or explicit local-file ownership.
+Main Save and PE Save continue to write only through the exact current owner and remain subject to the existing document-session, Vault-session, popup-session and node-revision checks.
 
 ## 2. Core invariants
 
-P022 preserves these boundaries:
-
-- the selected local JSON file or encrypted Vault remains the explicit document truth;
-- no selected or created file means no ordinary editable tree;
-- browser storage is recovery support only;
-- Vault browser recovery contains no readable Pocket content;
-- no password, decrypted recovery payload, `CryptoKey` or writable `FileSystemFileHandle` is persisted;
-- the original Vault filename and handle are not required to unlock recovery;
-- decrypting recovery does not adopt it as the active document;
-- every output destination is explicit and user-selected;
-- failed, cancelled or rejected output leaves the encrypted recovery intact;
-- successful live-Vault persistence clears only recovery covered by that write;
-- PE remains dirty until truth-file persistence succeeds;
-- no autosave, background truth-file write, file watcher, cloud synchronisation or silent handle reuse is introduced; and
-- existing non-Vault browser recovery continues to use its established path.
+- No selected or created file means no ordinary editable tree.
+- Browser recovery is encrypted safety data, not authoritative document truth.
+- The browser record contains no readable node labels, Notes, Outline/editor content, password, `CryptoKey`, original filename or writable handle.
+- The recovery password is used only in live memory to authenticate and decrypt the record.
+- Wrong-password, cancellation, validation and output failure reveal or delete nothing.
+- Viewing recovery does not adopt a document, create an owner, mark Pocket dirty or open PE.
+- Every output destination is explicitly selected.
+- A recovery destination is adopted only after its write closes successfully.
+- The exact encrypted browser record is cleared only after successful persistence and adoption, or explicit confirmed discard.
+- Ordinary JSON and Vault owners remain distinct.
+- Vault output never falls through to a plaintext Save path.
+- No autosave, background truth-file write, file watcher, silent handle reuse, cloud synchronisation or cross-file write is added.
 
 ## 3. Encrypted browser record
 
-The browser record uses the localStorage key:
+The record remains at:
 
 ```text
 pocketLite.vaultRecovery.encrypted.v1
 ```
 
-Its outer shape is deliberately small:
+Its outer schema remains `pocket.vaultRecovery.encrypted.v1` version 1. It contains `capturedAt`, `highestSequence` and one authenticated Pocket Vault v1 envelope.
 
-```json
-{
-  "schema": "pocket.vaultRecovery.encrypted.v1",
-  "version": 1,
-  "capturedAt": "2026-07-30T06:30:00.000Z",
-  "highestSequence": 12,
-  "envelope": {
-    "kind": "pocket.vault",
-    "version": 1,
-    "vaultId": "<opaque Vault identifier>",
-    "revision": 5,
-    "createdAt": "<Vault creation time>",
-    "contentType": "portal.export.v1+json",
-    "crypto": {
-      "cipher": "AES-GCM",
-      "kdf": "PBKDF2-SHA-256",
-      "iterations": 310000,
-      "salt": "<base64url>",
-      "nonce": "<base64url>",
-      "encoding": "base64url"
-    },
-    "payload": "<base64url>"
-  }
-}
-```
+The envelope exposes only bounded management and cryptographic metadata, including its stable `vaultId` and revision. The complete canonical Pocket payload remains inside AES-GCM ciphertext. Each capture uses a fresh nonce. The password and decrypted payload are never written back to browser storage.
 
-Only management and cryptographic envelope metadata is readable outside the ciphertext. Node labels, Notes, Outline/editor data, root/data extras and tombstones exist only inside the authenticated encrypted envelope.
+For a normal unsaved capture, the recovery envelope revision is the saved Vault revision plus one. P023 therefore uses:
 
-The encrypted plaintext is a complete canonical Pocket payload built from the current in-memory document. `highestSequence` identifies the latest operation covered by that encrypted capture. It supports save-race decisions but is not an authority to write or adopt a file.
+- envelope `vaultId` to identify the original Vault independently of filename; and
+- recovery revision minus one as the saved base revision from which the unsaved recovery was captured.
 
-Recovery encryption reuses the active Vault's non-extractable in-memory key, salt and Vault identity. Each capture is sealed with a fresh AES-GCM nonce. The password and decrypted bytes are not added to the record.
+These values support comparison. They do not independently grant Save authority.
 
-## 4. Capture lifecycle
+## 4. Capture and live-Save lifecycle
 
-`recordOp()` remains the canonical operation owner. When the active owner is an encrypted Vault, its normal browser-safety call is routed to `PocketVaultRecovery.scheduleCapture()` instead of the plaintext local-safety snapshot.
+`recordOp()` remains the canonical operation owner. For an active Vault it schedules `PocketVaultRecovery.scheduleCapture()` instead of plaintext local-safety storage.
 
-Capture is asynchronous and serialised:
+A capture freezes the canonical payload and covered operation sequence, captures the exact document and Vault identities, encrypts with the active non-extractable key, rechecks ownership, then replaces only the record owned by that capture chain.
 
-1. freeze the current canonical payload and highest operation sequence;
-2. capture the exact Pocket document and Vault-session identities;
-3. encrypt with the active non-extractable Vault key;
-4. recheck both identities before storing;
-5. replace the browser record only if the capture is still current; and
-6. report whether encrypted recovery is pending, stored or failed.
+An unresolved startup record cannot be replaced or cleared merely because another page opens a Vault with the same ID. A successful live Vault Save clears only matching recovery owned by the current page and covered by that write. If newer operations remain after Save, Pocket encrypts the newer state again.
 
-An older capture cannot overwrite a newer capture or cross into another document/Vault session. Pocket also refuses to replace an unresolved encrypted recovery belonging to a different Vault. This preserves the earlier recovery instead of silently destroying it.
+The synchronous `beforeunload` guard only warns. It does not begin encryption or write a truth file during unload.
 
-Replacement and live-Save cleanup require exact in-memory ownership of the stored recovery bytes, not merely a matching Vault ID. A record found at startup is therefore unowned by the new page until the user explicitly resolves it. Choosing **Keep for later**, or opening the same Vault in another page/session, cannot silently replace or clear that kept record. The current page may update only the capture chain it created itself.
+## 5. Startup gate
 
-Browser quota, serialisation or encryption failure leaves the in-memory document and operation list dirty. The UI warns that encrypted browser recovery could not be updated and directs the user to save the Vault. A failed recovery capture never becomes a truth-file write.
+When any encrypted recovery record exists, Pocket blocks ordinary startup behind the accessible Vault dialog. The initial choice contains exactly:
 
-The synchronous `beforeunload` guard continues to warn about dirty work. It does not begin asynchronous encryption or writing while the page is unloading.
-
-## 5. Successful Vault Save and save races
-
-Main Save still freezes one canonical payload and the operation sequence covered at Save start. Only a successfully closed encrypted Vault write may advance the Vault revision, establish the new baseline or retire covered operations.
-
-After successful truth persistence:
-
-- when no newer operations remain, P022 removes the matching encrypted browser recovery;
-- when newer operations were recorded during the write, P022 encrypts the newest visible state with the now-current Vault session and retains that newer recovery;
-- if refreshing the newer recovery fails, the successful truth save remains successful, the newer operations remain dirty and Pocket warns that browser recovery could not be refreshed; and
-- a recovery belonging to another Vault or changed flow is not deleted.
-
-Encryption failure, permission failure, a cancelled picker, stale-session rejection, write failure or close failure leaves the existing encrypted recovery intact.
-
-## 6. Startup warning and interaction gate
-
-On startup or reload, the presence of the browser record immediately opens the permanent accessible Vault dialog before ordinary work continues.
-
-The warning says that Pocket kept unsaved Vault changes encrypted in this browser and offers:
-
-- **Unlock recovery**
-- **Delete recovery**
-- **Not now**
-
-The modal uses the shared Vault dialog's `role="dialog"`, `aria-modal="true"`, focus containment, background inertness and keyboard handling. While the recovery flow is open, tree mutation, file opening/creation, Vault creation/export and PiP opening are gated.
-
-The ordinary startup file gate and any PiP snapshot adoption are also deferred through one callback until the user finishes the recovery choice. This prevents startup code from rotating the document session behind the modal. After **Not now**, Delete, Keep or a completed output, that deferred normal startup runs once.
-
-**Not now** closes the flow, leaves the encrypted record untouched and allows normal Pocket use. No recovery content is decrypted.
-
-## 7. Delete and discard
-
-**Delete recovery** does not require a password. Pocket first asks for explicit confirmation:
-
-> This permanently deletes only the browser-held encrypted recovery. It does not change or delete any saved Pocket file or Vault.
-
-The post-unlock **Discard recovery** action uses the same safety meaning and also requires confirmation.
-
-Cancellation changes nothing. Confirmed deletion removes only the exact browser record which the current flow opened. If that record changed meanwhile or browser deletion fails, Pocket leaves it available and reports the failure.
-
-## 8. Unlock boundary
-
-**Unlock recovery** asks for the protecting Vault password inside Pocket. It does not ask for the original Vault file or use a remembered handle.
-
-Unlock:
-
-- validates the stored record and Vault envelope before use;
-- derives a key from the entered password and envelope parameters;
-- authenticates/decrypts the ciphertext;
-- validates the recovered Pocket structure without adopting it;
-- keeps the validated decrypted payload only in the current in-memory flow; and
-- clears the credential controls after submission or closure.
-
-A wrong password reveals no content, deletes nothing and leaves retry or Cancel available. A damaged, changed or structurally unsafe record also remains encrypted and stored.
-
-After successful unlock, Pocket presents exactly these explicit actions:
-
-- **Save as new encrypted Vault**
-- **Save as plain JSON**
-- **Add to an existing Pocket file**
-- **Keep for later**
+- **View recovery**
 - **Discard recovery**
 
-Unlocking alone never changes the visible tree, active handle, document session, operation history or saved file.
+There is no initial password-free bypass. The normal file gate and PiP startup adoption remain deferred while this decision is unresolved.
 
-## 9. Output ownership
+**Discard recovery** requires confirmation, needs no password, deletes only the exact encrypted browser record and then returns to normal no-file startup. It does not touch a saved JSON file or Vault.
 
-Every recovery output is bound to the exact document session in which the startup flow began and to an unforgeable in-memory recovery-flow token. Output is rejected if the active document/session changes, another owner action is pending, a permission prompt is open or the flow is superseded.
+**View recovery** opens the password dialog. Cancel returns to the initial two choices. A wrong password reveals no content and leaves the record byte-for-byte intact.
 
-### Save as new encrypted Vault
+## 6. Read-only recovery viewer
 
-Pocket:
+After successful authentication and structural validation, `PocketVaultRecoveryViewer` displays a dedicated temporary preview.
 
-1. validates the recovered payload;
-2. asks for a new Vault destination;
-3. requires that destination to be provably distinct from any current active handle;
-4. asks for and confirms a new password;
-5. creates a new non-extractable Vault session;
-6. seals revision 1 with a fresh nonce;
-7. writes and closes only the selected new handle.
+The viewer:
 
-The recovery output is deliberately write-only: it does not replace the visible tree or active document owner. Cancellation, encryption failure or write failure retains both the current owner and encrypted browser recovery. A successful save clears the recovery. If browser deletion then fails, the newly saved Vault remains authoritative and Pocket warns that the older encrypted recovery still exists.
+- displays the capture date and time;
+- says that the content is recovered browser data and has not been written to a Pocket file;
+- renders the recovered home tree;
+- supports branch expansion and collapse;
+- supports node selection;
+- displays the selected label and readable Notes;
+- displays supported `pocket.nodeEditor.v1` Outline rows with indentation;
+- keeps keyboard focus inside the modal preview while it is open; and
+- treats Escape as **Keep for later**, without deleting or writing recovery.
 
-### Save as plain JSON
+The viewer works from an isolated cloned recovery document. It does not replace `state.nodes`, set a file handle, activate a Vault session, add operations, write browser storage, clear recovery, open PE or expose mutation controls.
 
-Pocket first warns:
+Closing the viewer clears its cloned tree and selection references. **Keep for later** also clears the recovery flow's decrypted document and payload references where practical.
 
-> This creates a readable plain JSON file. Anyone who can open that file can read the recovered Pocket content.
+## 7. Actions after viewing
 
-After confirmation it asks for a new JSON destination, requires it to be distinct from the current active handle and writes only that handle. It does not adopt the readable output as the active document. Failure or cancellation retains the encrypted recovery. Success clears it, subject to the same deletion-failure warning.
+The viewer offers:
 
-### Keep for later
+- **Keep for later**
+- **Save as new encrypted Vault**
+- **Save as plain JSON**
+- **Add to existing Pocket file**
+- **Discard recovery**
 
-Pocket clears decrypted in-memory flow state, closes the dialog and leaves the encrypted browser record intact. It does not adopt or write recovered content.
+**Keep for later** closes the viewer, retains the encrypted record and continues to normal startup.
 
-## 10. Add to an existing Pocket file
+**Discard recovery** uses the same confirmed exact-record deletion as the initial discard.
 
-This action intentionally avoids a full-document merge.
+**Save as new encrypted Vault** asks for a new destination and a new confirmed password, creates a new Vault ID and revision 1, writes only the selected new file, then adopts it as the active Vault. The record is cleared only after that succeeds.
 
-Pocket asks the user to select one existing plain Pocket JSON file, reads and validates it, builds the result in memory, shows an explicit **Add and save** confirmation, then rereads the destination immediately before writing. Any byte-level change since review fails closed. Pocket writes only the explicitly selected handle and does not adopt that destination as the active document.
+**Save as plain JSON** first warns that the output is readable and unencrypted, asks for a new destination, writes only that file, then adopts it as the active JSON owner. The record is cleared only after that succeeds.
 
-The import:
+Picker cancellation, password cancellation, encryption failure, permission failure, stale flow, write failure or unsafe adoption retains the encrypted recovery.
 
-- creates one new top-level node labelled `Recovered YYYY-MM-DD HH:MM`;
-- assigns a fresh ID to the wrapper;
-- assigns fresh IDs to every recovered node;
-- remaps every recovered parent relationship beneath the wrapper;
-- preserves recovered node content, Notes, supported or opaque editor metadata, generic node extras and subtree order; and
-- retains the destination document's existing nodes, tombstones, root extras and data extras.
+## 8. Smart Add to existing
 
-Only the recovered node tree is imported. Recovered root extras, data extras and tombstones are deliberately not merged into the destination because P022 favours a contained, inspectable subtree over risky whole-document combination. The selected destination must be a supported plain Pocket JSON file; encrypted Vault envelopes are rejected.
+Add to existing uses the same `PocketFileOpening` content classifier as the main **Choose file** action:
 
-Read, parse, validation, confirmation, freshness or write failure performs no adoption and leaves recovery available. A successful import/write leaves the current active owner unchanged and clears the encrypted recovery.
+1. select one file;
+2. read and parse its contents;
+3. validate a Vault envelope before considering plain JSON; and
+4. return a classified candidate without adopting it.
 
-## 11. Non-Vault recovery
+Filename and extension are diagnostic only. Both plain Pocket JSON and authenticated Pocket Vault envelopes are accepted. A Vault destination is unlocked through the shared Vault credential and structural-validation function.
 
-P022 does not replace, delete or reinterpret ordinary JSON browser recovery.
+All write paths acquire write permission, reread the exact destination bytes reviewed by the flow, fail if those bytes changed, write through the destination's correct JSON or encrypted route, and only then adopt it.
 
-While a Vault is active:
+### Same Vault
 
-- plaintext workspace, local-safety trail, auto-cache, last-save and PiP recovery writes remain suppressed;
-- an existing ordinary JSON safety record is preserved;
-- the new encrypted Vault record uses its separate key and lifecycle; and
-- returning to an ordinary JSON owner restores the ordinary recovery rules.
+The selected envelope's `vaultId` is compared with the recovery envelope's `vaultId`.
 
-Vault recovery is not routed through P016 FILE/DEVICE/BASE comparison, is not eligible for silent restoration, and is never mixed with ordinary plaintext safety data.
+If the IDs match and the selected revision equals the recovery base revision, Pocket confirms a clean restore, writes the recovered whole-document state as the next encrypted revision, then activates that Vault.
 
-## 12. Security and failure invariants
+If the IDs match but the selected revision is newer or otherwise different, Pocket does not overwrite it. The confirmation explains the divergence and offers the safe fallback: preserve the selected Vault and import the recovered document beneath one timestamped top-level `Recovered <date/time>` node.
 
-The automated and manual acceptance boundary must prove:
+If the contained fallback cannot be built and validated safely, Pocket fails closed and writes nothing.
 
-- persisted browser data does not contain readable node, Notes, Outline, root/data-extra or password marker text;
-- only a valid password can authenticate/decrypt the envelope;
-- wrong-password, invalid-record and invalid-structure paths preserve the blob;
-- decrypted content stays in the active JavaScript flow only;
-- Delete/Discard removes only the browser record;
-- recovery output never writes the current handle unless that exact file was explicitly selected for the contained add-to-existing action;
-- a recovery output never adopts its selected destination or changes the visible working tree;
-- stale flow/session completion cannot write, adopt or clear a newer record;
-- a failed output never clears recovery;
-- live-Vault save clears only covered recovery;
-- newer changes during Save remain dirty and encrypted in refreshed recovery;
-- the canonical Main Save and PE Save owners remain unchanged; and
-- no recovery metadata enters Pocket nodes or exported truth JSON.
+### Different Vault
 
-P022 does not provide password recovery, key escrow, multi-device recovery, cloud backup, rollback detection, shared Vaults, automatic restore, automatic merge or a guarantee that browser storage survives user/browser clearing.
+Pocket preserves the destination Vault's stable ID, existing content and revision lineage. It creates one timestamped top-level Recovered node, fresh-remaps every imported node ID, preserves the recovered hierarchy and supported node content, encrypts the combined document as the next destination revision, then activates that Vault.
 
-## 13. Automated validation
+### Plain JSON
 
-The focused executable contract is exercised by:
+Pocket uses the same contained import and fresh-ID remapping, writes only the selected JSON handle, then activates that JSON file.
+
+Recovered root extras, data extras and tombstones are not broadly merged into a different destination. The contained subtree preserves recovered node data without inventing a lossy whole-document merge.
+
+## 9. Output adoption and clearing order
+
+Recovery output follows this order:
+
+1. validate the recovered and destination structures;
+2. obtain explicit confirmation;
+3. capture the exact recovery flow and source document session;
+4. acquire permission;
+5. reread and compare destination bytes where a destination already exists;
+6. write and close only the selected destination;
+7. establish that handle and its JSON or Vault session as the sole active owner;
+8. establish the written payload as the clean baseline; and
+9. clear only the exact browser recovery record opened by the flow.
+
+The deferred no-file startup callback is retired after a successful adopted output so it cannot clear the newly installed owner.
+
+If browser-record deletion fails after a successful output, the new file remains authoritative and active, and Pocket warns that the older encrypted recovery still exists.
+
+## 10. Interaction with current-file conversion
+
+P023 moves encryption and decryption to document-owned controls.
+
+- A plain JSON owner can be converted to a new encrypted Vault.
+- A Vault owner can be converted to a new readable JSON file.
+- Conversion never overwrites the source file in place.
+- The source remains active and dirty if destination selection, credentials or persistence fails.
+- The new file becomes active only after its write succeeds.
+- Vault-to-JSON conversion clears an exact matching encrypted recovery only after the current document is safely persisted into the new JSON.
+
+## 11. Security and failure boundary
+
+Automated and physical acceptance must prove:
+
+- persisted browser surfaces contain no recovery plaintext or password;
+- wrong passwords disclose nothing;
+- the viewer is display-only and creates no owner;
+- classification does not adopt;
+- unsupported content reaches no permission or write step;
+- stale or changed destinations are not written;
+- Vault destinations use encrypted persistence only;
+- different destinations retain existing content under one fresh Recovered wrapper;
+- same-Vault divergence is never blindly overwritten;
+- failed or cancelled output retains recovery and the prior owner;
+- successful output activates only the written destination;
+- Main Save and PE Save retain their existing owner/session protections; and
+- no recovery metadata enters truth JSON or node editor data.
+
+The File System Access API does not provide compare-and-swap. Pocket rereads immediately before writing, but a separate external writer changing the file after that final comparison remains a platform-level race.
+
+## 12. Automated validation
+
+The executable contract uses production modules in controlled VM/browser-like contexts with synthetic handles, Web Crypto, localStorage and DOM surfaces:
 
 ```sh
 node --test tests/p019-vault-ownership.test.js
+node --test tests/pe-persistence-contract.test.js
+node --test tests/device-changes-resolution.test.js
+node --test tests/p018-popout-isolation.test.js
 ```
 
-P022 result: **133 passed, 0 failed**.
+P023 adds coverage for content-based JSON/Vault classification, one smart Choose file action, unsupported content, the two-choice startup gate, wrong passwords, read-only tree/content inspection, Keep, exact discard, same-Vault revision restore, divergent same-Vault contained fallback, different-Vault import, plain-JSON import, post-write adoption, both conversion directions and cancellation/failure retention.
 
-The suite loads the actual production scripts in a controlled VM with synthetic handles, Web Crypto, localStorage and DOM surfaces. P022 coverage includes encrypted-only capture, decryptability with the correct synthetic password, absence of plaintext markers, capture coalescing/session checks, startup warning actions, wrong-password retention, confirmed deletion, all explicit output routes, add-to-existing ID/parent remapping, write/cancellation failure retention, successful clearing, save-race refresh, ordinary JSON recovery preservation, dialog lifecycle/accessibility and existing P019-P021 owner/save regressions.
+Exact results for the completed implementation are recorded in `docs/CODEX_REPORT.md`.
 
-Changed JavaScript is syntax-checked directly with `node --check`. The prohibited broad checker and its npm alias are not part of this contract.
+## 13. Physical browser acceptance checklist
 
-## 14. Physical browser acceptance checklist
+Use disposable synthetic files and disposable passwords only.
 
-Use disposable synthetic Pocket/Vault files only. This checklist records required acceptance and must not be marked complete until Murray has exercised it in a real supported browser:
+1. Create a disposable encrypted recovery and reload Pocket.
+2. Confirm the startup prompt shows only **View recovery** and **Discard recovery**.
+3. Choose View and Cancel the password dialog; confirm the initial choice returns.
+4. Enter a wrong password; confirm no recovered content appears and the record remains.
+5. Enter the correct password.
+6. Confirm the read-only viewer shows capture time, tree, branch toggles, node selection, Notes and supported Outline.
+7. Confirm no active filename/owner appears, editing commands remain unavailable and PE cannot open.
+8. Choose Keep for later, reload and confirm the recovery offer returns.
+9. Confirm initial and post-view Discard delete only browser recovery after confirmation.
+10. Use the main **Choose file** control to open a plain JSON file.
+11. Use the same control to open a Vault and confirm the password prompt.
+12. Confirm no separate Open Vault control exists.
+13. Add recovery to a plain JSON destination and confirm one Recovered root and active JSON ownership after Save.
+14. Add recovery to a different Vault and confirm one Recovered root, unchanged destination Vault ID and active Vault ownership.
+15. Select the original Vault under a different filename and confirm same-Vault detection uses Vault ID.
+16. Confirm an unchanged-base original Vault offers clean restore.
+17. Confirm a newer original Vault is not overwritten and offers the contained Recovered fallback.
+18. Cancel or fail each output route and confirm recovery remains.
+19. Convert current JSON to a new Vault; confirm the JSON is untouched and the new Vault becomes active only after Save.
+20. Convert current Vault to a new plain JSON; confirm the Vault is untouched, the warning is clear and the new JSON becomes active only after Save.
+21. Confirm Main Save, PE Save and File A/File B stale-session protection still target only the active owner.
 
-1. Open an encrypted Vault.
-2. Make a change so the document is dirty.
-3. Confirm an encrypted recovery snapshot is created via the intended flow.
-4. Simulate reload / restart.
-5. Confirm the startup recovery warning appears.
-6. Confirm the options are:
-   - Unlock recovery
-   - Delete recovery
-   - Not now
-7. Confirm Delete recovery works without password and requires confirmation.
-8. Confirm wrong password does not reveal content and does not delete the blob.
-9. Confirm correct password unlocks the recovery flow.
-10. Confirm the unlocked options include:
-    - Save as new encrypted Vault
-    - Save as plain JSON
-    - Add to an existing Pocket file
-    - Keep for later
-    - Discard recovery
-11. Confirm Save as new encrypted Vault succeeds and clears recovery.
-12. Confirm Save as plain JSON warns clearly and clears recovery on success.
-13. Confirm Add to an existing Pocket file imports beneath a single timestamped top-level recovery node and clears recovery on success.
-14. Confirm Keep for later leaves the recovery blob intact.
-15. Confirm Discard recovery removes it with confirmation.
-16. Confirm no existing active-file session protections were broken.
-17. Confirm normal non-recovery Vault usage still works.
-18. Confirm PE save semantics and explicit truth-file saving still behave correctly.
+Stop immediately if the wrong file changes or an owner rotates before successful persistence.
 
-## 15. Known limits
+## 14. Known limits
 
-- Browser localStorage is finite and may be cleared by the browser or user. P022 reports capture failure but cannot guarantee browser retention.
-- Only one encrypted Vault recovery record is retained. An unresolved record from another Vault is preserved rather than overwritten, so the newly active Vault may temporarily lack browser recovery until the earlier record is resolved.
-- Output processing is bounded to 10,000 nodes and approximately 5,000,000 serialised characters to avoid unsafe recovery transformation in the browser.
-- Add to an existing file accepts plain Pocket JSON only and imports the recovered node tree under one wrapper. It does not merge recovered root/data extras or tombstones.
-- Add to existing acquires write permission and rereads exact destination bytes immediately before writing. The File System Access API does not provide a compare-and-swap transaction, so a separate external writer changing the file after that final check remains a platform-level race.
-- A successfully written recovery output may remain accompanied by the older encrypted browser record if localStorage deletion fails. Pocket reports that state rather than pretending cleanup succeeded.
-- Physical browser acceptance is still required for real picker permission, File System Access write/close behaviour, reload persistence, focus containment and localStorage quota behaviour.
+- Browser localStorage is finite and may be cleared by the browser or user.
+- Only one encrypted Vault recovery record is retained.
+- Processing is bounded to 10,000 nodes and approximately 5,000,000 serialised characters.
+- Safe contained import does not perform a broad merge of root/data extras or tombstones.
+- Same-Vault clean restore relies on the stable Vault ID and monotonic saved revision; divergent revisions use the contained fallback.
+- Password recovery, key escrow, cloud backup, multi-device recovery and automatic file reopening remain out of scope.
+- Physical browser acceptance is still required for real picker permission, write/close, focus, reload persistence and browser-storage behaviour.

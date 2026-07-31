@@ -8,7 +8,7 @@ The central rule is:
 
 > Exactly one active document owner has Save authority. When that owner is a Vault, Main Save and PE Save may write only an encrypted Vault envelope to that Vault's exact handle.
 
-P019 did not add cloud synchronisation, accounts, key escrow, password recovery, OS keychain integration, encrypted browser crash recovery, shared Vaults or Document PiP for Vault content. P022 now adds encrypted browser recovery as a separate safety layer without changing the Pocket Vault v1 envelope format, the Pocket truth payload schema or this explicit owner model. See [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md) for the complete P022 lifecycle.
+P019 did not add cloud synchronisation, accounts, key escrow, password recovery, OS keychain integration, encrypted browser crash recovery, shared Vaults or Document PiP for Vault content. P022 added encrypted browser recovery as a separate safety layer. P023 completes recovery inspection/output and unifies existing-file selection without changing the Pocket Vault v1 envelope, Pocket truth payload schema or explicit owner model. See [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md).
 
 ## 2. Active document owners
 
@@ -62,9 +62,11 @@ Every encrypted Save uses `crypto.getRandomValues()` to create a fresh 12-byte n
 
 P019 retains Vault v1 compatibility. It does not introduce a new authenticated-header format or a rollback-detection protocol. Those are separate future hardening decisions.
 
-## 5. Atomic Vault opening
+## 5. One smart Choose file doorway and atomic Vault opening
 
-`PocketVaultBrowserIo.openVault()` uses `showOpenFilePicker()` and treats the chosen handle as a pending candidate, not an owner.
+P023 exposes one user-facing **Choose file** action. `PocketFileOpening` opens one picker, reads and parses the selected bytes, validates a Vault envelope before considering plain Pocket JSON, and returns a classified candidate without adopting it. Filename and extension do not determine the route. The separate **Open encrypted Vault…** control is retired.
+
+A classified JSON candidate continues through the established JSON permission, validation, dirty-owner and adoption path. A classified Vault candidate continues through `PocketVaultBrowserIo` and the shared Vault unlock path. Recovery Add to existing reuses the same classifier and Vault unlock validation but keeps its own explicit write/adopt decision.
 
 The current document, handle, tree, operations, dirty state, document session and unlocked key remain authoritative while Pocket:
 
@@ -167,27 +169,25 @@ If the node change is applied in memory but Vault persistence fails, the returne
 
 No password, `CryptoKey`, salt or full Vault session is exposed to the popup.
 
-## 9. Creating an active encrypted Vault
+## 9. Converting current plain JSON to an encrypted Vault
 
-**Save as encrypted Vault…** requires an already active valid Pocket document and `showSaveFilePicker()`.
+**Convert to encrypted Vault…** is a current-file action shown for a plain JSON owner. It requires an active valid Pocket document and `showSaveFilePicker()`.
 
 Pocket chooses a new destination, proves it is distinct from the active handle, collects and confirms a password, derives a non-extractable key, generates a new Vault ID and salt, seals revision 1 with a fresh nonce, writes and closes the new file, and only then installs it as the active Vault owner. If exact-handle comparison is unavailable or fails, Pocket asks for another destination rather than treating uncertainty as permission to overwrite.
 
-The previous JSON, Vault or detached owner remains unchanged if the picker, credential entry, encryption, permission or write fails. Creating a Vault never repurposes or overwrites the previous JSON file.
+The previous JSON or detached owner remains unchanged if the picker, credential entry, encryption, permission or write fails. Conversion never repurposes or overwrites the previous JSON file.
 
 After success, future Main Save and PE Save target only the new encrypted Vault.
 
-## 10. Explicit unencrypted JSON export
+## 10. Converting current Vault to plain JSON
 
-While a Vault is active, **Export unencrypted JSON copy…** first shows:
+While a Vault is active, **Convert to plain JSON…** warns that the new file will be readable and unencrypted and that the original Vault will remain untouched.
 
-> **Export an unencrypted copy?**
->
-> This creates a readable JSON file. Your encrypted Vault will remain active, and future Save will continue writing only to the Vault.
+After confirmation Pocket opens `showSaveFilePicker()`, requires a destination proven distinct from the active Vault handle, freezes the current in-memory document and writes one readable canonical JSON payload to the selected new handle. Only after the writable stream closes does Pocket install that JSON handle as the sole active owner, establish the written payload as baseline and clear covered operations.
 
-After explicit confirmation Pocket always opens `showSaveFilePicker()`, requires a destination proven distinct from the active Vault handle, writes one readable canonical JSON payload to the newly selected handle, and leaves the Vault owner, key, revision and document session unchanged. A second wrapper for the same file is rejected through `isSameEntry()`. Missing or failed exact-entry comparison fails closed.
+The original Vault handle receives no conversion write. Cancellation, permission failure, stale-session rejection or persistence failure leaves the Vault owner, key, revision, dirty operations and matching encrypted browser recovery intact. After successful adoption Pocket removes only an exact matching encrypted recovery record for the converted Vault.
 
-The exported JSON handle receives no future Save authority. Export cancellation or failure changes nothing. Exporting a copy does not make the Vault clean unless the Vault itself was already saved.
+The older internal `exportUnencryptedJsonCopy()` compatibility surface remains non-authoritative and is not exposed as the current document conversion control.
 
 ## 11. Dirty owner switching
 
@@ -238,13 +238,15 @@ Plaintext persistence and restoration remain suppressed through:
 
 Opening a Vault does not delete or reinterpret a pre-existing ordinary JSON recovery copy. JSON recovery remains intact and becomes relevant again after returning to ordinary JSON ownership. Vault recovery uses a separate browser-storage key and does not participate in P016 FILE/DEVICE/BASE comparison or Document PiP.
 
-When an encrypted recovery record exists at startup, Pocket shows a gated warning with **Unlock recovery**, **Delete recovery** and **Not now**. The ordinary file-gate or PiP startup adoption callback waits until this choice finishes, so it cannot rotate the source session behind the modal. Unlocking with the original Vault password validates and decrypts only into the current in-memory flow. It does not adopt a tree, remember a file handle or authorise a write. Output requires one explicit action and destination: save as a new encrypted Vault, save as plain JSON after a readable-copy warning, or add the recovered tree beneath one fresh `Recovered <date/time>` root in an explicitly selected existing Pocket JSON file. **Keep for later** removes the decrypted in-memory flow state while retaining the encrypted browser record. Delete and post-unlock Discard require confirmation.
+When an encrypted recovery record exists at startup, Pocket gates normal startup behind exactly **View recovery** and **Discard recovery**. View asks for the password and, after authentication and structural validation, opens a dedicated read-only tree/content viewer. The viewer has no truth handle, Vault session, mutation commands, PE route or operation writes.
 
-The original Vault file and handle are not required for recovery. Recovery outputs are explicit write-only files: they do not adopt the output, replace the visible tree or change the active owner. No output writes the previously active handle merely because it was active. Add-to-existing rereads the selected destination after write permission and immediately before writing, then fails closed if it changed during review. A failed, cancelled, rejected or stale output leaves the encrypted record intact. A successful live Vault Save clears only recovery owned by the current page capture chain and covered by the written operation sequence; changes made during that write remain dirty and are captured again with the advanced Vault revision. A startup record kept for later cannot be silently overwritten or cleared by reopening the same Vault or by another page/session. Successful explicit recovery output clears only the exact record that was opened.
+Recovery output requires one explicit action and destination. New Vault and plain JSON outputs become the active owner only after successful persistence. Add to existing uses the same content-based JSON/Vault classifier as the main Choose file route. Same-Vault identity is determined by the stable envelope Vault ID, not filename. An unchanged base revision permits confirmed whole-document restore; a divergent original Vault is preserved and offers the contained timestamped Recovered-node fallback. Different Vault and plain JSON destinations receive that contained import with fresh IDs.
+
+Every existing destination is reread after permission and immediately before writing. A failed, cancelled, rejected or stale output leaves the encrypted record intact. A successful live Vault Save still clears only recovery owned by the current page capture chain and covered by the written operation sequence; changes made during that write remain dirty and are captured again. A startup record kept for later cannot be silently overwritten or cleared by reopening the same Vault or by another page/session. Successful explicit recovery output clears only the exact record opened by the flow.
 
 While a dirty Vault is being protected, the UI reports that unsaved changes are being encrypted for browser recovery. Capture or storage failure leaves the Vault dirty and warns the user to save it. The existing synchronous `beforeunload` guard still only warns; it does not start asynchronous encryption or a truth-file write during unload.
 
-The detailed record shape, password boundary, startup flow, output ownership, contained add-to-existing rule, race handling, failure behaviour and P022 physical checks are in [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md).
+The detailed record shape, viewer boundary, same/different-Vault handling, output ownership, race behaviour and P023 physical checks are in [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md).
 
 ## 13. Document PiP
 
@@ -295,16 +297,7 @@ find js -name '*.js' -print0 | xargs -0 -n1 node --check
 git diff --check
 ~~~
 
-Current P019-P022 contract results:
-
-- Vault ownership, P020 inline-switch, P021 dialog-reuse and P022 encrypted-recovery suite: **133 passed, 0 failed**
-- PE persistence suite: **96 passed, 0 failed**
-- Device-changes/P017 suite: **69 passed, 0 failed**
-- P018 popup-isolation suite: **15 passed, 0 failed**
-- Combined test result: **313 passed, 0 failed**
-- Production JavaScript syntax checks: **PASS for every `js/*.js` file and `sw.js`**
-- Generated PE runtime `new Function(...)`, where applicable: **PASS through the PE persistence suite**
-- `git diff --check`: **PASS**
+P023 exact results, including the expanded Vault/recovery suite, are recorded in `docs/CODEX_REPORT.md`.
 
 The focused tests must use synthetic data, fake handles and browser-like VM contexts. They must not read Murray's real truth file, real Vault, browser storage or password.
 
@@ -312,11 +305,11 @@ The focused tests must use synthetic data, fake handles and browser-like VM cont
 
 Murray's physical browser acceptance remains required. Use disposable files and a disposable password only. Do not use Murray's real truth file or a future real Vault.
 
-The steps below preserve the accumulated P019-P021 ownership, inline-rename and dialog-reset checklist. Step 38 records the historical P019 no-recovery expectation and is superseded by P022. Run the current encrypted-recovery checklist in [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md) in addition to the still-applicable steps below.
+The steps below preserve the accumulated ownership, inline-rename and dialog-reset checks with P023 labels. Run the current view-first recovery, smart file opening, contained import and conversion checklist in [`docs/VAULT_RECOVERY_CONTRACT.md`](VAULT_RECOVERY_CONTRACT.md) in addition to the still-applicable steps below.
 
 1. Create disposable JSON A.
 2. Add a distinctive item and Save A.
-3. Choose Save as encrypted Vault.
+3. Choose Convert to encrypted Vault.
 4. Create disposable Vault V with a disposable password.
 5. Confirm source says Encrypted Vault and shows V.
 6. Edit V in the main tree.
@@ -332,11 +325,11 @@ The steps below preserve the accumulated P019-P021 ownership, inline-rename and 
 16. Confirm PE becomes clean only after encrypted persistence.
 17. Reopen V and confirm the PE edit.
 18. Confirm A remains unchanged.
-19. Choose Export unencrypted JSON copy.
-20. Confirm the warning says the copy is readable.
-21. Export to disposable JSON C.
-22. Confirm V remains active.
-23. Make another V edit and press Main Save.
+19. Choose Convert to plain JSON.
+20. Confirm the warning says the new file is readable and the original Vault is untouched.
+21. Save to disposable JSON C.
+22. Confirm C becomes active only after its write succeeds.
+23. Reopen V with Choose file, make another V edit and press Main Save.
 24. Reopen V and confirm the edit.
 25. Confirm C did not receive the later Save.
 26. Attempt to open V with the wrong password while A is active.
@@ -351,7 +344,7 @@ The steps below preserve the accumulated P019-P021 ownership, inline-rename and 
 35. Reload Pocket.
 36. Confirm V requires its password again.
 37. Confirm ordinary JSON recovery still works with disposable JSON.
-38. Historical P019-only check, superseded by P022: confirm no Vault recovery offer appears over V.
+38. Complete the current P023 recovery checklist in the linked contract.
 39. Confirm PiP is calmly unavailable while V is active.
 40. Stop immediately if any operation targets the wrong file or Chrome becomes unstable.
 41. Open a disposable encrypted Vault.
@@ -368,10 +361,10 @@ The steps below preserve the accumulated P019-P021 ownership, inline-rename and 
 52. Confirm the replacement file appears only after encrypted Vault persistence has completed.
 53. Stop immediately if the wrong file changes, adoption precedes the Vault write, or any draft disappears unexpectedly.
 54. Open disposable JSON A.
-55. Choose **Save as encrypted Vault…**.
+55. Choose **Convert to encrypted Vault…**.
 56. Create a disposable Vault using `PocketTest2026!`.
 57. Save a PE edit into the Vault.
-58. Choose **Open encrypted Vault…**.
+58. Choose **Choose file**.
 59. Select the created Vault.
 60. Confirm **Unlock** and **Cancel** are enabled.
 61. Enter `PocketTest2026!`.

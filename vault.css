@@ -1,9 +1,12 @@
 .activeDocumentSource[hidden],
+.commandBtn[hidden],
 .vaultRecoveryNotice[hidden],
 .vaultDialogOverlay[hidden],
+.vaultRecoveryViewerOverlay[hidden],
 .vaultCredentialForm[hidden],
 .vaultDialogField[hidden],
 .vaultDialogActions[hidden],
+.vaultRecoveryContentPane section[hidden],
 .vaultRecoveryUnlockedActions[hidden] {
   display: none;
 }
@@ -162,6 +165,170 @@
   gap: 9px;
 }
 
+.vaultRecoveryViewerOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 112;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(24, 32, 28, 0.42);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+.vaultRecoveryViewerCard {
+  width: min(980px, 100%);
+  max-height: min(820px, calc(100vh - 44px));
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid rgba(89, 109, 97, 0.22);
+  border-radius: 18px;
+  background: #fbfcfa;
+  color: #243028;
+  box-shadow: 0 24px 70px rgba(22, 31, 25, 0.3);
+}
+
+.vaultRecoveryViewerHeader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.vaultRecoveryViewerHeader h2,
+.vaultRecoveryViewerHeader p,
+.vaultRecoveryContentPane h3,
+.vaultRecoveryContentPane h4,
+.vaultRecoveryContentPane pre {
+  margin: 0;
+}
+
+.vaultRecoveryCaptureTime {
+  margin-top: 5px !important;
+  color: #5e6d64;
+  font-size: 0.88rem;
+}
+
+.vaultRecoveryViewerNotice {
+  padding: 10px 12px;
+  border: 1px solid rgba(180, 132, 42, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 247, 226, 0.76);
+  color: #6f531b;
+  line-height: 1.4;
+}
+
+.vaultRecoveryViewerBody {
+  min-height: 360px;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.35fr);
+  border: 1px solid rgba(76, 101, 85, 0.2);
+  border-radius: 13px;
+  overflow: hidden;
+}
+
+.vaultRecoveryTreePane,
+.vaultRecoveryContentPane {
+  min-width: 0;
+  max-height: 450px;
+  overflow: auto;
+  padding: 15px;
+}
+
+.vaultRecoveryTreePane {
+  border-right: 1px solid rgba(76, 101, 85, 0.18);
+  background: rgba(242, 246, 242, 0.72);
+}
+
+.vaultRecoveryTreeList {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0 0 0 17px;
+  list-style: none;
+}
+
+#vaultRecoveryTree {
+  padding-left: 0;
+}
+
+.vaultRecoveryTreeRow {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.vaultRecoveryTreeToggle,
+.vaultRecoveryTreeToggleSpacer {
+  width: 24px;
+  min-width: 24px;
+}
+
+.vaultRecoveryTreeToggle {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: #51675a;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.vaultRecoveryTreeNode {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #30453a;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vaultRecoveryTreeNode.selected {
+  background: #dce9df;
+  color: #244531;
+  font-weight: 700;
+}
+
+.vaultRecoveryTreeNode:focus-visible,
+.vaultRecoveryTreeToggle:focus-visible {
+  outline: 3px solid rgba(58, 111, 76, 0.3);
+  outline-offset: 1px;
+}
+
+.vaultRecoveryContentPane {
+  display: grid;
+  align-content: start;
+  gap: 17px;
+  background: #fff;
+}
+
+.vaultRecoveryContentPane section {
+  display: grid;
+  gap: 7px;
+}
+
+.vaultRecoveryContentPane h4 {
+  color: #59675f;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.vaultRecoveryContentPane pre {
+  min-height: 42px;
+  overflow-wrap: anywhere;
+  color: #2f3b34;
+  font: inherit;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .vaultRecoveryAction {
   display: grid;
   gap: 3px;
@@ -209,7 +376,8 @@
   line-height: 1.45;
 }
 
-body.vaultDialogOpen {
+body.vaultDialogOpen,
+body.vaultRecoveryViewerOpen {
   overflow: hidden;
 }
 
@@ -221,6 +389,31 @@ body.vaultDialogOpen {
   .vaultDialogOverlay {
     align-items: end;
     padding: 12px;
+  }
+
+  .vaultRecoveryViewerOverlay {
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  .vaultRecoveryViewerCard {
+    max-height: calc(100vh - 20px);
+    padding: 17px;
+  }
+
+  .vaultRecoveryViewerHeader,
+  .vaultRecoveryViewerBody {
+    grid-template-columns: 1fr;
+  }
+
+  .vaultRecoveryTreePane {
+    max-height: 230px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(76, 101, 85, 0.18);
+  }
+
+  .vaultRecoveryContentPane {
+    max-height: 300px;
   }
 
   .vaultDialogCard {
@@ -252,7 +445,18 @@ body.phoneMode .vaultDialogOverlay {
   padding: 8px;
 }
 
+body.phoneMode .vaultRecoveryViewerOverlay {
+  align-items: stretch;
+  padding: 8px;
+}
+
 body.phoneMode .vaultDialogCard {
+  width: 100%;
+  max-height: none;
+  border-radius: 14px;
+}
+
+body.phoneMode .vaultRecoveryViewerCard {
   width: 100%;
   max-height: none;
   border-radius: 14px;

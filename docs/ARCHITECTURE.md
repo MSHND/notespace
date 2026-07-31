@@ -104,11 +104,17 @@ Current design:
 - `detached` is the existing P016 handle-free adopted document and requires a new destination on Save.
 - `none` preserves the no-file editing gate.
 
-Vault opening is atomic. Permission, envelope validation, password unlock, authenticated decrypt, lossless decrypted-document validation and dirty-owner resolution complete while the old owner remains authoritative. The replacement state is staged without UI/storage side effects before ownership rotates, and successful commit clears old document-bound drafts and undo state. Only a fully prepared candidate may rotate the document session, install its exact handle/key session and replace the tree. Failure or cancellation writes nothing and leaves the old owner unchanged. New Vault and readable-copy destinations must be proven distinct from the current exact file entry; uncertain comparison fails closed.
+There is one user-facing **Choose file** doorway. `PocketFileOpening` reads and classifies the selected contents before adoption: a valid Vault envelope routes to the shared password/unlock pipeline; a valid plain Pocket payload routes to JSON ownership; unsupported content fails before permission or write. Filename and extension are not ownership signals.
+
+Vault opening remains atomic. Permission, envelope validation, password unlock, authenticated decrypt, lossless decrypted-document validation and dirty-owner resolution complete while the old owner remains authoritative. The replacement state is staged without UI/storage side effects before ownership rotates, and successful commit clears old document-bound drafts and undo state. Only a fully prepared candidate may rotate the document session, install its exact handle/key session and replace the tree. Failure or cancellation writes nothing and leaves the old owner unchanged. New conversion destinations must be proven distinct from the current exact file entry; uncertain comparison fails closed.
 
 `js/pocket-vault.js` owns only the page-lifetime unlocked Vault session. Vault ID and revision come from the exact envelope, not origin-global localStorage. Revision advances only after a successful encrypted write, and every Save uses a fresh AES-GCM nonce.
 
-Vault plaintext is deliberately excluded from ordinary browser recovery, workspace/cache snapshots, P016 device-change resolution and Document PiP. Existing JSON recovery data is left intact. Unsaved Vault edits therefore exist only in memory until encrypted persistence succeeds. `docs/VAULT_OWNERSHIP_CONTRACT.md` is the durable P019 contract and physical acceptance checklist.
+Vault plaintext is deliberately excluded from ordinary browser recovery, workspace/cache snapshots, P016 device-change resolution and Document PiP. Existing JSON recovery data is left intact. Unsaved Vault edits are instead captured through a separate authenticated encrypted browser record.
+
+At startup that record gates normal work behind **View recovery** or confirmed **Discard recovery**. Successful unlock opens `PocketVaultRecoveryViewer`, a dedicated cloned read-only tree/content surface with no truth owner, mutation route or PE access. Recovery output and Add to existing keep classification, writing and adoption separate: selected files are classified without adoption, writes use the destination's JSON or Vault route, and that destination becomes active only after persistence succeeds. Vault ID and saved revision determine same-Vault clean restore; divergent or different destinations use the contained timestamped Recovered-node import with fresh IDs.
+
+Current-file conversion is document-owned rather than a preference. A JSON owner can create and adopt a new Vault; a Vault owner can create and adopt a new readable JSON file. Both leave the source file untouched and preserve the source owner on cancellation or failure.
 
 Relevant files/functions:
 
@@ -118,7 +124,10 @@ Relevant files/functions:
 - `js/pocket-node-popout-editor.js`: PE apply calls `recordOp({ type: "details_edit", ... })` and persists state after applying popup changes.
 - `js/pocket-crypto.js`: Vault v1 validation, key derivation, unlock and fresh-nonce sealing.
 - `js/pocket-vault.js`: active in-memory unlocked Vault session and post-write revision advancement.
-- `js/pocket-vault-io-browser.js`: Vault candidate, accessible credential/switch/export dialogs, atomic adoption, encrypted handle writes and explicit readable-copy export.
+- `js/pocket-file-opening.js`: content-based JSON/Vault inspection for the one Choose file action; classification never adopts.
+- `js/pocket-vault-io-browser.js`: Vault candidate, shared credentials, atomic adoption, encrypted handle writes and current-file conversion.
+- `js/pocket-vault-recovery.js`: encrypted capture, exact-record lifecycle, same/different-destination recovery writes and post-write adoption.
+- `js/pocket-vault-recovery-viewer.js`: isolated read-only recovery tree and selected-node content.
 
 ## 5. Sync-Readiness / Health Status
 

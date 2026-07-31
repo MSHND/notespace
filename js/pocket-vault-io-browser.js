@@ -22,12 +22,6 @@
     "vaultSwitchCancel",
     "vaultRecoveryUnlock",
     "vaultRecoveryDelete",
-    "vaultRecoveryLater",
-    "vaultRecoverySaveVault",
-    "vaultRecoverySaveJson",
-    "vaultRecoveryAddExisting",
-    "vaultRecoveryKeep",
-    "vaultRecoveryDiscard",
     "vaultRecoveryConfirm",
     "vaultRecoveryConfirmCancel"
   ]);
@@ -157,12 +151,14 @@
     const password = dom("vaultPassword");
     const confirm = dom("vaultPasswordConfirm");
     const recoveryConfirm = dom("vaultRecoveryConfirm");
+    const exportConfirm = dom("vaultExportConfirm");
     if (password) password.disabled = false;
     if (confirm) confirm.disabled = true;
     if (recoveryConfirm) {
       recoveryConfirm.textContent = "Continue";
       recoveryConfirm.classList.remove("danger");
     }
+    if (exportConfirm) exportConfirm.textContent = "Export copy";
     if (record) record.busy = false;
     return true;
   }
@@ -173,7 +169,6 @@
       "vaultExportActions",
       "vaultSwitchActions",
       "vaultRecoveryWarningActions",
-      "vaultRecoveryUnlockedActions",
       "vaultRecoveryConfirmActions"
     ]) {
       const section = dom(id);
@@ -289,7 +284,7 @@
       if (!showDialogShell({
         mode: "recovery-warning",
         title: "Unsaved encrypted Vault changes found",
-        body: config.body || "Pocket kept unsaved Vault changes encrypted in this browser. Unlock them to choose a safe destination, keep them for later, or delete only this browser recovery.",
+        body: config.body || "Pocket kept unsaved Vault changes encrypted in this browser. View them before choosing what to do, or discard only this browser recovery.",
         initialFocusId: "vaultRecoveryUnlock",
         resolve,
       })) {
@@ -305,27 +300,10 @@
     return showCredentialDialog({
       mode: "recovery-unlock",
       title: "Unlock encrypted recovery",
-      body: config.body || "Enter the Vault password that protected these unsaved changes. The original Vault file is not required.",
-      submitLabel: "Unlock recovery",
+      body: config.body || "Enter the Vault password to view these recovered changes. The password is not stored, and the original Vault file is not required.",
+      submitLabel: "View recovery",
       submit: config.submit,
       cancel: config.cancel,
-    });
-  }
-
-  function showRecoveryActions(config = {}) {
-    return new Promise((resolve) => {
-      if (!showDialogShell({
-        mode: "recovery-actions",
-        title: "Encrypted recovery unlocked",
-        body: config.body || "Choose where to put the recovered Pocket data. Nothing will be opened or written until you choose an action.",
-        initialFocusId: "vaultRecoverySaveVault",
-        resolve,
-      })) {
-        resolve(false);
-        return;
-      }
-      const actions = dom("vaultRecoveryUnlockedActions");
-      if (actions) actions.hidden = false;
     });
   }
 
@@ -364,6 +342,27 @@
         resolve(false);
         return;
       }
+      const actions = dom("vaultExportActions");
+      if (actions) actions.hidden = false;
+    });
+  }
+
+  function showDecryptConversionConfirmation() {
+    return new Promise((resolve) => {
+      if (!showDialogShell({
+        mode: "convert-json",
+        title: "Convert this Vault to plain JSON?",
+        body: "This creates a new readable, unencrypted Pocket file and leaves the original encrypted Vault untouched. After the new file is saved, it becomes the active Pocket file.",
+        initialFocusId: "vaultExportConfirm",
+        resolve,
+      })) {
+        resolve(false);
+        return;
+      }
+      const confirm = dom("vaultExportConfirm");
+      if (confirm) confirm.textContent = "Create plain JSON";
+      const cancel = dom("vaultExportCancel");
+      if (cancel) cancel.textContent = "Cancel";
       const actions = dom("vaultExportActions");
       if (actions) actions.hidden = false;
     });
@@ -558,9 +557,11 @@
     dialogBound = true;
     dom("vaultCredentialForm")?.addEventListener("submit", submitCredentialDialog);
     dom("vaultCredentialCancel")?.addEventListener("click", cancelDialog);
-    dom("vaultExportConfirm")?.addEventListener("click", () => (
-      closeDialogForMode("export", true, { restoreFocus: false })
-    ));
+    dom("vaultExportConfirm")?.addEventListener("click", () => {
+      const record = activeDialog;
+      if (!record || !["export", "convert-json"].includes(record.mode) || record.busy) return;
+      closeDialog(true, { restoreFocus: false, record });
+    });
     dom("vaultExportCancel")?.addEventListener("click", cancelDialog);
     dom("vaultSwitchSave")?.addEventListener("click", () => { void saveBeforeOwnerSwitch(); });
     dom("vaultSwitchDiscard")?.addEventListener("click", () => (
@@ -568,28 +569,10 @@
     ));
     dom("vaultSwitchCancel")?.addEventListener("click", cancelDialog);
     dom("vaultRecoveryUnlock")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-warning", "unlock", { restoreFocus: false })
+      closeDialogForMode("recovery-warning", "view", { restoreFocus: false })
     ));
     dom("vaultRecoveryDelete")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-warning", "delete", { restoreFocus: false })
-    ));
-    dom("vaultRecoveryLater")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-warning", "later", { restoreFocus: false })
-    ));
-    dom("vaultRecoverySaveVault")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-actions", "save-vault", { restoreFocus: false })
-    ));
-    dom("vaultRecoverySaveJson")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-actions", "save-json", { restoreFocus: false })
-    ));
-    dom("vaultRecoveryAddExisting")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-actions", "add-existing", { restoreFocus: false })
-    ));
-    dom("vaultRecoveryKeep")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-actions", "keep", { restoreFocus: false })
-    ));
-    dom("vaultRecoveryDiscard")?.addEventListener("click", () => (
-      closeDialogForMode("recovery-actions", "discard", { restoreFocus: false })
+      closeDialogForMode("recovery-warning", "discard", { restoreFocus: false })
     ));
     dom("vaultRecoveryConfirm")?.addEventListener("click", () => {
       const record = activeDialog;
@@ -718,6 +701,63 @@
     return { ok: true, norm };
   }
 
+  async function unlockClassifiedVault(envelope, options = {}) {
+    const canContinue = typeof options.canContinue === "function"
+      ? options.canContinue
+      : () => true;
+    try {
+      global.PocketCrypto?.validateEnvelope?.(envelope);
+    } catch (_error) {
+      return {
+        ok: false,
+        reason: "invalid-vault",
+        message: "That encrypted Vault is damaged or unsupported.",
+      };
+    }
+    if (!canContinue()) return { ok: false, reason: "candidate-changed" };
+    const result = await showCredentialDialog({
+      mode: "unlock",
+      title: options.title || "Unlock encrypted Vault",
+      body: options.body || "",
+      sourceSession: options.sourceSession || currentSaveSession(),
+      submit: async (credential, forgetCredentials) => {
+        if (!canContinue()) {
+          return { ok: false, message: "This Vault request is no longer current." };
+        }
+        let passphrase = String(credential || "");
+        credential = "";
+        let unlocked;
+        try {
+          unlocked = await global.PocketVault.unlockEnvelope(envelope, passphrase);
+        } catch (_error) {
+          return {
+            ok: false,
+            message: options.wrongPasswordMessage
+              || "That password did not unlock this Vault, or the Vault has been changed.",
+          };
+        } finally {
+          passphrase = "";
+          forgetCredentials?.();
+        }
+        if (!canContinue()) {
+          return { ok: false, message: "This Vault request is no longer current." };
+        }
+        const checked = validateDecryptedPayload(unlocked.payload);
+        if (!checked.ok) return checked;
+        return {
+          ok: true,
+          unlocked,
+          payload: unlocked.payload,
+          norm: checked.norm,
+        };
+      },
+      cancel: options.cancel,
+    });
+    return result && result.ok === true
+      ? result
+      : { ok: false, reason: "cancelled-or-failed" };
+  }
+
   async function adoptReadyVault(candidate, ready, fileName, adoptionLease) {
     try {
       return await global.enqueuePocketOwnerTransition(async () => {
@@ -800,36 +840,9 @@
       return false;
     }
 
-    const unlockedResult = await showCredentialDialog({
-      mode: "unlock",
+    const unlockedResult = await unlockClassifiedVault(envelope, {
       sourceSession: candidate.sourceSession,
-      submit: async (credential, forgetCredentials) => {
-        if (!candidateIsCurrent(candidate)) {
-          return { ok: false, message: "This Vault open request is no longer current." };
-        }
-        let passphrase = String(credential || "");
-        credential = "";
-        let unlocked;
-        try {
-          unlocked = await global.PocketVault.unlockEnvelope(envelope, passphrase);
-        } catch (_error) {
-          return { ok: false, message: "That password did not unlock this Vault, or the Vault has been changed." };
-        } finally {
-          passphrase = "";
-          forgetCredentials?.();
-        }
-        if (!candidateIsCurrent(candidate)) {
-          return { ok: false, message: "This Vault open request is no longer current." };
-        }
-        const checked = validateDecryptedPayload(unlocked.payload);
-        if (!checked.ok) return checked;
-        return {
-          ok: true,
-          unlocked,
-          payload: unlocked.payload,
-          norm: checked.norm,
-        };
-      },
+      canContinue: () => candidateIsCurrent(candidate),
       cancel: () => clearCandidate(candidate),
     });
     if (!unlockedResult || unlockedResult.ok !== true || !candidateIsCurrent(candidate)) {
@@ -1042,11 +1055,45 @@
           if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
           const saved = await writeEnvelopeToHandle(envelope, handle, { isCurrent });
           if (!saved.ok || !isCurrent()) return saved;
+          const persistedSession = Object.freeze({
+            ...session,
+            revision: envelope.revision,
+            createdAt: envelope.createdAt,
+          });
+          const fileName = clean(handle.name || "pocket-recovered.vault.json", 120);
+          const committed = global.commitPreparedPocketDocument(checked.norm, {
+            schema: checked.norm.schema || "",
+            fileName,
+            writtenAt: checked.norm.writtenAt || payload.writtenAt || envelope.createdAt || "",
+          }, {
+            handle,
+            displayName: fileName,
+            ownerKind: "vault",
+            vaultSession: persistedSession,
+            forceNewSession: true,
+            canContinue: isCurrent,
+            loadedStateOptions: {
+              clearOps: true,
+              skipLocalSafetyCheck: true,
+              establishDocumentBaseline: true,
+              baselinePayload: payload,
+              storagePrivate: "vault",
+            },
+          });
+          if (!committed.ok) {
+            return { ok: false, reason: "adoption-failed", written: true };
+          }
           clearCandidate(candidate);
+          global.clearConflictGuard?.();
+          global.markVaultSavedNow?.();
+          global.refreshMeta?.();
+          global.renderTree?.();
+          void global.storeRecentPocketFileMeta?.(fileName);
           return {
             ok: true,
             target: "vault",
             written: true,
+            adopted: true,
           };
         });
         return written.ok
@@ -1119,11 +1166,38 @@
         return { ok: false, reason: "write-failed", error };
       }
       if (!saved.ok || !isCurrent()) return saved;
+      const fileName = clean(handle.name || "pocket-recovered.json", 120);
+      const committed = global.commitPreparedPocketDocument(checked.norm, {
+        schema: checked.norm.schema || "",
+        fileName,
+        writtenAt: checked.norm.writtenAt || payload.writtenAt || "",
+      }, {
+        handle,
+        displayName: fileName,
+        ownerKind: "json",
+        forceNewSession: true,
+        canContinue: isCurrent,
+        loadedStateOptions: {
+          clearOps: true,
+          skipLocalSafetyCheck: true,
+          establishDocumentBaseline: true,
+          baselinePayload: payload,
+        },
+      });
+      if (!committed.ok) {
+        return { ok: false, reason: "adoption-failed", written: true };
+      }
       clearCandidate(candidate);
+      global.clearConflictGuard?.();
+      global.markSavedNow?.(payload);
+      global.refreshMeta?.();
+      global.renderTree?.();
+      void global.storeRecentPocketFileMeta?.(fileName);
       return {
         ok: true,
         target: "json",
         written: true,
+        adopted: true,
       };
     });
     if (!written.ok) clearCandidate(candidate);
@@ -1200,8 +1274,9 @@
       say("Finish the current file action before creating a Vault.", "warn", 5200);
       return false;
     }
-    if (!global.canShowPocketTree?.()) {
-      say("Open or create a Pocket document before saving it as an encrypted Vault.", "warn", 6200);
+    if (!global.canShowPocketTree?.()
+        || !["json", "detached"].includes(global.pocketDocumentOwnerKind?.())) {
+      say("Open a plain Pocket JSON file before converting it to an encrypted Vault.", "warn", 6200);
       return false;
     }
     if (typeof global.showSaveFilePicker !== "function") {
@@ -1226,6 +1301,9 @@
     const candidate = newCandidate("create-vault", handle, sourceSession);
     const result = await showCredentialDialog({
       mode: "create",
+      title: "Convert to encrypted Vault",
+      body: "Choose a password for the new encrypted Vault. Pocket will leave the current plain JSON file untouched and activate the new Vault only after it is saved.",
+      submitLabel: "Create encrypted Vault",
       sourceSession,
       submit: async (credential, forgetCredentials) => {
         if (!candidateIsCurrent(candidate)) {
@@ -1296,7 +1374,104 @@
       clearCandidate(candidate);
       return false;
     }
-    say("Encrypted Vault created and opened.", "ok", 5200);
+    say("Encrypted Vault created and opened. The original plain JSON file was not changed.", "ok", 6200);
+    return true;
+  }
+
+  async function convertActiveVaultToJson() {
+    if (recoveryFlowOpen()) {
+      say("Finish the encrypted recovery action before converting this Vault.", "warn", 5200);
+      return false;
+    }
+    if (!global.isPocketVaultOwnerActive?.()) {
+      say("Open an encrypted Vault before converting it to plain JSON.", "warn", 5200);
+      return false;
+    }
+    if (ownerActionPending() || global.isPocketFilePermissionPromptOpen?.()) return false;
+    const sourceSession = currentSaveSession();
+    const vaultSession = global.PocketVault?.getActiveSession?.();
+    if (!vaultSession || !sourceSessionIsCurrent(sourceSession)) return false;
+    const recovery = global.PocketVaultRecovery?.inspectRecord?.();
+    const matchingRecoveryRaw = recovery?.valid
+      && clean(recovery.record?.envelope?.vaultId, 160) === clean(vaultSession.vaultId, 160)
+      ? recovery.raw
+      : "";
+    const confirmed = await showDecryptConversionConfirmation();
+    if (!confirmed || !sourceSessionIsCurrent(sourceSession)) return false;
+    if (typeof global.showSaveFilePicker !== "function") {
+      say("Plain JSON conversion is not available in this browser.", "warn", 6200);
+      return false;
+    }
+    let handle;
+    try {
+      handle = await global.showSaveFilePicker({
+        ...jsonExportPickerOptions(),
+        suggestedName: "pocket-data.json",
+      });
+    } catch (error) {
+      if (!isAbort(error)) say("Could not open the plain JSON destination picker.", "warn", 6200);
+      return false;
+    }
+    if (!handle || !sourceSessionIsCurrent(sourceSession)) return false;
+    if (!await requireDistinctDestination(
+      handle,
+      sourceSession.handle,
+      "Choose a different file for the new plain JSON document."
+    )) return false;
+    if (!sourceSessionIsCurrent(sourceSession)) return false;
+    const candidate = newCandidate("convert-vault-to-json", handle, sourceSession);
+    const result = await global.enqueuePocketOwnerTransition(async () => {
+      const isCurrent = () => candidateIsCurrent(candidate);
+      if (!isCurrent()) return { ok: false, reason: "vault-session-changed" };
+      const coveredSequence = Number(global.getPocketHighestOperationSequence?.() || 0);
+      const writtenAt = new Date().toISOString();
+      const payload = global.buildPocketPayload(writtenAt);
+      let written;
+      try {
+        written = await global.writePocketPayloadToHandle(payload, handle, { isCurrent });
+      } catch (error) {
+        return { ok: false, reason: "write-failed", error };
+      }
+      if (!written.ok || !isCurrent()) return written;
+      const fileName = clean(handle.name || "pocket-data.json", 120);
+      global.setPocketFileSession(handle, fileName, {
+        ownerKind: "json",
+        forceNewSession: true,
+      });
+      state.source = {
+        schema: clean(payload.schema, 80),
+        fileName,
+        writtenAt: clean(payload.writtenAt || payload.exportedAt, 40),
+      };
+      global.establishPocketDocumentBaseline?.(payload, state.source);
+      global.retainPocketOperationsAfterSequence?.(coveredSequence);
+      global.clearConflictGuard?.();
+      global.markSavedNow?.(payload);
+      clearCandidate(candidate);
+      global.refreshMeta?.();
+      global.renderTree?.();
+      void global.storeRecentPocketFileMeta?.(fileName);
+      return {
+        ok: true,
+        target: "json",
+        written: true,
+        adopted: true,
+      };
+    });
+    if (!result.ok) {
+      clearCandidate(candidate);
+      say("The plain JSON file was not created. The encrypted Vault remains active.", "warn", 6200);
+      return false;
+    }
+    const recoveryCleared = !matchingRecoveryRaw
+      || global.PocketVaultRecovery?.clearRecovery?.(matchingRecoveryRaw) === true;
+    say(
+      recoveryCleared
+        ? "Plain JSON created and opened. The original encrypted Vault was not changed."
+        : "Plain JSON created and opened, but Pocket could not remove the older matching browser recovery.",
+      recoveryCleared ? "ok" : "warn",
+      recoveryCleared ? 6200 : 7200
+    );
     return true;
   }
 
@@ -1362,13 +1537,15 @@
     openVaultFile: beginOpenVaultHandle,
     createActiveVault,
     saveVaultFromCurrentPocket: createActiveVault,
+    convertActiveVaultToJson,
     exportUnencryptedJsonCopy,
     saveRecoveredPayloadAsVault,
     saveRecoveredPayloadAsJson,
     writeActiveVaultPayload,
+    writeEnvelopeToHandle,
+    unlockClassifiedVault,
     showRecoveryWarning,
     showRecoveryUnlock,
-    showRecoveryActions,
     showRecoveryConfirmation,
     beforeAdoptPreparedDocument,
     finishPreparedDocumentAdoption,

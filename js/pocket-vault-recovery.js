@@ -501,7 +501,7 @@
     }
     const resume = deferredNormalStartup;
     deferredNormalStartup = null;
-    if (typeof resume === "function") {
+    if (options.resumeStartup !== false && typeof resume === "function") {
       try {
         resume();
       } catch (_error) {}
@@ -518,9 +518,9 @@
   async function confirmRecoveryDeletion(flow, afterUnlock) {
     const confirmed = await global.PocketVaultBrowserIo?.showRecoveryConfirmation?.({
       mode: afterUnlock ? "recovery-confirm-discard" : "recovery-confirm-delete",
-      title: afterUnlock ? "Discard encrypted recovery?" : "Delete encrypted recovery?",
+      title: "Discard encrypted recovery?",
       body: "This permanently deletes only the browser-held encrypted recovery. It does not change or delete any saved Pocket file or Vault.",
-      confirmLabel: afterUnlock ? "Discard recovery" : "Delete recovery",
+      confirmLabel: "Discard recovery",
       danger: true,
     });
     if (!flowIsCurrent(flow) || !confirmed) return false;
@@ -615,12 +615,14 @@
         status: "Recovered Vault saved, but Pocket could not remove the older browser recovery.",
         tone: "warn",
         durationMs: 7200,
+        resumeStartup: false,
       });
       return true;
     }
     finishFlow(flow, {
       status: "Recovered data saved as a new encrypted Vault.",
       tone: "ok",
+      resumeStartup: false,
     });
     return true;
   }
@@ -652,116 +654,298 @@
         status: "Recovered plain JSON saved, but Pocket could not remove the encrypted browser recovery.",
         tone: "warn",
         durationMs: 7200,
+        resumeStartup: false,
       });
       return true;
     }
     finishFlow(flow, {
       status: "Recovered data saved as plain JSON.",
       tone: "ok",
+      resumeStartup: false,
     });
     return true;
   }
 
-  async function addRecoveryToExisting(flow) {
-    if (typeof global.showOpenFilePicker !== "function") {
-      global.setStatus?.("Opening an existing Pocket file is not available in this browser.", "warn");
-      return false;
-    }
-    let handle;
+  function normalisePayloadForAdoption(payload) {
+    const checked = validateRecoveredPayload(payload);
+    if (!checked.ok || typeof global.normaliseInput !== "function") return null;
+    const norm = global.normaliseInput(payload);
+    return Array.isArray(norm?.nodes) ? norm : null;
+  }
+
+  async function rereadExactDestination(handle, expectedRaw, isCurrent) {
+    if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
+    const permitted = await global.ensureWritePermission?.(handle);
+    if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
+    if (!permitted) return { ok: false, reason: "permission-denied" };
     try {
-      const handles = await global.showOpenFilePicker({
-        types: [{
-          description: "Pocket JSON file",
-          accept: { "application/json": [".json"] },
-        }],
-        multiple: false,
-      });
-      handle = Array.isArray(handles) ? handles[0] : null;
+      const file = await handle.getFile();
+      const raw = await file.text();
+      if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
+      return raw === expectedRaw
+        ? { ok: true }
+        : { ok: false, reason: "destination-changed" };
     } catch (error) {
-      if (!error || (error.name !== "AbortError" && !/abort/i.test(String(error.message || "")))) {
-        global.setStatus?.("Pocket could not open the existing-file picker.", "warn");
-      }
-      return false;
+      return { ok: false, reason: "destination-read-failed", error };
     }
-    if (!handle || !flowIsCurrent(flow)) return false;
+  }
 
-    let file;
-    let parsed;
-    let destinationRaw = "";
-    try {
-      file = await handle.getFile();
-      destinationRaw = await file.text();
-      if (destinationRaw.length > MAX_OUTPUT_CHARS) {
-        throw new Error("The selected Pocket file is too large for this safe import.");
-      }
-      parsed = JSON.parse(destinationRaw);
-    } catch (_error) {
-      global.setStatus?.(
-        "Pocket could not read that existing Pocket JSON file safely. Nothing was written.",
-        "warn",
-        { durationMs: 7200 }
-      );
-      return false;
-    }
-    if (!flowIsCurrent(flow)
-        || global.PocketCrypto?.isVaultEnvelope?.(parsed)
-        || !global.isPocketPayloadShape?.(parsed)) {
-      global.setStatus?.(
-        "Choose a supported plain Pocket JSON file for this import. Nothing was written.",
-        "warn",
-        { durationMs: 7200 }
-      );
-      return false;
-    }
-    const combined = buildRecoveredImport(parsed, flow.payload, flow.capturedAt);
-    if (!combined.ok) {
-      global.setStatus?.(
-        "Pocket could not add the recovered items without risking content loss. Nothing was written.",
-        "warn",
-        { durationMs: 7200 }
-      );
-      return false;
-    }
-    const fileName = clean(file?.name || handle.name || "Pocket file", 120);
-    const confirmed = await global.PocketVaultBrowserIo?.showRecoveryConfirmation?.({
-      mode: "recovery-confirm-add-existing",
-      title: `Add recovered items to ${fileName}?`,
-      body: "Pocket will add one new top-level Recovered item and save only the file you selected. It will not merge or overwrite existing items.",
-      confirmLabel: "Add and save",
-    });
-    if (!flowIsCurrent(flow) || !confirmed) return false;
-
+  async function writeAndAdoptRecoveryJson(flow, selected, payload) {
+    const norm = normalisePayloadForAdoption(payload);
+    if (!norm) return { ok: false, reason: "unsafe-payload" };
     const sourceSession = flow.sourceSession;
-    const written = await global.enqueuePocketOwnerTransition(async () => {
-      const isCurrent = () => flowIsCurrent(flow)
-        && global.isPocketFileSaveSessionCurrent?.(sourceSession) === true;
-      if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
-      const permitted = await global.ensureWritePermission?.(handle);
-      if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
-      if (!permitted) return { ok: false, reason: "permission-denied" };
-      let currentDestinationRaw = "";
-      try {
-        const currentDestination = await handle.getFile();
-        currentDestinationRaw = await currentDestination.text();
-      } catch (error) {
-        return { ok: false, reason: "destination-read-failed", error };
-      }
-      if (!isCurrent()) return { ok: false, reason: "recovery-flow-changed" };
-      if (currentDestinationRaw !== destinationRaw) {
-        return { ok: false, reason: "destination-changed" };
-      }
-      let saved;
-      try {
-        saved = await global.writePocketPayloadToHandle(combined.payload, handle, { isCurrent });
-      } catch (error) {
-        return { ok: false, reason: "write-failed", error };
-      }
-      if (!saved.ok || !isCurrent()) return saved;
-      return { ok: true, written: true, targetName: fileName };
+    const adoptionLease = await global.PocketVaultBrowserIo?.beforeAdoptPreparedDocument?.({
+      kind: "json",
+      displayName: selected.fileName,
+      canContinue: () => flowIsCurrent(flow),
     });
-    if (!written.ok) {
+    if (!adoptionLease || !flowIsCurrent(flow)) {
+      global.PocketVaultBrowserIo?.finishPreparedDocumentAdoption?.(adoptionLease);
+      return { ok: false, reason: "recovery-flow-changed" };
+    }
+    try {
+      return await global.enqueuePocketOwnerTransition(async () => {
+        const isCurrent = () => flowIsCurrent(flow)
+          && global.isPocketFileSaveSessionCurrent?.(sourceSession) === true;
+        const reread = await rereadExactDestination(
+          selected.handle,
+          selected.raw,
+          isCurrent
+        );
+        if (!reread.ok) return reread;
+        let saved;
+        try {
+          saved = await global.writePocketPayloadToHandle(payload, selected.handle, { isCurrent });
+        } catch (error) {
+          return { ok: false, reason: "write-failed", error };
+        }
+        if (!saved.ok || !isCurrent()) return saved;
+        const committed = global.commitPreparedPocketDocument(norm, {
+          schema: norm.schema || "",
+          fileName: selected.fileName,
+          writtenAt: norm.writtenAt || payload.writtenAt || payload.exportedAt || "",
+        }, {
+          handle: selected.handle,
+          displayName: selected.fileName,
+          ownerKind: "json",
+          forceNewSession: true,
+          canContinue: isCurrent,
+          loadedStateOptions: {
+            clearOps: true,
+            skipLocalSafetyCheck: true,
+            establishDocumentBaseline: true,
+            baselinePayload: payload,
+          },
+        });
+        if (!committed.ok) {
+          return { ok: false, reason: "adoption-failed", written: true };
+        }
+        global.clearConflictGuard?.();
+        global.markSavedNow?.(payload);
+        global.refreshMeta?.();
+        global.renderTree?.();
+        void global.storeRecentPocketFileMeta?.(selected.fileName);
+        return { ok: true, written: true, target: "json", adopted: true };
+      });
+    } finally {
+      global.PocketVaultBrowserIo?.finishPreparedDocumentAdoption?.(adoptionLease);
+    }
+  }
+
+  async function writeAndAdoptRecoveryVault(flow, selected, payload, unlockedSession) {
+    const norm = normalisePayloadForAdoption(payload);
+    if (!norm || !unlockedSession) return { ok: false, reason: "unsafe-payload" };
+    const sourceSession = flow.sourceSession;
+    let envelope;
+    try {
+      envelope = await global.PocketVault.sealWithUnlockedKey(
+        payload,
+        unlockedSession,
+        Number(unlockedSession.revision) + 1
+      );
+    } catch (error) {
+      return { ok: false, reason: "vault-encryption-failed", error };
+    }
+    if (!flowIsCurrent(flow)) return { ok: false, reason: "recovery-flow-changed" };
+    const adoptionLease = await global.PocketVaultBrowserIo?.beforeAdoptPreparedDocument?.({
+      kind: "vault",
+      displayName: selected.fileName,
+      canContinue: () => flowIsCurrent(flow),
+    });
+    if (!adoptionLease || !flowIsCurrent(flow)) {
+      global.PocketVaultBrowserIo?.finishPreparedDocumentAdoption?.(adoptionLease);
+      return { ok: false, reason: "recovery-flow-changed" };
+    }
+    try {
+      return await global.enqueuePocketOwnerTransition(async () => {
+        const isCurrent = () => flowIsCurrent(flow)
+          && global.isPocketFileSaveSessionCurrent?.(sourceSession) === true;
+        const reread = await rereadExactDestination(
+          selected.handle,
+          selected.raw,
+          isCurrent
+        );
+        if (!reread.ok) return reread;
+        const saved = await global.PocketVaultBrowserIo.writeEnvelopeToHandle(
+          envelope,
+          selected.handle,
+          { isCurrent }
+        );
+        if (!saved.ok || !isCurrent()) return saved;
+        const persistedSession = Object.freeze({
+          ...unlockedSession,
+          revision: envelope.revision,
+          createdAt: envelope.createdAt,
+        });
+        const committed = global.commitPreparedPocketDocument(norm, {
+          schema: norm.schema || "",
+          fileName: selected.fileName,
+          writtenAt: norm.writtenAt || payload.writtenAt || envelope.createdAt || "",
+        }, {
+          handle: selected.handle,
+          displayName: selected.fileName,
+          ownerKind: "vault",
+          vaultSession: persistedSession,
+          forceNewSession: true,
+          canContinue: isCurrent,
+          loadedStateOptions: {
+            clearOps: true,
+            skipLocalSafetyCheck: true,
+            establishDocumentBaseline: true,
+            baselinePayload: payload,
+            storagePrivate: "vault",
+          },
+        });
+        if (!committed.ok) {
+          return { ok: false, reason: "adoption-failed", written: true };
+        }
+        global.clearConflictGuard?.();
+        global.markVaultSavedNow?.();
+        global.refreshMeta?.();
+        global.renderTree?.();
+        void global.storeRecentPocketFileMeta?.(selected.fileName);
+        return {
+          ok: true,
+          written: true,
+          target: "vault",
+          revision: envelope.revision,
+          adopted: true,
+        };
+      });
+    } finally {
+      global.PocketVaultBrowserIo?.finishPreparedDocumentAdoption?.(adoptionLease);
+    }
+  }
+
+  async function addRecoveryToExisting(flow) {
+    const selected = await global.PocketFileOpening?.chooseExistingFile?.({
+      canContinue: () => flowIsCurrent(flow),
+    });
+    if (!selected || !selected.ok || !flowIsCurrent(flow)) {
+      if (selected
+          && !["cancelled", "candidate-changed"].includes(selected.reason)) {
+        global.setStatus?.(
+          selected.reason === "damaged-vault"
+            ? "That encrypted Vault is damaged or unsupported. Nothing was written."
+            : "Choose a supported Pocket JSON or encrypted Vault. Nothing was written.",
+          "warn",
+          { durationMs: 7200 }
+        );
+      }
+      return false;
+    }
+
+    let destinationPayload = selected.payload || null;
+    let destinationVaultSession = null;
+    let destinationVaultId = "";
+    let destinationVaultRevision = 0;
+    if (selected.kind === "vault") {
+      const ready = await global.PocketVaultBrowserIo?.unlockClassifiedVault?.(
+        selected.envelope,
+        {
+          title: `Unlock ${selected.fileName}`,
+          body: "Unlock this destination Vault so Pocket can compare it safely with the recovered browser data.",
+          sourceSession: flow.sourceSession,
+          canContinue: () => flowIsCurrent(flow),
+          wrongPasswordMessage: "That password did not unlock the destination Vault. Nothing was written.",
+        }
+      );
+      if (!ready?.ok || !flowIsCurrent(flow)) return false;
+      destinationPayload = ready.payload;
+      destinationVaultSession = ready.unlocked;
+      destinationVaultId = clean(selected.envelope?.vaultId, 160);
+      destinationVaultRevision = Number(selected.envelope?.revision);
+    }
+
+    let outputPayload;
+    let confirmation;
+    let resultStatus;
+    const sameVault = selected.kind === "vault"
+      && !!flow.sourceVaultId
+      && destinationVaultId === flow.sourceVaultId;
+    const baseRevision = Number(flow.sourceRecoveryRevision) - 1;
+    if (sameVault
+        && Number.isSafeInteger(baseRevision)
+        && baseRevision >= 0
+        && destinationVaultRevision === baseRevision) {
+      outputPayload = payloadFromDocument(flow.document, new Date().toISOString());
+      confirmation = {
+        mode: "recovery-confirm-restore-same-vault",
+        title: `Restore recovered changes to ${selected.fileName}?`,
+        body: "This is the original Vault, and its saved revision still matches the base captured by recovery. Pocket will restore the recovered state, save only this Vault, and then open it.",
+        confirmLabel: "Restore and save",
+      };
+      resultStatus = "Recovered changes restored to their original encrypted Vault.";
+    } else {
+      const combined = buildRecoveredImport(
+        destinationPayload,
+        flow.payload,
+        flow.capturedAt
+      );
+      if (!combined.ok) {
+        global.setStatus?.(
+          sameVault
+            ? "The original Vault has diverged, and Pocket could not create a safe recovered copy beneath a new Recovered item. Nothing was written."
+            : "Pocket could not add the recovered items without risking content loss. Nothing was written.",
+          "warn",
+          { durationMs: 8200 }
+        );
+        return false;
+      }
+      outputPayload = combined.payload;
+      confirmation = sameVault
+        ? {
+            mode: "recovery-confirm-divergent-same-vault",
+            title: `The original Vault has newer or different changes`,
+            body: "Pocket will not overwrite those changes. The safe fallback is to add the recovered material beneath one new timestamped Recovered item in this Vault, preserving both versions.",
+            confirmLabel: "Add recovered copy",
+          }
+        : {
+            mode: "recovery-confirm-add-existing",
+            title: `Add recovered items to ${selected.fileName}?`,
+            body: "Pocket will add one new top-level Recovered item with fresh internal IDs, save only the file you selected, and then open that file.",
+            confirmLabel: "Add and save",
+          };
+      resultStatus = sameVault
+        ? "The diverged Vault was preserved and the recovered material was added beneath a new Recovered item."
+        : `Recovered items added beneath ${recoveredLabel(flow.capturedAt)}.`;
+    }
+
+    const confirmed = await global.PocketVaultBrowserIo?.showRecoveryConfirmation?.(
+      confirmation
+    );
+    if (!flowIsCurrent(flow) || !confirmed) return false;
+    const written = selected.kind === "vault"
+      ? await writeAndAdoptRecoveryVault(
+          flow,
+          selected,
+          outputPayload,
+          destinationVaultSession
+        )
+      : await writeAndAdoptRecoveryJson(flow, selected, outputPayload);
+    if (!written?.ok) {
       global.setStatus?.(
-        "The existing Pocket file was not changed. The encrypted browser recovery is still available.",
+        "The selected Pocket file was not changed safely. The encrypted browser recovery is still available.",
         "warn",
         { durationMs: 7200 }
       );
@@ -769,22 +953,27 @@
     }
     if (!clearRecovery(flow.recordRaw)) {
       finishFlow(flow, {
-        status: "Recovered items were added, but Pocket could not remove the encrypted browser recovery.",
+        status: "The recovered data was saved and opened, but Pocket could not remove the encrypted browser recovery.",
         tone: "warn",
         durationMs: 7200,
+        resumeStartup: false,
       });
       return true;
     }
     finishFlow(flow, {
-      status: `Recovered items added beneath ${recoveredLabel(flow.capturedAt)}.`,
+      status: resultStatus,
       tone: "ok",
+      resumeStartup: false,
     });
     return true;
   }
 
   async function runUnlockedActions(flow) {
     while (flowIsCurrent(flow) && flow.payload && flow.document) {
-      const action = await global.PocketVaultBrowserIo?.showRecoveryActions?.();
+      const action = await global.PocketVaultRecoveryViewer?.show?.(
+        flow.document,
+        flow.capturedAt
+      );
       if (!flowIsCurrent(flow)) return false;
       if (!action || action === "keep") {
         finishFlow(flow, {
@@ -816,18 +1005,12 @@
     while (flowIsCurrent(flow)) {
       const action = await global.PocketVaultBrowserIo?.showRecoveryWarning?.();
       if (!flowIsCurrent(flow)) return false;
-      if (!action || action === "later") {
-        finishFlow(flow, {
-          status: "Encrypted browser recovery kept for later.",
-          tone: "ok",
-        });
-        return true;
-      }
-      if (action === "delete") {
+      if (!action) continue;
+      if (action === "discard") {
         if (await confirmRecoveryDeletion(flow, false)) return true;
         continue;
       }
-      if (action === "unlock") {
+      if (action === "view") {
         if (!await unlockRecovery(flow)) continue;
         return runUnlockedActions(flow);
       }
@@ -846,6 +1029,12 @@
       sourceSession,
       recordRaw: inspected.raw,
       capturedAt: inspected.valid ? inspected.record.capturedAt : "",
+      sourceVaultId: inspected.valid
+        ? clean(inspected.record.envelope?.vaultId, 160)
+        : "",
+      sourceRecoveryRevision: inspected.valid
+        ? Number(inspected.record.envelope?.revision)
+        : 0,
       payload: null,
       document: null,
       cancelled: false,

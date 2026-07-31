@@ -77,9 +77,8 @@
         <button id="cmdFocus" class="commandBtn" type="button"><span>Focus here</span><span class="commandHint">Shift + F</span></button>
         <button id="cmdSearch" class="commandBtn" type="button"><span>Filter</span><span class="commandHint">Ctrl/Cmd + F</span></button>
         <button id="cmdSave" class="commandBtn" type="button"><span>save</span><span class="commandHint">Ctrl/Cmd + S</span></button>
-        <button id="cmdOpenVault" class="commandBtn" type="button"><span>Open encrypted Vault…</span><span class="commandHint">local encrypted file</span></button>
-        <button id="cmdCreateVault" class="commandBtn" type="button"><span>Save as encrypted Vault…</span><span class="commandHint">new encrypted file</span></button>
-        <button id="cmdExportVaultJson" class="commandBtn" type="button" hidden disabled><span>Export unencrypted JSON copy…</span><span class="commandHint">readable copy</span></button>
+        <button id="cmdCreateVault" class="commandBtn" type="button" hidden disabled><span>Convert to encrypted Vault…</span><span class="commandHint">new encrypted file</span></button>
+        <button id="cmdExportVaultJson" class="commandBtn" type="button" hidden disabled><span>Convert to plain JSON…</span><span class="commandHint">new readable file</span></button>
         <button id="cmdHealth" class="commandBtn" type="button"><span>Health check</span><span class="commandHint">calm status</span></button>
         <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Review an earlier device version</span><span class="commandHint">safety</span></button>
         <button id="cmdHelp" class="commandBtn" type="button"><span>Show controls</span><span class="commandHint">?</span></button>
@@ -138,12 +137,49 @@
         </div>
 
         <div id="vaultRecoveryWarningActions" class="vaultDialogActions vaultRecoveryWarningActions" hidden>
-          <button id="vaultRecoveryUnlock" class="vaultDialogPrimary" type="button">Unlock recovery</button>
-          <button id="vaultRecoveryDelete" class="vaultDialogSecondary" type="button">Delete recovery</button>
-          <button id="vaultRecoveryLater" class="vaultDialogSecondary" type="button">Not now</button>
+          <button id="vaultRecoveryUnlock" class="vaultDialogPrimary" type="button">View recovery</button>
+          <button id="vaultRecoveryDelete" class="vaultDialogSecondary" type="button">Discard recovery</button>
         </div>
 
-        <div id="vaultRecoveryUnlockedActions" class="vaultRecoveryUnlockedActions" hidden>
+        <div id="vaultRecoveryConfirmActions" class="vaultDialogActions" hidden>
+          <button id="vaultRecoveryConfirm" class="vaultDialogPrimary" type="button">Continue</button>
+          <button id="vaultRecoveryConfirmCancel" class="vaultDialogSecondary" type="button">Cancel</button>
+        </div>
+
+        <p id="vaultDialogError" class="vaultDialogError" role="status" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <div id="vaultRecoveryViewerOverlay" class="vaultRecoveryViewerOverlay" hidden>
+      <section class="vaultRecoveryViewerCard" role="dialog" aria-modal="true" aria-labelledby="vaultRecoveryViewerTitle" aria-describedby="vaultRecoveryViewerNotice">
+        <header class="vaultRecoveryViewerHeader">
+          <div>
+            <h2 id="vaultRecoveryViewerTitle">Recovered browser data</h2>
+            <p id="vaultRecoveryCaptureTime" class="vaultRecoveryCaptureTime"></p>
+          </div>
+          <p id="vaultRecoveryViewerNotice" class="vaultRecoveryViewerNotice">This is a read-only recovery preview. It has not been written to a Pocket file.</p>
+        </header>
+        <div class="vaultRecoveryViewerBody">
+          <nav class="vaultRecoveryTreePane" aria-label="Recovered Pocket tree">
+            <ul id="vaultRecoveryTree" class="vaultRecoveryTreeList"></ul>
+          </nav>
+          <article class="vaultRecoveryContentPane" aria-live="polite">
+            <h3 id="vaultRecoverySelectedLabel">Select a recovered item</h3>
+            <section>
+              <h4>Notes</h4>
+              <pre id="vaultRecoverySelectedDetails"></pre>
+            </section>
+            <section id="vaultRecoverySelectedOutlineSection" hidden>
+              <h4>Outline</h4>
+              <pre id="vaultRecoverySelectedOutline"></pre>
+            </section>
+          </article>
+        </div>
+        <div class="vaultRecoveryUnlockedActions">
+          <button id="vaultRecoveryKeep" class="vaultRecoveryAction" type="button">
+            <strong>Keep for later</strong>
+            <span>Close this preview and leave the encrypted browser recovery intact.</span>
+          </button>
           <button id="vaultRecoverySaveVault" class="vaultRecoveryAction" type="button">
             <strong>Save as new encrypted Vault</strong>
             <span>Choose a new encrypted file and password.</span>
@@ -153,25 +189,14 @@
             <span>Choose a readable, unencrypted Pocket file.</span>
           </button>
           <button id="vaultRecoveryAddExisting" class="vaultRecoveryAction" type="button">
-            <strong>Add to an existing Pocket file</strong>
-            <span>Place the recovered items beneath one new top-level item.</span>
-          </button>
-          <button id="vaultRecoveryKeep" class="vaultRecoveryAction" type="button">
-            <strong>Keep for later</strong>
-            <span>Leave the encrypted browser recovery intact.</span>
+            <strong>Add to existing Pocket file</strong>
+            <span>Choose a plain Pocket JSON or encrypted Vault.</span>
           </button>
           <button id="vaultRecoveryDiscard" class="vaultRecoveryAction danger" type="button">
             <strong>Discard recovery</strong>
             <span>Delete only the browser-held encrypted recovery.</span>
           </button>
         </div>
-
-        <div id="vaultRecoveryConfirmActions" class="vaultDialogActions" hidden>
-          <button id="vaultRecoveryConfirm" class="vaultDialogPrimary" type="button">Continue</button>
-          <button id="vaultRecoveryConfirmCancel" class="vaultDialogSecondary" type="button">Cancel</button>
-        </div>
-
-        <p id="vaultDialogError" class="vaultDialogError" role="status" aria-live="polite"></p>
       </section>
     </div>
 
@@ -305,6 +330,8 @@
   <script src="js/pocket-crypto.js"></script>
   <script src="js/pocket-vault.js"></script>
   <script src="js/pocket-vault-io-browser.js"></script>
+  <script src="js/pocket-file-opening.js"></script>
+  <script src="js/pocket-vault-recovery-viewer.js"></script>
   <script src="js/pocket-vault-recovery.js"></script>
   <script src="js/pocket-phone-mode.js"></script>
   <script src="js/pocket-phone-tap.js"></script>

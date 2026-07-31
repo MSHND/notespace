@@ -969,6 +969,10 @@ async function openPocketFile() {
     setStatus("Finish the encrypted Vault action before opening another file.", "warn", { durationMs: 5200 });
     return false;
   }
+  if (window.PocketFileOpening
+      && typeof window.PocketFileOpening.chooseAndOpen === "function") {
+    return await window.PocketFileOpening.chooseAndOpen();
+  }
   if (typeof window.showOpenFilePicker !== "function") {
     setStatus("Pocket file loading is not available in this browser.", "warn", { durationMs: 6200 });
     return false;

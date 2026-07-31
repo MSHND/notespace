@@ -231,7 +231,12 @@ function refreshCommandPaletteState() {
   setDisabled(el.cmdEdit, !hasSelection);
   setDisabled(el.cmdMove, !hasSelection);
   setDisabled(el.cmdFocus, !hasSelection);
-  const vaultActive = typeof isPocketVaultOwnerActive === "function" && isPocketVaultOwnerActive();
+  const ownerKind = typeof pocketDocumentOwnerKind === "function"
+    ? pocketDocumentOwnerKind()
+    : "none";
+  const vaultActive = ownerKind === "vault"
+    && typeof isPocketVaultOwnerActive === "function"
+    && isPocketVaultOwnerActive();
   const trail = vaultActive ? [] : readLocalSafetyTrail();
   const latest = readLocalSafetySnapshot();
   const latestMs = latest ? latest.capturedMs : 0;
@@ -244,6 +249,10 @@ function refreshCommandPaletteState() {
       : "safety";
   }
   setDisabled(el.cmdRestoreRecent, !hasPreviousLocalVersion);
+  if (el.cmdCreateVault instanceof HTMLButtonElement) {
+    el.cmdCreateVault.hidden = ownerKind !== "json";
+    setDisabled(el.cmdCreateVault, ownerKind !== "json");
+  }
   if (el.cmdExportVaultJson instanceof HTMLButtonElement) {
     el.cmdExportVaultJson.hidden = !vaultActive;
     setDisabled(el.cmdExportVaultJson, !vaultActive);
@@ -320,17 +329,13 @@ function runCommandPaletteAction(action) {
         el.search.select();
       }
     } else if (action === "save") saveCurrentContext();
-    else if (action === "open_vault") {
-      shouldReturnToTree = false;
-      void window.PocketVaultBrowserIo?.openVault?.();
-    }
     else if (action === "create_vault") {
       shouldReturnToTree = false;
       void window.PocketVaultBrowserIo?.createActiveVault?.();
     }
     else if (action === "export_vault_json") {
       shouldReturnToTree = false;
-      void window.PocketVaultBrowserIo?.exportUnencryptedJsonCopy?.();
+      void window.PocketVaultBrowserIo?.convertActiveVaultToJson?.();
     }
     else if (action === "delete") deleteSelected();
     else if (action === "health") showPocketHealth();
@@ -462,7 +467,6 @@ function bind() {
   el.cmdFocus?.addEventListener("click", () => runCommandPaletteAction("focus"));
   el.cmdSearch?.addEventListener("click", () => runCommandPaletteAction("search"));
   el.cmdSave?.addEventListener("click", () => runCommandPaletteAction("save"));
-  el.cmdOpenVault?.addEventListener("click", () => runCommandPaletteAction("open_vault"));
   el.cmdCreateVault?.addEventListener("click", () => runCommandPaletteAction("create_vault"));
   el.cmdExportVaultJson?.addEventListener("click", () => runCommandPaletteAction("export_vault_json"));
   el.cmdHealth?.addEventListener("click", () => runCommandPaletteAction("health"));
