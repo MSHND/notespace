@@ -173,6 +173,47 @@
   opacity: 0.62;
 }
 
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultDialogCard {
+  width: min(356px, 100%);
+  gap: 10px;
+  padding: 15px;
+}
+
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultDialogHeader {
+  gap: 3px;
+}
+
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultRecoveryWarningActions:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.72fr);
+  gap: 7px;
+}
+
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultRecoveryWarningActions button {
+  width: 100%;
+}
+
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultRecoveryWarningActions .vaultRecoveryQuietDelete {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: auto;
+  min-height: 40px;
+  padding: 6px 10px;
+  border-color: transparent;
+  background: transparent;
+  color: #9f3f2e;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultRecoveryWarningActions .vaultRecoveryQuietDelete:hover {
+  background: rgba(180, 83, 63, 0.08);
+}
+
+.vaultDialogOverlay.vaultRecoveryWarningMode .vaultDialogError:empty {
+  display: none;
+}
+
 .vaultRecoveryUnlockedActions {
   display: flex;
   flex-wrap: wrap;
@@ -470,6 +511,14 @@ body.vaultRecoveryViewerOpen {
     padding: 16px;
   }
 
+  .vaultDialogOverlay.vaultRecoveryWarningMode .vaultDialogCard {
+    padding: 14px;
+  }
+
+  .vaultDialogOverlay.vaultRecoveryWarningMode .vaultRecoveryWarningActions .vaultRecoveryQuietDelete {
+    min-height: 44px;
+  }
+
   .vaultDialogActions {
     gap: 6px;
   }
@@ -505,6 +554,10 @@ body.phoneMode .vaultRecoveryViewerCard {
 }
 
 body.phoneMode .vaultDialogActions button {
+  min-height: 44px;
+}
+
+body.phoneMode .vaultDialogOverlay.vaultRecoveryWarningMode .vaultRecoveryWarningActions .vaultRecoveryQuietDelete {
   min-height: 44px;
 }
 

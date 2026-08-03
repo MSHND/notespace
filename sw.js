@@ -1,6 +1,6 @@
 /* pocket service worker: cache the app shell for a more app-like phone/PWA launch. */
 
-const CACHE_NAME = "pocket-shell-v6";
+const CACHE_NAME = "pocket-shell-v7";
 const SHELL_FILES = [
   "./",
   "./index.html",

@@ -1,5 +1,79 @@
 # Codex report
 
+## POCKET TASK P026 - TIGHTEN VAULT RECOVERY STARTUP UI
+
+Title: Tighten Vault recovery prompt
+
+Status: the initial encrypted-recovery warning now uses shorter copy and a compact warning-only layout. **View recovery** and **Not now** remain the two main choices; quiet **Delete recovery** sits beneath them and is last in DOM and Tab order. The accepted P025 recovery behaviours and the existing shared Vault dialog/recovery owners are unchanged.
+
+Commit title:
+
+- `P026 Tighten Vault recovery prompt`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `897cf5e400df1bcf856c821d46ac56f49bb3c5ab`
+- Starting title: `P025 Allow deferring Vault recovery`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- P026 changes only initial-warning and deletion-confirmation wording/presentation, production contract tests, documentation and the offline cache generation. It adds no modal, recovery owner, listener, storage key, file route, Save path or startup route.
+- Browser validation used the repository's disposable encrypted fixture on an isolated local origin. No personal Pocket file, Vault, password, handle or browser recovery was inspected.
+
+### Implementation
+
+The shared Vault overlay now receives `vaultRecoveryWarningMode` only while its existing `recovery-warning` mode is active and removes it on close. That mode limits the card to 356px, reduces warning-only gaps/padding, removes the empty error row from layout, and gives the three canonical actions a two-column-plus-delete grid. Other Vault dialogs retain the shared P024/P025 presentation.
+
+The initial warning now says **Unsaved Vault changes** and **Pocket found encrypted recovery data from an earlier session.** Its DOM and keyboard order is View recovery, Not now, Delete recovery. Delete is an underlined quiet destructive action on its own row. At narrow widths all three controls retain 44px touch heights.
+
+The existing exact-record deletion path still owns both initial and post-view deletion. Its shared confirmation now says **Delete encrypted recovery?** and explains that only recovery stored in this browser is permanently deleted while saved Pocket files and Vaults are unchanged. The confirm action remains visibly destructive. View, Not now, Cancel, confirmed deletion, recovery retention, output ownership and file safety semantics are unchanged.
+
+The service-worker cache advances from `pocket-shell-v6` to `pocket-shell-v7` so installed/offline copies refresh the changed HTML, CSS and JavaScript.
+
+### Files changed
+
+- `index.html`
+- `vault.css`
+- `js/pocket-vault-io-browser.js`
+- `js/pocket-vault-recovery.js`
+- `sw.js`
+- `tests/p019-vault-ownership.test.js`
+- `docs/VAULT_RECOVERY_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No crypto primitive, Vault envelope, truth payload, file owner, Main Save, PE Save, recovery storage format, dependency, fixture or personal-data file changed.
+
+### Automated validation
+
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 328 passed, 0 failed.
+- `node --check` passed for both changed production JavaScript modules, `sw.js` and the changed JavaScript test.
+- `git diff --check` passed.
+
+The production-module harness proves the exact warning copy, three-action order, warning-mode lifecycle, Not-now retention/reload, View/Cancel, Delete/Cancel/confirm, exact confirmation copy, destructive confirm styling, zero saved-file writes and refreshed offline shell. Existing recovery, PE, device-resolution and popup-isolation cases continue to prove the unchanged ownership and persistence boundaries.
+
+The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+### Disposable production-browser validation
+
+- Desktop 1280x720: the warning was a 356px by 190.5px upper panel, initial focus was View, the error live region occupied no space, View/Not now shared the primary row and Delete sat beneath.
+- 390x720, 320x720 and 280x720: the panel widths were 356px, 300px and 260px; View/Not now stayed side by side, Delete stayed beneath, every action was 44px high, the whole panel was visible without scrolling and document width equalled viewport width.
+- Tab order was View recovery, Not now, Delete recovery, then wrapped to View.
+- Not now closed the modal, returned focus to Choose file, opened no viewer, and the warning returned after reload.
+- View opened the unchanged recovery-password dialog; Cancel returned to the warning.
+- Delete opened the exact revised confirmation. Cancel returned to the warning; confirmed deletion closed the flow and the warning did not return after reload.
+- The destructive confirm rendered with its established danger class and red filled treatment; the warning-only class was absent from confirmation mode.
+- The top-level production page recorded zero console warnings or errors.
+
+The temporary local seed page, disposable browser record and local server were removed after validation.
+
+### Remaining physical acceptance
+
+Murray's physical browser acceptance remains required for installed/offline cache replacement, real touch/safe-area rendering and interaction alongside native file permissions. Use disposable Pocket/Vault files and passwords only. The P026-inclusive checklist is in `docs/VAULT_RECOVERY_CONTRACT.md`, section 13.
+
 ## POCKET TASK P025 - ALLOW DEFERRING VAULT RECOVERY
 
 Title: Add Not now to Vault recovery startup

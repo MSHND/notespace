@@ -518,9 +518,9 @@
   async function confirmRecoveryDeletion(flow, afterUnlock) {
     const confirmed = await global.PocketVaultBrowserIo?.showRecoveryConfirmation?.({
       mode: afterUnlock ? "recovery-confirm-discard" : "recovery-confirm-delete",
-      title: "Discard encrypted recovery?",
-      body: "This permanently deletes only the browser-held encrypted recovery. It does not change or delete any saved Pocket file or Vault.",
-      confirmLabel: "Discard recovery",
+      title: "Delete encrypted recovery?",
+      body: "This permanently deletes only the recovery stored in this browser. Saved Pocket files and Vaults are not changed.",
+      confirmLabel: "Delete recovery",
       danger: true,
     });
     if (!flowIsCurrent(flow) || !confirmed) return false;

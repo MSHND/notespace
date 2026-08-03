@@ -205,6 +205,7 @@
     };
     const title = dom("vaultDialogTitle");
     const body = dom("vaultDialogBody");
+    overlay.classList.toggle("vaultRecoveryWarningMode", config.mode === "recovery-warning");
     if (title) title.textContent = config.title || "";
     if (body) body.textContent = config.body || "";
     overlay.hidden = false;
@@ -220,7 +221,10 @@
     resetDialogControls(record);
     resetDialogSections();
     const overlay = dom("vaultDialogOverlay");
-    if (overlay) overlay.hidden = true;
+    if (overlay) {
+      overlay.hidden = true;
+      overlay.classList.remove("vaultRecoveryWarningMode");
+    }
     document.body?.classList?.remove("vaultDialogOpen");
     setDialogBackgroundInert(false);
     activeDialog = null;
@@ -284,8 +288,8 @@
     return new Promise((resolve) => {
       if (!showDialogShell({
         mode: "recovery-warning",
-        title: "Unsaved encrypted Vault changes found",
-        body: config.body || "Pocket kept unsaved Vault changes encrypted in this browser. View them, discard only this browser recovery, or continue for now and decide next time.",
+        title: "Unsaved Vault changes",
+        body: config.body || "Pocket found encrypted recovery data from an earlier session.",
         initialFocusId: "vaultRecoveryUnlock",
         resolve,
       })) {
