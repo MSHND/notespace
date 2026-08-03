@@ -1,5 +1,73 @@
 # Codex report
 
+## POCKET TASK P027 - BUILD THE SYNCED POCKET FOUNDATION
+
+Title: Build synced Pocket foundation
+
+Status: P027 adds an unloaded, provider-neutral Synced Pocket contract; a deterministic test-only remote adapter; executable ownership, activation, local-first Save, pending retry, conflict and human-copy coverage; and the approved future security and user-journey documentation. It does not expose or enable sync in production.
+
+Commit title:
+
+- `P027 Build synced Pocket foundation`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `a75b269a898a1a4a3f7c99b039ba23fbc468d2b2`
+- Starting title: `P026 Tighten Vault recovery prompt`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- The new module is deliberately absent from `index.html` and `sw.js`. Existing local JSON/Vault ownership, Main Save, PE Save, recovery, file opening, crypto and service-worker behaviour are unchanged.
+
+### Contract and API
+
+`PocketSyncContract` follows the repository's browser/global module style and exposes:
+
+- `COPY` for the exact Turn on sync, Sync is ready and Save/conflict strings;
+- `plainJsonNotice(displayName)` for exact readable-source transparency using the supplied filename;
+- `activate(dependencies, options)` for ordered JSON/Vault-to-synced activation;
+- `save(dependencies, syncedState, options)` for encrypted device-first Save and one conditional remote attempt; and
+- `retryPending(dependencies, syncedState)` for explicit retry with no new edits.
+
+Every stateful boundary is injected: source-session capture/currency, dirty-source Save, payload freeze, local sealing, encrypted device persistence, remote revision read, conditional encrypted write and final synced-owner adoption. Adoption occurs exactly once and only after initial device and remote success. Failures leave the local JSON/Vault owner active.
+
+The deterministic `InMemorySyncAdapter` exists only under `tests/helpers`. It models empty/matching remote state, successful writes, unavailability, failed writes, newer revisions and an intervening device write without network, timers, browser storage, credentials or random behaviour.
+
+Tests use distinctive readable content and a separate key object, proving that remote arguments contain neither readable payload data nor key/source-handle objects. Revision mismatches never overwrite or merge remote content. A pending encrypted record remains locally safe and an explicit Save can reuse and sync it even with zero new edits.
+
+### Files changed
+
+- `js/pocket-sync-contract.js`
+- `tests/helpers/p027-in-memory-sync-adapter.js`
+- `tests/p027-sync-contract.test.js`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+No production-loaded JavaScript, HTML, CSS, service worker, dependency, crypto format, fixture or personal-data file changed.
+
+### Validation
+
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 364 passed, 0 failed.
+- `node --check` passed for the new production contract, test adapter and P027 test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P027 changes no production-loaded code or visible UI.
+
+### Deliberately unimplemented
+
+P027 adds no Turn on sync button, sign-in screen, account, backend, network request, passkey, Face ID/fingerprint/PIN request, production content-key store, emergency recovery key, IndexedDB synced record, live `ownerKind: "synced"`, background retry, autosave or second Sync button. It does not claim that real cloud sync is available.
+
+### Recommended next integration boundary
+
+Before production UI or ownership wiring, complete a provider-neutral security/storage design that selects the account/passkey boundary, Pocket master-key protection and transfer, emergency recovery, durable encrypted device store and conditional remote API together. After review, adapt those implementations behind P027's injected seams and branch a future live synced Save immediately before `exportTree()`'s current zero-operation early return so pending sync can be retried explicitly.
+
 ## POCKET TASK P026 - TIGHTEN VAULT RECOVERY STARTUP UI
 
 Title: Tighten Vault recovery prompt
