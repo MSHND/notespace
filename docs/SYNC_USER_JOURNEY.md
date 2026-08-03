@@ -2,7 +2,7 @@
 
 ## Approved future journey — not yet in production
 
-This is the approved human journey for a future Synced Pocket. P027 does not add these screens or turn sync on. There is no production account, passkey, emergency recovery or remote service yet.
+This is the approved human journey for a future Synced Pocket. P027/P028 do not add these screens or turn sync on. There is no production account, passkey, emergency recovery, device transfer or remote service yet. P028 locks the security/recovery behaviour behind this journey without changing P027's existing copy.
 
 The experience should feel like one simple choice: keep using a local Pocket, or turn on a protected Pocket that follows the human across their devices.
 
@@ -20,9 +20,9 @@ There is no provider, folder, token, URL or technical setup.
 
 Pocket asks the human to use the device's normal secure gesture, such as Face ID, fingerprint or device PIN.
 
-This step proves account access. Pocket should not describe encryption keys, protocols or server details in the ordinary journey. Behind the scenes, account access and the key that protects Pocket content remain separate security responsibilities.
+This step proves account access. Pocket should not describe encryption keys, protocols or server details in the ordinary journey. Behind the scenes, account access and the random key that protects Pocket content remain separate security responsibilities. A passkey sign-in alone never becomes the content key.
 
-This step is a future placeholder. P027 does not invoke a passkey or device gesture.
+Where the actual passkey ceremony returns valid optional PRF output, Pocket may use it locally to help unlock the master key. Pocket must not promise this capability based on sign-in alone and must never upload PRF output. This step remains a future placeholder; P027/P028 invoke no passkey or device gesture.
 
 ## 3. Original-file notice
 
@@ -38,21 +38,33 @@ For a local Vault, Pocket likewise explains that the existing Vault stays where 
 
 If the current local Pocket has unsaved changes, Pocket first uses the existing Save. If that Save is cancelled or fails, activation stops and the local Pocket remains open.
 
-## 4. Emergency recovery step
+## 4. Save the recovery copy
 
-Pocket will need a short, understandable emergency recovery step before production activation can complete.
+After preparing the protected device and remote records, Pocket requires a local emergency recovery copy before activation can complete.
 
-This future step must help the human regain access after losing a device or account gesture without giving the service readable Pocket content. The wording and mechanism are not yet approved or implemented. P027 must not pretend otherwise.
+**Save your recovery copy**
+
+This lets you get back into your Pocket if your devices or sign-in are unavailable. Keep it somewhere safe.
+
+**Save recovery copy**
+
+**I’ll do this later**
+
+**Save recovery copy** produces a local-only package containing versioned recovery material, an opaque account/Pocket locator, checksum and instructions. It contains no Pocket notes and is never uploaded. **I’ll do this later** pauses activation: the current JSON/Vault owner remains active, no synced owner is adopted and **Sync is ready** is not shown.
+
+After emergency recovery, Pocket must invalidate the old recovery authorisation, rotate to a new recovery version and ask the human to save a replacement copy.
 
 ## 5. Sync ready
 
-Only after the protected device copy and initial remote copy are both safely committed does Pocket change owners and show:
+Only after every locked condition succeeds does Pocket change owners and show:
 
 **Sync is ready**
 
 Your Pocket is protected and available on your devices.
 
 The original file remains unchanged as a backup snapshot. Future ordinary Save writes to the Synced Pocket only.
+
+The locked conditions are: current source session; any dirty source saved; master key created locally; trusted encrypted device record durable; initial encrypted remote commit successful; account credential registered; recovery envelope created; recovery copy saved; and synced-owner adoption successful. There is no warning-only recovery bypass.
 
 ## 6. Saved and synced
 
@@ -91,6 +103,10 @@ Pocket must plainly explain:
 
 The human should never need to understand storage providers, remote revisions, encryption formats or key-management terms to know whether their Pocket is safe.
 
+## Additional-device recovery path
+
+A later additional-device journey may ask an already trusted device to approve a short-lived pairing. It uses an ephemeral authenticated agreement and a single-use encrypted master-key transfer envelope. The service relays only opaque material and never receives readable content or the master key. P028 documents this path but does not add UI or pairing behaviour.
+
 ## What is deliberately absent today
 
-P027 adds no production Turn on sync button, sign-in screen, account, passkey, biometric request, emergency recovery key, backend, network request, background sync, live synced owner or second Sync button. These future screens remain documentation until the required security and service decisions are made and tested.
+P027/P028 add no production Turn on sync button, sign-in screen, account, passkey, biometric request, emergency recovery package, device transfer, backend, network request, durable synced-device store, background sync, live synced owner or second Sync button. The locked architecture is documented in [SYNC_SECURITY_ARCHITECTURE.md](SYNC_SECURITY_ARCHITECTURE.md), [SYNC_REMOTE_API_CONTRACT.md](SYNC_REMOTE_API_CONTRACT.md) and [SYNC_THREAT_MODEL.md](SYNC_THREAT_MODEL.md); concrete production implementations still require review and tests.

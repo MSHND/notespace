@@ -6,6 +6,8 @@ P027 defines the tested foundation for a future Synced Pocket. It does not expos
 
 The unloaded `PocketSyncContract` module is a dependency-injected orchestration seam. Its tests establish the ownership, encryption, Save and remote-revision rules that later integration must preserve.
 
+P028 locks the complementary versioned security, trusted-device storage, mandatory recovery and provider-neutral remote API architecture. Its unloaded `PocketSyncSecurityContract` adds deterministic builders/validators only; it is also absent from `index.html` and `sw.js`. See [Synced Pocket security and recovery architecture](SYNC_SECURITY_ARCHITECTURE.md), [remote API contract](SYNC_REMOTE_API_CONTRACT.md) and [threat model](SYNC_THREAT_MODEL.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -51,19 +53,15 @@ Future account/passkey authentication proves that the human may access an accoun
 
 A separately designed Pocket master key will protect readable Pocket content. It must be unlocked locally. The service must never receive readable Pocket content or the unlocked content key.
 
-P027 deliberately does not choose:
+P028 now locks that split: a passkey authenticates the account; a separately generated random 256-bit master key protects content; and independent `device`, optional `passkey-prf`, `device-transfer` and `recovery` envelopes unlock that key locally. A passkey assertion alone is never the content key. PRF is usable only when an actual ceremony returns valid output, and that output remains client-only.
 
-- a WebAuthn/passkey flow;
-- a passkey-to-key mechanism;
-- a production master-key store;
-- a key-wrapping scheme; or
-- an account/server authentication protocol.
+The concrete WebAuthn ceremonies, cryptographic algorithm/parameter selection, durable store and remote adapter remain unimplemented and require later review.
 
-## 6. Emergency recovery is required but deferred
+## 6. Emergency recovery is mandatory
 
-Synced Pocket needs an understandable emergency recovery mechanism for a lost device or inaccessible account gesture. It is a prerequisite for a production activation journey, but P027 does not generate, display, store or validate a recovery key.
+The recovery architecture is locked, though still not implemented. Activation creates a local random recovery root of at least 256 bits, a separately derived account-recovery verifier, a separately derived master-key wrapping envelope and a local-only recovery package. The raw root and package are never uploaded.
 
-Production activation must not claim to be ready until account access, content-key protection and emergency recovery have a complete reviewed design.
+The human must save the recovery copy. Choosing **I’ll do this later** pauses activation and preserves the current JSON/Vault owner. It cannot show **Sync is ready**. Successful emergency recovery rotates the root, verifier and envelope, invalidates the old recovery authorisation and requires a replacement recovery copy.
 
 ## 7. Activation preconditions and source-session protection
 
@@ -85,6 +83,8 @@ The tested order is:
 6. read and verify the expected remote revision;
 7. conditionally commit only the encrypted record; and
 8. adopt the synced owner exactly once.
+
+P028 adds locked completion gates around that P027 sequence. Production activation must also register an account credential, generate the 256-bit master key locally, durably establish its device envelope, create a recovery envelope and confirm that the human saved the recovery copy. **Sync is ready** is allowed only after those gates, the initial conditional remote commit and final owner adoption all succeed for the same current source session.
 
 Adoption occurs only after the initial device and remote writes succeed. Before that point, the local JSON/Vault owner remains active. A staged device record is not authoritative merely because it was written.
 
@@ -111,9 +111,12 @@ A remote commit supplies:
 
 - the synced Pocket identity;
 - the last confirmed revision as the expected revision; and
+- a stable operation/idempotency ID and logical-change ID; plus
 - the next opaque encrypted record.
 
 The remote adapter writes only when its current revision equals the expected revision. A mismatch returns an explicit conflict. Pocket never overwrites newer remote data, silently picks a winner or automatically merges in P027.
+
+Retrying the same exact logical request reuses the operation ID and must return the original result without creating another revision. A new content change receives new identifiers. Reuse of one operation ID with different revision/content fails closed. The versioned conceptual shapes are in [SYNC_REMOTE_API_CONTRACT.md](SYNC_REMOTE_API_CONTRACT.md).
 
 The deterministic test adapter can model an empty remote, a matching revision, unavailability, write failure, a newer revision and an intervening write between read and conditional commit.
 
@@ -175,19 +178,12 @@ The contract contains no timers, polling, service-worker messaging, background s
 
 Dependencies own payload freezing, local sealing, device persistence, remote read, conditional remote write, dirty-source Save, source-session currency and final owner adoption. This keeps backend, account and storage choices outside the contract.
 
-## 15. Deferred production decisions
+The separately unloaded `PocketSyncSecurityContract` exposes version/policy constants plus deterministic validation/building for unlock selection, PRF ceremony results, recovery and activation readiness, trusted-device/remote/content/envelope metadata, local-only recovery packages, opaque conditional writes/results and recovery rotation. It performs no cryptography, storage, DOM work or network access.
 
-Before production integration, later work must decide and review:
+## 15. Locked architecture and deferred implementation
 
-- the remote service and conditional-write API;
-- account identity and passkey registration/sign-in;
-- Pocket master-key generation, wrapping, local unlock and device transfer;
-- emergency recovery creation, storage and human journey;
-- the production encrypted device-record store and durability guarantees;
-- the synced encrypted-record format and metadata limits;
-- first-device and additional-device bootstrap;
-- conflict review/reconciliation UI without automatic merge;
-- account, device and remote-data deletion semantics; and
-- availability, abuse, quota and operational monitoring boundaries.
+P028 locks the provider-neutral account/content-key split, envelope kinds, unlock order, mandatory recovery, trusted-device allowlist, remote-safe metadata boundary, conditional revision/idempotency semantics, additional-device architecture and conceptual account/credential/envelope/recovery/deletion operations.
 
-The recommended next integration boundary is a provider-neutral security/storage design that chooses the account, content-key, emergency-recovery, device-store and conditional remote API contracts together. Only after those are reviewed should the unloaded P027 contract be adapted behind production ownership and Save seams.
+Before production integration, later work must implement and review concrete algorithms/parameters and vectors, WebAuthn ceremonies, durable device storage/migrations, remote adapters/service enforcement, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint or infrastructure has been selected.
+
+Only after those implementations pass focused security and ownership review should the unloaded P027/P028 contracts be adapted behind production ownership and Save seams.

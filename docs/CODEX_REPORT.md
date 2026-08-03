@@ -1,5 +1,76 @@
 # Codex report
 
+## POCKET TASK P028 - LOCK SYNC SECURITY, STORAGE AND RECOVERY ARCHITECTURE
+
+Title: Lock sync security architecture
+
+Status: P028 locks a provider-neutral, versioned security/storage/recovery architecture for the future Synced Pocket. It adds one unloaded deterministic production contract, focused executable validation, conceptual remote API shapes and a threat model. It does not enable sync, load code in production, select a provider or endpoint, add an account/passkey/recovery flow, or change current JSON/Vault ownership, Save or recovery behaviour.
+
+Commit title:
+
+- `P028 Lock sync security architecture`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `a4ea0f75dac4b740bf1a1d56d325a7a8367c3dc0`
+- Starting title: `P027 Build synced Pocket foundation`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- `js/pocket-sync-security-contract.js` is deliberately absent from `index.html` and `sw.js`. It has no DOM, browser storage, cryptography, randomness, network, endpoint or provider dependency.
+- P027's exact human copy and orchestration are unchanged. No current production-loaded JavaScript, HTML, CSS, service worker, Vault/JSON format, crypto, file handle, owner/session, Main Save, PE Save or browser-recovery path changed.
+
+### Locked architecture
+
+- One random locally generated 256-bit Pocket master key protects content through authenticated encryption with a fresh nonce for every record. Multiple independent key envelopes allow one envelope to be replaced without re-encrypting all content. Raw bytes have minimum practical lifetime and best-effort clearing; no perfect JavaScript zeroisation or universal hardware-backed protection is claimed.
+- Passkeys authenticate the account but are not the content key. Optional WebAuthn PRF may unlock only when the actual ceremony supplies valid client extension output; output remains client-only, uses domain-separated derivation and is never the sole recovery path.
+- Unlock priority is exactly valid device envelope, valid actual passkey-PRF envelope, approved device-transfer envelope, recovery envelope, then unavailable. Missing/invalid material fails closed rather than silently falling through.
+- Trusted-device and remote metadata use strict allowlists. Filenames, readable Pocket content, raw keys/PRF/recovery roots, file/Vault handles, owner tokens and current browser-safety recovery payloads are forbidden.
+- Mandatory recovery uses a random local root of at least 256 bits, separate account-authorisation/master-key-wrap labels, a local-only package and exact locked human copy. **I’ll do this later** pauses activation without replacing the source owner. Successful recovery rotates recovery material, invalidates old authorisation and requires a new copy.
+- **Sync is ready** requires the current/saved source, local master key, durable encrypted device record, successful conditional initial remote commit, registered account credential, recovery envelope, saved recovery copy and final synced-owner adoption.
+- Remote operation shapes are versioned for passkey registration/authentication, credential list/revoke, revision/read/download/conditional upload/conflict, envelopes add/revoke, emergency recovery/rotation, device-transfer relay and account deletion request/confirm. Conditional writes carry expected revision plus stable operation/logical-change IDs; idempotent replay cannot create another revision and conflicts never overwrite.
+- Product v1 permits one ordinary Synced Pocket while all schemas carry an opaque synced Pocket ID. No filename establishes identity.
+
+### Contract and tests
+
+`PocketSyncSecurityContract` exposes explicit versions and policies plus deterministic builders/validators for PRF ceremony output, unlock selection, recovery/activation readiness, trusted-device/remote/content/envelope metadata, local-only recovery packages, opaque encrypted records, conditional write requests/results and recovery rotation.
+
+The focused suite executes that production source inside isolated VM contexts. A distinctive plaintext sentinel proves readable fields cannot enter accepted remote metadata/request shapes. It also checks loader isolation, exact envelope kinds/order/copy/derivation labels, passkey-versus-PRF separation, fail-closed invalid material, mandatory recovery, all activation gates, device-store exclusions, conditional conflict/idempotency semantics, recovery rotation and absence of DOM/storage/network/provider dependencies.
+
+### Files changed
+
+- `js/pocket-sync-security-contract.js`
+- `tests/p028-sync-security-contract.test.js`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p028-sync-security-contract.test.js` - 25 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 389 passed, 0 failed.
+- `node --check` passed for the new production contract and focused test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P028 changes no production-loaded code or visible UI.
+
+### Deliberately unimplemented
+
+P028 adds no actual encryption/key generation, WebAuthn ceremony, passkey account, PRF request, IndexedDB/device store, recovery file picker, pairing, backend, endpoint, provider, remote request, live synced owner, production UI, service-worker behaviour, autosave or background sync. Concrete algorithm/parameter selection, test vectors, durable migrations, server enforcement, operational controls, conflict UI and synced-owner browser recovery require later reviewed work.
+
+### Recommended next implementation boundary
+
+Select and review concrete authenticated-encryption, key-derivation and envelope parameters with test vectors; implement the versioned encrypted device-store adapter and real WebAuthn/account-service adapters behind P027/P028's injected seams; then test activation/recovery failure atomicity before loading any synced owner or visible UI in production.
+
 ## POCKET TASK P027 - BUILD THE SYNCED POCKET FOUNDATION
 
 Title: Build synced Pocket foundation
