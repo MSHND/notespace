@@ -2,7 +2,7 @@
 
 ## 1. Scope and security goals
 
-This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store, P031's unloaded account/passkey client and P032's unloaded same-origin remote client. It does not change the threat model of today's local JSON and Vault owners.
+This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store, P031's unloaded account/passkey client, P032's unloaded same-origin remote client and P034's dormant undeployed service safety core. It does not change the threat model of today's local JSON and Vault owners.
 
 The primary goals are:
 
@@ -73,17 +73,17 @@ Local JSON/Vault files, file handles, source sessions and browser safety copies 
 | Malicious remote response | Substitutes identifiers/revisions, returns conflict as success or injects readable/unknown fields | P032 exact response allowlists repeat operation/Pocket/revision identity and require HTTP 200 committed versus HTTP 409 conflict consistency | The client cannot prove a malicious service returned the globally newest record |
 | Cross-origin redirect or URL leakage | Sends credentials/opaque IDs to another origin or places them in logs/history | Same-origin path-only root, POST body identifiers, `redirect: error`, `referrerPolicy: no-referrer` and same-origin fetch mode | Compromised same-origin code can issue its own requests outside this module |
 | Persisted bearer token theft | Reuses long-lived client-managed credentials | P032 has no bearer token/header/storage and relies on a future browser-managed same-origin cookie | Secure/HttpOnly/SameSite scope, expiry and rotation must be correctly implemented by the future server |
-| CSRF or session fixation | Uses or plants an authenticated browser session | Future server must rotate after authentication, bind sessions to verified ceremonies and enforce deployment-appropriate CSRF checks on every state-changing POST | P032's fetch settings do not by themselves stop same-origin request forgery |
+| CSRF or session fixation | Uses or plants an authenticated browser session | P034 rejects any context not exact POST, trusted Origin, same-origin Fetch Metadata and JSON; completion atomically rotates the session | P035 must map real headers/cookies correctly and add deployment abuse controls; compromised same-origin code remains in origin |
 | Oversized or confusing HTTP body | Exhausts memory or treats HTML/error text as trusted JSON | Declared and streamed UTF-8 bounds, stream cancellation, exact JSON content type, object-only parse and status allowlists | Repeated large responses can still consume bandwidth before the bound is reached |
 | Concurrent legitimate device | Silently overwrites newer work | Expected revision and atomic conditional write; conflict returns `wrote: false` | Human conflict resolution/merge UI remains future work |
-| Retried request after lost response | Creates multiple revisions | Same operation ID maps to the same result; different content under one ID fails | Service must durably enforce idempotency |
-| Operation-ID replay or changed-payload reuse | Replays a write or associates one result with different ciphertext/revision | Client distinguishes new change from explicit idempotent retry; server must key durable results by account/Pocket/operation and reject any changed logical request | P032 cannot verify server persistence and does not automatically retry |
+| Retried request after lost response | Creates multiple revisions | P034 stores one immutable committed/conflict outcome under the account/Pocket/operation key and exact logical digest | P032 cannot distinguish a lost response without a later explicit retry |
+| Operation-ID replay or changed-payload reuse | Replays a write or associates one result with different ciphertext/revision | P034's canonical digest covers every logical identity and encrypted-record field except attempt kind; changed reuse and `new-change` replay fail | A production database must preserve the same atomic uniqueness guarantees |
 | Network ambiguity after dispatch | Client assumes failure or success after the server may have committed | One request only; unavailable result stays ambiguous and later explicit reconciliation uses the stable operation identity | Human-visible pending/reconciliation behavior remains future Save integration |
 | Stolen encrypted remote/device store | Offline content disclosure | 256-bit random master key and independently wrapped envelopes | Weak platform/device protection may expose a device wrapping path |
 | Lost or stolen unlocked device | Reads/modifies Pocket | Device lock, account/device revocation, short sessions, explicit envelope revocation | Content visible while unlocked may be captured; revocation cannot erase an offline copy already obtained |
 | Compromised same-origin code/XSS | Exfiltrates content or keys | Strict CSP/dependency review, minimal raw-key lifetime, narrow modules, no remote readable fields | In-scope runtime compromise can defeat client E2EE while active; P028 does not claim otherwise |
 | Malicious extension/OS | Reads memory or UI | Platform protections and non-extractable keys where available | Browser JavaScript cannot defend against a fully privileged attacker |
-| Passkey phishing/replay or ceremony substitution | Account takeover or wrong credential binding | WebAuthn relying-party/origin binding, required user verification, server challenge verification, explicit operation/ceremony/credential/PRF-input continuity and expiry checks | P031 is only the client boundary; the future service and session layer must enforce replay, binding and revocation |
+| Passkey phishing/replay or ceremony substitution | Account takeover or wrong credential binding | P034 binds type, operation, challenge, account, prior session and exact finish digest; P035's real verifier must enforce WebAuthn cryptography/origin/RP/user verification | P034 deliberately injects rather than implements the standards verifier |
 | PRF result leakage | Converts optional local unlock material into a remote/logging secret | Inspect before serialisation, require exactly 32 bytes, copy locally, strip all PRF results from finish requests and require caller clearing | Same-origin compromise or careless future callers can still copy live result bytes |
 | Account authentication confused with content unlock | Bypasses envelope policy | P028/P031 explicitly return authentication success with content still locked; only a validated credential-bound envelope may open the master key | Future orchestration remains security-critical and is not implemented |
 | PRF capability confusion | Treats passkey sign-in as content unlock | Use only actual valid client extension output; client-only domain-separated derivation | Platform bugs remain possible; recovery must not depend solely on PRF |
@@ -139,15 +139,37 @@ Turning on sync does not encrypt, move or delete the original JSON source. That 
 
 A source Vault remains protected under its existing Vault format, but P028 does not claim that Vault v1 and the synced encrypted-record format are interchangeable.
 
-## 9. Abuse and privacy controls
+## 9. Service-core failure boundary
+
+P034 converts several previously specified server duties into an executable dormant state machine:
+
+| Failure or attacker action | P034 enforcement | Remaining boundary |
+| --- | --- | --- |
+| Malformed persisted service state | Every read validates the exact record kind, version, identity and fields; malformed state fails and is never repaired or treated as absent | A real adapter must surface storage corruption safely and restore only through reviewed operational recovery |
+| Stale transaction writer | Store-version compare-and-swap plus a single atomic transaction rejects stale replacements | The production database adapter must supply equivalent isolation and uniqueness |
+| Partial session rotation | Replacement-session insert, prior-session revocation and completed ceremony commit together | P035 must issue/clear the browser cookie only from the committed session instruction |
+| Ceremony replay | Pending begin is digest-idempotent; finish is one-time and exact replay returns its stored result | Abuse/rate controls and cleanup remain deployment work |
+| Changed finish under one operation | Finish digest binds ceremony type, session context, operation, ceremony, device where applicable and exact public credential response | Correct WebAuthn verification still depends on the injected P035 adapter |
+| Changed ciphertext under one operation ID | Canonical upload digest includes exact encrypted record, Pocket, revisions and logical identities; changed reuse fails | Digest availability does not make the ciphertext readable or prove remote availability |
+| Account-to-Pocket substitution | Content routes require the active session account and its one bound Pocket; first binding commits with revision 1 | Multi-Pocket accounts require a later explicit schema/policy version |
+| Credential-to-account substitution | Stored account credential list, credential owner and session credential relationship are revalidated | Compromise of the future verifier or database/runtime remains privileged compromise |
+| Session expiry or revocation | Content calls fail with a non-secret clear-session instruction and do not slide expiry | Cleanup of expired records is intentionally absent |
+| Verifier-adapter compromise | Strict result allowlists, credential identity and counter/backup continuity limit accepted mutations | A verifier that falsely proves a signature can still authenticate an attacker; P035 adapter selection/review is critical |
+| Operation digest ambiguity | SHA-256 inputs use explicitly ordered fields and unambiguous operation keys | Changing canonicalisation requires a compatibility/security review |
+| Conflict replay after later writes | Stored conflict result is immutable and replayed exactly rather than recalculated | The human-facing later reconciliation path remains unimplemented |
+| Transaction or commit failure | Success resolves only after commit; injected failures preserve the previous complete snapshot | Service database backup, rollback detection and disaster recovery remain future operational design |
+
+The core starts no background cleanup, timer, queue, polling or retry. Expired/revoked records remain validated state until a later explicitly designed maintenance boundary. It logs no identifiers, credentials, errors or ciphertext.
+
+## 10. Abuse and privacy controls
 
 Future service implementation must define conservative limits for ceremony creation, authentication failures, recovery attempts, pairing creation/approval, encrypted record sizes, envelope counts, device/credential counts and deletion attempts. Logs must exclude WebAuthn responses, PRF output, recovery proofs, ciphertext bodies and any submitted readable content.
 
 Credential labels and device labels can become personal metadata. If later UI allows them, collection must be optional/minimal, display escaping mandatory and remote retention documented. P028's executable metadata allowlists use opaque IDs and do not admit labels.
 
-## 10. Explicitly out of scope for P028/P029/P030
+## 11. Explicitly out of scope for P027-P034
 
-P028/P029/P030 do not provide:
+P027-P034 do not provide:
 
 - a formal cryptographic proof, global cross-device encryption-use counter or automatic master-key rotation;
 - protection after arbitrary code execution in the active origin/browser/device;

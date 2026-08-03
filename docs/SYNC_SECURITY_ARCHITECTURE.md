@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary and P032 supplies the strict same-origin remote transport plus account/content adapters. All implementation modules remain unloaded. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, and P034 supplies the dormant server-side safety and persistence state machine. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -56,7 +56,9 @@ P031 inspects client extension results before credential serialisation, strips e
 
 P032 implements the dormant request boundary beneath P031 and P028. One caller-supplied same-origin absolute-path root receives seven locked POST-only JSON routes with same-origin browser credentials, no-store caching, rejected redirects, no referrer and bounded JSON responses. The browser session is future server-owned cookie state; P032 stores no bearer token or session, retries nothing automatically and accepts only exact versioned response shapes. See [Synced Pocket remote client](SYNC_REMOTE_CLIENT.md).
 
-This client boundary does not implement server-side WebAuthn verification, secure cookie issuance, CSRF/session-fixation defenses, backend/session persistence, durable idempotency or authorization checks. The actual same-origin service origin remains unselected. Envelope, recovery, device-transfer and deletion remote operations also remain unimplemented, and no sync module is production-loaded.
+P034 now implements the server-side state machine beneath that client boundary. It validates an exact same-origin request context, strict records and relationships, uses one injected atomic transaction boundary, rotates sessions atomically, enforces account/Pocket authorisation, and durably records conditional-write results for exact idempotent replay. Its only content record is the current P028/P029 opaque ciphertext. See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md).
+
+P034 still does not implement a real WebAuthn verifier, HTTP/header/cookie adapter, durable database, rate limiting, deployment or selected same-origin service origin. Envelope, recovery, device-transfer and deletion remote operations also remain unimplemented, and no sync module is production-loaded.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 
@@ -197,8 +199,8 @@ Future synced recovery must be implemented as a separately versioned encrypted d
 The architecture and concrete cryptographic format are locked; production integration is still absent. Before loading sync code, later work must supply and review:
 
 - live-owner integration of the versioned P030 device store, plus whole-account encryption-use enforcement and master-key rotation consistent with the P029 format and vectors;
-- real WebAuthn ceremonies and server-side verification;
-- the actual same-origin backend/session service behind P032, including server-side WebAuthn verification, authorisation, CSRF/session policy and durable conditional-write/idempotency enforcement;
+- the real WebAuthn verifier adapter for P034's ceremony state machine;
+- an actual same-origin HTTP/header/cookie adapter and durable database implementation around P034, plus abuse limits and operational recovery;
 - additional-device and recovery UI with abuse/rate controls;
 - conflict review and account deletion UI;
 - synced-owner integration behind the existing ownership/Save seams; and

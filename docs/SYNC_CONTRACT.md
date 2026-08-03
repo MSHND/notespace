@@ -16,6 +16,8 @@ P031 implements the still-unloaded account/passkey client foundation. It validat
 
 P032 implements the still-unloaded same-origin remote client foundation. It binds P031's exact account-service methods and P028's revision/download/conditional-write shapes to seven locked POST-only JSON routes, bounded responses and browser-managed same-origin credentials, with no automatic retry or persisted token. See [Synced Pocket remote client](SYNC_REMOTE_CLIENT.md).
 
+P034 implements the dormant, undeployed server-side safety state machine behind those seven routes. It enforces exact request context, strict account/credential/session/ceremony/Pocket/operation records, atomic session rotation, account/Pocket authorisation and durable conditional-write idempotency through an injected transaction boundary. It adds no HTTP server, real verifier, database or deployment. See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -63,7 +65,7 @@ A separately designed Pocket master key will protect readable Pocket content. It
 
 P028 now locks that split: a passkey authenticates the account; a separately generated random 256-bit master key protects content; and independent `device`, optional `passkey-prf`, `device-transfer` and `recovery` envelopes unlock that key locally. A passkey assertion alone is never the content key. PRF is usable only when an actual ceremony returns valid output, and that output remains client-only.
 
-The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 now supplies the strict unloaded WebAuthn client ceremony boundary, but server enforcement, account-session ownership, credential-bound envelope orchestration, whole-account key-use enforcement/rotation and the remote adapter remain unimplemented and require later review.
+The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 supplies the strict unloaded WebAuthn client ceremony boundary, and P034 supplies strict ceremony/account/session persistence and rotation around an injected verifier. A real verifier/HTTP/cookie/database adapter, credential-bound envelope orchestration and whole-account key-use enforcement/rotation remain unimplemented and require later review.
 
 ## 6. Emergency recovery is mandatory
 
@@ -111,7 +113,7 @@ The remote boundary must never receive:
 
 P027 tests this with a distinctive plaintext sentinel and a separate key object. Neither appears in any remote adapter argument. P027 does not change the Pocket Vault format or claim that Vault v1 is the final synced-record format.
 
-P032 makes this boundary executable without loading it in production: request/response allowlists reject readable fields and substituted identities; downloaded size means decoded ciphertext including its authentication tag; HTTP 200 is committed and HTTP 409 is conflict; and ambiguous network failure is never guessed or automatically retried. The actual service and its enforcement remain unimplemented.
+P032 makes the client boundary executable without loading it in production: request/response allowlists reject readable fields and substituted identities; downloaded size means decoded ciphertext including its authentication tag; HTTP 200 is committed and HTTP 409 is conflict; and ambiguous network failure is never guessed or automatically retried. P034 implements the corresponding dormant service enforcement with strict opaque records, atomic authorisation/revision/idempotency transactions and no readable content. It remains undeployed behind an injected verifier and store.
 
 ## 10. Remote revision contract
 
@@ -198,10 +200,12 @@ The separately unloaded `PocketSyncAccountClient` exposes strict request/respons
 
 The separately unloaded `PocketSyncRemoteClient` exposes the frozen transport policy/route map, exact remote request/response validators, one bounded same-origin browser JSON transport, one P031-compatible account service and one P028-backed content service. It performs no storage, encryption, DOM UI, session/token persistence, automatic retry, owner adoption or Save integration.
 
+The dormant CommonJS `sync-service/pocket-sync-service-core.js` exports frozen `POLICY`, `COLLECTIONS` and `createServiceCore`. The factory exposes exactly P032's seven asynchronous operations and accepts only injected clock, randomness, WebAuthn verifier and strict transactional store boundaries. It performs no HTTP, cookie, file, environment, browser, owner or Save work.
+
 ## 15. Locked architecture and deferred implementation
 
 P028 locks the provider-neutral account/content-key split, envelope kinds, unlock order, mandatory recovery, trusted-device allowlist, remote-safe metadata boundary, conditional revision/idempotency semantics, additional-device architecture and conceptual account/credential/envelope/recovery/deletion operations.
 
-Before production integration, later work must implement and review the WebAuthn server/session backend and UI, credential-bound envelope orchestration, live-owner use of the dormant device store, whole-account encryption-use enforcement/rotation, durable remote service enforcement behind P032, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint origin or infrastructure has been selected.
+Before production integration, later work must supply and review the real WebAuthn verifier, HTTP/header/cookie adapter, durable database transaction adapter and abuse controls around P034; credential-bound envelope orchestration; live-owner use of the dormant device store; whole-account encryption-use enforcement/rotation; recovery/device-transfer UI; conflict review; deletion/retention operations; and synced-owner browser recovery. No provider, endpoint origin or infrastructure has been selected.
 
 Only after those implementations pass focused security and ownership review should the unloaded P027/P028 contracts be adapted behind production ownership and Save seams.

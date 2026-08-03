@@ -1,5 +1,110 @@
 # Codex report
 
+## POCKET TASK P034 - BUILD SYNC SERVICE SAFETY CORE
+
+Title: Build sync service safety core
+
+Status: P034 adds the dormant, undeployed CommonJS safety and persistence state machine behind P032's seven locked remote routes. The core validates exact same-origin request context, passkey ceremony/account/session relationships and opaque encrypted revisions independently of the browser client. It reports success only after one injected atomic transaction commits.
+
+Commit title:
+
+- `P034 Build sync service safety core`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `0cd030afb81f1e4c2867e0c1ad23bf197078ef98`
+- Starting title: `P033 Harden remote revision boundary`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- Production boundary: `sync-service/pocket-sync-service-core.js` in the same repository.
+- The CommonJS module is absent from `index.html`, `sw.js` and every browser production loader.
+
+P034 adds no HTTP server, real WebAuthn verifier, production database, ORM, host, provider, domain/origin, cookie implementation, deployment file, UI, owner, Main Save/PE Save integration, service-worker change, dependency, npm script or background process. Current JSON/Vault behaviour and every loaded browser production path remain unchanged.
+
+### Core, request and transaction design
+
+- The frozen module exports exactly `POLICY`, `COLLECTIONS` and `createServiceCore`.
+- The factory requires the exact injected store, two-method verifier, 32-byte randomness function, finite clock, canonical HTTPS trusted origin, RP identity/name, frozen credential algorithms and bounded ceremony/session lifetimes.
+- The created core exposes exactly the seven asynchronous P032 operations: registration begin/finish, authentication begin/finish, revision read, encrypted download and conditional upload.
+- Every invocation first validates an exact POST, trusted-Origin, `same-origin` Fetch Metadata, JSON content type and nullable opaque session context. Unknown or cross-origin context fails before body, store, randomness or verifier work.
+- Stable errors expose only their stable service code, status and narrowly applicable retry/clear-session booleans. Native failures, submitted identifiers, credentials, keys, ciphertext and readable content are not logged or copied into errors.
+- The injected store exposes only `transact(readonly|readwrite, callback)`. A transaction exposes exactly Promise-returning `get`, `insert`, `replace` and `remove`; insert is insert-only and replacement/removal uses `storeVersion` compare-and-swap.
+- The production module supplies no database driver. `tests/helpers/p034-memory-service-store.js` is a deterministic test-only serial driver with staged atomic commits, rollback, two-core shared state, snapshots and four narrow failure points.
+
+### Exact service state and authorisation
+
+- Six strict version-1 collections store only accounts, public credentials, sessions, passkey ceremonies, one current encrypted Pocket record and immutable operation results.
+- Every record is an exact plain object with matching identity, positive safe store version and no unknown fields. All reads validate before use; malformed or relationally impossible state fails without repair, deletion or reset.
+- Account records contain a public 32-byte PRF evaluation input, active opaque credential IDs and one nullable Pocket binding. They contain no readable account profile or Pocket content.
+- Credential records contain only public verifier state and account ownership. Sessions contain only opaque relationships, status and expiry. Ceremony records contain public options, challenge/digests and exact completed results, never raw PRF output or private key material.
+- Only the Pocket record stores ciphertext. It stores one current P028/P029 opaque encrypted record and its decoded ciphertext size; revision zero is absence and no history is retained.
+- Immutable operation records store a canonical SHA-256 logical-request digest and exact committed/conflict result, not ciphertext.
+- Content methods require an active unexpired session, valid session/account/credential relationships and the exact account-to-Pocket binding. Invalid supplied sessions request clearing without exposing the session ID.
+
+### Ceremonies, verifier and sessions
+
+- Registration begin stores only one pending ceremony. Exact pending begin replay returns the original body/challenge; changed, expired or completed reuse fails.
+- Authentication resolves an account from a current session or explicit opaque locator and uses one non-enumerating unresolved-account error. Discoverable no-locator policy remains deferred.
+- P034 builds P031-compatible resident-key/user-verification-required options with the account's stable public PRF input. No second PRF input or conditional mediation is added.
+- The injected verifier is called once outside a write transaction. Its strict result is revalidated, then the core re-reads ceremony, account, credential and prior session before commit.
+- Registration atomically creates/updates account and credential state, creates the active session and completes the ceremony. Authentication atomically advances permitted verifier state, creates the replacement session, revokes the prior session and completes the ceremony.
+- Exact completed finish replay returns the stored result and same still-valid session instruction; changed replay creates no second credential or session.
+- Successful account authentication does not create or return a content key, PRF output, envelope or content-unlocked claim.
+
+### Encrypted revisions and idempotency
+
+- An unbound authorised account reads exact revision zero. First expected-revision-zero upload atomically binds that account, creates revision 1 and inserts its operation result.
+- Conditional upload independently enforces the exact P032 body, safe advanceable expected revision and strict opaque encrypted record.
+- The canonical digest explicitly covers account, Pocket, expected revision, operation and logical-change identities plus every encrypted-record field. `attemptKind` alone is excluded.
+- Exact current revision commits once. A newer actual revision creates an immutable HTTP 409 conflict result without changing the Pocket. Actual revision below expected fails as invalid state.
+- Exact explicit idempotent retries replay the original commit or conflict; a committed replay sets `replayed: true`. First-seen idempotent retry may execute. `new-change` reuse or any changed logical request fails.
+- Concurrent same-revision writes serialize so they cannot both commit. Replays also validate the current account/Pocket relationship and coherent stored outcome before returning success.
+
+### Failure injection and confidentiality
+
+- Injected failures before first read, after reads/before staging, after staging/before commit and during commit retain the prior complete snapshot.
+- Focused failures prove there is no partial account, credential, session, session revocation, Pocket binding, Pocket revision or operation outcome, and no false success after commit failure.
+- Stale ceremony, account, credential and prior-session versions fail after verifier work but before any partial completion.
+- Distinctive readable-Pocket and raw-unlock-secret sentinels are rejected from all request/verifier schemas, records, results and errors. Only the Pocket record contains opaque ciphertext, exactly once.
+
+### Files changed
+
+- `sync-service/pocket-sync-service-core.js`
+- `tests/helpers/p034-memory-service-store.js`
+- `tests/p034-sync-service-core.test.js`
+- `docs/SYNC_SERVICE_CORE.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 538 passed, 0 failed.
+- `node --check` passed for the production core, deterministic helper and focused test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P034 is server-side, undeployed and not production-loaded.
+
+### Recommended P035 boundary
+
+Supply one reviewed HTTP/header/cookie adapter, one standards-compliant WebAuthn verifier adapter and one real durable database transaction adapter around P034's exact interfaces. Add request-size/rate limits, secure cookie issuance/clearing and operational rollback/backup policy without weakening the state machine or loading sync in today's Pocket. Keep provider/origin selection, envelope/recovery/pairing/deletion APIs, account-discovery UI and owner/Save integration separately reviewed.
+
 ## POCKET TASK P033 - HARDEN REMOTE REVISION BOUNDARY
 
 Title: Harden remote revision boundary

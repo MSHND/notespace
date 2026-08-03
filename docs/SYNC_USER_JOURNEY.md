@@ -2,7 +2,7 @@
 
 ## Approved future journey — not yet in production
 
-This is the approved human journey for a future Synced Pocket. P027-P032 do not add these screens or turn sync on. There is no production account, passkey UI, emergency recovery, device transfer or remote service yet. P031 adds only an unloaded strict client ceremony boundary; P032 adds only its unloaded same-origin remote transport/account/content adapter. Neither changes approved copy.
+This is the approved human journey for a future Synced Pocket. P027-P034 do not add these screens or turn sync on. There is no production account, passkey UI, emergency recovery, device transfer or deployed remote service yet. P031 adds an unloaded strict client ceremony boundary; P032 adds its unloaded same-origin remote transport/account/content adapter; P034 adds only a dormant server-side safety state machine behind those seven routes. None changes approved copy.
 
 The experience should feel like one simple choice: keep using a local Pocket, or turn on a protected Pocket that follows the human across their devices.
 
@@ -109,4 +109,4 @@ A later additional-device journey may ask an already trusted device to approve a
 
 ## What is deliberately absent today
 
-P027-P032 add no production Turn on sync button, sign-in screen, account session, biometric request, emergency recovery package, device transfer, backend, background sync, live synced owner or second Sync button. P032 can issue requests only when a future caller explicitly injects and invokes its unloaded transport; nothing invokes it today. The dormant account and remote clients are documented in [SYNC_ACCOUNT_PASSKEY.md](SYNC_ACCOUNT_PASSKEY.md) and [SYNC_REMOTE_CLIENT.md](SYNC_REMOTE_CLIENT.md); concrete UI, service, session and owner integration still require review and tests.
+P027-P034 add no production Turn on sync button, sign-in screen, account session, biometric request, emergency recovery package, device transfer, deployed backend, background sync, live synced owner or second Sync button. P032 can issue requests only when a future caller explicitly injects and invokes its unloaded transport; nothing invokes it today. P034 is an undeployed CommonJS state machine with injected verifier/store boundaries, not a running service. The dormant client/core boundaries are documented in [SYNC_ACCOUNT_PASSKEY.md](SYNC_ACCOUNT_PASSKEY.md), [SYNC_REMOTE_CLIENT.md](SYNC_REMOTE_CLIENT.md) and [SYNC_SERVICE_CORE.md](SYNC_SERVICE_CORE.md); concrete UI, HTTP/cookie/database adapters and owner integration still require review and tests.

@@ -2,7 +2,7 @@
 
 ## 1. Status and conventions
 
-This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded client transport and strict account/content adapters described here, but it selects no endpoint origin, hosting, database, identity vendor or infrastructure and makes no request at module load. P031 remains the strict client-side WebAuthn ceremony owner.
+This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded client transport and strict account/content adapters described here. P034 implements the corresponding dormant, undeployed server-side safety state machine for the seven locked routes. Neither selects an endpoint origin, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
@@ -20,7 +20,7 @@ The future service is reached beneath one caller-supplied same-origin absolute-p
 - `/pockets/content/download`
 - `/pockets/content/conditional-upload`
 
-All seven operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Future authentication uses a browser-managed same-origin cookie; P032 neither sends nor persists a bearer token. Secure cookie attributes, session rotation/fixation prevention, CSRF controls, authorisation and server persistence remain mandatory server responsibilities.
+All seven operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Future authentication uses a browser-managed same-origin cookie; P032 neither sends nor persists a bearer token. P034 enforces an exact POST/Origin/Fetch-Metadata/content-type/session context, atomic session rotation, account/Pocket authorisation and durable conditional-write/idempotency state. A later HTTP adapter must map real headers and Secure/HttpOnly/SameSite cookies into that boundary and supply abuse controls.
 
 Account/revision responses and their requests are limited to 262,144 UTF-8 bytes. Encrypted content download/upload JSON is limited to 16,777,216 UTF-8 bytes. P032 rejects declared or actually oversized responses, non-JSON/HTML bodies, redirects, malformed JSON and unexpected statuses. It never retries automatically.
 
@@ -202,6 +202,16 @@ HTTP 409 is accepted only with the exact conflict body. Conflict never writes an
 ```
 
 HTTP/body disagreement fails closed: a conflict body on 200 and a committed body on 409 are both invalid. The server records the result keyed by account, synced Pocket and `operationId`. Retrying the same exact logical operation uses the same operation ID, logical change ID, expected revision and encrypted record with `attemptKind: "idempotent-retry"`; it returns the original committed result with `replayed: true` and does not create another revision. A new logical content change uses a new operation ID and logical change ID. Reuse of an operation ID with different content or revision fails closed. If a network response is lost after a possible commit, P032 reports ambiguity as unavailable and does not guess or retry automatically.
+
+### P034 service-core enforcement
+
+`sync-service/pocket-sync-service-core.js` is the dormant CommonJS state machine behind these seven route shapes. It has no HTTP listener, cookie parser, database driver, real WebAuthn verifier, selected origin or deployment. Its exact request context must be produced by a later HTTP adapter before any request body, store or verifier work occurs.
+
+The core persists six strict version-1 record types: account, credential, session, ceremony, Pocket and immutable operation result. All reads validate exact stored schemas. Registration/authentication completion rechecks ceremony, account, credential and prior-session versions after the injected verifier returns, then commits credential/account/session/ceremony changes atomically. Session rotation never revokes the old session without durably creating its replacement.
+
+Content routes require an active unexpired account session and the exact account-to-Pocket relationship. First upload binds the account only in the same transaction that creates revision 1 and its immutable operation result. Later writes use one current encrypted record, safe revision compare-and-swap and a canonical SHA-256 logical-request digest. Exact explicit retries replay the stored committed or conflict outcome. A changed payload or `new-change` reuse under an existing operation ID fails closed. Conflict remains HTTP 409 and does not alter the Pocket.
+
+See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md) for the factory, transaction and record contracts. The seven client request/response bodies above are unchanged.
 
 ## 7. Key envelopes
 
