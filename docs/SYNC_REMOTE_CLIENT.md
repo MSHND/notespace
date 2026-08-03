@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-P032 adds the unloaded `PocketSyncRemoteClient` boundary between Pocket's already-encrypted local state and a future version 1 same-origin account/content service. It is absent from `index.html` and `sw.js`, performs no work when loaded, and does not enable sync. No backend, provider, service origin, account session, UI, live owner, Save integration, storage, token manager, envelope operation or service-worker behavior is selected or implemented.
+P032 adds the unloaded `PocketSyncRemoteClient` boundary between Pocket's already-encrypted local state and a future version 1 same-origin service. P038 extends that same module with strict key-envelope and recovery communication matching P036/P037. It is absent from `index.html` and `sw.js`, performs no work when loaded, and does not enable sync. No backend, provider, service origin, account session, UI, live owner, Save integration, storage, token manager or service-worker behaviour is selected or implemented.
 
 The module composes the existing foundations instead of replacing them:
 
@@ -16,11 +16,13 @@ The product principles remain unchanged: the service never receives readable Poc
 
 ## Public boundary
 
-`PocketSyncRemoteClient` exports frozen `POLICY` and `ROUTES` values, exact request/response validators, and three factories:
+`PocketSyncRemoteClient` exports frozen `POLICY` and `ROUTES` values, exact request/response validators, and five factories:
 
 - `createBrowserJsonTransport({ serviceRoot, fetch, TextEncoder?, TextDecoder? })` returns exactly `{ request }`;
 - `createAccountService({ transport, now? })` returns exactly P031's four account methods; and
-- `createContentService({ transport })` returns `readRevision`, `downloadEncryptedRecord` and `conditionalUpload`.
+- `createContentService({ transport })` returns `readRevision`, `downloadEncryptedRecord` and `conditionalUpload`;
+- `createEnvelopeService({ transport })` returns list/download/add/revoke; and
+- `createRecoveryService({ transport, now? })` returns initialise/begin/finish/rotate.
 
 All public shapes use `apiVersion: 1`, exact allowlists and opaque identifiers of at most 160 characters. The module does not choose an origin or provider.
 
@@ -39,12 +41,20 @@ Locked route suffixes are:
 | `readRevision` | `/pockets/revision/read` |
 | `downloadEncryptedRecord` | `/pockets/content/download` |
 | `conditionalUpload` | `/pockets/content/conditional-upload` |
+| `listEnvelopes` | `/pockets/envelopes/list` |
+| `downloadEnvelope` | `/pockets/envelopes/download` |
+| `addEnvelope` | `/pockets/envelopes/add` |
+| `revokeEnvelope` | `/pockets/envelopes/revoke` |
+| `initialiseRecovery` | `/account/recovery/initialise` |
+| `beginRecovery` | `/account/recovery/begin` |
+| `finishRecovery` | `/account/recovery/finish` |
+| `rotateRecovery` | `/account/recovery/rotate` |
 
 Every request is one `POST` with `mode: "same-origin"`, `credentials: "same-origin"`, `cache: "no-store"`, `redirect: "error"`, `referrerPolicy: "no-referrer"`, `Accept: application/json` and `Content-Type: application/json`. Identifiers are in the JSON body, never the URL. The request is validated as finite plain JSON and stringified exactly once.
 
-Only exact JSON object responses are accepted. Redirected responses, missing or non-JSON content types, empty/malformed JSON, arrays, `null`, unexpected statuses and unknown fields fail closed. Account/revision/download operations accept HTTP 200 only; conditional upload accepts 200 or 409 and then requires the matching body form. Declared and actual UTF-8 response sizes are bounded; an oversized stream is cancelled immediately.
+Only exact JSON object responses are accepted. Redirected responses, missing or non-JSON content types, empty/malformed JSON, arrays, `null`, unexpected statuses and unknown fields fail closed. Account/revision/download, envelope list/download and recovery begin/finish operations accept HTTP 200 only. Conditional upload and key/recovery mutations accept 200 or 409 and then require the matching body form. Declared and actual UTF-8 response sizes are bounded; an oversized stream is cancelled immediately.
 
-Small account/revision JSON is limited to 262,144 bytes. Encrypted content download/upload JSON is limited to 16,777,216 bytes. The downloaded `encryptedRecordSize` is the decoded ciphertext length including the 16-byte authentication tag, excluding the nonce and JSON/base64url framing.
+Small account/revision/key/recovery JSON is limited to 262,144 bytes. Encrypted content download/upload JSON is limited to 16,777,216 bytes. The downloaded `encryptedRecordSize` is the decoded ciphertext length including the 16-byte authentication tag, excluding the nonce and JSON/base64url framing.
 
 ## Browser session boundary
 
@@ -81,6 +91,10 @@ HTTP 200 must be the exact committed result: it wrote, returned a safe-integer r
 
 The client never retries automatically. A deliberate idempotent retry must reuse the exact logical request and may receive the original committed result without creating a revision. A network failure after dispatch is reported as unavailable even if the server might have committed; the client does not guess, send a second request or convert ambiguity into success. Durable server-side operation-ID ownership and rejection of reuse with different ciphertext remain mandatory server work.
 
+## Key-envelope and recovery services
+
+P038 adds exact envelope list/download/add/revoke and recovery initialise/begin/finish/rotate validation. P029's opaque master-key-envelope validator remains canonical. P031's registration validators remain canonical for recovery passkey options, credentials and completion identity. Key-set/recovery versions, operation/Pocket/envelope identities and HTTP committed/conflict forms are correlated before a deeply frozen result is returned. See [Synced Pocket key and recovery remote client](SYNC_KEY_RECOVERY_REMOTE_CLIENT.md).
+
 ## Error model and readable-content exclusion
 
 Errors use stable non-secret codes for invalid roots/routes/requests/responses, redirects, content type, size, authentication/authorization, rate limiting, service unavailability and other rejection. Only unavailable/timeout-class failures and rate limiting are marked retryable; no retry is performed. Native network messages and response bodies are not copied into errors or logs.
@@ -89,4 +103,4 @@ Exact schemas exclude readable Pocket content, filenames, paths, handles, keys, 
 
 ## Remaining implementation
 
-Still required are the actual same-origin service and origin selection; server-side WebAuthn verification; secure session creation/persistence/CSRF enforcement; durable conditional-write/idempotency storage; rate/abuse controls; envelope, recovery, device-transfer and deletion operations; content-envelope orchestration; conflict UI; live synced-owner adoption; Save integration; and production security review. P032 stays unloaded until those pieces form one reviewed owner transition and Save path.
+Still required are the actual same-origin HTTP/cookie service and origin selection; real WebAuthn and recovery-proof adapters; durable database; rate/abuse controls; local key/recovery-package and activation orchestration; device transfer and deletion; conflict UI; live synced-owner adoption; Save integration; and production security review. P038 stays unloaded until those pieces form one reviewed owner transition and Save path.

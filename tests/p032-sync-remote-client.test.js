@@ -126,6 +126,14 @@ test("policy and route map are exact and deeply frozen", () => {
     readRevision: "/pockets/revision/read",
     downloadEncryptedRecord: "/pockets/content/download",
     conditionalUpload: "/pockets/content/conditional-upload",
+    listEnvelopes: "/pockets/envelopes/list",
+    downloadEnvelope: "/pockets/envelopes/download",
+    addEnvelope: "/pockets/envelopes/add",
+    revokeEnvelope: "/pockets/envelopes/revoke",
+    initialiseRecovery: "/account/recovery/initialise",
+    beginRecovery: "/account/recovery/begin",
+    finishRecovery: "/account/recovery/finish",
+    rotateRecovery: "/account/recovery/rotate",
   });
   assert.equal(Object.isFrozen(api.POLICY), true);
   assert.equal(Object.isFrozen(api.ROUTES), true);

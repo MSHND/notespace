@@ -22,6 +22,8 @@ P035 hardens that factory boundary by requiring the version-1 WebAuthn RP ID to 
 
 P036 extends the same dormant service core with strict key-set/envelope records, ciphertext-erasing revocation, durable key-operation idempotency, opaque recovery locators, isolated proof/passkey recovery ceremonies and atomic verifier/envelope/locator rotation. The raw recovery root, master key and PRF output remain client-only. See [Synced Pocket key-envelope and recovery service core](SYNC_KEY_RECOVERY_SERVICE.md).
 
+P037 binds initial recovery rotation and stored replay to the credential created by the completed recovery ceremony. P038 extends the same unloaded browser remote client to all fifteen account/content/key/recovery routes with exact P031/P029 reuse, status/body agreement and production-core compatibility tests. It adds communication only, not activation, cryptography or ownership. See [Synced Pocket key and recovery remote client](SYNC_KEY_RECOVERY_REMOTE_CLIENT.md).
+
 ## 2. Two human modes
 
 ### Local Pocket

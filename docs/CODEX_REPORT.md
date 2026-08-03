@@ -1,5 +1,76 @@
 # Codex report
 
+## POCKET TASK P038 - EXTEND THE REMOTE KEY AND RECOVERY CLIENT
+
+Title: Extend remote key and recovery client
+
+Status: P038 extends the single dormant P032 browser remote client from seven to fifteen exact same-origin account/content/key/recovery routes. It adds strict communication and compatibility only; no current Pocket code loads or invokes it.
+
+Commit title:
+
+- `P038 Extend remote key and recovery client`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `368cb7424f48193ac8b761765662cff29b150cf7`
+- Starting title: `P037 Bind recovery rotation replay to recovered credential`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- Eight suffixes are added for envelope list/download/add/revoke and recovery initialise/begin/finish/rotate. All identifiers remain in JSON bodies.
+- Sixteen public request/response validators and two frozen service factories are added. `createEnvelopeService` exposes exactly four envelope methods; `createRecoveryService` exposes exactly four recovery methods.
+- Every new route uses P032's same-origin POST/JSON/no-store/no-referrer/redirect-error policy and the 262,144-byte small-JSON limit. Reads and recovery begin/finish accept 200 only; mutations accept 200/409 with exact body agreement.
+- Request/response identity binds operation, Pocket, envelope, ceremony, credential, key-set and recovery versions. Safe advancing versions, canonical base64url, timestamps, deterministic envelope metadata and committed/conflict replay semantics fail closed.
+
+### Contract reuse and compatibility
+
+- P029/P028 `validateOpaqueMasterKeyEnvelopeRecord` remains the only encrypted-envelope record validator. P038 adds no cryptography.
+- P031 registration validators remain the authority for recovery public options, finish credentials and account/credential completion identity. Client-only PRF result bytes do not cross transport.
+- A production-source VM test drives all eight new P038 methods through a test-only in-process transport into the actual P036/P037 service core and deterministic P034 store. List, download, add, revoke, initialise, begin, finish, rotate, committed replay and conflict all pass both real boundaries.
+- Invalid requests stop before transport, response values are deeply frozen, caller inputs remain unchanged, and a network ambiguity is reported once without retry.
+
+### Files changed
+
+- `js/pocket-sync-remote-client.js`
+- `tests/p038-key-recovery-remote-client.test.js`
+- `tests/p032-sync-remote-client.test.js`
+- `docs/SYNC_KEY_RECOVERY_REMOTE_CLIENT.md`
+- `docs/SYNC_REMOTE_CLIENT.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p038-key-recovery-remote-client.test.js` - 11 passed, 0 failed.
+- `node --test tests/p037-recovery-replay-authorisation.test.js` - 4 passed, 0 failed.
+- `node --test tests/p036-key-recovery-service-core.test.js` - 19 passed, 0 failed.
+- `node --test tests/p035-rp-id-hardening.test.js` - 4 passed, 0 failed.
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 576 passed, 0 failed.
+- `node --check` passed for the production remote client and both changed tests.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+No key generation, wrapping/unwrapping, recovery proof/package, retry, browser storage/loading, UI, owner, Main Save/PE Save integration, HTTP server/adapter, cookie parsing, database, provider, deployment, dependency or service-worker change was added. Physical browser acceptance is not applicable because P038 remains dormant and unloaded.
+
+### Recommended P039 boundary
+
+Build reviewed local activation/recovery orchestration around P027-P031 and P038: generate keys and roots locally, create/open P029 envelopes, create and confirm the local-only recovery package, preserve device-first durability and stage owner adoption only after every gate succeeds. Keep real HTTP/cookie, verifier, database and deployment adapters separate.
+
 ## POCKET TASK P037 - BIND RECOVERY ROTATION REPLAY TO THE RECOVERED CREDENTIAL
 
 Title: Bind recovery rotation replay to the recovered credential

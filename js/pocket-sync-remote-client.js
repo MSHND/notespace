@@ -33,6 +33,14 @@ persisting session state, retrying work, or changing a Pocket owner.
     readRevision: "/pockets/revision/read",
     downloadEncryptedRecord: "/pockets/content/download",
     conditionalUpload: "/pockets/content/conditional-upload",
+    listEnvelopes: "/pockets/envelopes/list",
+    downloadEnvelope: "/pockets/envelopes/download",
+    addEnvelope: "/pockets/envelopes/add",
+    revokeEnvelope: "/pockets/envelopes/revoke",
+    initialiseRecovery: "/account/recovery/initialise",
+    beginRecovery: "/account/recovery/begin",
+    finishRecovery: "/account/recovery/finish",
+    rotateRecovery: "/account/recovery/rotate",
   });
 
   const IDENTIFIER_LIMIT = 160;
@@ -78,12 +86,12 @@ persisting session state, retrying work, or changing a Pocket owner.
     return value;
   }
 
-  function identifier(value) {
+  function identifier(value, code = "remote-request-invalid") {
     if (typeof value !== "string"
         || value.length < 1
         || value.length > IDENTIFIER_LIMIT
         || value !== value.trim()) {
-      throw remoteError("remote-request-invalid");
+      throw remoteError(code);
     }
     return value;
   }
@@ -122,7 +130,13 @@ persisting session state, retrying work, or changing a Pocket owner.
       response: routeName === "downloadEncryptedRecord"
         ? POLICY.contentJsonLimitBytes
         : POLICY.smallJsonLimitBytes,
-      statuses: routeName === "conditionalUpload" ? Object.freeze([200, 409]) : Object.freeze([200]),
+      statuses: [
+        "conditionalUpload",
+        "addEnvelope",
+        "revokeEnvelope",
+        "initialiseRecovery",
+        "rotateRecovery",
+      ].includes(routeName) ? Object.freeze([200, 409]) : Object.freeze([200]),
     });
   }
 
@@ -457,11 +471,13 @@ persisting session state, retrying work, or changing a Pocket owner.
     });
   }
 
-  function securityContract() {
+  function securityContract(requireEnvelope = false) {
     const contract = global.PocketSyncSecurityContract;
     if (!isObject(contract)
         || typeof contract.validateOpaqueEncryptedRecord !== "function"
-        || typeof contract.buildConditionalWriteRequest !== "function") {
+        || typeof contract.buildConditionalWriteRequest !== "function"
+        || (requireEnvelope
+          && typeof contract.validateOpaqueMasterKeyEnvelopeRecord !== "function")) {
       throw remoteError("remote-security-contract-unavailable");
     }
     return contract;
@@ -711,6 +727,481 @@ persisting session state, retrying work, or changing a Pocket owner.
     throw remoteError("remote-response-invalid");
   }
 
+  function canonicalBase64url(value, bytes, code) {
+    if (canonicalBase64urlByteLength(value) !== bytes) throw remoteError(code);
+    return value;
+  }
+
+  function canonicalTimestamp(value) {
+    if (typeof value !== "string") throw remoteError("remote-response-invalid");
+    const milliseconds = Date.parse(value);
+    if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) {
+      throw remoteError("remote-response-invalid");
+    }
+    return value;
+  }
+
+  function validateEnvelopeFields(input, options = {}) {
+    const code = options.code || "remote-request-invalid";
+    const fields = [
+      "envelopeId", "envelopeKind", "envelopeVersion", "deviceId", "credentialId",
+      "kdf", "kdfSalt", "derivationVersion",
+    ];
+    if (!isObject(input) || fields.some((field) =>
+      !Object.prototype.hasOwnProperty.call(input, field))) throw remoteError(code);
+    const value = input;
+    const envelopeId = identifier(value.envelopeId, code);
+    const envelopeVersion = revision(value.envelopeVersion, 1, code);
+    const kinds = options.allowRecovery
+      ? ["device", "passkey-prf", "device-transfer", "recovery"]
+      : ["device", "passkey-prf", "device-transfer"];
+    if (!kinds.includes(value.envelopeKind)) throw remoteError(code);
+    if (value.envelopeKind === "device") {
+      if (value.credentialId !== null || value.kdf !== "none"
+          || value.kdfSalt !== null || value.derivationVersion !== null) throw remoteError(code);
+      identifier(value.deviceId, code);
+    } else {
+      if (value.deviceId !== null || value.kdf !== "HKDF-SHA-256"
+          || value.derivationVersion !== 1) throw remoteError(code);
+      canonicalBase64url(value.kdfSalt, 32, code);
+      if (value.envelopeKind === "passkey-prf") identifier(value.credentialId, code);
+      else if (value.credentialId !== null) throw remoteError(code);
+    }
+    return frozen({
+      envelopeId,
+      envelopeKind: value.envelopeKind,
+      envelopeVersion,
+      deviceId: value.deviceId,
+      credentialId: value.credentialId,
+      kdf: value.kdf,
+      kdfSalt: value.kdfSalt,
+      derivationVersion: value.derivationVersion,
+    });
+  }
+
+  function validateActiveEnvelope(input, allowRecovery, contract, code = "remote-request-invalid") {
+    const value = exactObject(input, [
+      "envelopeId", "envelopeKind", "envelopeVersion", "deviceId", "credentialId",
+      "kdf", "kdfSalt", "derivationVersion", "encryptedEnvelope",
+    ], [
+      "envelopeId", "envelopeKind", "envelopeVersion", "deviceId", "credentialId",
+      "kdf", "kdfSalt", "derivationVersion", "encryptedEnvelope",
+    ], code);
+    const metadata = validateEnvelopeFields(value, { allowRecovery, code });
+    let record;
+    try {
+      record = contract.validateOpaqueMasterKeyEnvelopeRecord(value.encryptedEnvelope);
+    } catch (_error) {
+      throw remoteError(code);
+    }
+    if (!isObject(record) || record.ok !== true || !isObject(record.value)
+        || canonicalBase64urlByteLength(record.value.ciphertext) !== 48) {
+      throw remoteError(code);
+    }
+    return frozen({ ...metadata, encryptedEnvelope: record.value });
+  }
+
+  function validateRecoveryVerifier(input, code = "remote-request-invalid") {
+    const value = exactObject(input, [
+      "format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier",
+    ], ["format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier"], code);
+    if (value.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
+        || value.kdf !== "HKDF-SHA-256" || value.derivationVersion !== 1) {
+      throw remoteError(code);
+    }
+    revision(value.version, 1, code);
+    canonicalBase64url(value.kdfSalt, 32, code);
+    canonicalBase64url(value.verifier, 32, code);
+    return frozen(value);
+  }
+
+  function validateRecoveryProof(input) {
+    const value = exactObject(input, ["format", "version", "proof"],
+      ["format", "version", "proof"], "remote-request-invalid");
+    const size = canonicalBase64urlByteLength(value.proof);
+    if (value.format !== "pocket.sync.recovery-authorisation-proof.opaque"
+        || value.version !== 1 || size < 32 || size > 1024) {
+      throw remoteError("remote-request-invalid");
+    }
+    return frozen(value);
+  }
+
+  function validateKeyMutation(input, additionalFields) {
+    const common = [
+      "apiVersion", "operationId", "logicalChangeId", "attemptKind",
+      "syncedPocketId", "expectedKeySetVersion",
+    ];
+    const fields = [...common, ...additionalFields];
+    const request = exactObject(input, fields, fields, "remote-request-invalid");
+    if (request.apiVersion !== POLICY.apiVersion
+        || !["new-change", "idempotent-retry"].includes(request.attemptKind)
+        || revision(request.expectedKeySetVersion) >= Number.MAX_SAFE_INTEGER) {
+      throw remoteError("remote-request-invalid");
+    }
+    return {
+      ...request,
+      operationId: identifier(request.operationId),
+      logicalChangeId: identifier(request.logicalChangeId),
+      syncedPocketId: identifier(request.syncedPocketId),
+    };
+  }
+
+  function validateListEnvelopesRequest(input) {
+    const value = exactObject(input, ["apiVersion", "operationId", "syncedPocketId"],
+      ["apiVersion", "operationId", "syncedPocketId"], "remote-request-invalid");
+    if (value.apiVersion !== POLICY.apiVersion) throw remoteError("remote-request-invalid");
+    return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+      syncedPocketId: identifier(value.syncedPocketId) });
+  }
+
+  function validateListEnvelopesResponse(input, requestInput) {
+    const request = validateListEnvelopesRequest(requestInput);
+    const response = exactObject(input, ["apiVersion", "ok", "operationId", "syncedPocketId",
+      "keySetVersion", "recoveryStatus", "recoveryVersion", "envelopes"],
+    ["apiVersion", "ok", "operationId", "syncedPocketId", "keySetVersion",
+      "recoveryStatus", "recoveryVersion", "envelopes"]);
+    const keySetVersion = revision(response.keySetVersion, 0, "remote-response-invalid");
+    const recoveryVersion = revision(response.recoveryVersion, 0, "remote-response-invalid");
+    if (response.apiVersion !== 1 || response.ok !== true
+        || response.operationId !== request.operationId
+        || response.syncedPocketId !== request.syncedPocketId
+        || !["unconfigured", "ready", "rotation-required"].includes(response.recoveryStatus)
+        || !Array.isArray(response.envelopes)
+        || (keySetVersion === 0 && (response.recoveryStatus !== "unconfigured"
+          || recoveryVersion !== 0 || response.envelopes.length !== 0))
+        || (response.recoveryStatus === "unconfigured" && recoveryVersion !== 0)
+        || (response.recoveryStatus !== "unconfigured" && recoveryVersion < 1)) {
+      throw remoteError("remote-response-invalid");
+    }
+    let previous = null;
+    const envelopes = response.envelopes.map((item) => {
+      const value = exactObject(item, ["envelopeId", "envelopeKind", "envelopeVersion", "status",
+        "deviceId", "credentialId", "kdf", "kdfSalt", "derivationVersion", "createdAt", "revokedAt"],
+      ["envelopeId", "envelopeKind", "envelopeVersion", "status", "deviceId", "credentialId",
+        "kdf", "kdfSalt", "derivationVersion", "createdAt", "revokedAt"]);
+      const metadata = validateEnvelopeFields(value, { allowRecovery: true,
+        code: "remote-response-invalid" });
+      if (!["active", "revoked"].includes(value.status)
+          || (value.status === "active" && value.revokedAt !== null)
+          || (value.status === "revoked" && value.revokedAt === null)) {
+        throw remoteError("remote-response-invalid");
+      }
+      canonicalTimestamp(value.createdAt);
+      if (value.revokedAt !== null) canonicalTimestamp(value.revokedAt);
+      if (previous !== null && metadata.envelopeId <= previous) {
+        throw remoteError("remote-response-invalid");
+      }
+      previous = metadata.envelopeId;
+      return frozen({ ...metadata, status: value.status, createdAt: value.createdAt,
+        revokedAt: value.revokedAt });
+    });
+    return frozen({ ...response, keySetVersion, recoveryVersion, envelopes });
+  }
+
+  function validateDownloadEnvelopeRequest(input) {
+    const value = exactObject(input, ["apiVersion", "operationId", "syncedPocketId", "envelopeId"],
+      ["apiVersion", "operationId", "syncedPocketId", "envelopeId"], "remote-request-invalid");
+    if (value.apiVersion !== 1) throw remoteError("remote-request-invalid");
+    return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+      syncedPocketId: identifier(value.syncedPocketId), envelopeId: identifier(value.envelopeId) });
+  }
+
+  function validateDownloadEnvelopeResponse(input, requestInput, contractInput) {
+    const request = validateDownloadEnvelopeRequest(requestInput);
+    const contract = contractInput || securityContract(true);
+    const response = exactObject(input, ["apiVersion", "ok", "operationId", "syncedPocketId",
+      "keySetVersion", "envelope"], ["apiVersion", "ok", "operationId", "syncedPocketId",
+      "keySetVersion", "envelope"]);
+    if (response.apiVersion !== 1 || response.ok !== true
+        || response.operationId !== request.operationId
+        || response.syncedPocketId !== request.syncedPocketId) throw remoteError("remote-response-invalid");
+    revision(response.keySetVersion, 1, "remote-response-invalid");
+    const envelopeValue = exactObject(response.envelope, ["envelopeId", "envelopeKind",
+      "envelopeVersion", "deviceId", "credentialId", "kdf", "kdfSalt", "derivationVersion",
+      "encryptedEnvelopeSize", "encryptedEnvelope"], ["envelopeId", "envelopeKind",
+      "envelopeVersion", "deviceId", "credentialId", "kdf", "kdfSalt", "derivationVersion",
+      "encryptedEnvelopeSize", "encryptedEnvelope"]);
+    const { encryptedEnvelopeSize: _size, ...activeEnvelope } = envelopeValue;
+    const envelope = validateActiveEnvelope(activeEnvelope, true, contract, "remote-response-invalid");
+    if (envelope.envelopeId !== request.envelopeId || envelopeValue.encryptedEnvelopeSize !== 48) {
+      throw remoteError("remote-response-invalid");
+    }
+    return frozen({ ...response, envelope: { ...envelope, encryptedEnvelopeSize: 48 } });
+  }
+
+  function validateAddEnvelopeRequest(input, contractInput) {
+    const contract = contractInput || securityContract(true);
+    const request = validateKeyMutation(input, ["envelope"]);
+    return frozen({ ...request,
+      envelope: validateActiveEnvelope(request.envelope, false, contract) });
+  }
+
+  function validateRevokeEnvelopeRequest(input) {
+    const request = validateKeyMutation(input, ["envelopeId"]);
+    return frozen({ ...request, envelopeId: identifier(request.envelopeId) });
+  }
+
+  function validateKeyMutationResponse(status, input, requestInput, options = {}) {
+    const request = requestInput;
+    if (status === 200) {
+      const fields = ["apiVersion", "ok", "status", "wrote", "operationId", "replayed",
+        "keySetVersion", ...(options.committedFields || [])];
+      const response = exactObject(input, fields, fields);
+      if (response.apiVersion !== 1 || response.ok !== true || response.status !== "committed"
+          || response.wrote !== true || response.operationId !== request.operationId
+          || typeof response.replayed !== "boolean"
+          || (request.attemptKind === "new-change" && response.replayed)
+          || response.keySetVersion !== request.expectedKeySetVersion + 1) {
+        throw remoteError("remote-response-invalid");
+      }
+      return response;
+    }
+    if (status === 409) {
+      const fields = ["apiVersion", "ok", "status", "wrote", "conflict", "operationId",
+        "actualKeySetVersion", ...(options.conflictFields || [])];
+      const response = exactObject(input, fields, fields);
+      const actual = revision(response.actualKeySetVersion, 0, "remote-response-invalid");
+      if (response.apiVersion !== 1 || response.ok !== false || response.status !== "conflict"
+          || response.wrote !== false || response.conflict !== true
+          || response.operationId !== request.operationId
+          || (!options.allowMatchingKeySet && actual === request.expectedKeySetVersion)) {
+        throw remoteError("remote-response-invalid");
+      }
+      return response;
+    }
+    throw remoteError("remote-response-invalid");
+  }
+
+  function validateAddEnvelopeResponse(status, input, requestInput, contractInput) {
+    const request = validateAddEnvelopeRequest(requestInput, contractInput);
+    return frozen(validateKeyMutationResponse(status, input, request));
+  }
+
+  function validateRevokeEnvelopeResponse(status, input, requestInput) {
+    const request = validateRevokeEnvelopeRequest(requestInput);
+    return frozen(validateKeyMutationResponse(status, input, request));
+  }
+
+  function validateInitialiseRecoveryRequest(input, contractInput) {
+    const contract = contractInput || securityContract(true);
+    const request = validateKeyMutation(input, ["recoveryVerifier", "recoveryEnvelope"]);
+    const verifier = validateRecoveryVerifier(request.recoveryVerifier);
+    const envelope = validateActiveEnvelope(request.recoveryEnvelope, true, contract);
+    if (verifier.version !== 1 || envelope.envelopeKind !== "recovery"
+        || envelope.envelopeVersion !== 1) throw remoteError("remote-request-invalid");
+    return frozen({ ...request, recoveryVerifier: verifier, recoveryEnvelope: envelope });
+  }
+
+  function validateInitialiseRecoveryResponse(status, input, requestInput, contractInput) {
+    const request = validateInitialiseRecoveryRequest(requestInput, contractInput);
+    const response = validateKeyMutationResponse(status, input, request,
+      { committedFields: ["recoveryVersion", "accountLocator", "recoveryCopyRequired"] });
+    if (status === 200 && (response.recoveryVersion !== 1
+        || response.recoveryCopyRequired !== true)) throw remoteError("remote-response-invalid");
+    if (status === 200) identifier(response.accountLocator, "remote-response-invalid");
+    return frozen(response);
+  }
+
+  function validateBeginRecoveryRequest(input) {
+    const request = exactObject(input, ["apiVersion", "operationId", "accountLocator", "deviceId"],
+      ["apiVersion", "operationId", "accountLocator", "deviceId"], "remote-request-invalid");
+    if (request.apiVersion !== 1) throw remoteError("remote-request-invalid");
+    return frozen({ apiVersion: 1, operationId: identifier(request.operationId),
+      accountLocator: identifier(request.accountLocator), deviceId: identifier(request.deviceId) });
+  }
+
+  function validateBeginRecoveryResponse(input, requestInput, now = Date.now, contractInput) {
+    const request = validateBeginRecoveryRequest(requestInput);
+    const contract = contractInput || accountContract();
+    const response = exactObject(input, ["apiVersion", "ok", "operationId", "recoveryCeremonyId",
+      "expiresAt", "recoveryVersion", "challenge", "recoveryAuthorisation",
+      "prfEvaluationInput", "publicKeyCreationOptions"], ["apiVersion", "ok", "operationId",
+      "recoveryCeremonyId", "expiresAt", "recoveryVersion", "challenge", "recoveryAuthorisation",
+      "prfEvaluationInput", "publicKeyCreationOptions"]);
+    if (response.apiVersion !== 1 || response.ok !== true
+        || response.operationId !== request.operationId) throw remoteError("remote-response-invalid");
+    identifier(response.recoveryCeremonyId, "remote-response-invalid");
+    const recoveryVersion = revision(response.recoveryVersion, 1, "remote-response-invalid");
+    canonicalBase64url(response.challenge, 32, "remote-response-invalid");
+    const publicMetadata = exactObject(response.recoveryAuthorisation,
+      ["format", "version", "kdf", "kdfSalt", "derivationVersion"],
+      ["format", "version", "kdf", "kdfSalt", "derivationVersion"]);
+    if (publicMetadata.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
+        || publicMetadata.version !== recoveryVersion || publicMetadata.kdf !== "HKDF-SHA-256"
+        || publicMetadata.derivationVersion !== 1) throw remoteError("remote-response-invalid");
+    canonicalBase64url(publicMetadata.kdfSalt, 32, "remote-response-invalid");
+    try {
+      contract.validateBeginRegistrationResponse({ apiVersion: 1, ok: true,
+        operationId: response.operationId, ceremonyId: response.recoveryCeremonyId,
+        expiresAt: response.expiresAt, prfEvaluationInput: response.prfEvaluationInput,
+        publicKeyCreationOptions: response.publicKeyCreationOptions },
+      request.operationId, currentMilliseconds(now));
+    } catch (_error) {
+      throw remoteError("remote-response-invalid");
+    }
+    return frozen(response);
+  }
+
+  function validateFinishRecoveryRequest(input, contractInput) {
+    const contract = contractInput || accountContract();
+    const request = exactObject(input, ["apiVersion", "operationId", "recoveryCeremonyId",
+      "deviceId", "proof", "credential"], ["apiVersion", "operationId", "recoveryCeremonyId",
+      "deviceId", "proof", "credential"], "remote-request-invalid");
+    if (request.apiVersion !== 1) throw remoteError("remote-request-invalid");
+    let registration;
+    try {
+      registration = contract.validateFinishRegistrationRequest({ apiVersion: 1,
+        operationId: request.operationId, ceremonyId: request.recoveryCeremonyId,
+        deviceId: request.deviceId, credential: request.credential });
+    } catch (_error) {
+      throw remoteError("remote-request-invalid");
+    }
+    return frozen({ apiVersion: 1, operationId: registration.operationId,
+      recoveryCeremonyId: registration.ceremonyId, deviceId: registration.deviceId,
+      proof: validateRecoveryProof(request.proof), credential: registration.credential });
+  }
+
+  function validateFinishRecoveryResponse(input, requestInput, accountInput, securityInput) {
+    const account = accountInput || accountContract();
+    const security = securityInput || securityContract(true);
+    const request = validateFinishRecoveryRequest(requestInput, account);
+    const response = exactObject(input, ["apiVersion", "ok", "operationId", "recoveryCeremonyId",
+      "accountId", "credentialId", "credentialVersion", "accountPolicyVersion", "prfEvaluationInput",
+      "syncedPocketId", "keySetVersion", "recoveryVersion", "recoveryEnvelope",
+      "replacementCopyRequired"], ["apiVersion", "ok", "operationId", "recoveryCeremonyId",
+      "accountId", "credentialId", "credentialVersion", "accountPolicyVersion", "prfEvaluationInput",
+      "syncedPocketId", "keySetVersion", "recoveryVersion", "recoveryEnvelope",
+      "replacementCopyRequired"]);
+    if (response.apiVersion !== 1 || response.ok !== true
+        || response.operationId !== request.operationId
+        || response.recoveryCeremonyId !== request.recoveryCeremonyId
+        || response.credentialId !== request.credential.id
+        || response.replacementCopyRequired !== true) throw remoteError("remote-response-invalid");
+    try {
+      account.validateFinishRegistrationResponse({ apiVersion: 1, ok: true,
+        operationId: response.operationId, ceremonyId: response.recoveryCeremonyId,
+        accountId: response.accountId, credentialId: response.credentialId,
+        credentialVersion: response.credentialVersion,
+        accountPolicyVersion: response.accountPolicyVersion,
+        prfEvaluationInput: response.prfEvaluationInput }, { operationId: request.operationId,
+        ceremonyId: request.recoveryCeremonyId, credentialId: request.credential.id,
+        prfEvaluationInput: response.prfEvaluationInput });
+    } catch (_error) {
+      throw remoteError("remote-response-invalid");
+    }
+    identifier(response.syncedPocketId, "remote-response-invalid");
+    revision(response.keySetVersion, 1, "remote-response-invalid");
+    const recoveryVersion = revision(response.recoveryVersion, 1, "remote-response-invalid");
+    const envelopeValue = exactObject(response.recoveryEnvelope, ["envelopeId", "envelopeKind",
+      "envelopeVersion", "deviceId", "credentialId", "kdf", "kdfSalt", "derivationVersion",
+      "encryptedEnvelopeSize", "encryptedEnvelope"], ["envelopeId", "envelopeKind",
+      "envelopeVersion", "deviceId", "credentialId", "kdf", "kdfSalt", "derivationVersion",
+      "encryptedEnvelopeSize", "encryptedEnvelope"]);
+    const { encryptedEnvelopeSize: _size, ...activeEnvelope } = envelopeValue;
+    const envelope = validateActiveEnvelope(activeEnvelope, true, security, "remote-response-invalid");
+    if (envelope.envelopeKind !== "recovery" || envelope.envelopeVersion !== recoveryVersion
+        || envelopeValue.encryptedEnvelopeSize !== 48) throw remoteError("remote-response-invalid");
+    return frozen({ ...response, recoveryEnvelope: { ...envelope, encryptedEnvelopeSize: 48 } });
+  }
+
+  function validateRotateRecoveryRequest(input, contractInput) {
+    const contract = contractInput || securityContract(true);
+    const request = validateKeyMutation(input, ["recoveryOperationId", "expectedRecoveryVersion",
+      "recoveryVerifier", "recoveryEnvelope"]);
+    if (revision(request.expectedRecoveryVersion, 1) >= Number.MAX_SAFE_INTEGER) {
+      throw remoteError("remote-request-invalid");
+    }
+    const verifier = validateRecoveryVerifier(request.recoveryVerifier);
+    const envelope = validateActiveEnvelope(request.recoveryEnvelope, true, contract);
+    if (verifier.version !== request.expectedRecoveryVersion + 1
+        || envelope.envelopeKind !== "recovery"
+        || envelope.envelopeVersion !== request.expectedRecoveryVersion + 1) {
+      throw remoteError("remote-request-invalid");
+    }
+    return frozen({ ...request, recoveryOperationId: identifier(request.recoveryOperationId),
+      recoveryVerifier: verifier, recoveryEnvelope: envelope });
+  }
+
+  function validateRotateRecoveryResponse(status, input, requestInput, contractInput) {
+    const request = validateRotateRecoveryRequest(requestInput, contractInput);
+    const response = validateKeyMutationResponse(status, input, request, {
+      committedFields: ["recoveryVersion", "accountLocator", "previousRecoveryInvalidated",
+        "replacementCopyRequired"],
+      conflictFields: ["actualRecoveryVersion"],
+      allowMatchingKeySet: true,
+    });
+    if (status === 200) {
+      if (response.recoveryVersion !== request.expectedRecoveryVersion + 1
+          || response.previousRecoveryInvalidated !== true
+          || response.replacementCopyRequired !== true) throw remoteError("remote-response-invalid");
+      identifier(response.accountLocator, "remote-response-invalid");
+    } else {
+      const actualRecoveryVersion = revision(response.actualRecoveryVersion, 0,
+        "remote-response-invalid");
+      if (response.actualKeySetVersion === request.expectedKeySetVersion
+          && actualRecoveryVersion === request.expectedRecoveryVersion) {
+        throw remoteError("remote-response-invalid");
+      }
+    }
+    return frozen(response);
+  }
+
+  function createEnvelopeService({ transport } = {}) {
+    const remote = validateTransport(transport);
+    const contract = securityContract(true);
+    return Object.freeze({
+      async listEnvelopes(input) {
+        const request = validateListEnvelopesRequest(input);
+        const result = validateTransportResult(await callTransport(remote, "listEnvelopes", request), [200]);
+        return validateListEnvelopesResponse(result.body, request);
+      },
+      async downloadEnvelope(input) {
+        const request = validateDownloadEnvelopeRequest(input);
+        const result = validateTransportResult(await callTransport(remote, "downloadEnvelope", request), [200]);
+        return validateDownloadEnvelopeResponse(result.body, request, contract);
+      },
+      async addEnvelope(input) {
+        const request = validateAddEnvelopeRequest(input, contract);
+        const result = validateTransportResult(await callTransport(remote, "addEnvelope", request), [200, 409]);
+        return validateAddEnvelopeResponse(result.status, result.body, request, contract);
+      },
+      async revokeEnvelope(input) {
+        const request = validateRevokeEnvelopeRequest(input);
+        const result = validateTransportResult(await callTransport(remote, "revokeEnvelope", request), [200, 409]);
+        return validateRevokeEnvelopeResponse(result.status, result.body, request);
+      },
+    });
+  }
+
+  function createRecoveryService({ transport, now = Date.now } = {}) {
+    const remote = validateTransport(transport);
+    const account = accountContract();
+    const security = securityContract(true);
+    if (typeof now !== "function") throw remoteError("remote-client-invalid");
+    return Object.freeze({
+      async initialiseRecovery(input) {
+        const request = validateInitialiseRecoveryRequest(input, security);
+        const result = validateTransportResult(await callTransport(remote, "initialiseRecovery", request), [200, 409]);
+        return validateInitialiseRecoveryResponse(result.status, result.body, request, security);
+      },
+      async beginRecovery(input) {
+        const request = validateBeginRecoveryRequest(input);
+        const result = validateTransportResult(await callTransport(remote, "beginRecovery", request), [200]);
+        return validateBeginRecoveryResponse(result.body, request, now, account);
+      },
+      async finishRecovery(input) {
+        const request = validateFinishRecoveryRequest(input, account);
+        const result = validateTransportResult(await callTransport(remote, "finishRecovery", request), [200]);
+        return validateFinishRecoveryResponse(result.body, request, account, security);
+      },
+      async rotateRecovery(input) {
+        const request = validateRotateRecoveryRequest(input, security);
+        const result = validateTransportResult(await callTransport(remote, "rotateRecovery", request), [200, 409]);
+        return validateRotateRecoveryResponse(result.status, result.body, request, security);
+      },
+    });
+  }
+
   function createContentService({ transport } = {}) {
     const remote = validateTransport(transport);
     const contract = securityContract();
@@ -754,8 +1245,26 @@ persisting session state, retrying work, or changing a Pocket owner.
     validateDownloadResponse,
     validateConditionalUploadRequest,
     validateConditionalUploadResponse,
+    validateListEnvelopesRequest,
+    validateListEnvelopesResponse,
+    validateDownloadEnvelopeRequest,
+    validateDownloadEnvelopeResponse,
+    validateAddEnvelopeRequest,
+    validateAddEnvelopeResponse,
+    validateRevokeEnvelopeRequest,
+    validateRevokeEnvelopeResponse,
+    validateInitialiseRecoveryRequest,
+    validateInitialiseRecoveryResponse,
+    validateBeginRecoveryRequest,
+    validateBeginRecoveryResponse,
+    validateFinishRecoveryRequest,
+    validateFinishRecoveryResponse,
+    validateRotateRecoveryRequest,
+    validateRotateRecoveryResponse,
     createBrowserJsonTransport,
     createAccountService,
     createContentService,
+    createEnvelopeService,
+    createRecoveryService,
   });
 })(typeof window !== "undefined" ? window : globalThis);

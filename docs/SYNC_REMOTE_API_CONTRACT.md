@@ -2,13 +2,13 @@
 
 ## 1. Status and conventions
 
-This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded client transport and strict account/content adapters described here. P034/P035 implement the corresponding dormant, undeployed server-side safety state machine for the seven locked routes, and P036 adds dormant key-envelope/recovery methods whose future suffixes are reserved but not yet wired by P032. None selects an endpoint origin, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
+This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded account/content transport, and P038 extends that same dormant browser client across the P036/P037 key-envelope/recovery methods. P034-P037 implement the corresponding dormant, undeployed service-core state machines. None selects an endpoint origin, HTTP adapter, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
 Unknown fields fail validation. Remote records may contain public WebAuthn ceremony material, opaque identifiers, authenticated ciphertext and minimal operational metadata only. They may not contain readable Pocket content, filenames/paths, local handles, raw content keys, raw PRF results, raw recovery roots or complete recovery packages.
 
-### P032 transport binding
+### P032/P038 transport binding
 
 The future service is reached beneath one caller-supplied same-origin absolute-path root. P032 accepts no full or scheme-relative URL and v1 has no cross-origin API. These locked suffixes are appended to that root:
 
@@ -19,10 +19,18 @@ The future service is reached beneath one caller-supplied same-origin absolute-p
 - `/pockets/revision/read`
 - `/pockets/content/download`
 - `/pockets/content/conditional-upload`
+- `/pockets/envelopes/list`
+- `/pockets/envelopes/download`
+- `/pockets/envelopes/add`
+- `/pockets/envelopes/revoke`
+- `/account/recovery/initialise`
+- `/account/recovery/begin`
+- `/account/recovery/finish`
+- `/account/recovery/rotate`
 
-All seven operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Future authentication uses a browser-managed same-origin cookie; P032 neither sends nor persists a bearer token. P034 enforces an exact POST/Origin/Fetch-Metadata/content-type/session context, atomic session rotation, account/Pocket authorisation and durable conditional-write/idempotency state. A later HTTP adapter must map real headers and Secure/HttpOnly/SameSite cookies into that boundary and supply abuse controls.
+All fifteen operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Future authentication uses a browser-managed same-origin cookie; the client neither sends nor persists a bearer token. P034-P037 enforce an exact POST/Origin/Fetch-Metadata/content-type/session context, atomic state and durable idempotency. A later HTTP adapter must map real headers and Secure/HttpOnly/SameSite cookies into that boundary and supply abuse controls.
 
-Account/revision responses and their requests are limited to 262,144 UTF-8 bytes. Encrypted content download/upload JSON is limited to 16,777,216 UTF-8 bytes. P032 rejects declared or actually oversized responses, non-JSON/HTML bodies, redirects, malformed JSON and unexpected statuses. It never retries automatically.
+Account/revision/key/recovery responses and their requests are limited to 262,144 UTF-8 bytes. Encrypted content download/upload JSON is limited to 16,777,216 UTF-8 bytes. P032/P038 reject declared or actually oversized responses, non-JSON/HTML bodies, redirects, malformed JSON and unexpected statuses. They never retry automatically.
 
 ## 2. Common result forms
 
@@ -217,7 +225,7 @@ See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md) for the factory, t
 
 ## 7. Key envelopes
 
-P036 enforces the following operations inside the dormant service core. They are reserved for future same-origin suffixes `/pockets/envelopes/list`, `/pockets/envelopes/download`, `/pockets/envelopes/add` and `/pockets/envelopes/revoke`. P032 does not route them yet.
+P036 enforces the following operations inside the dormant service core. P038 implements their exact unloaded browser-client validators and same-origin suffixes `/pockets/envelopes/list`, `/pockets/envelopes/download`, `/pockets/envelopes/add` and `/pockets/envelopes/revoke`. No production loader or real HTTP adapter invokes them.
 
 ### List permitted envelope metadata
 
@@ -248,7 +256,7 @@ Revoking an ordinary envelope does not rewrite the encrypted content record. Rec
 
 ## 8. Emergency recovery
 
-P036 enforces reserved future same-origin suffixes `/account/recovery/initialise`, `/account/recovery/begin`, `/account/recovery/finish` and `/account/recovery/rotate`. These are service-core methods only; P032 cannot call them yet.
+P036 enforces same-origin suffixes `/account/recovery/initialise`, `/account/recovery/begin`, `/account/recovery/finish` and `/account/recovery/rotate`. P038 implements their exact unloaded browser-client request/response boundary. No selected origin or real HTTP/cookie adapter exists, so production Pocket still cannot call them.
 
 ### Initialise recovery
 
