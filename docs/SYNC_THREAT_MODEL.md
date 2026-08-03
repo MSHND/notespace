@@ -2,7 +2,7 @@
 
 ## 1. Scope and security goals
 
-This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store, P031's unloaded account/passkey client, P032's unloaded same-origin remote client, P034's dormant undeployed service safety core, P035's exact-host RP-ID policy and P036's dormant key-envelope/recovery state machine. It does not change the threat model of today's local JSON and Vault owners.
+This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store, P031's unloaded account/passkey client, P032/P038's unloaded same-origin remote client, P034-P037's dormant service state machines and P039's dormant activation orchestrator. It does not change the threat model of today's local JSON and Vault owners.
 
 The primary goals are:
 
@@ -139,6 +139,25 @@ Turning on sync does not encrypt, move or delete the original JSON source. That 
 
 A source Vault remains protected under its existing Vault format, but P028 does not claim that Vault v1 and the synced encrypted-record format are interchangeable.
 
+### P039 activation failure boundary
+
+| Failure or attacker action | P039 enforcement | Remaining boundary |
+| --- | --- | --- |
+| Source owner swapped during activation | Owner kind and opaque continuity value are captured; the injected current-session check runs after asynchronous boundaries and before adoption | A future live adapter must supply a continuity value that changes on every owner/session rotation |
+| Dirty source not saved | Existing JSON/Vault Save runs before the one payload freeze; cancellation/failure stops before keys, device staging or remote work | The existing Save boundary remains responsible for physical file durability |
+| Payload changes during activation | One frozen payload feeds P029 once; a later source-session change stops adoption | Same-session in-memory edits must make the live source check fail or be prevented by future UI |
+| Duplicate passkey after ambiguous finish | P031 hands P039 a server-safe credential continuation before finish; resume submits that exact finish without another WebAuthn create | Ambiguity before durable credential continuation cannot be guessed and remains a non-complete activation |
+| Duplicate Pocket/envelope/recovery creation | Stable operation/logical-change IDs are encrypted before use; pending dispatch is durable; explicit resume uses exact idempotent retry | Permanent abandonment can leave authorised opaque remote orphan state |
+| Recovery-copy write fails or is deferred | No owner adoption; exact root/package/locator/envelopes survive only inside the encrypted draft for explicit resume | A compromised recovery-copy writer can copy, corrupt or disclose the deliberately powerful package |
+| Recovery root lost after remote initialisation | Root and package remain encrypted locally until copy confirmation; cleanup occurs only afterward | Site-data loss before package storage can make the staged remote recovery envelope unusable |
+| Raw root/package leaks through device storage | P029 encrypts the complete draft with the non-extractable device key; raw-store sentinel tests reject plaintext exposure | Same-origin code or a compromised device able to invoke the key can open the draft |
+| Operation IDs regenerated | All identifiers are generated once, persisted before first use and reused from the draft | Random collision fails without a retry loop; no global anti-rollback transparency exists |
+| Adoption before recovery confirmation | Pre-adoption P028 readiness requires local device durability, revision 1, credential, recovery envelope and confirmed copy | The future injected owner adapter must be idempotent and preserve its own session invariants |
+| Adoption after source-session change | Immediate source recheck stops the owner call | A malicious live adapter that lies about current source defeats this injected boundary |
+| Stale activation writer | P030 whole-record `storeRevision` compare-and-swap rejects the stale replacement | Future UI must explain a stable local conflict instead of silently resetting |
+| Malformed or impossible draft | Exact decrypted fields, stages, identities, versions, envelope records and secret-presence rules fail closed; no repair/reset | Database rollback can restore an older internally valid encrypted draft |
+| Partially completed activation | Confirmed stages are persisted before the next mutation; resume starts at the first unconfirmed step | No background cleanup or remote rollback guess exists |
+
 ## 9. Service-core failure boundary
 
 P034-P036 convert previously specified server duties into one executable dormant state machine:
@@ -191,9 +210,9 @@ Future service implementation must define conservative limits for ceremony creat
 
 Credential labels and device labels can become personal metadata. If later UI allows them, collection must be optional/minimal, display escaping mandatory and remote retention documented. P028's executable metadata allowlists use opaque IDs and do not admit labels.
 
-## 11. Explicitly out of scope for P027-P036
+## 11. Explicitly out of scope for P027-P039
 
-P027-P036 do not provide:
+P027-P039 do not provide:
 
 - a formal cryptographic proof, global cross-device encryption-use counter or automatic master-key rotation;
 - protection after arbitrary code execution in the active origin/browser/device;

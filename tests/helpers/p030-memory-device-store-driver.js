@@ -78,6 +78,10 @@ function createMemoryDeviceStoreDriver(sharedState = createSharedDeviceStoreStat
         trigger("before-read");
         return staged.has(key) ? clone(staged.get(key)) : undefined;
       },
+      async getAll() {
+        trigger("before-read");
+        return Array.from(staged.values(), (value) => clone(value));
+      },
       async add(value) {
         if (mode !== "readwrite") throw driverError("readonly-write");
         const key = value && value.syncedPocketId;

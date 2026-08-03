@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034-P037 supply the dormant service state machines, and P038 aligns the unloaded browser client with their key-envelope/recovery methods. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034-P037 supply the dormant service state machines, P038 aligns the unloaded browser client with their key-envelope/recovery methods, and P039 joins them in one dormant local activation flow. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -167,6 +167,16 @@ After successful emergency recovery, Pocket can register a new passkey, unwrap t
 
 Missing recovery, cancellation, changed source ownership or any persistence/remote failure leaves the original owner active. No partially staged record silently becomes truth.
 
+### P039 concrete activation ordering
+
+P039 saves a dirty source through its existing owner, freezes one payload, obtains recovery-copy destination permission, creates local P029 material, then commits an encrypted P030 draft before account or remote content work. It registers the passkey, conditionally creates revision 1, adds the mandatory device envelope, adds an actual-PRF envelope or records an explicit skip, and initialises recovery in that order.
+
+Every mutation has a durable operation identity. An ambiguous response stops. Explicit resume alone changes the exact pending request to idempotent retry. Confirmed operations are not repeated and timestamps never choose a winner.
+
+The recovery root and package may survive interruption only inside the P029-encrypted activation draft. Recovery-copy confirmation removes both before owner adoption. The service sees the purpose-separated verifier and recovery envelope, never the root/package; P039 sends no readable payload, raw master key or PRF output.
+
+P028 readiness now supports an explicit pre-adoption validation phase: all non-owner gates must be true while `syncedOwnerAdopted` remains false. P039 then rechecks the captured source and calls the injected idempotent owner boundary last. A failed adoption leaves a ready encrypted draft for an adoption-only resume.
+
 ## 11. Additional-device transfer
 
 The future human journey is:
@@ -200,12 +210,12 @@ Future synced recovery must be implemented as a separately versioned encrypted d
 
 ## 13. Remaining implementation review gates
 
-The architecture and concrete cryptographic format are locked; production integration is still absent. Before loading sync code, later work must supply and review:
+The architecture, concrete cryptographic format and dormant initial-activation ordering are locked; production integration is still absent. Before loading sync code, later work must supply and review:
 
 - live-owner integration of the versioned P030 device store, plus whole-account encryption-use enforcement and master-key rotation consistent with the P029 format and vectors;
 - the real WebAuthn verifier adapter for P034's ceremony state machine;
 - an actual same-origin HTTP/header/cookie adapter and durable database implementation around P034, plus abuse limits and operational recovery;
-- additional-device and recovery UI with abuse/rate controls;
+- P040 emergency-recovery orchestration on a new device, then additional-device and recovery UI with abuse/rate controls;
 - conflict review and account deletion UI;
 - synced-owner integration behind the existing ownership/Save seams; and
 - security review for origin policy, content security, dependencies and operational controls.

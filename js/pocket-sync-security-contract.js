@@ -313,7 +313,12 @@
 
   function validateActivationReadiness(input) {
     const value = isObject(input) ? input : {};
-    const missing = ACTIVATION_REQUIREMENTS.filter((requirement) => value[requirement] !== true);
+    const preAdoption = value.activationPhase === "pre-adoption";
+    const requirements = preAdoption
+      ? ACTIVATION_REQUIREMENTS.filter((requirement) => requirement !== "syncedOwnerAdopted")
+      : ACTIVATION_REQUIREMENTS;
+    const missing = requirements.filter((requirement) => value[requirement] !== true);
+    if (preAdoption && value.syncedOwnerAdopted !== false) missing.push("syncedOwnerAdopted");
     return missing.length
       ? fail("activation-incomplete", { ready: false, missing })
       : frozen({ ok: true, ready: true });

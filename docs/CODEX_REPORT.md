@@ -1,5 +1,103 @@
 # Codex report
 
+## POCKET TASK P039 - BUILD LOCAL SYNC ACTIVATION ORCHESTRATION
+
+Title: Build local sync activation orchestration
+
+Status: P039 adds one dormant client-side conductor that joins the reviewed P027-P038 source, cryptography, encrypted device state, passkey, remote content, envelope and recovery boundaries. Current Pocket does not load or invoke it.
+
+Commit title:
+
+- `P039 Build local sync activation orchestration`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `ab17a22ab1552b3c434c550d633971c83b17fcc6`
+- Starting title: `P038 Extend remote key and recovery client`
+- Implementation date: 2026-08-04
+- Branch: `main`
+- New frozen production export: `PocketSyncActivation.POLICY` and `createActivationOrchestrator`.
+- Created orchestrator surface: exactly asynchronous `activate` and `resume`.
+- Source and platform work remains injected. P039 supplies no UI, picker, file writer, live owner, remote origin or browser loader.
+
+### Activation state and source safety
+
+- A fresh activation accepts only JSON/Vault and captures a non-handle source continuity value. It uses the existing source Save once when dirty, freezes one payload once, checks the exact source after asynchronous boundaries and rechecks immediately before owner adoption.
+- Recovery-copy destination permission occurs before key creation, WebAuthn or remote mutation. Deferral/cancellation leaves no device/remote activation state and preserves the local owner.
+- Stable activation, content, envelope, registration and recovery operation/logical-change IDs are generated once and encrypted before their first remote use.
+- The monotonic stages distinguish device staging, account registration, content commit, device envelope, PRF envelope or explicit skip, recovery initialisation, copy pending, ready, and adopted. Impossible state/version/secret combinations fail closed without repair.
+
+### Local cryptography and encrypted device draft
+
+- P029 creates the non-extractable master/device keys, exact revision-1 content record and device/recovery/optional-PRF envelopes. A focused P029 addition derives the recovery-authorisation verifier with `pocket.sync.recovery.account-authorisation.v1`; recovery wrapping remains under its distinct existing label.
+- P030 record schema 2 adds one optional P029-encrypted activation draft and registers a strict schema-1-to-2 null-draft migration. Database version, one object store, key path and no-index design remain unchanged.
+- The draft is encrypted with the non-extractable device key and bound to Pocket/store revision. Raw persistence contains neither readable Pocket content nor temporary root/package material. `readActivation` scans the same store and fails closed on malformed or duplicate encrypted activation identity.
+- Compare-and-swap persists pending dispatch before remote use and confirmed success before the next operation. A stale writer cannot move activation state backwards.
+
+### Account, PRF, remote order and recovery
+
+- P031 now offers a narrow server-safe finish continuation when an activation callback handles the freshly created credential. A committed-but-ambiguous finish can be resumed without a second `navigator.credentials.create`. Existing one-shot registration remains compatible.
+- Actual PRF output remains client-only. P039 immediately derives one passkey-PRF envelope and clears the bytes, or durably records `prf-envelope-skipped` when output is unavailable.
+- Exact remote order is: conditional content revision 0 to 1; device envelope; optional PRF envelope or skip; recovery initialisation. Every ambiguous mutation stops and only explicit resume sends the exact idempotent retry. Conflicts stop without adoption.
+- Recovery version 1 uses separate verifier/envelope salts and a service-generated locator. The P028-valid package is built locally after that locator exists and never enters a service request.
+- A cancelled/failed copy leaves the same encrypted root, package, locator, envelopes and IDs for explicit resume. Copy confirmation removes root, package and registration continuation before adoption.
+
+### Owner adoption
+
+- P028 readiness gains an explicit pre-adoption mode so every non-owner gate must be true while owner adoption is still false.
+- Final owner data contains only owner kind, activation/Pocket/device IDs, revision 1 and `syncPending: false`.
+- Adoption is the last authority transition. Failure preserves the ready encrypted draft and current source; resume repeats only the injected idempotent adoption. A completed replay performs no remote, cryptographic, copy or owner work.
+
+### Files changed
+
+- `js/pocket-sync-activation.js`
+- `js/pocket-sync-device-store.js`
+- `js/pocket-sync-account-client.js`
+- `js/pocket-sync-crypto.js`
+- `js/pocket-sync-security-contract.js`
+- `tests/p039-sync-activation.test.js`
+- `tests/p030-sync-device-store.test.js`
+- `tests/helpers/p030-memory-device-store-driver.js`
+- `docs/SYNC_ACTIVATION_ORCHESTRATION.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_DEVICE_STORE.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Compatibility and validation
+
+- The P039 suite loads production P028/P029/P030/P031/P038 modules in a VM, drives actual P034-P037 service methods through the production remote validators, uses real Web Crypto and both deterministic transactional stores, and injects only source/copy/owner seams.
+- It covers PRF present/absent, dirty JSON/Vault, destination deferral, source change, content/envelope/recovery ambiguity, passkey-finish continuation, remote conflict, copy pause/resume, adoption failure/replay, exact remote order and encrypted secret cleanup.
+- `node --test tests/p039-sync-activation.test.js` - 22 passed, 0 failed.
+- `node --test tests/p038-key-recovery-remote-client.test.js` - 11 passed, 0 failed.
+- `node --test tests/p037-recovery-replay-authorisation.test.js` - 4 passed, 0 failed.
+- `node --test tests/p036-key-recovery-service-core.test.js` - 19 passed, 0 failed.
+- `node --test tests/p035-rp-id-hardening.test.js` - 4 passed, 0 failed.
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 598 passed, 0 failed.
+- `node --check` passed for every changed production/test JavaScript file.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+No UI, production loader, live synced owner, Main Save/PE Save branch, HTTP server/adapter, cookie handling, database, provider, host/domain/origin selection, deployment file, dependency, service-worker change, timer, worker, polling or background retry was added. Physical browser acceptance is not applicable because P039 remains dormant and unloaded.
+
+### Recommended P040 boundary
+
+Build dormant emergency-recovery orchestration for a new device: recovery-package intake; begin/finish recovery; local proof derivation through a reviewed adapter; recovery-envelope opening and content validation; replacement root/verifier/envelope; atomic remote rotation; replacement-copy confirmation; and new-device state persistence. Keep UI, live owner/Save integration and deployment separate.
+
 ## POCKET TASK P038 - EXTEND THE REMOTE KEY AND RECOVERY CLIENT
 
 Title: Extend remote key and recovery client

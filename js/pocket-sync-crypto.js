@@ -31,6 +31,7 @@ operations without activating sync, storage, account, or transport behaviour.
     "device-transfer": "pocket.sync.device-transfer.master-key-wrapping.v1",
     recovery: "pocket.sync.recovery.master-key-wrapping.v1",
   });
+  const RECOVERY_AUTHORISATION_LABEL = "pocket.sync.recovery.account-authorisation.v1";
   const ENVELOPE_KINDS = Object.freeze([
     "device",
     "passkey-prf",
@@ -344,6 +345,58 @@ operations without activating sync, storage, account, or transport behaviour.
     }
   }
 
+  async function deriveRecoveryAuthorisationVerifier(secretBytes, saltText) {
+    const salt = decodeBase64Url(saltText, "derivation-salt-invalid");
+    if (salt.byteLength !== FORMAT.hkdfSaltBytes) throw cryptoError("derivation-salt-invalid");
+    const secret = copySecretBytes(secretBytes);
+    const info = textEncoder.encode(JSON.stringify([RECOVERY_AUTHORISATION_LABEL]));
+    try {
+      const baseKey = await getCrypto().subtle.importKey(
+        "raw",
+        secret,
+        FORMAT.webCryptoKdf,
+        false,
+        ["deriveBits"]
+      );
+      const bits = await getCrypto().subtle.deriveBits(
+        { name: FORMAT.webCryptoKdf, hash: FORMAT.hash, salt, info },
+        baseKey,
+        FORMAT.keyBits
+      );
+      const verifierBytes = new Uint8Array(bits);
+      try {
+        return encodeBase64Url(verifierBytes);
+      } finally {
+        verifierBytes.fill(0);
+      }
+    } catch (error) {
+      if (error && typeof error.code === "string") throw error;
+      throw cryptoError("recovery-verifier-derivation-failed");
+    } finally {
+      secret.fill(0);
+      salt.fill(0);
+      info.fill(0);
+    }
+  }
+
+  async function createRecoveryAuthorisationVerifier(secretBytes) {
+    const salt = randomBytes(FORMAT.hkdfSaltBytes);
+    const kdfSalt = encodeBase64Url(salt);
+    try {
+      const verifier = await deriveRecoveryAuthorisationVerifier(secretBytes, kdfSalt);
+      return Object.freeze({
+        format: "pocket.sync.recovery-authorisation-verifier.opaque",
+        version: 1,
+        kdf: FORMAT.kdf,
+        kdfSalt,
+        derivationVersion: FORMAT.derivationVersion,
+        verifier,
+      });
+    } finally {
+      salt.fill(0);
+    }
+  }
+
   function validatePlans(plans, options) {
     const allowEmpty = options && options.allowEmpty === true;
     const reservedIds = new Set((options && options.reservedIds) || []);
@@ -585,6 +638,8 @@ operations without activating sync, storage, account, or transport behaviour.
     buildHkdfInfo,
     generateDeviceWrappingKey,
     createDerivedWrappingKey,
+    deriveRecoveryAuthorisationVerifier,
+    createRecoveryAuthorisationVerifier,
     deriveWrappingKey,
     createMasterKeyBundle,
     openMasterKeyBundle,

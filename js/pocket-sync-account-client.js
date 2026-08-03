@@ -1028,6 +1028,52 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     });
   }
 
+  function buildRegistrationContinuation(request, begin, serialised) {
+    return freezeTree({
+      apiVersion: POLICY.apiVersion,
+      operationId: request.operationId,
+      ceremonyId: begin.ceremonyId,
+      deviceId: request.deviceId,
+      prfEvaluationInput: begin.prfEvaluationInput,
+      credential: serialised.credential,
+    });
+  }
+
+  function validateRegistrationContinuation(input) {
+    const code = "registration-continuation-invalid";
+    const value = exactObject(input, [
+      "apiVersion",
+      "operationId",
+      "ceremonyId",
+      "deviceId",
+      "prfEvaluationInput",
+      "credential",
+    ], [
+      "apiVersion",
+      "operationId",
+      "ceremonyId",
+      "deviceId",
+      "prfEvaluationInput",
+      "credential",
+    ], code);
+    if (value.apiVersion !== POLICY.apiVersion) throw accountError(code);
+    const request = validateFinishRegistrationRequest({
+      apiVersion: value.apiVersion,
+      operationId: value.operationId,
+      ceremonyId: value.ceremonyId,
+      deviceId: value.deviceId,
+      credential: value.credential,
+    });
+    return freezeTree({
+      apiVersion: POLICY.apiVersion,
+      operationId: request.operationId,
+      ceremonyId: request.ceremonyId,
+      deviceId: request.deviceId,
+      prfEvaluationInput: validatePrfEvaluationInput(value.prfEvaluationInput, code),
+      credential: request.credential,
+    });
+  }
+
   function createClient({
     accountService,
     webAuthn = createBrowserWebAuthnAdapter(),
@@ -1037,8 +1083,33 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     const credentialApi = validateWebAuthn(webAuthn);
     if (typeof now !== "function") throw accountError("account-client-invalid");
 
-    async function registerPasskey(input) {
+    async function finishRegistration(input) {
+      const continuation = validateRegistrationContinuation(input);
+      const finishRequest = validateFinishRegistrationRequest({
+        apiVersion: continuation.apiVersion,
+        operationId: continuation.operationId,
+        ceremonyId: continuation.ceremonyId,
+        deviceId: continuation.deviceId,
+        credential: continuation.credential,
+      });
+      const finishRaw = await callService(service, "finishRegistration", finishRequest);
+      const finish = validateFinishRegistrationResponse(finishRaw, {
+        operationId: continuation.operationId,
+        ceremonyId: continuation.ceremonyId,
+        credentialId: continuation.credential.id,
+        prfEvaluationInput: continuation.prfEvaluationInput,
+      });
+      return buildSuccess(
+        finish,
+        unavailablePrf(continuation.prfEvaluationInput, "unavailable")
+      );
+    }
+
+    async function registerPasskey(input, onCredentialReady) {
       const request = validateBeginRegistrationRequest(input);
+      if (onCredentialReady !== undefined && typeof onCredentialReady !== "function") {
+        throw accountError("account-client-invalid");
+      }
       const beginRaw = await callService(service, "beginRegistration", request);
       const begin = validateBeginRegistrationResponse(
         beginRaw,
@@ -1058,22 +1129,20 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       try {
         serialised = serializeRegistrationCredential(rawCredential, begin.prfEvaluationInput);
         ensureCurrent(expiry, now);
-        const finishRequest = validateFinishRegistrationRequest({
-          apiVersion: POLICY.apiVersion,
-          operationId: request.operationId,
-          ceremonyId: begin.ceremonyId,
-          deviceId: request.deviceId,
-          credential: serialised.credential,
-        });
-        const finishRaw = await callService(service, "finishRegistration", finishRequest);
-        const finish = validateFinishRegistrationResponse(finishRaw, {
-          operationId: request.operationId,
-          ceremonyId: begin.ceremonyId,
-          credentialId: serialised.credential.id,
-          prfEvaluationInput: begin.prfEvaluationInput,
-        });
+        const continuation = buildRegistrationContinuation(request, begin, serialised);
+        if (onCredentialReady) {
+          await onCredentialReady(Object.freeze({ continuation, prf: serialised.prf }));
+          ensureCurrent(expiry, now);
+        }
+        const result = await finishRegistration(continuation);
         completed = true;
-        return buildSuccess(finish, serialised.prf);
+        const returnedPrf = onCredentialReady && serialised.prf.outputBytes
+          ? Object.freeze({
+            status: "handled",
+            evaluationInput: serialised.prf.evaluationInput,
+          })
+          : serialised.prf;
+        return Object.freeze(Object.assign({}, result, { prf: returnedPrf }));
       } finally {
         if (!completed && serialised?.prf?.outputBytes) serialised.prf.outputBytes.fill(0);
       }
@@ -1120,7 +1189,7 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       }
     }
 
-    return Object.freeze({ registerPasskey, authenticatePasskey });
+    return Object.freeze({ registerPasskey, finishRegistration, authenticatePasskey });
   }
 
   global.PocketSyncAccountClient = Object.freeze({

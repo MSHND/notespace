@@ -16,13 +16,13 @@ and a narrow atomic transaction boundary without activating a synced owner.
   });
   const FORMAT = Object.freeze({
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 1,
+    recordSchemaVersion: 2,
     firstStoreRevision: 1,
   });
   const MIGRATION_POLICY = Object.freeze({
     currentDatabaseVersion: CONFIG.databaseVersion,
     currentRecordSchemaVersion: FORMAT.recordSchemaVersion,
-    registeredRecordMigrations: Object.freeze([]),
+    registeredRecordMigrations: Object.freeze(["1-to-2-encrypted-activation-draft"]),
     destructiveResetAllowed: false,
   });
   const TOP_LEVEL_FIELDS = Object.freeze([
@@ -36,7 +36,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
     "content",
     "remote",
     "usage",
+    "activationDraft",
   ]);
+  const LEGACY_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
+    (field) => field !== "activationDraft"
+  ));
   const DEVICE_ENVELOPE_FIELDS = Object.freeze(["context", "metadata", "record"]);
   const DEVICE_METADATA_FIELDS = Object.freeze([
     "contractVersion",
@@ -221,6 +225,16 @@ and a narrow atomic transaction boundary without activating a synced owner.
     return Object.freeze({ context, record });
   }
 
+  function validateActivationDraft(input, syncedPocketId, storeRevision) {
+    if (input === null) return null;
+    const value = exactObject(input, CONTENT_FIELDS, "activation-draft-invalid");
+    const encrypted = validateContent(value, syncedPocketId);
+    if (encrypted.context.revision !== storeRevision) {
+      throw deviceStoreError("activation-draft-revision-invalid");
+    }
+    return encrypted;
+  }
+
   function validatePending(input, syncedPocketId, contentRecord, confirmedRevision) {
     if (input === null) return null;
     const pending = exactObject(input, PENDING_FIELDS, "device-pending-invalid");
@@ -311,12 +325,13 @@ and a narrow atomic transaction boundary without activating a synced owner.
     return value;
   }
 
-  function validateRecord(input) {
+  function validateCurrentRecord(input) {
     const record = exactObject(input, TOP_LEVEL_FIELDS, "device-state-invalid");
     if (record.kind !== FORMAT.recordKind) throw deviceStoreError("device-state-kind-invalid");
     if (record.schemaVersion !== FORMAT.recordSchemaVersion) {
       throw deviceStoreError("device-state-schema-unsupported");
     }
+    const storeRevision = positiveInteger(record.storeRevision, "device-store-revision-invalid");
     const syncedPocketId = identifier(record.syncedPocketId, "device-state-identity-invalid");
     const deviceId = identifier(record.deviceId, "device-state-identity-invalid");
     const deviceWrappingKey = validateDeviceWrappingKey(record.deviceWrappingKey);
@@ -324,10 +339,15 @@ and a narrow atomic transaction boundary without activating a synced owner.
     const content = validateContent(record.content, syncedPocketId);
     const remote = validateRemote(record.remote, syncedPocketId, content);
     const usage = validateUsage(record.usage);
+    const activationDraft = validateActivationDraft(
+      record.activationDraft,
+      syncedPocketId,
+      storeRevision
+    );
     return freezeValue({
       kind: FORMAT.recordKind,
       schemaVersion: FORMAT.recordSchemaVersion,
-      storeRevision: positiveInteger(record.storeRevision, "device-store-revision-invalid"),
+      storeRevision,
       syncedPocketId,
       deviceId,
       deviceWrappingKey,
@@ -335,14 +355,32 @@ and a narrow atomic transaction boundary without activating a synced owner.
       content,
       remote,
       usage,
+      activationDraft,
     }, deviceWrappingKey);
+  }
+
+  function migrateVersionOneRecord(input) {
+    const legacy = exactObject(input, LEGACY_TOP_LEVEL_FIELDS, "device-state-invalid");
+    return validateCurrentRecord(Object.assign({}, legacy, {
+      schemaVersion: FORMAT.recordSchemaVersion,
+      activationDraft: null,
+    }));
+  }
+
+  function validateRecord(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      throw deviceStoreError("device-state-invalid");
+    }
+    if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
+    return validateCurrentRecord(input);
   }
 
   function migrateRecord(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)) {
       throw deviceStoreError("device-state-invalid");
     }
-    if (input.schemaVersion === FORMAT.recordSchemaVersion) return validateRecord(input);
+    if (input.schemaVersion === FORMAT.recordSchemaVersion) return validateCurrentRecord(input);
+    if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
     if (Number.isSafeInteger(input.schemaVersion)
         && input.schemaVersion >= 0
         && input.schemaVersion < FORMAT.recordSchemaVersion) {
@@ -415,6 +453,39 @@ and a narrow atomic transaction boundary without activating a synced owner.
       });
     }
 
+    async function readActivation(activationIdInput) {
+      requireOpen();
+      const activationId = identifier(activationIdInput, "activation-draft-identity-invalid");
+      const records = await driver.transaction("readonly", async (transaction) => {
+        if (typeof transaction.getAll !== "function") {
+          throw deviceStoreError("device-store-driver-invalid");
+        }
+        const found = await transaction.getAll();
+        transaction.checkpoint("after-read-before-validation");
+        if (!Array.isArray(found)) throw deviceStoreError("device-store-read-invalid");
+        return found.map((record) => migrateRecord(record));
+      });
+      let match = null;
+      for (const record of records) {
+        if (record.activationDraft === null) continue;
+        let draft;
+        try {
+          draft = await cryptoContract().openContent(
+            record.activationDraft.record,
+            record.deviceWrappingKey,
+            record.activationDraft.context
+          );
+        } catch (_error) {
+          throw deviceStoreError("activation-draft-invalid");
+        }
+        if (draft && draft.activationId === activationId) {
+          if (match !== null) throw deviceStoreError("activation-draft-identity-conflict");
+          match = Object.freeze({ record, draft: freezeValue(draft, record.deviceWrappingKey) });
+        }
+      }
+      return match;
+    }
+
     async function createPocket(input) {
       requireOpen();
       return driver.transaction("readwrite", async (transaction) => {
@@ -470,6 +541,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     return Object.freeze({
       open: openStore,
       readPocket,
+      readActivation,
       createPocket,
       replacePocket,
       close: closeStore,
@@ -633,6 +705,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
         transaction.onerror = () => {};
         const boundary = Object.freeze({
           get: (key) => requestResult(store, "get", key),
+          getAll: () => requestResult(store, "getAll"),
           add: (value) => requestResult(store, "add", value),
           put: (value) => requestResult(store, "put", value),
           checkpoint: () => {},
@@ -687,6 +760,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     createIndexedDbDriver,
     open: () => getDefaultStore().open(),
     readPocket: (syncedPocketId) => getDefaultStore().readPocket(syncedPocketId),
+    readActivation: (activationId) => getDefaultStore().readActivation(activationId),
     createPocket: (record) => getDefaultStore().createPocket(record),
     replacePocket: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .replacePocket(syncedPocketId, expectedStoreRevision, record),
