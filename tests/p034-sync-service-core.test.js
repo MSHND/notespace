@@ -173,6 +173,7 @@ function createHarness(options = {}) {
   const driver = options.driver || createMemoryServiceStore();
   let currentTime = options.now ?? NOW;
   const verifierCalls = { registration: 0, authentication: 0 };
+  let recoveryProofCalls = 0;
   const verifier = Object.freeze({
     async verifyRegistration(input) {
       verifierCalls.registration += 1;
@@ -203,6 +204,12 @@ function createHarness(options = {}) {
   const config = {
     store: driver.store,
     webAuthnVerifier: verifier,
+    recoveryProofVerifier: Object.freeze({
+      async verifyRecoveryProof() {
+        recoveryProofCalls += 1;
+        return { verified: true };
+      },
+    }),
     randomBytes: options.randomBytes || deterministicRandom(),
     now: () => currentTime,
     trustedOrigin: ORIGIN,
@@ -217,6 +224,7 @@ function createHarness(options = {}) {
     core,
     driver,
     verifierCalls,
+    get recoveryProofCalls() { return recoveryProofCalls; },
     config,
     setTime(value) { currentTime = value; },
   };
@@ -273,6 +281,11 @@ test("P034 service module is dormant, server-side only, and exports one frozen s
     "ceremonies",
     "pockets",
     "operations",
+    "keySets",
+    "envelopes",
+    "recoveryLocators",
+    "recoveryCeremonies",
+    "keyOperations",
   ]);
   assert.doesNotMatch(source("index.html"), /pocket-sync-service-core/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-service-core/);
@@ -321,6 +334,14 @@ test("factory configuration, store boundary, origin and lifetimes are exact", ()
     "readRevision",
     "downloadEncryptedRecord",
     "conditionalUpload",
+    "listEnvelopes",
+    "downloadEnvelope",
+    "addEnvelope",
+    "revokeEnvelope",
+    "initialiseRecovery",
+    "beginRecovery",
+    "finishRecovery",
+    "rotateRecovery",
   ]);
   assert.equal(Object.isFrozen(harness.core), true);
   for (const field of Object.keys(harness.config)) {

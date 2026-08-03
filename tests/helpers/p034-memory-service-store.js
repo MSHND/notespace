@@ -7,6 +7,11 @@ const COLLECTIONS = Object.freeze([
   "ceremonies",
   "pockets",
   "operations",
+  "keySets",
+  "envelopes",
+  "recoveryLocators",
+  "recoveryCeremonies",
+  "keyOperations",
 ]);
 const FAILURE_POINTS = Object.freeze([
   "before-first-read",

@@ -20,6 +20,8 @@ P034 implements the dormant, undeployed server-side safety state machine behind 
 
 P035 hardens that factory boundary by requiring the version-1 WebAuthn RP ID to equal the canonical trusted-origin hostname exactly. Parent-domain RP scope remains deliberately unsupported until a real deployment needs and can review public-suffix-aware policy.
 
+P036 extends the same dormant service core with strict key-set/envelope records, ciphertext-erasing revocation, durable key-operation idempotency, opaque recovery locators, isolated proof/passkey recovery ceremonies and atomic verifier/envelope/locator rotation. The raw recovery root, master key and PRF output remain client-only. See [Synced Pocket key-envelope and recovery service core](SYNC_KEY_RECOVERY_SERVICE.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -67,7 +69,7 @@ A separately designed Pocket master key will protect readable Pocket content. It
 
 P028 now locks that split: a passkey authenticates the account; a separately generated random 256-bit master key protects content; and independent `device`, optional `passkey-prf`, `device-transfer` and `recovery` envelopes unlock that key locally. A passkey assertion alone is never the content key. PRF is usable only when an actual ceremony returns valid output, and that output remains client-only.
 
-The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 supplies the strict unloaded WebAuthn client ceremony boundary, and P034 supplies strict ceremony/account/session persistence and rotation around an injected verifier. A real verifier/HTTP/cookie/database adapter, credential-bound envelope orchestration and whole-account key-use enforcement/rotation remain unimplemented and require later review.
+The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 supplies the strict unloaded WebAuthn client ceremony boundary; P034 supplies strict ceremony/account/session persistence; and P036 supplies strict remote envelope/recovery state around injected verifiers. Real verifier/HTTP/cookie/database adapters, local credential-bound envelope orchestration and whole-account key-use enforcement/rotation remain unimplemented and require later review.
 
 ## 6. Emergency recovery is mandatory
 
@@ -202,7 +204,7 @@ The separately unloaded `PocketSyncAccountClient` exposes strict request/respons
 
 The separately unloaded `PocketSyncRemoteClient` exposes the frozen transport policy/route map, exact remote request/response validators, one bounded same-origin browser JSON transport, one P031-compatible account service and one P028-backed content service. It performs no storage, encryption, DOM UI, session/token persistence, automatic retry, owner adoption or Save integration.
 
-The dormant CommonJS `sync-service/pocket-sync-service-core.js` exports frozen `POLICY`, `COLLECTIONS` and `createServiceCore`. The factory exposes exactly P032's seven asynchronous operations and accepts only injected clock, randomness, WebAuthn verifier and strict transactional store boundaries. It performs no HTTP, cookie, file, environment, browser, owner or Save work.
+The dormant CommonJS `sync-service/pocket-sync-service-core.js` exports frozen `POLICY`, `COLLECTIONS` and `createServiceCore`. The factory exposes P032's seven account/content operations plus P036's eight key/recovery operations and accepts only injected clock, randomness, WebAuthn/recovery-proof verifier and strict transactional-store boundaries. It performs no HTTP, cookie, file, environment, browser, owner or Save work.
 
 ## 15. Locked architecture and deferred implementation
 

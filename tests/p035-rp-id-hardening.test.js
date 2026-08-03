@@ -16,6 +16,14 @@ const METHOD_NAMES = Object.freeze([
   "readRevision",
   "downloadEncryptedRecord",
   "conditionalUpload",
+  "listEnvelopes",
+  "downloadEnvelope",
+  "addEnvelope",
+  "revokeEnvelope",
+  "initialiseRecovery",
+  "beginRecovery",
+  "finishRecovery",
+  "rotateRecovery",
 ]);
 
 function source(file) {
@@ -33,6 +41,7 @@ function configuration(overrides = {}) {
     clock: 0,
     registrationVerifier: 0,
     authenticationVerifier: 0,
+    recoveryVerifier: 0,
   };
   const value = {
     store: Object.freeze({
@@ -48,6 +57,12 @@ function configuration(overrides = {}) {
       },
       async verifyAuthentication() {
         calls.authenticationVerifier += 1;
+        throw new Error("verifier must not be called during factory creation");
+      },
+    }),
+    recoveryProofVerifier: Object.freeze({
+      async verifyRecoveryProof() {
+        calls.recoveryVerifier += 1;
         throw new Error("verifier must not be called during factory creation");
       },
     }),
@@ -83,6 +98,7 @@ test("production service core keeps its exact frozen export and method surfaces"
     clock: 0,
     registrationVerifier: 0,
     authenticationVerifier: 0,
+    recoveryVerifier: 0,
   });
 });
 
@@ -101,6 +117,7 @@ test("version 1 accepts only the exact trusted-origin hostname, including origin
     clock: 0,
     registrationVerifier: 0,
     authenticationVerifier: 0,
+    recoveryVerifier: 0,
   });
 });
 
@@ -135,6 +152,7 @@ test("parent, public, sibling, non-canonical and URL-like RP IDs fail before any
       clock: 0,
       registrationVerifier: 0,
       authenticationVerifier: 0,
+      recoveryVerifier: 0,
     }, rpId);
   }
   const trailingOrigin = configuration({
@@ -151,6 +169,7 @@ test("parent, public, sibling, non-canonical and URL-like RP IDs fail before any
     clock: 0,
     registrationVerifier: 0,
     authenticationVerifier: 0,
+    recoveryVerifier: 0,
   });
 });
 

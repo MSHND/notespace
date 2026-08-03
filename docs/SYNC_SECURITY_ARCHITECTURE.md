@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034 supplies the dormant server-side safety and persistence state machine, and P035 binds its version-1 RP ID exactly to the configured trusted-origin hostname. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034 supplies the dormant server-side safety and persistence state machine, P035 binds its version-1 RP ID exactly to the configured trusted-origin hostname, and P036 adds strict key-envelope and emergency-recovery service state. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -60,7 +60,9 @@ P034 now implements the server-side state machine beneath that client boundary. 
 
 P035 makes the version-1 WebAuthn RP policy deliberately narrower than WebAuthn's full permitted scope: the RP ID must equal the trusted-origin hostname exactly. Ports remain origin transport detail and are not part of the RP ID. Some registrable parent domains can be valid WebAuthn RP IDs, but Pocket does not accept them without a later public-suffix-aware deployment review.
 
-P034 still does not implement a real WebAuthn verifier, HTTP/header/cookie adapter, durable database, rate limiting, deployment or selected same-origin service origin. Envelope, recovery, device-transfer and deletion remote operations also remain unimplemented, and no sync module is production-loaded.
+P036 enforces key-set compare-and-swap, active/ciphertext-free revoked envelope records, durable key-operation idempotency, opaque recovery locators, proof/passkey recovery ceremonies, single-use `rotation-required` state and atomic verifier/envelope/locator rotation. The service never receives the root, master key or PRF output. See [Synced Pocket key-envelope and recovery service core](SYNC_KEY_RECOVERY_SERVICE.md).
+
+The core still does not implement a real WebAuthn verifier, recovery-proof algorithm, HTTP/header/cookie adapter, durable database, rate limiting, deployment, selected same-origin service origin, client transport extension, local recovery-package orchestration, device transfer or deletion. No sync module is production-loaded.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 

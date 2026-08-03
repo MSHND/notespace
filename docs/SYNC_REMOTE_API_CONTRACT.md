@@ -2,7 +2,7 @@
 
 ## 1. Status and conventions
 
-This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded client transport and strict account/content adapters described here. P034 implements the corresponding dormant, undeployed server-side safety state machine for the seven locked routes. Neither selects an endpoint origin, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
+This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded client transport and strict account/content adapters described here. P034/P035 implement the corresponding dormant, undeployed server-side safety state machine for the seven locked routes, and P036 adds dormant key-envelope/recovery methods whose future suffixes are reserved but not yet wired by P032. None selects an endpoint origin, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
@@ -217,50 +217,60 @@ See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md) for the factory, t
 
 ## 7. Key envelopes
 
+P036 enforces the following operations inside the dormant service core. They are reserved for future same-origin suffixes `/pockets/envelopes/list`, `/pockets/envelopes/download`, `/pockets/envelopes/add` and `/pockets/envelopes/revoke`. P032 does not route them yet.
+
 ### List permitted envelope metadata
 
-Authenticated request contains `apiVersion`, `operationId` and `syncedPocketId`. The response contains the current envelope-set version and allowlisted items only: opaque envelope ID, kind, envelope version, opaque target device/credential ID where applicable, creation time and revocation time/state. It omits wrapping ciphertext unless a separately authorised unlock/download operation needs that exact envelope, and never returns raw wrapping material.
+Authenticated request contains exactly `apiVersion`, `operationId` and `syncedPocketId`. The response contains key-set/recovery versions and deterministic allowlisted envelope metadata. It never includes ciphertext, account locator or recovery verifier. A separate exact download request returns one listed active envelope and never returns revoked ciphertext.
 
 ### Add envelope
 
-Authenticated request contains:
+Authenticated add contains:
 
 - `apiVersion`, `operationId`, `syncedPocketId`;
 - opaque `envelopeId`;
 - kind exactly `device`, `passkey-prf`, `device-transfer` or `recovery`;
 - envelope format/version and authenticated wrapping ciphertext;
 - purpose-bound metadata such as opaque target device/credential ID when applicable; and
-- expected envelope-set version.
+- expected key-set version, logical-change ID and explicit attempt kind.
 
 The opaque envelope record has exact top-level fields `format`, `version`, `algorithm`, `nonce` and `ciphertext`: format `pocket.sync.master-key-envelope.opaque`, version 1, algorithm `AES-GCM-256`, a canonical 12-byte nonce and exactly 48 ciphertext bytes. The latter protects the 32-byte master key plus the 16-byte tag. Envelope ID, kind and version remain separate and are locally authenticated through P029 envelope AAD.
 
 Envelope metadata uses strict allowlists. `device` requires an opaque `deviceId`, forbids `credentialId`, uses `kdf: none` and has no KDF salt/derivation version. `passkey-prf` requires an opaque `credentialId`, forbids `deviceId`, and uses `kdf: HKDF-SHA-256`, `derivationVersion: 1` and a canonical base64url salt decoding to exactly 32 bytes. `device-transfer` and `recovery` forbid both target identifiers and use those same HKDF fields. The service may store the public salt and credential binding; it must never receive raw derivation input, a wrapping key, PRF output, transfer secret, recovery root or master key.
 
-The service validates account/Pocket ownership, kind, exact format/size, KDF metadata, uniqueness and expected version, then returns the next envelope-set version. It cannot unwrap the envelope. Exact cryptographic layouts are defined in [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
+The service validates account/Pocket ownership, credential relationship, kind, exact format/size, KDF metadata, uniqueness and expected version, then atomically advances the key set and stores an immutable idempotency outcome. Recovery envelopes are forbidden through generic add. It cannot unwrap an envelope. Exact cryptographic layouts are defined in [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
 
 ### Revoke envelope
 
-Authenticated request contains `apiVersion`, `operationId`, `syncedPocketId`, `envelopeId`, expected envelope-set version and a fresh authorisation suitable for that envelope kind. Response returns the next envelope-set version and revocation state.
+Authenticated request contains exact version, operation/logical-change/attempt identity, Pocket/envelope identity and expected key-set version. Correct compare-and-swap replaces the active envelope with a metadata-only tombstone, erases its service-held ciphertext, advances the key set and stores the operation result atomically. Recovery envelopes are forbidden through this method.
 
-Revocation must not silently remove the last recovery envelope or all unlock paths. Revoking an envelope does not rewrite the encrypted content record.
+Revoking an ordinary envelope does not rewrite the encrypted content record. Recovery replacement is governed only by the atomic recovery rotation below.
 
 ## 8. Emergency recovery
 
+P036 enforces reserved future same-origin suffixes `/account/recovery/initialise`, `/account/recovery/begin`, `/account/recovery/finish` and `/account/recovery/rotate`. These are service-core methods only; P032 cannot call them yet.
+
+### Initialise recovery
+
+An authenticated exact request supplies operation identity, expected key-set version, an exact derived recovery-authorisation verifier and exact version-1 recovery envelope. One transaction installs them with a fresh server-generated opaque account locator and returns `recoveryCopyRequired: true`. The raw root and complete recovery package are rejected.
+
 ### Begin recovery
 
-Unauthenticated request contains `apiVersion`, `operationId` and the opaque account locator from the local recovery package. Response supplies a short-lived `recoveryCeremonyId`, recovery-authorisation version, random challenge, derivation parameters/version and expiry. It never requests the raw recovery root or full package.
+Unauthenticated request contains exactly `apiVersion`, `operationId`, the opaque account locator and target device ID. Response supplies a short-lived recovery ceremony, recovery-authorisation public derivation metadata, random challenge, stable PRF input and P031-compatible replacement-passkey registration options. It never returns the stored verifier value, envelope, raw root or full package.
 
 ### Finish recovery
 
-Request contains `apiVersion`, `operationId`, `recoveryCeremonyId`, a challenge-bound proof derived using `pocket.sync.recovery.account-authorisation.v1`, and a newly registered/re-authenticated account credential response as required by policy. The proof is distinct from the key derived with `pocket.sync.recovery.master-key-wrapping.v1`.
+Request contains exact operation/ceremony/device identity, an opaque challenge-bound proof and a new passkey-registration response. The injected proof verifier and WebAuthn verifier run outside the write transaction. One commit creates the credential/session, marks the key set `rotation-required`, completes the ceremony and returns the existing recovery envelope for client-only unwrapping. The response does not claim content is unlocked.
 
-On valid proof the service authorises download of the existing encrypted recovery envelope to the client. The client unwraps locally. Recovery is not complete until a rotation request atomically installs:
+Recovery is not complete until the new credential's session sends a rotation request that atomically installs:
 
 - a new recovery-authorisation verifier and version;
 - a new recovery master-key envelope/version; and
-- invalidation of the preceding recovery-authorisation version.
+- a fresh server-generated locator;
+- invalidation of the preceding locator and verifier; and
+- a ciphertext-free tombstone for the preceding recovery envelope.
 
-The response requires `replacementCopyRequired: true`. Pocket must prompt for a new local recovery copy. An old recovery proof fails after successful rotation. Failed/partial rotation leaves the prior valid state intact and is not reported as recovered.
+The response requires `replacementCopyRequired: true`. Pocket must prompt for a new local recovery copy. Exact retries replay one stored outcome. An old locator/proof fails after successful rotation. Failed/conflicted rotation leaves the prior complete state intact and is not reported as recovered.
 
 ## 9. Additional-device pairing relay
 

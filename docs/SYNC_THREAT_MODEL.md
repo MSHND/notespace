@@ -2,7 +2,7 @@
 
 ## 1. Scope and security goals
 
-This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store, P031's unloaded account/passkey client, P032's unloaded same-origin remote client, P034's dormant undeployed service safety core and P035's exact-host RP-ID policy. It does not change the threat model of today's local JSON and Vault owners.
+This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store, P031's unloaded account/passkey client, P032's unloaded same-origin remote client, P034's dormant undeployed service safety core, P035's exact-host RP-ID policy and P036's dormant key-envelope/recovery state machine. It does not change the threat model of today's local JSON and Vault owners.
 
 The primary goals are:
 
@@ -141,25 +141,44 @@ A source Vault remains protected under its existing Vault format, but P028 does 
 
 ## 9. Service-core failure boundary
 
-P034 converts several previously specified server duties into an executable dormant state machine:
+P034-P036 convert previously specified server duties into one executable dormant state machine:
 
 | Failure or attacker action | P034 enforcement | Remaining boundary |
 | --- | --- | --- |
 | Malformed persisted service state | Every read validates the exact record kind, version, identity and fields; malformed state fails and is never repaired or treated as absent | A real adapter must surface storage corruption safely and restore only through reviewed operational recovery |
 | Stale transaction writer | Store-version compare-and-swap plus a single atomic transaction rejects stale replacements | The production database adapter must supply equivalent isolation and uniqueness |
-| Partial session rotation | Replacement-session insert, prior-session revocation and completed ceremony commit together | P036 must issue/clear the browser cookie only from the committed session instruction |
+| Partial session rotation | Replacement-session insert, prior-session revocation and completed ceremony commit together | A later HTTP adapter must issue/clear the browser cookie only from the committed session instruction |
 | Ceremony replay | Pending begin is digest-idempotent; finish is one-time and exact replay returns its stored result | Abuse/rate controls and cleanup remain deployment work |
-| Changed finish under one operation | Finish digest binds ceremony type, session context, operation, ceremony, device where applicable and exact public credential response | Correct WebAuthn verification still depends on the injected P036 adapter |
+| Changed finish under one operation | Finish digest binds ceremony type, session context, operation, ceremony, device where applicable and exact public credential response | Correct WebAuthn verification still depends on a reviewed injected adapter |
 | Changed ciphertext under one operation ID | Canonical upload digest includes exact encrypted record, Pocket, revisions and logical identities; changed reuse fails | Digest availability does not make the ciphertext readable or prove remote availability |
 | Account-to-Pocket substitution | Content routes require the active session account and its one bound Pocket; first binding commits with revision 1 | Multi-Pocket accounts require a later explicit schema/policy version |
 | Credential-to-account substitution | Stored account credential list, credential owner and session credential relationship are revalidated | Compromise of the future verifier or database/runtime remains privileged compromise |
 | Session expiry or revocation | Content calls fail with a non-secret clear-session instruction and do not slide expiry | Cleanup of expired records is intentionally absent |
-| Verifier-adapter compromise | Strict result allowlists, credential identity and counter/backup continuity limit accepted mutations | A verifier that falsely proves a signature can still authenticate an attacker; P036 adapter selection/review is critical |
+| Verifier-adapter compromise | Strict result allowlists, credential identity and counter/backup continuity limit accepted mutations | A verifier that falsely proves a signature can still authenticate an attacker; adapter selection/review remains critical |
 | Operation digest ambiguity | SHA-256 inputs use explicitly ordered fields and unambiguous operation keys | Changing canonicalisation requires a compatibility/security review |
 | Conflict replay after later writes | Stored conflict result is immutable and replayed exactly rather than recalculated | The human-facing later reconciliation path remains unimplemented |
 | Transaction or commit failure | Success resolves only after commit; injected failures preserve the previous complete snapshot | Service database backup, rollback detection and disaster recovery remain future operational design |
 
 The core starts no background cleanup, timer, queue, polling or retry. Expired/revoked records remain validated state until a later explicitly designed maintenance boundary. It logs no identifiers, credentials, errors or ciphertext.
+
+### P036 key and recovery enforcement
+
+| Failure or attacker action | P036 enforcement | Remaining boundary |
+| --- | --- | --- |
+| Envelope or credential substitution | Exact envelope kind/KDF/size plus account/Pocket/credential relationships are revalidated | A compromised client with legitimate wrapping material can still create a malicious but well-formed envelope |
+| Stale key-set writer | Expected key-set version and immutable operation outcome make conflict a durable non-write | A production database must preserve transaction isolation and uniqueness |
+| Revoked ciphertext retention | Revocation atomically replaces the active record with a ciphertext-free tombstone | Ciphertext already copied before revocation cannot be recalled |
+| Recovery-locator replay | Active locator, account/Pocket/recovery version and ready key set must all agree | Online guessing/rate controls remain adapter/deployment work |
+| Old locator after rotation | Old locator is revoked in the same transaction that installs the new locator | A copied old package remains locally present but cannot start service recovery |
+| Verifier/envelope version mismatch | Initialisation fixes both at version 1; rotation requires both at exactly current plus one | Client-side derivation/opening still requires P037 orchestration |
+| Proof replay or changed proof | Ceremony challenge/version/expiry and exact finish digest bind one proof/credential request | Security of the proof itself depends on the later reviewed verifier algorithm |
+| Concurrent recovery finish | One ceremony commit creates one credential/session and marks one version rotation-required; exact concurrent replay returns that result | Transaction adapter correctness remains essential |
+| Multiple credentials from one recovery version | `rotation-required` blocks another begin; only exact finish replay is allowed before rotation | A malicious authorised recovered credential can refuse to rotate, causing denial of recovery completion |
+| Partial verifier/envelope/locator rotation | New records, old revocations, key-set update and immutable result commit together | Operational database rollback could resurrect old state unless deployment rollback policy is designed |
+| Compromised recovery-proof adapter | Exact input/output isolation prevents direct store mutation or secret return | A verifier that falsely approves a proof can authorise account recovery and new passkey creation |
+| Database disclosure of derived verifier | Stored verifier is purpose-specific and distinct from recovery wrapping material | Proof-algorithm strength and offline-guessing resistance remain P038 review work |
+| Authorised malicious envelope replacement | Ownership, version and idempotency remain enforced | An authorised client can deny future unlock by installing unusable encrypted material; the service cannot inspect it |
+| Malformed persisted key/recovery state | Every accessed record and cross-record relationship fails closed without repair/reset | A real adapter needs safe corruption reporting and reviewed restore procedures |
 
 ## 10. Abuse and privacy controls
 
@@ -167,9 +186,9 @@ Future service implementation must define conservative limits for ceremony creat
 
 Credential labels and device labels can become personal metadata. If later UI allows them, collection must be optional/minimal, display escaping mandatory and remote retention documented. P028's executable metadata allowlists use opaque IDs and do not admit labels.
 
-## 11. Explicitly out of scope for P027-P034
+## 11. Explicitly out of scope for P027-P036
 
-P027-P034 do not provide:
+P027-P036 do not provide:
 
 - a formal cryptographic proof, global cross-device encryption-use counter or automatic master-key rotation;
 - protection after arbitrary code execution in the active origin/browser/device;

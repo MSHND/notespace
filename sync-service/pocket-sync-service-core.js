@@ -10,6 +10,13 @@ const POLICY = Object.freeze({
   contentFormat: "pocket.sync.content.opaque",
   contentVersion: 1,
   contentAlgorithm: "AES-GCM-256",
+  envelopeFormat: "pocket.sync.master-key-envelope.opaque",
+  envelopeVersion: 1,
+  envelopeAlgorithm: "AES-GCM-256",
+  envelopeCiphertextByteLength: 48,
+  hkdfSaltByteLength: 32,
+  recoveryProofMinimumBytes: 32,
+  recoveryProofMaximumBytes: 1024,
   randomByteLength: 32,
   nonceByteLength: 12,
   authenticationTagByteLength: 16,
@@ -29,12 +36,18 @@ const COLLECTIONS = Object.freeze({
   ceremonies: "ceremonies",
   pockets: "pockets",
   operations: "operations",
+  keySets: "keySets",
+  envelopes: "envelopes",
+  recoveryLocators: "recoveryLocators",
+  recoveryCeremonies: "recoveryCeremonies",
+  keyOperations: "keyOperations",
 });
 
 const COLLECTION_NAMES = Object.freeze(Object.values(COLLECTIONS));
 const FACTORY_FIELDS = Object.freeze([
   "store",
   "webAuthnVerifier",
+  "recoveryProofVerifier",
   "randomBytes",
   "now",
   "trustedOrigin",
@@ -143,6 +156,34 @@ const RECORD_FIELDS = Object.freeze({
     "expectedRevision",
     "requestDigest",
     "result",
+  ]),
+  keySets: Object.freeze([
+    "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
+    "keySetVersion", "envelopeIds", "recoveryStatus", "recoveryVersion",
+    "recoveryEnvelopeId", "recoveryVerifier", "accountLocator",
+    "recoveryOperationId", "recoveryCredentialId", "createdAt", "updatedAt",
+  ]),
+  envelopes: Object.freeze([
+    "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
+    "envelopeId", "envelopeKind", "envelopeVersion", "status", "deviceId",
+    "credentialId", "kdf", "kdfSalt", "derivationVersion",
+    "encryptedEnvelopeSize", "encryptedEnvelope", "createdAt", "revokedAt",
+  ]),
+  recoveryLocators: Object.freeze([
+    "kind", "schemaVersion", "storeVersion", "accountLocator", "accountId",
+    "syncedPocketId", "recoveryVersion", "status", "createdAt", "revokedAt",
+  ]),
+  recoveryCeremonies: Object.freeze([
+    "kind", "schemaVersion", "storeVersion", "operationId", "recoveryCeremonyId",
+    "requestDigest", "accountId", "syncedPocketId", "deviceId", "challenge",
+    "recoveryVersion", "keySetVersion", "prfEvaluationInput",
+    "publicKeyCreationOptions", "expiresAt", "finishDigest",
+    "completedCredentialId", "completedSessionId", "completedKeySetVersion",
+  ]),
+  keyOperations: Object.freeze([
+    "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
+    "operationId", "logicalChangeId", "operationKind", "expectedKeySetVersion",
+    "requestDigest", "result",
   ]),
 });
 
@@ -305,6 +346,108 @@ function validateEncryptedRecord(input, code = "service-request-invalid") {
     throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
   }
   return frozen(record);
+}
+
+function validateMasterKeyEnvelope(input, code = "service-envelope-invalid") {
+  const record = exactObject(input, [
+    "format", "version", "algorithm", "nonce", "ciphertext",
+  ], ["format", "version", "algorithm", "nonce", "ciphertext"], code);
+  if (record.format !== POLICY.envelopeFormat
+      || record.version !== POLICY.envelopeVersion
+      || record.algorithm !== POLICY.envelopeAlgorithm
+      || canonicalBase64urlByteLength(record.nonce) !== POLICY.nonceByteLength
+      || canonicalBase64urlByteLength(record.ciphertext)
+        !== POLICY.envelopeCiphertextByteLength) {
+    throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
+  }
+  return frozen(record);
+}
+
+function validateRecoveryVerifier(input, code = "service-request-invalid") {
+  const value = exactObject(input, [
+    "format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier",
+  ], ["format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier"], code);
+  if (value.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
+      || !Number.isSafeInteger(value.version) || value.version < 1
+      || value.kdf !== "HKDF-SHA-256"
+      || canonicalBase64urlByteLength(value.kdfSalt) !== POLICY.hkdfSaltByteLength
+      || value.derivationVersion !== 1
+      || canonicalBase64urlByteLength(value.verifier) !== 32) {
+    throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
+  }
+  return frozen(value);
+}
+
+function validateRecoveryProof(input) {
+  const value = exactObject(input, ["format", "version", "proof"], [
+    "format", "version", "proof",
+  ]);
+  const size = canonicalBase64urlByteLength(value.proof);
+  if (value.format !== "pocket.sync.recovery-authorisation-proof.opaque"
+      || value.version !== 1
+      || size < POLICY.recoveryProofMinimumBytes
+      || size > POLICY.recoveryProofMaximumBytes) {
+    throw serviceError("service-request-invalid");
+  }
+  return frozen(value);
+}
+
+function validateEnvelopeBinding(value, options = {}) {
+  const code = options.code || "service-envelope-invalid";
+  identifier(value.envelopeId, code);
+  positiveInteger(value.envelopeVersion, code);
+  if (!["device", "passkey-prf", "device-transfer", "recovery"].includes(value.envelopeKind)) {
+    throw serviceError(code);
+  }
+  if (options.kind !== undefined && value.envelopeKind !== options.kind) {
+    throw serviceError(code);
+  }
+  if (options.allowRecovery === false && value.envelopeKind === "recovery") {
+    throw serviceError(code);
+  }
+  if (value.envelopeKind === "device") {
+    identifier(value.deviceId, code);
+    if (value.credentialId !== null || value.kdf !== "none"
+        || value.kdfSalt !== null || value.derivationVersion !== null) {
+      throw serviceError(code);
+    }
+  } else {
+    if (value.deviceId !== null
+        || value.kdf !== "HKDF-SHA-256"
+        || canonicalBase64urlByteLength(value.kdfSalt) !== POLICY.hkdfSaltByteLength
+        || value.derivationVersion !== 1) {
+      throw serviceError(code);
+    }
+    if (value.envelopeKind === "passkey-prf") {
+      identifier(value.credentialId, code);
+    } else if (value.credentialId !== null) {
+      throw serviceError(code);
+    }
+  }
+  return value;
+}
+
+function validateEnvelopeInput(input, options = {}) {
+  const code = options.code || "service-envelope-invalid";
+  const value = exactObject(input, [
+    "envelopeId", "envelopeKind", "envelopeVersion", "deviceId", "credentialId",
+    "kdf", "kdfSalt", "derivationVersion", "encryptedEnvelope",
+  ], [
+    "envelopeId", "envelopeKind", "envelopeVersion", "deviceId", "credentialId",
+    "kdf", "kdfSalt", "derivationVersion", "encryptedEnvelope",
+  ], code);
+  validateEnvelopeBinding(value, options);
+  return frozen({
+    envelopeId: value.envelopeId,
+    envelopeKind: value.envelopeKind,
+    envelopeVersion: value.envelopeVersion,
+    deviceId: value.deviceId,
+    credentialId: value.credentialId,
+    kdf: value.kdf,
+    kdfSalt: value.kdfSalt,
+    derivationVersion: value.derivationVersion,
+    encryptedEnvelope: validateMasterKeyEnvelope(value.encryptedEnvelope, code),
+  });
 }
 
 function validateCredentialDescriptor(input, code) {
@@ -770,6 +913,171 @@ function validateStoredRecord(collection, input, key) {
       }
       break;
     }
+    case COLLECTIONS.keySets: {
+      if (input.kind !== "pocket.sync.service-key-set"
+          || input.syncedPocketId !== key
+          || !Array.isArray(input.envelopeIds)
+          || new Set(input.envelopeIds).size !== input.envelopeIds.length
+          || !["unconfigured", "ready", "rotation-required"].includes(input.recoveryStatus)) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      identifier(input.accountId, "service-state-invalid");
+      identifier(input.syncedPocketId, "service-state-invalid");
+      positiveInteger(input.keySetVersion, "service-state-invalid");
+      input.envelopeIds.forEach((value) => identifier(value, "service-state-invalid"));
+      nonNegativeInteger(input.recoveryVersion, "service-state-invalid");
+      isoTimestamp(input.createdAt);
+      isoTimestamp(input.updatedAt);
+      if (input.recoveryStatus === "unconfigured") {
+        if (input.recoveryVersion !== 0 || input.recoveryEnvelopeId !== null
+            || input.recoveryVerifier !== null || input.accountLocator !== null
+            || input.recoveryOperationId !== null || input.recoveryCredentialId !== null) {
+          throw serviceError("service-state-invalid", 500);
+        }
+      } else {
+        positiveInteger(input.recoveryVersion, "service-state-invalid");
+        identifier(input.recoveryEnvelopeId, "service-state-invalid");
+        identifier(input.accountLocator, "service-state-invalid");
+        if (!input.envelopeIds.includes(input.recoveryEnvelopeId)) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        const verifier = validateRecoveryVerifier(input.recoveryVerifier, "service-state-invalid");
+        if (verifier.version !== input.recoveryVersion) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        if (input.recoveryStatus === "ready") {
+          if (input.recoveryOperationId !== null || input.recoveryCredentialId !== null) {
+            throw serviceError("service-state-invalid", 500);
+          }
+        } else {
+          identifier(input.recoveryOperationId, "service-state-invalid");
+          identifier(input.recoveryCredentialId, "service-state-invalid");
+        }
+      }
+      break;
+    }
+    case COLLECTIONS.envelopes: {
+      if (input.kind !== "pocket.sync.service-envelope"
+          || input.envelopeId !== key
+          || !["active", "revoked"].includes(input.status)) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      identifier(input.accountId, "service-state-invalid");
+      identifier(input.syncedPocketId, "service-state-invalid");
+      validateEnvelopeBinding(input, { code: "service-state-invalid" });
+      isoTimestamp(input.createdAt);
+      if (input.status === "active") {
+        if (input.encryptedEnvelopeSize !== POLICY.envelopeCiphertextByteLength
+            || input.revokedAt !== null) throw serviceError("service-state-invalid", 500);
+        validateMasterKeyEnvelope(input.encryptedEnvelope, "service-state-invalid");
+      } else if (input.encryptedEnvelopeSize !== 0
+          || input.encryptedEnvelope !== null || input.revokedAt === null) {
+        throw serviceError("service-state-invalid", 500);
+      } else {
+        isoTimestamp(input.revokedAt);
+      }
+      break;
+    }
+    case COLLECTIONS.recoveryLocators:
+      if (input.kind !== "pocket.sync.service-recovery-locator"
+          || input.accountLocator !== key
+          || !["active", "revoked"].includes(input.status)) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      identifier(input.accountLocator, "service-state-invalid");
+      identifier(input.accountId, "service-state-invalid");
+      identifier(input.syncedPocketId, "service-state-invalid");
+      positiveInteger(input.recoveryVersion, "service-state-invalid");
+      isoTimestamp(input.createdAt);
+      if (input.status === "active" && input.revokedAt !== null) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      if (input.status === "revoked") isoTimestamp(input.revokedAt);
+      break;
+    case COLLECTIONS.recoveryCeremonies: {
+      if (input.kind !== "pocket.sync.service-recovery-ceremony"
+          || input.operationId !== key || !DIGEST_PATTERN.test(input.requestDigest)) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      [input.operationId, input.recoveryCeremonyId, input.accountId,
+        input.syncedPocketId, input.deviceId].forEach((value) => (
+        identifier(value, "service-state-invalid")
+      ));
+      canonicalBinary(input.challenge, { minimum: 32, maximum: 32 }, "service-state-invalid");
+      positiveInteger(input.recoveryVersion, "service-state-invalid");
+      positiveInteger(input.keySetVersion, "service-state-invalid");
+      canonicalBinary(input.prfEvaluationInput, { minimum: 32, maximum: 32 }, "service-state-invalid");
+      validateRegistrationOptions(input.publicKeyCreationOptions, input.prfEvaluationInput);
+      if (input.publicKeyCreationOptions.challenge !== input.challenge
+          || input.publicKeyCreationOptions.user.name !== input.accountId
+          || input.publicKeyCreationOptions.user.displayName !== input.accountId) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      isoTimestamp(input.expiresAt);
+      const pending = input.finishDigest === null
+        && input.completedCredentialId === null && input.completedSessionId === null
+        && input.completedKeySetVersion === null;
+      const completed = typeof input.finishDigest === "string"
+        && DIGEST_PATTERN.test(input.finishDigest)
+        && typeof input.completedCredentialId === "string"
+        && typeof input.completedSessionId === "string"
+        && Number.isSafeInteger(input.completedKeySetVersion);
+      if (!pending && !completed) throw serviceError("service-state-invalid", 500);
+      if (completed) {
+        identifier(input.completedCredentialId, "service-state-invalid");
+        identifier(input.completedSessionId, "service-state-invalid");
+        positiveInteger(input.completedKeySetVersion, "service-state-invalid");
+      }
+      break;
+    }
+    case COLLECTIONS.keyOperations: {
+      if (input.kind !== "pocket.sync.service-key-operation"
+          || input.storeVersion !== 1 || !DIGEST_PATTERN.test(input.requestDigest)
+          || !["add-envelope", "revoke-envelope", "initialise-recovery", "rotate-recovery"]
+            .includes(input.operationKind)) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      [input.accountId, input.syncedPocketId, input.operationId, input.logicalChangeId]
+        .forEach((value) => identifier(value, "service-state-invalid"));
+      nonNegativeInteger(input.expectedKeySetVersion, "service-state-invalid");
+      if (key !== operationKey(input.accountId, input.syncedPocketId, input.operationId)
+          || !isObject(input.result)) throw serviceError("service-state-invalid", 500);
+      if (input.result.status === "committed") {
+        if (!sameKeys(input.result, ["status", "keySetVersion", "details"])) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        positiveInteger(input.result.keySetVersion, "service-state-invalid");
+        if (input.result.keySetVersion !== input.expectedKeySetVersion + 1
+            || !isObject(input.result.details)) throw serviceError("service-state-invalid", 500);
+        if (["add-envelope", "revoke-envelope"].includes(input.operationKind)) {
+          if (!sameKeys(input.result.details, [])) throw serviceError("service-state-invalid", 500);
+        } else if (input.operationKind === "initialise-recovery") {
+          if (!sameKeys(input.result.details, [
+            "recoveryVersion", "accountLocator", "recoveryCopyRequired",
+          ]) || input.result.details.recoveryVersion !== 1
+              || input.result.details.recoveryCopyRequired !== true) {
+            throw serviceError("service-state-invalid", 500);
+          }
+          identifier(input.result.details.accountLocator, "service-state-invalid");
+        } else if (!sameKeys(input.result.details, [
+          "recoveryVersion", "accountLocator", "previousRecoveryInvalidated",
+          "replacementCopyRequired",
+        ]) || input.result.details.previousRecoveryInvalidated !== true
+            || input.result.details.replacementCopyRequired !== true) {
+          throw serviceError("service-state-invalid", 500);
+        } else {
+          positiveInteger(input.result.details.recoveryVersion, "service-state-invalid");
+          identifier(input.result.details.accountLocator, "service-state-invalid");
+        }
+      } else if (input.result.status === "conflict") {
+        if (!sameKeys(input.result, ["status", "actualKeySetVersion", "actualRecoveryVersion"])) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        nonNegativeInteger(input.result.actualKeySetVersion, "service-state-invalid");
+        nonNegativeInteger(input.result.actualRecoveryVersion, "service-state-invalid");
+      } else throw serviceError("service-state-invalid", 500);
+      break;
+    }
     default:
       throw serviceError("service-state-invalid", 500);
   }
@@ -826,6 +1134,9 @@ function validateFactoryConfig(input) {
       || !sameKeys(input.webAuthnVerifier, ["verifyRegistration", "verifyAuthentication"])
       || typeof input.webAuthnVerifier.verifyRegistration !== "function"
       || typeof input.webAuthnVerifier.verifyAuthentication !== "function"
+      || !isObject(input.recoveryProofVerifier)
+      || !sameKeys(input.recoveryProofVerifier, ["verifyRecoveryProof"])
+      || typeof input.recoveryProofVerifier.verifyRecoveryProof !== "function"
       || typeof input.randomBytes !== "function"
       || typeof input.now !== "function") {
     throw serviceError("service-core-invalid");
@@ -1077,11 +1388,109 @@ function validateConditionalRequest(input) {
   });
 }
 
+function validateKeyMutation(value, fields) {
+  exactObject(value, fields, fields);
+  if (value.apiVersion !== 1
+      || !["new-change", "idempotent-retry"].includes(value.attemptKind)) {
+    throw serviceError("service-request-invalid");
+  }
+  const expectedKeySetVersion = nonNegativeInteger(value.expectedKeySetVersion);
+  if (expectedKeySetVersion >= Number.MAX_SAFE_INTEGER) {
+    throw serviceError("service-request-invalid");
+  }
+  return {
+    apiVersion: 1,
+    operationId: identifier(value.operationId),
+    logicalChangeId: identifier(value.logicalChangeId),
+    attemptKind: value.attemptKind,
+    syncedPocketId: identifier(value.syncedPocketId),
+    expectedKeySetVersion,
+  };
+}
+
+function validateListEnvelopesRequest(input) {
+  const value = exactObject(input, ["apiVersion", "operationId", "syncedPocketId"], [
+    "apiVersion", "operationId", "syncedPocketId",
+  ]);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+    syncedPocketId: identifier(value.syncedPocketId) });
+}
+
+function validateDownloadEnvelopeRequest(input) {
+  const value = exactObject(input, [
+    "apiVersion", "operationId", "syncedPocketId", "envelopeId",
+  ], ["apiVersion", "operationId", "syncedPocketId", "envelopeId"]);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+    syncedPocketId: identifier(value.syncedPocketId), envelopeId: identifier(value.envelopeId) });
+}
+
+function validateAddEnvelopeRequest(input) {
+  const fields = ["apiVersion", "operationId", "logicalChangeId", "attemptKind",
+    "syncedPocketId", "expectedKeySetVersion", "envelope"];
+  const value = exactObject(input, fields, fields);
+  return frozen({ ...validateKeyMutation(value, fields),
+    envelope: validateEnvelopeInput(value.envelope, { allowRecovery: false }) });
+}
+
+function validateRevokeEnvelopeRequest(input) {
+  const fields = ["apiVersion", "operationId", "logicalChangeId", "attemptKind",
+    "syncedPocketId", "envelopeId", "expectedKeySetVersion"];
+  const value = exactObject(input, fields, fields);
+  return frozen({ ...validateKeyMutation(value, fields), envelopeId: identifier(value.envelopeId) });
+}
+
+function validateInitialiseRecoveryRequest(input) {
+  const fields = ["apiVersion", "operationId", "logicalChangeId", "attemptKind",
+    "syncedPocketId", "expectedKeySetVersion", "recoveryVerifier", "recoveryEnvelope"];
+  const value = exactObject(input, fields, fields);
+  const verifier = validateRecoveryVerifier(value.recoveryVerifier);
+  if (verifier.version !== 1) throw serviceError("service-request-invalid");
+  const envelope = validateEnvelopeInput(value.recoveryEnvelope, { kind: "recovery" });
+  if (envelope.envelopeVersion !== 1) throw serviceError("service-envelope-invalid");
+  return frozen({ ...validateKeyMutation(value, fields), recoveryVerifier: verifier,
+    recoveryEnvelope: envelope });
+}
+
+function validateBeginRecoveryRequest(input) {
+  const value = exactObject(input, [
+    "apiVersion", "operationId", "accountLocator", "deviceId",
+  ], ["apiVersion", "operationId", "accountLocator", "deviceId"]);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+    accountLocator: identifier(value.accountLocator), deviceId: identifier(value.deviceId) });
+}
+
+function validateFinishRecoveryRequest(input) {
+  const value = exactObject(input, [
+    "apiVersion", "operationId", "recoveryCeremonyId", "deviceId", "proof", "credential",
+  ], ["apiVersion", "operationId", "recoveryCeremonyId", "deviceId", "proof", "credential"]);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+    recoveryCeremonyId: identifier(value.recoveryCeremonyId),
+    deviceId: identifier(value.deviceId), proof: validateRecoveryProof(value.proof),
+    credential: validateRegistrationCredential(value.credential) });
+}
+
+function validateRotateRecoveryRequest(input) {
+  const fields = ["apiVersion", "operationId", "logicalChangeId", "attemptKind",
+    "recoveryOperationId", "syncedPocketId", "expectedKeySetVersion",
+    "expectedRecoveryVersion", "recoveryVerifier", "recoveryEnvelope"];
+  const value = exactObject(input, fields, fields);
+  const request = validateKeyMutation(value, fields);
+  return frozen({ ...request, recoveryOperationId: identifier(value.recoveryOperationId),
+    expectedRecoveryVersion: positiveInteger(value.expectedRecoveryVersion),
+    recoveryVerifier: validateRecoveryVerifier(value.recoveryVerifier),
+    recoveryEnvelope: validateEnvelopeInput(value.recoveryEnvelope, { kind: "recovery" }) });
+}
+
 function createServiceCore(input) {
   const config = validateFactoryConfig(input);
   const {
     store,
     webAuthnVerifier,
+    recoveryProofVerifier,
     randomBytes,
     now,
     trustedOrigin,
@@ -1276,6 +1685,169 @@ function createServiceCore(input) {
         request.encryptedRecord.ciphertext,
       ],
     ]);
+  }
+
+  function keyMutationDigest(accountId, kind, request) {
+    const logical = { ...request };
+    delete logical.attemptKind;
+    return sha256([1, "key-operation", accountId, kind, logical]);
+  }
+
+  function recoveryBeginDigest(request) {
+    return sha256([1, "recovery", "begin", request.operationId,
+      request.accountLocator, request.deviceId]);
+  }
+
+  function recoveryFinishDigest(request) {
+    return sha256([1, "recovery", "finish", request.operationId,
+      request.recoveryCeremonyId, request.deviceId, request.proof, request.credential]);
+  }
+
+  function envelopeRecord(accountId, syncedPocketId, envelope, at) {
+    return frozen({
+      kind: "pocket.sync.service-envelope",
+      schemaVersion: 1,
+      storeVersion: 1,
+      accountId,
+      syncedPocketId,
+      envelopeId: envelope.envelopeId,
+      envelopeKind: envelope.envelopeKind,
+      envelopeVersion: envelope.envelopeVersion,
+      status: "active",
+      deviceId: envelope.deviceId,
+      credentialId: envelope.credentialId,
+      kdf: envelope.kdf,
+      kdfSalt: envelope.kdfSalt,
+      derivationVersion: envelope.derivationVersion,
+      encryptedEnvelopeSize: POLICY.envelopeCiphertextByteLength,
+      encryptedEnvelope: envelope.encryptedEnvelope,
+      createdAt: timestamp(at),
+      revokedAt: null,
+    });
+  }
+
+  function envelopeMetadata(record) {
+    return frozen({
+      envelopeId: record.envelopeId,
+      envelopeKind: record.envelopeKind,
+      envelopeVersion: record.envelopeVersion,
+      status: record.status,
+      deviceId: record.deviceId,
+      credentialId: record.credentialId,
+      kdf: record.kdf,
+      kdfSalt: record.kdfSalt,
+      derivationVersion: record.derivationVersion,
+      createdAt: record.createdAt,
+      revokedAt: record.revokedAt,
+    });
+  }
+
+  function envelopeDownload(record) {
+    return frozen({
+      envelopeId: record.envelopeId,
+      envelopeKind: record.envelopeKind,
+      envelopeVersion: record.envelopeVersion,
+      deviceId: record.deviceId,
+      credentialId: record.credentialId,
+      kdf: record.kdf,
+      kdfSalt: record.kdfSalt,
+      derivationVersion: record.derivationVersion,
+      encryptedEnvelopeSize: record.encryptedEnvelopeSize,
+      encryptedEnvelope: record.encryptedEnvelope,
+    });
+  }
+
+  async function requireOwnedPocket(transaction, account, syncedPocketId) {
+    if (account.syncedPocketId !== syncedPocketId) {
+      throw serviceError("service-authorisation-failed", 403);
+    }
+    const pocket = await readRecord(transaction, COLLECTIONS.pockets, syncedPocketId);
+    if (pocket === null || pocket.accountId !== account.accountId) {
+      throw serviceError("service-state-invalid", 500);
+    }
+    return pocket;
+  }
+
+  async function loadKeySetState(transaction, account, syncedPocketId) {
+    const keySet = await readRecord(transaction, COLLECTIONS.keySets, syncedPocketId);
+    if (keySet === null) return frozen({ keySet: null, envelopes: Object.freeze([]), locator: null });
+    if (keySet.accountId !== account.accountId || keySet.syncedPocketId !== syncedPocketId) {
+      throw serviceError("service-state-invalid", 500);
+    }
+    const envelopes = [];
+    for (const envelopeId of keySet.envelopeIds) {
+      const envelope = await readRecord(transaction, COLLECTIONS.envelopes, envelopeId);
+      if (envelope === null || envelope.accountId !== account.accountId
+          || envelope.syncedPocketId !== syncedPocketId) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      envelopes.push(envelope);
+    }
+    let locator = null;
+    if (keySet.accountLocator !== null) {
+      locator = await readRecord(transaction, COLLECTIONS.recoveryLocators, keySet.accountLocator);
+      if (locator === null || locator.status !== "active"
+          || locator.accountId !== account.accountId
+          || locator.syncedPocketId !== syncedPocketId
+          || locator.recoveryVersion !== keySet.recoveryVersion) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      const recoveryEnvelope = envelopes.find((item) => item.envelopeId === keySet.recoveryEnvelopeId);
+      if (!recoveryEnvelope || recoveryEnvelope.status !== "active"
+          || recoveryEnvelope.envelopeKind !== "recovery"
+          || recoveryEnvelope.envelopeVersion !== keySet.recoveryVersion) {
+        throw serviceError("service-state-invalid", 500);
+      }
+    }
+    return frozen({ keySet, envelopes, locator });
+  }
+
+  function keyOperationWrapper(operation, replayed) {
+    if (operation.result.status === "conflict") {
+      const body = {
+        apiVersion: 1, ok: false, status: "conflict", wrote: false, conflict: true,
+        operationId: operation.operationId,
+        actualKeySetVersion: operation.result.actualKeySetVersion,
+      };
+      if (operation.operationKind === "rotate-recovery") {
+        body.actualRecoveryVersion = operation.result.actualRecoveryVersion;
+      }
+      return frozen({ status: 409, body, session: null });
+    }
+    return frozen({ status: 200, body: {
+      apiVersion: 1, ok: true, status: "committed", wrote: true,
+      operationId: operation.operationId, replayed,
+      keySetVersion: operation.result.keySetVersion,
+      ...operation.result.details,
+    }, session: null });
+  }
+
+  async function existingKeyOperation(transaction, account, request, operationKind, digest) {
+    const key = operationKey(account.accountId, request.syncedPocketId, request.operationId);
+    const operation = await readRecord(transaction, COLLECTIONS.keyOperations, key);
+    if (operation === null) return null;
+    if (operation.requestDigest !== digest || operation.operationKind !== operationKind
+        || operation.logicalChangeId !== request.logicalChangeId
+        || operation.expectedKeySetVersion !== request.expectedKeySetVersion) {
+      throw serviceError("service-operation-reuse", 409);
+    }
+    if (request.attemptKind !== "idempotent-retry") {
+      throw serviceError("service-operation-reuse", 409);
+    }
+    return keyOperationWrapper(operation, true);
+  }
+
+  async function recordKeyOperation(transaction, account, request, operationKind, digest, result) {
+    const record = frozen({
+      kind: "pocket.sync.service-key-operation", schemaVersion: 1, storeVersion: 1,
+      accountId: account.accountId, syncedPocketId: request.syncedPocketId,
+      operationId: request.operationId, logicalChangeId: request.logicalChangeId,
+      operationKind, expectedKeySetVersion: request.expectedKeySetVersion,
+      requestDigest: digest, result,
+    });
+    await insertRecord(transaction, COLLECTIONS.keyOperations,
+      operationKey(account.accountId, request.syncedPocketId, request.operationId), record);
+    return record;
   }
 
   async function authoriseSession(transaction, sessionId, atMilliseconds) {
@@ -1569,6 +2141,21 @@ function createServiceCore(input) {
       return await promise;
     } catch (_error) {
       throw serviceError("service-webauthn-failed", 400);
+    }
+  }
+
+  async function callRecoveryProofVerifier(inputValue) {
+    let promise;
+    try {
+      promise = recoveryProofVerifier.verifyRecoveryProof(frozen(inputValue));
+      if (!thenable(promise)) throw serviceError("service-recovery-proof-failed", 400);
+      const result = await promise;
+      if (!sameKeys(result, ["verified"]) || result.verified !== true) {
+        throw serviceError("service-recovery-proof-failed", 400);
+      }
+      return frozen(result);
+    } catch (_error) {
+      throw serviceError("service-recovery-proof-failed", 400);
     }
   }
 
@@ -2217,6 +2804,506 @@ function createServiceCore(input) {
     });
   }
 
+  async function listEnvelopes(value) {
+    const { context, body } = invocation(value);
+    const request = validateListEnvelopesRequest(body);
+    const at = clockMilliseconds();
+    return transact("readonly", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const state = await loadKeySetState(transaction, account, request.syncedPocketId);
+      return frozen({ status: 200, body: {
+        apiVersion: 1, ok: true, operationId: request.operationId,
+        syncedPocketId: request.syncedPocketId,
+        keySetVersion: state.keySet ? state.keySet.keySetVersion : 0,
+        recoveryStatus: state.keySet ? state.keySet.recoveryStatus : "unconfigured",
+        recoveryVersion: state.keySet ? state.keySet.recoveryVersion : 0,
+        envelopes: state.envelopes.slice().sort((a, b) => a.envelopeId.localeCompare(b.envelopeId))
+          .map(envelopeMetadata),
+      }, session: null });
+    });
+  }
+
+  async function downloadEnvelope(value) {
+    const { context, body } = invocation(value);
+    const request = validateDownloadEnvelopeRequest(body);
+    const at = clockMilliseconds();
+    return transact("readonly", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const state = await loadKeySetState(transaction, account, request.syncedPocketId);
+      const envelope = state.envelopes.find((item) => item.envelopeId === request.envelopeId);
+      if (!envelope) {
+        const unlisted = await readRecord(transaction, COLLECTIONS.envelopes, request.envelopeId);
+        if (unlisted && unlisted.accountId === account.accountId
+            && unlisted.syncedPocketId === request.syncedPocketId) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        throw serviceError("service-envelope-not-found", 404);
+      }
+      if (envelope.status !== "active") throw serviceError("service-envelope-revoked", 410);
+      return frozen({ status: 200, body: {
+        apiVersion: 1, ok: true, operationId: request.operationId,
+        syncedPocketId: request.syncedPocketId,
+        keySetVersion: state.keySet.keySetVersion, envelope: envelopeDownload(envelope),
+      }, session: null });
+    });
+  }
+
+  async function addEnvelope(value) {
+    const { context, body } = invocation(value);
+    const request = validateAddEnvelopeRequest(body);
+    const at = clockMilliseconds();
+    return transact("readwrite", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const digest = keyMutationDigest(account.accountId, "add-envelope", request);
+      const replay = await existingKeyOperation(transaction, account, request, "add-envelope", digest);
+      if (replay) return replay;
+      const state = await loadKeySetState(transaction, account, request.syncedPocketId);
+      const actual = state.keySet ? state.keySet.keySetVersion : 0;
+      if (actual !== request.expectedKeySetVersion) {
+        const result = frozen({ status: "conflict", actualKeySetVersion: actual,
+          actualRecoveryVersion: state.keySet ? state.keySet.recoveryVersion : 0 });
+        const operation = await recordKeyOperation(transaction, account, request,
+          "add-envelope", digest, result);
+        return keyOperationWrapper(operation, false);
+      }
+      if (await readRecord(transaction, COLLECTIONS.envelopes, request.envelope.envelopeId)) {
+        throw serviceError("service-envelope-invalid", 400);
+      }
+      if (request.envelope.envelopeKind === "passkey-prf") {
+        const credential = await readRecord(transaction, COLLECTIONS.credentials,
+          request.envelope.credentialId);
+        if (!credential || credential.accountId !== account.accountId || credential.status !== "active") {
+          throw serviceError("service-authorisation-failed", 403);
+        }
+      }
+      const record = envelopeRecord(account.accountId, request.syncedPocketId, request.envelope, at);
+      await insertRecord(transaction, COLLECTIONS.envelopes, record.envelopeId, record);
+      const nextVersion = request.expectedKeySetVersion + 1;
+      const keySet = state.keySet ? frozen({ ...state.keySet,
+        storeVersion: state.keySet.storeVersion + 1, keySetVersion: nextVersion,
+        envelopeIds: [...state.keySet.envelopeIds, record.envelopeId], updatedAt: timestamp(at),
+      }) : frozen({
+        kind: "pocket.sync.service-key-set", schemaVersion: 1, storeVersion: 1,
+        accountId: account.accountId, syncedPocketId: request.syncedPocketId,
+        keySetVersion: nextVersion, envelopeIds: [record.envelopeId],
+        recoveryStatus: "unconfigured", recoveryVersion: 0, recoveryEnvelopeId: null,
+        recoveryVerifier: null, accountLocator: null, recoveryOperationId: null,
+        recoveryCredentialId: null, createdAt: timestamp(at), updatedAt: timestamp(at),
+      });
+      if (state.keySet) await replaceRecord(transaction, COLLECTIONS.keySets,
+        request.syncedPocketId, state.keySet, keySet);
+      else await insertRecord(transaction, COLLECTIONS.keySets, request.syncedPocketId, keySet);
+      const result = frozen({ status: "committed", keySetVersion: nextVersion, details: {} });
+      const operation = await recordKeyOperation(transaction, account, request,
+        "add-envelope", digest, result);
+      return keyOperationWrapper(operation, false);
+    });
+  }
+
+  async function revokeEnvelope(value) {
+    const { context, body } = invocation(value);
+    const request = validateRevokeEnvelopeRequest(body);
+    const at = clockMilliseconds();
+    return transact("readwrite", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const digest = keyMutationDigest(account.accountId, "revoke-envelope", request);
+      const replay = await existingKeyOperation(transaction, account, request, "revoke-envelope", digest);
+      if (replay) return replay;
+      const state = await loadKeySetState(transaction, account, request.syncedPocketId);
+      const actual = state.keySet ? state.keySet.keySetVersion : 0;
+      if (actual !== request.expectedKeySetVersion) {
+        const result = frozen({ status: "conflict", actualKeySetVersion: actual,
+          actualRecoveryVersion: state.keySet ? state.keySet.recoveryVersion : 0 });
+        const operation = await recordKeyOperation(transaction, account, request,
+          "revoke-envelope", digest, result);
+        return keyOperationWrapper(operation, false);
+      }
+      const envelope = state.envelopes.find((item) => item.envelopeId === request.envelopeId);
+      if (!envelope) {
+        const unlisted = await readRecord(transaction, COLLECTIONS.envelopes, request.envelopeId);
+        if (unlisted && unlisted.accountId === account.accountId
+            && unlisted.syncedPocketId === request.syncedPocketId) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        throw serviceError("service-envelope-not-found", 404);
+      }
+      if (envelope.status !== "active") throw serviceError("service-envelope-revoked", 410);
+      if (envelope.envelopeKind === "recovery") throw serviceError("service-envelope-invalid", 400);
+      const revoked = frozen({ ...envelope, storeVersion: envelope.storeVersion + 1,
+        status: "revoked", encryptedEnvelopeSize: 0, encryptedEnvelope: null,
+        revokedAt: timestamp(at) });
+      await replaceRecord(transaction, COLLECTIONS.envelopes, envelope.envelopeId, envelope, revoked);
+      const nextVersion = request.expectedKeySetVersion + 1;
+      const keySet = frozen({ ...state.keySet, storeVersion: state.keySet.storeVersion + 1,
+        keySetVersion: nextVersion, updatedAt: timestamp(at) });
+      await replaceRecord(transaction, COLLECTIONS.keySets, request.syncedPocketId,
+        state.keySet, keySet);
+      const result = frozen({ status: "committed", keySetVersion: nextVersion, details: {} });
+      const operation = await recordKeyOperation(transaction, account, request,
+        "revoke-envelope", digest, result);
+      return keyOperationWrapper(operation, false);
+    });
+  }
+
+  async function initialiseRecovery(value) {
+    const { context, body } = invocation(value);
+    const request = validateInitialiseRecoveryRequest(body);
+    const at = clockMilliseconds();
+    return transact("readwrite", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const digest = keyMutationDigest(account.accountId, "initialise-recovery", request);
+      const replay = await existingKeyOperation(transaction, account, request,
+        "initialise-recovery", digest);
+      if (replay) return replay;
+      const state = await loadKeySetState(transaction, account, request.syncedPocketId);
+      const actual = state.keySet ? state.keySet.keySetVersion : 0;
+      if (actual !== request.expectedKeySetVersion) {
+        const result = frozen({ status: "conflict", actualKeySetVersion: actual,
+          actualRecoveryVersion: state.keySet ? state.keySet.recoveryVersion : 0 });
+        const operation = await recordKeyOperation(transaction, account, request,
+          "initialise-recovery", digest, result);
+        return keyOperationWrapper(operation, false);
+      }
+      if (state.keySet && state.keySet.recoveryStatus !== "unconfigured") {
+        throw serviceError("service-recovery-already-configured", 409);
+      }
+      if (await readRecord(transaction, COLLECTIONS.envelopes,
+        request.recoveryEnvelope.envelopeId)) throw serviceError("service-envelope-invalid", 400);
+      const accountLocator = randomToken();
+      await ensureGeneratedKeyAvailable(transaction, COLLECTIONS.recoveryLocators, accountLocator);
+      const envelope = envelopeRecord(account.accountId, request.syncedPocketId,
+        request.recoveryEnvelope, at);
+      const locator = frozen({ kind: "pocket.sync.service-recovery-locator", schemaVersion: 1,
+        storeVersion: 1, accountLocator, accountId: account.accountId,
+        syncedPocketId: request.syncedPocketId, recoveryVersion: 1, status: "active",
+        createdAt: timestamp(at), revokedAt: null });
+      await insertRecord(transaction, COLLECTIONS.envelopes, envelope.envelopeId, envelope);
+      await insertRecord(transaction, COLLECTIONS.recoveryLocators, accountLocator, locator);
+      const nextVersion = request.expectedKeySetVersion + 1;
+      const keySet = state.keySet ? frozen({ ...state.keySet,
+        storeVersion: state.keySet.storeVersion + 1, keySetVersion: nextVersion,
+        envelopeIds: [...state.keySet.envelopeIds, envelope.envelopeId],
+        recoveryStatus: "ready", recoveryVersion: 1, recoveryEnvelopeId: envelope.envelopeId,
+        recoveryVerifier: request.recoveryVerifier, accountLocator,
+        recoveryOperationId: null, recoveryCredentialId: null, updatedAt: timestamp(at),
+      }) : frozen({ kind: "pocket.sync.service-key-set", schemaVersion: 1, storeVersion: 1,
+        accountId: account.accountId, syncedPocketId: request.syncedPocketId,
+        keySetVersion: nextVersion, envelopeIds: [envelope.envelopeId],
+        recoveryStatus: "ready", recoveryVersion: 1, recoveryEnvelopeId: envelope.envelopeId,
+        recoveryVerifier: request.recoveryVerifier, accountLocator,
+        recoveryOperationId: null, recoveryCredentialId: null,
+        createdAt: timestamp(at), updatedAt: timestamp(at) });
+      if (state.keySet) await replaceRecord(transaction, COLLECTIONS.keySets,
+        request.syncedPocketId, state.keySet, keySet);
+      else await insertRecord(transaction, COLLECTIONS.keySets, request.syncedPocketId, keySet);
+      const details = frozen({ recoveryVersion: 1, accountLocator, recoveryCopyRequired: true });
+      const result = frozen({ status: "committed", keySetVersion: nextVersion, details });
+      const operation = await recordKeyOperation(transaction, account, request,
+        "initialise-recovery", digest, result);
+      return keyOperationWrapper(operation, false);
+    });
+  }
+
+  function recoveryBeginBody(ceremony, verifier) {
+    return frozen({
+      apiVersion: 1, ok: true, operationId: ceremony.operationId,
+      recoveryCeremonyId: ceremony.recoveryCeremonyId, expiresAt: ceremony.expiresAt,
+      recoveryVersion: ceremony.recoveryVersion, challenge: ceremony.challenge,
+      recoveryAuthorisation: {
+        format: verifier.format, version: verifier.version, kdf: verifier.kdf,
+        kdfSalt: verifier.kdfSalt, derivationVersion: verifier.derivationVersion,
+      },
+      prfEvaluationInput: ceremony.prfEvaluationInput,
+      publicKeyCreationOptions: ceremony.publicKeyCreationOptions,
+    });
+  }
+
+  async function beginRecovery(value) {
+    const { context, body } = invocation(value);
+    if (context.sessionId !== null) throw serviceError("service-request-context-invalid", 400);
+    const request = validateBeginRecoveryRequest(body);
+    const at = clockMilliseconds();
+    const digest = recoveryBeginDigest(request);
+    return transact("readwrite", async (transaction) => {
+      const existing = await readRecord(transaction, COLLECTIONS.recoveryCeremonies,
+        request.operationId);
+      if (existing) {
+        if (existing.requestDigest !== digest) throw serviceError("service-operation-reuse", 409);
+        if (existing.finishDigest !== null) throw serviceError("service-ceremony-complete", 409);
+        if (Date.parse(existing.expiresAt) <= at) throw serviceError("service-ceremony-expired", 410);
+        const account = await readRecord(transaction, COLLECTIONS.accounts, existing.accountId);
+        if (!account) throw serviceError("service-state-invalid", 500);
+        const state = await loadKeySetState(transaction, account, existing.syncedPocketId);
+        if (!state.keySet || state.keySet.recoveryStatus !== "ready"
+            || state.keySet.recoveryVersion !== existing.recoveryVersion
+            || state.keySet.keySetVersion !== existing.keySetVersion) {
+          throw serviceError("service-recovery-unavailable", 404);
+        }
+        return frozen({ status: 200,
+          body: recoveryBeginBody(existing, state.keySet.recoveryVerifier), session: null });
+      }
+      const locator = await readRecord(transaction, COLLECTIONS.recoveryLocators,
+        request.accountLocator);
+      if (!locator || locator.status !== "active") {
+        throw serviceError("service-recovery-unavailable", 404);
+      }
+      const account = await readRecord(transaction, COLLECTIONS.accounts, locator.accountId);
+      if (!account || account.syncedPocketId !== locator.syncedPocketId) {
+        throw serviceError("service-recovery-unavailable", 404);
+      }
+      await requireOwnedPocket(transaction, account, locator.syncedPocketId);
+      const credentials = await loadAccountCredentials(transaction, account);
+      const state = await loadKeySetState(transaction, account, locator.syncedPocketId);
+      if (!state.keySet || state.keySet.recoveryStatus !== "ready"
+          || state.keySet.accountLocator !== request.accountLocator
+          || state.keySet.recoveryVersion !== locator.recoveryVersion) {
+        throw serviceError("service-recovery-unavailable", 404);
+      }
+      const recoveryCeremonyId = randomToken();
+      const challenge = randomToken();
+      const userId = randomToken();
+      const expiresAt = expiry(at, ceremonyLifetimeMs);
+      const publicKeyCreationOptions = registrationOptions(account.accountId, userId,
+        account.prfEvaluationInput, challenge, credentials);
+      const ceremony = frozen({
+        kind: "pocket.sync.service-recovery-ceremony", schemaVersion: 1, storeVersion: 1,
+        operationId: request.operationId, recoveryCeremonyId, requestDigest: digest,
+        accountId: account.accountId, syncedPocketId: locator.syncedPocketId,
+        deviceId: request.deviceId, challenge, recoveryVersion: state.keySet.recoveryVersion,
+        keySetVersion: state.keySet.keySetVersion,
+        prfEvaluationInput: account.prfEvaluationInput, publicKeyCreationOptions,
+        expiresAt, finishDigest: null, completedCredentialId: null,
+        completedSessionId: null, completedKeySetVersion: null,
+      });
+      await insertRecord(transaction, COLLECTIONS.recoveryCeremonies,
+        request.operationId, ceremony);
+      return frozen({ status: 200,
+        body: recoveryBeginBody(ceremony, state.keySet.recoveryVerifier), session: null });
+    });
+  }
+
+  function recoveryFinishBody(ceremony, credentialId, keySet, envelope) {
+    return frozen({
+      apiVersion: 1, ok: true, operationId: ceremony.operationId,
+      recoveryCeremonyId: ceremony.recoveryCeremonyId,
+      accountId: ceremony.accountId, credentialId,
+      credentialVersion: POLICY.credentialVersion,
+      accountPolicyVersion: POLICY.accountPolicyVersion,
+      prfEvaluationInput: ceremony.prfEvaluationInput,
+      syncedPocketId: ceremony.syncedPocketId,
+      keySetVersion: keySet.keySetVersion, recoveryVersion: keySet.recoveryVersion,
+      recoveryEnvelope: envelopeDownload(envelope), replacementCopyRequired: true,
+    });
+  }
+
+  async function recoveryFinishReplay(transaction, ceremony, digest, at) {
+    if (ceremony.finishDigest !== digest) throw serviceError("service-operation-reuse", 409);
+    const account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
+    if (!account) throw serviceError("service-state-invalid", 500);
+    const state = await loadKeySetState(transaction, account, ceremony.syncedPocketId);
+    if (!state.keySet || state.keySet.recoveryStatus !== "rotation-required"
+        || state.keySet.recoveryOperationId !== ceremony.operationId
+        || state.keySet.recoveryCredentialId !== ceremony.completedCredentialId
+        || state.keySet.keySetVersion !== ceremony.completedKeySetVersion) {
+      throw serviceError("service-ceremony-complete", 409);
+    }
+    const authorised = await authoriseSession(transaction, ceremony.completedSessionId, at);
+    if (authorised.account.accountId !== account.accountId
+        || authorised.credential.credentialId !== ceremony.completedCredentialId) {
+      throw serviceError("service-state-invalid", 500);
+    }
+    const envelope = state.envelopes.find((item) => item.envelopeId === state.keySet.recoveryEnvelopeId);
+    return frozen({ status: 200,
+      body: recoveryFinishBody(ceremony, ceremony.completedCredentialId, state.keySet, envelope),
+      session: { action: "set", sessionId: authorised.session.sessionId,
+        expiresAt: authorised.session.expiresAt, replaceSessionId: null } });
+  }
+
+  async function finishRecovery(value) {
+    const { context, body } = invocation(value);
+    if (context.sessionId !== null) throw serviceError("service-request-context-invalid", 400);
+    const request = validateFinishRecoveryRequest(body);
+    const at = clockMilliseconds();
+    const digest = recoveryFinishDigest(request);
+    const prepared = await transact("readonly", async (transaction) => {
+      const ceremony = await readRecord(transaction, COLLECTIONS.recoveryCeremonies,
+        request.operationId);
+      if (!ceremony || ceremony.recoveryCeremonyId !== request.recoveryCeremonyId
+          || ceremony.deviceId !== request.deviceId) throw serviceError("service-ceremony-invalid", 400);
+      if (ceremony.finishDigest !== null) {
+        return frozen({ replay: await recoveryFinishReplay(transaction, ceremony, digest, at) });
+      }
+      if (Date.parse(ceremony.expiresAt) <= at) throw serviceError("service-ceremony-expired", 410);
+      const account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
+      if (!account) throw serviceError("service-state-invalid", 500);
+      const state = await loadKeySetState(transaction, account, ceremony.syncedPocketId);
+      if (!state.keySet || state.keySet.recoveryStatus !== "ready"
+          || state.keySet.recoveryVersion !== ceremony.recoveryVersion
+          || state.keySet.keySetVersion !== ceremony.keySetVersion) {
+        throw serviceError("service-recovery-unavailable", 404);
+      }
+      return frozen({ ceremony, account, keySet: state.keySet, replay: null });
+    });
+    if (prepared.replay) return prepared.replay;
+    await callRecoveryProofVerifier({ trustedOrigin, accountId: prepared.account.accountId,
+      syncedPocketId: prepared.ceremony.syncedPocketId, operationId: request.operationId,
+      recoveryCeremonyId: request.recoveryCeremonyId,
+      challenge: prepared.ceremony.challenge, recoveryVersion: prepared.ceremony.recoveryVersion,
+      expiresAt: prepared.ceremony.expiresAt,
+      storedVerifier: prepared.keySet.recoveryVerifier, proof: request.proof });
+    const rawVerified = await callVerifier("verifyRegistration", { trustedOrigin, rpId,
+      challenge: prepared.ceremony.challenge,
+      publicKeyCreationOptions: prepared.ceremony.publicKeyCreationOptions,
+      credential: request.credential });
+    const verified = validateRegistrationVerifierResult(rawVerified, credentialAlgorithms);
+    if (verified.credentialId !== request.credential.id) {
+      throw serviceError("service-webauthn-failed", 400);
+    }
+    const commitAt = clockMilliseconds();
+    return transact("readwrite", async (transaction) => {
+      const ceremony = await readRecord(transaction, COLLECTIONS.recoveryCeremonies,
+        request.operationId);
+      if (!ceremony) throw serviceError("service-ceremony-invalid", 400);
+      if (ceremony.finishDigest !== null) {
+        return recoveryFinishReplay(transaction, ceremony, digest, commitAt);
+      }
+      if (ceremony.storeVersion !== prepared.ceremony.storeVersion
+          || ceremony.recoveryCeremonyId !== request.recoveryCeremonyId
+          || ceremony.deviceId !== request.deviceId
+          || Date.parse(ceremony.expiresAt) <= commitAt) {
+        throw serviceError("service-transaction-conflict", 409, { retryable: true });
+      }
+      const account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
+      if (!account || account.storeVersion !== prepared.account.storeVersion) {
+        throw serviceError("service-transaction-conflict", 409, { retryable: true });
+      }
+      const state = await loadKeySetState(transaction, account, ceremony.syncedPocketId);
+      if (!state.keySet || state.keySet.storeVersion !== prepared.keySet.storeVersion
+          || state.keySet.recoveryStatus !== "ready") {
+        throw serviceError("service-transaction-conflict", 409, { retryable: true });
+      }
+      if (await readRecord(transaction, COLLECTIONS.credentials, verified.credentialId)) {
+        throw serviceError("service-webauthn-failed", 400);
+      }
+      const createdAt = timestamp(commitAt);
+      const credential = frozen({ kind: "pocket.sync.service-credential", schemaVersion: 1,
+        storeVersion: 1, credentialId: verified.credentialId, accountId: account.accountId,
+        credentialVersion: 1, status: "active", publicKey: verified.publicKey,
+        publicKeyAlgorithm: verified.publicKeyAlgorithm, signCount: verified.signCount,
+        transports: verified.transports, backupEligible: verified.backupEligible,
+        backedUp: verified.backedUp, createdAt });
+      await insertRecord(transaction, COLLECTIONS.credentials, credential.credentialId, credential);
+      const updatedAccount = frozen({ ...account, storeVersion: account.storeVersion + 1,
+        credentialIds: [...account.credentialIds, credential.credentialId] });
+      await replaceRecord(transaction, COLLECTIONS.accounts, account.accountId,
+        account, updatedAccount);
+      const session = await createSession(transaction, account.accountId,
+        credential.credentialId, null, commitAt);
+      const updatedKeySet = frozen({ ...state.keySet,
+        storeVersion: state.keySet.storeVersion + 1,
+        keySetVersion: state.keySet.keySetVersion + 1,
+        recoveryStatus: "rotation-required", recoveryOperationId: ceremony.operationId,
+        recoveryCredentialId: credential.credentialId, updatedAt: timestamp(commitAt) });
+      await replaceRecord(transaction, COLLECTIONS.keySets, ceremony.syncedPocketId,
+        state.keySet, updatedKeySet);
+      const completed = frozen({ ...ceremony, storeVersion: ceremony.storeVersion + 1,
+        finishDigest: digest, completedCredentialId: credential.credentialId,
+        completedSessionId: session.record.sessionId,
+        completedKeySetVersion: updatedKeySet.keySetVersion });
+      await replaceRecord(transaction, COLLECTIONS.recoveryCeremonies,
+        ceremony.operationId, ceremony, completed);
+      const envelope = state.envelopes.find((item) => item.envelopeId === state.keySet.recoveryEnvelopeId);
+      return frozen({ status: 200,
+        body: recoveryFinishBody(completed, credential.credentialId, updatedKeySet, envelope),
+        session: session.instruction });
+    });
+  }
+
+  async function rotateRecovery(value) {
+    const { context, body } = invocation(value);
+    const request = validateRotateRecoveryRequest(body);
+    if (request.recoveryVerifier.version !== request.expectedRecoveryVersion + 1
+        || request.recoveryEnvelope.envelopeVersion !== request.expectedRecoveryVersion + 1) {
+      throw serviceError("service-request-invalid");
+    }
+    const at = clockMilliseconds();
+    return transact("readwrite", async (transaction) => {
+      const authorised = await authoriseSession(transaction, context.sessionId, at);
+      const { account, credential } = authorised;
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const digest = keyMutationDigest(account.accountId, "rotate-recovery", request);
+      const replay = await existingKeyOperation(transaction, account, request,
+        "rotate-recovery", digest);
+      if (replay) return replay;
+      const state = await loadKeySetState(transaction, account, request.syncedPocketId);
+      const actualKeySetVersion = state.keySet ? state.keySet.keySetVersion : 0;
+      const actualRecoveryVersion = state.keySet ? state.keySet.recoveryVersion : 0;
+      if (actualKeySetVersion !== request.expectedKeySetVersion
+          || actualRecoveryVersion !== request.expectedRecoveryVersion) {
+        const result = frozen({ status: "conflict", actualKeySetVersion,
+          actualRecoveryVersion });
+        const operation = await recordKeyOperation(transaction, account, request,
+          "rotate-recovery", digest, result);
+        return keyOperationWrapper(operation, false);
+      }
+      if (!state.keySet || state.keySet.recoveryStatus !== "rotation-required") {
+        throw serviceError("service-recovery-rotation-required", 409);
+      }
+      if (state.keySet.recoveryOperationId !== request.recoveryOperationId
+          || state.keySet.recoveryCredentialId !== credential.credentialId) {
+        throw serviceError("service-authorisation-failed", 403);
+      }
+      if (await readRecord(transaction, COLLECTIONS.envelopes,
+        request.recoveryEnvelope.envelopeId)) throw serviceError("service-envelope-invalid", 400);
+      const newLocatorId = randomToken();
+      await ensureGeneratedKeyAvailable(transaction, COLLECTIONS.recoveryLocators, newLocatorId);
+      const oldEnvelope = state.envelopes.find((item) =>
+        item.envelopeId === state.keySet.recoveryEnvelopeId);
+      const oldLocator = state.locator;
+      const newEnvelope = envelopeRecord(account.accountId, request.syncedPocketId,
+        request.recoveryEnvelope, at);
+      const newLocator = frozen({ kind: "pocket.sync.service-recovery-locator",
+        schemaVersion: 1, storeVersion: 1, accountLocator: newLocatorId,
+        accountId: account.accountId, syncedPocketId: request.syncedPocketId,
+        recoveryVersion: request.recoveryVerifier.version, status: "active",
+        createdAt: timestamp(at), revokedAt: null });
+      await insertRecord(transaction, COLLECTIONS.envelopes,
+        newEnvelope.envelopeId, newEnvelope);
+      await insertRecord(transaction, COLLECTIONS.recoveryLocators, newLocatorId, newLocator);
+      const revokedEnvelope = frozen({ ...oldEnvelope,
+        storeVersion: oldEnvelope.storeVersion + 1, status: "revoked",
+        encryptedEnvelopeSize: 0, encryptedEnvelope: null, revokedAt: timestamp(at) });
+      const revokedLocator = frozen({ ...oldLocator,
+        storeVersion: oldLocator.storeVersion + 1, status: "revoked", revokedAt: timestamp(at) });
+      await replaceRecord(transaction, COLLECTIONS.envelopes, oldEnvelope.envelopeId,
+        oldEnvelope, revokedEnvelope);
+      await replaceRecord(transaction, COLLECTIONS.recoveryLocators, oldLocator.accountLocator,
+        oldLocator, revokedLocator);
+      const nextVersion = request.expectedKeySetVersion + 1;
+      const keySet = frozen({ ...state.keySet, storeVersion: state.keySet.storeVersion + 1,
+        keySetVersion: nextVersion,
+        envelopeIds: [...state.keySet.envelopeIds, newEnvelope.envelopeId],
+        recoveryStatus: "ready", recoveryVersion: request.recoveryVerifier.version,
+        recoveryEnvelopeId: newEnvelope.envelopeId,
+        recoveryVerifier: request.recoveryVerifier, accountLocator: newLocatorId,
+        recoveryOperationId: null, recoveryCredentialId: null, updatedAt: timestamp(at) });
+      await replaceRecord(transaction, COLLECTIONS.keySets, request.syncedPocketId,
+        state.keySet, keySet);
+      const details = frozen({ recoveryVersion: request.recoveryVerifier.version,
+        accountLocator: newLocatorId, previousRecoveryInvalidated: true,
+        replacementCopyRequired: true });
+      const result = frozen({ status: "committed", keySetVersion: nextVersion, details });
+      const operation = await recordKeyOperation(transaction, account, request,
+        "rotate-recovery", digest, result);
+      return keyOperationWrapper(operation, false);
+    });
+  }
+
   return Object.freeze({
     beginRegistration,
     finishRegistration,
@@ -2225,6 +3312,14 @@ function createServiceCore(input) {
     readRevision,
     downloadEncryptedRecord,
     conditionalUpload,
+    listEnvelopes,
+    downloadEnvelope,
+    addEnvelope,
+    revokeEnvelope,
+    initialiseRecovery,
+    beginRecovery,
+    finishRecovery,
+    rotateRecovery,
   });
 }
 

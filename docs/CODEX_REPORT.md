@@ -1,5 +1,91 @@
 # Codex report
 
+## POCKET TASK P036 - BUILD KEY-ENVELOPE AND RECOVERY SERVICE CORE
+
+Title: Build key-envelope and recovery service core
+
+Status: P036 extends the existing dormant P034/P035 CommonJS service state machine with strict encrypted master-key envelopes and single-use emergency-recovery state. It adds no browser loading, service deployment or current Pocket behaviour.
+
+Commit title:
+
+- `P036 Build key-envelope and recovery service core`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `8b36c126e3d2849c9b590d9a64e85f19f251a094`
+- Starting title: `P035 Harden WebAuthn RP ID validation`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- Production boundary remains the one file `sync-service/pocket-sync-service-core.js`.
+- Frozen module exports remain exactly `POLICY`, `COLLECTIONS` and `createServiceCore`.
+- The created core expands from seven to exactly fifteen methods by adding envelope list/download/add/revoke and recovery initialise/begin/finish/rotate.
+
+No HTTP server, cookie adapter, real WebAuthn verifier, recovery-proof algorithm, database, provider, host/domain/origin selection, deployment file, dependency, browser integration, UI, owner, Main Save/PE Save integration, service-worker change or background process was added.
+
+### Key and recovery service state
+
+- Five strict collections are added: `keySets`, `envelopes`, `recoveryLocators`, `recoveryCeremonies` and `keyOperations`.
+- One account-owned key set uses a positive compare-and-swap version and the exact `unconfigured`, `ready` and `rotation-required` recovery states.
+- Active envelopes retain exact P029 AES-GCM metadata and exactly 48 decoded ciphertext bytes. Generic addition checks device/passkey/transfer metadata and credential ownership; recovery envelopes use only the recovery operations.
+- Revocation replaces an active envelope with a metadata-only tombstone. The service record has zero encrypted size and null ciphertext; Pocket content ciphertext remains unchanged.
+- Immutable key-operation records store canonical request digests and committed/conflict outcomes, never ciphertext, verifier or proof material. Exact explicit retries replay one outcome; changed or `new-change` reuse fails.
+- Initial recovery atomically installs one version-1 verifier/envelope and one fresh 32-byte opaque locator. Replay returns that same locator.
+
+### Recovery proof, passkey and rotation
+
+- The factory now requires an exact one-method `recoveryProofVerifier`. It receives bound public context, the derived stored verifier and submitted opaque proof. It has no store/key-unwrapping method and is called once outside the write transaction.
+- P036 deliberately selects no production proof algorithm. False, malformed and thrown adapter results map to the stable non-secret `service-recovery-proof-failed` error.
+- Begin recovery validates the active locator/account/Pocket/key-set/envelope/verifier relationships and creates only one short-lived ceremony with P031-compatible replacement-passkey options. The response omits the verifier value and envelope.
+- Finish validates proof and WebAuthn registration outside the write transaction, then atomically creates one credential/session, appends account membership, completes the ceremony, advances the key set and marks that recovery version `rotation-required`.
+- Account authentication still does not unlock content. Finish returns the existing recovery envelope only for local client unwrapping and requires a replacement copy.
+- Only the newly recovered credential's session can rotate. One transaction installs the next verifier/envelope/locator, revokes the old locator, tombstones and erases old envelope ciphertext, clears consumed recovery identity, advances versions and returns to `ready`.
+- A failure or conflict preserves the previous complete recovery path. Concurrent same-version changes and recovery finishes cannot create duplicate outcomes.
+
+### Files changed
+
+- `sync-service/pocket-sync-service-core.js`
+- `tests/helpers/p034-memory-service-store.js`
+- `tests/p034-sync-service-core.test.js`
+- `tests/p035-rp-id-hardening.test.js`
+- `tests/p036-key-recovery-service-core.test.js`
+- `docs/SYNC_KEY_RECOVERY_SERVICE.md`
+- `docs/SYNC_SERVICE_CORE.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p036-key-recovery-service-core.test.js` - 19 passed, 0 failed.
+- `node --test tests/p035-rp-id-hardening.test.js` - 4 passed, 0 failed.
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 561 passed, 0 failed.
+- `node --check` passed for the production core, deterministic helper and focused P036 test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Distinctive readable Pocket, raw master-key, raw recovery-root and raw PRF-output sentinels do not enter accepted requests, records, results or errors. Only Pocket records contain content ciphertext, and only active envelope records contain envelope ciphertext. Revoked envelope ciphertext is erased from active service state.
+
+Physical browser acceptance: not applicable. P036 remains server-side, dormant, undeployed and not browser-loaded.
+
+### Recommended P037 boundary
+
+Build the unloaded local orchestration and strict client transport extension for envelope creation/opening, recovery-package creation, replacement-copy confirmation and owner-safe staged activation. Keep roots, master keys and PRF output client-only. Defer the production recovery-proof algorithm, HTTP/cookie adapter, real WebAuthn verifier, durable database and deployment controls to a separately reviewed adapter boundary.
+
 ## POCKET TASK P035 - HARDEN WEBAUTHN RP ID VALIDATION
 
 Title: Harden WebAuthn RP ID validation
@@ -64,9 +150,9 @@ No Public Suffix List, dependency, parent-domain support, DNS/network lookup, HT
 
 Physical browser acceptance: not applicable. The service core remains server-side, undeployed and not production-loaded.
 
-### Recommended P036 boundary
+### Recommended adapter boundary (moved after P036)
 
-Proceed with the previously deferred reviewed HTTP/header/cookie adapter, standards-compliant WebAuthn verifier adapter and durable database transaction adapter around P034/P035's exact interfaces. Preserve exact-host RP policy unless a concrete deployment later justifies a separately reviewed public-suffix-aware expansion.
+The reviewed HTTP/header/cookie, WebAuthn verifier and durable database adapters remain deferred after P036's key/recovery state extension. Preserve exact-host RP policy unless a concrete deployment later justifies a separately reviewed public-suffix-aware expansion.
 
 ## POCKET TASK P034 - BUILD SYNC SERVICE SAFETY CORE
 

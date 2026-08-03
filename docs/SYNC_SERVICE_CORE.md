@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P034 adds a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. It is CommonJS Node code in the existing repository. It is not loaded by `index.html`, `sw.js` or any browser module, and it adds no HTTP server, cookie parser, WebAuthn implementation, database driver, deployment configuration, provider, host, origin, UI, owner or Save integration.
+P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. It is CommonJS Node code in the existing repository. It is not loaded by `index.html`, `sw.js` or any browser module, and it adds no HTTP server, cookie parser, WebAuthn implementation, database driver, deployment configuration, provider, host, origin, UI, owner or Save integration.
 
 The core is the smallest deterministic state machine that can later sit behind P032's seven locked routes. It independently validates request context, relationships and opaque encrypted records before committing. It never accepts readable Pocket content or a content-unlock secret.
 
@@ -23,10 +23,10 @@ None of these modules is production-loaded.
 The frozen CommonJS export has exactly:
 
 - `POLICY`, the reviewed version and conservative validation limits;
-- `COLLECTIONS`, the six exact collection names; and
+- `COLLECTIONS`, the eleven exact collection names; and
 - `createServiceCore(configuration)`.
 
-`createServiceCore()` returns exactly seven asynchronous methods:
+`createServiceCore()` returns exactly fifteen asynchronous methods:
 
 - `beginRegistration(input)`;
 - `finishRegistration(input)`;
@@ -34,7 +34,15 @@ The frozen CommonJS export has exactly:
 - `finishAuthentication(input)`;
 - `readRevision(input)`;
 - `downloadEncryptedRecord(input)`; and
-- `conditionalUpload(input)`.
+- `conditionalUpload(input)`;
+- `listEnvelopes(input)`;
+- `downloadEnvelope(input)`;
+- `addEnvelope(input)`;
+- `revokeEnvelope(input)`;
+- `initialiseRecovery(input)`;
+- `beginRecovery(input)`;
+- `finishRecovery(input)`; and
+- `rotateRecovery(input)`.
 
 There is no generic dispatcher, collection access, raw transaction access, cookie helper, cleanup task, migration command or administrative mutation API.
 
@@ -46,6 +54,7 @@ The factory accepts exactly:
 {
   store,
   webAuthnVerifier,
+  recoveryProofVerifier,
   randomBytes,
   now,
   trustedOrigin,
@@ -68,6 +77,8 @@ The injected verifier has exactly two Promise-returning methods:
 
 Verifier results remain untrusted until the core validates every field and relationship.
 
+P036 adds an exact one-method `recoveryProofVerifier`. It receives only bound public ceremony context, the stored derived recovery-authorisation verifier and the submitted opaque proof. It receives no recovery envelope, Pocket ciphertext, root, master key or PRF output. P036 deliberately supplies no production proof algorithm.
+
 ## 4. Request-security context
 
 Every method receives exactly `{ context, body }`. Context is exactly:
@@ -84,9 +95,9 @@ Every method receives exactly `{ context, body }`. Context is exactly:
 
 `contentType` may include a valid UTF-8 charset parameter. Method, exact Origin, Fetch Metadata, content type and nullable opaque session ID are checked before body handling, store access, randomness or verifier work. Missing or `null` origins, cross-site and same-site requests, GET, forms, unknown fields and bearer-token substitutes fail closed.
 
-P034 models the decision. A future P036 adapter must map real HTTP headers and the secure browser-managed session cookie into this exact context.
+The core models the decision. A future adapter must map real HTTP headers and the secure browser-managed session cookie into this exact context.
 
-Successful methods return exactly `{ status, body, session }`. Only successful registration or authentication completion returns a session instruction. P034 never emits a cookie header. Conflict is an exact normal result with status 409 and `session: null`; other failures throw stable, non-secret service errors.
+Successful methods return exactly `{ status, body, session }`. Only successful passkey registration, authentication or recovery completion returns a session instruction. The core never emits a cookie header. Conflict is an exact normal result with status 409 and `session: null`; other failures throw stable, non-secret service errors.
 
 ## 5. Transactional store contract
 
@@ -113,7 +124,7 @@ P034 provides no production database. `tests/helpers/p034-memory-service-store.j
 
 ## 6. Persisted records
 
-The exact frozen collections are `accounts`, `credentials`, `sessions`, `ceremonies`, `pockets` and `operations`. Every record is a strict plain object with `schemaVersion: 1`, a positive safe `storeVersion`, matching collection identity and no unknown fields.
+The exact frozen collections are `accounts`, `credentials`, `sessions`, `ceremonies`, `pockets`, `operations`, `keySets`, `envelopes`, `recoveryLocators`, `recoveryCeremonies` and `keyOperations`. Every record is a strict plain object with `schemaVersion: 1`, a positive safe `storeVersion`, matching collection identity and no unknown fields.
 
 ### Account
 
@@ -137,7 +148,11 @@ A Pocket record stores only account/Pocket identity, current positive revision, 
 
 ### Operation
 
-An immutable operation record stores account/Pocket/operation/logical-change identity, expected revision, a SHA-256 logical-request digest and exact committed/conflict result. It never stores ciphertext. Composite keys use unambiguous length-prefixed identifiers.
+An immutable operation record stores account/Pocket/operation/logical-change identity, expected revision, a SHA-256 logical-request digest and exact committed/conflict result. It never stores ciphertext. Composite keys use separately base64url-encoded identifier components.
+
+### Key and recovery records
+
+P036 adds one versioned key set per Pocket, active or ciphertext-free revoked envelope records, opaque recovery locators, single-use recovery ceremonies and immutable key-operation outcomes. Key-set compare-and-swap prevents stale envelope changes. Recovery moves through `unconfigured`, `ready` and `rotation-required`; new credential/session creation and later verifier/envelope/locator rotation each commit atomically. Full schemas and invariants are in `docs/SYNC_KEY_RECOVERY_SERVICE.md`.
 
 ## 7. Ceremony and verifier lifecycle
 
@@ -164,7 +179,7 @@ Session IDs use 32 random bytes. The response body never carries one. Instead, c
 }
 ```
 
-The future P036 adapter must turn that instruction into a correctly scoped secure cookie. The new session and any prior-session revocation are one atomic transaction. A failed commit leaves the prior session active and creates no replacement. Sessions neither slide nor receive background cleanup.
+A future HTTP adapter must turn that instruction into a correctly scoped secure cookie. The new session and any prior-session revocation are one atomic transaction. A failed commit leaves the prior session active and creates no replacement. Sessions neither slide nor receive background cleanup.
 
 ## 9. Account and Pocket authorisation
 
@@ -193,9 +208,9 @@ Stable errors contain only a code, safe HTTP status and narrowly applicable `ret
 
 Raw PRF output, master keys, recovery roots and device wrapping keys are rejected by strict request/verifier schemas. Only a Pocket record contains ciphertext, and no accepted record contains readable Pocket fields.
 
-## 12. Deferred P036 adapter boundary
+## 12. Deferred adapter and P037 boundary
 
-P036 should provide and review:
+Later adapter work must provide and review:
 
 - a real HTTP adapter for the seven locked routes;
 - exact header/body limits and context mapping;
@@ -205,7 +220,7 @@ P036 should provide and review:
 - rate limits and operational rollback/backup policy; and
 - the unresolved no-locator account-discovery policy.
 
-P036 must not weaken P034/P035's state machine and exact-host RP-ID policy. Provider, runtime, database, deployment origin, envelope/recovery/pairing/deletion operations, production UI and current owner/Save integration remain unselected or separately deferred.
+P037 owns local envelope/recovery orchestration, recovery-package creation and future transport extension. Later adapters must not weaken the P034-P036 state machine or exact-host RP-ID policy. Provider, runtime, database, deployment origin, production UI and current owner/Save integration remain unselected.
 
 ## 13. Validation status
 
