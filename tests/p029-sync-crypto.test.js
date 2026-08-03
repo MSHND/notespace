@@ -476,7 +476,9 @@ test("P028 accepts only concrete P029 content records and exact envelope metadat
     version: 1,
     createdAt: "2030-01-01T00:00:00Z",
   };
-  assert.equal(contract.buildKeyEnvelopeMetadata(Object.assign({}, common, { kind: "device", kdf: "none" })).ok, true);
+  assert.equal(contract.buildKeyEnvelopeMetadata(Object.assign({}, common, {
+    kind: "device", deviceId: "device-p029-tests", kdf: "none",
+  })).ok, true);
   assert.equal(contract.buildKeyEnvelopeMetadata(Object.assign({}, common, {
     kind: "recovery",
     kdf: "HKDF-SHA-256",

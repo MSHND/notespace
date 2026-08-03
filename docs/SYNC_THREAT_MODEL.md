@@ -2,7 +2,7 @@
 
 ## 1. Scope and security goals
 
-This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format and P030's concrete unloaded encrypted device store. It does not change the threat model of today's local JSON and Vault owners.
+This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format, P030's concrete unloaded encrypted device store and P031's unloaded account/passkey client. It does not change the threat model of today's local JSON and Vault owners.
 
 The primary goals are:
 
@@ -76,7 +76,9 @@ Local JSON/Vault files, file handles, source sessions and browser safety copies 
 | Lost or stolen unlocked device | Reads/modifies Pocket | Device lock, account/device revocation, short sessions, explicit envelope revocation | Content visible while unlocked may be captured; revocation cannot erase an offline copy already obtained |
 | Compromised same-origin code/XSS | Exfiltrates content or keys | Strict CSP/dependency review, minimal raw-key lifetime, narrow modules, no remote readable fields | In-scope runtime compromise can defeat client E2EE while active; P028 does not claim otherwise |
 | Malicious extension/OS | Reads memory or UI | Platform protections and non-extractable keys where available | Browser JavaScript cannot defend against a fully privileged attacker |
-| Passkey phishing/replay | Account takeover | WebAuthn relying-party/origin binding, server challenge verification, expiry and user verification policy | Account auth alone still does not unlock content; session theft remains a separate risk |
+| Passkey phishing/replay or ceremony substitution | Account takeover or wrong credential binding | WebAuthn relying-party/origin binding, required user verification, server challenge verification, explicit operation/ceremony/credential/PRF-input continuity and expiry checks | P031 is only the client boundary; the future service and session layer must enforce replay, binding and revocation |
+| PRF result leakage | Converts optional local unlock material into a remote/logging secret | Inspect before serialisation, require exactly 32 bytes, copy locally, strip all PRF results from finish requests and require caller clearing | Same-origin compromise or careless future callers can still copy live result bytes |
+| Account authentication confused with content unlock | Bypasses envelope policy | P028/P031 explicitly return authentication success with content still locked; only a validated credential-bound envelope may open the master key | Future orchestration remains security-critical and is not implemented |
 | PRF capability confusion | Treats passkey sign-in as content unlock | Use only actual valid client extension output; client-only domain-separated derivation | Platform bugs remain possible; recovery must not depend solely on PRF |
 | Invalid envelope injection | Silent fallback hides corruption/attack | Selected candidate with missing/invalid material fails closed and returns a structured reason | Human may need another explicit recovery attempt after diagnosing failure |
 | Recovery-package theft | Account/content recovery by attacker | High-entropy root, local-only package, safe storage guidance, rate limiting, rotation after use | Recovery copy is intentionally powerful; possession plus successful protocol may recover access |

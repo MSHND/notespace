@@ -1,5 +1,79 @@
 # Codex report
 
+## POCKET TASK P031 - BUILD ACCOUNT AND PASSKEY CLIENT FOUNDATION
+
+Title: Build account and passkey client foundation
+
+Status: P031 adds the dormant provider-neutral client boundary for future Pocket account passkey registration/authentication. It validates exact versioned ceremony shapes, performs strict native/fallback WebAuthn JSON conversion, keeps PRF output local and reports account success with content still locked. It does not enable sync or change current production behavior.
+
+Commit title:
+
+- `P031 Build account and passkey client foundation`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `1229cd6fde21f8a8d948a0d6438a44dea091ce7c`
+- Starting title: `P030 Build encrypted device store foundation`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- `js/pocket-sync-account-client.js` remains absent from `index.html` and `sw.js`.
+- No live synced owner, UI, account session, backend/provider/endpoint, network transport, current Save integration, service-worker change, JSON/Vault owner or browser-recovery change was added.
+
+### Client and WebAuthn boundary
+
+- One injected Pocket account service has exactly `beginRegistration`, `finishRegistration`, `beginAuthentication` and `finishAuthentication`; one separately injected WebAuthn adapter owns browser calls.
+- Exact version 1 begin/finish allowlists bind operation, ceremony, credential, device and PRF-input identities. Expiry is checked before and after the human gesture. No path retries automatically.
+- Registration requires a discoverable credential, user verification and no attestation. Authentication requires user verification and does not request conditional mediation.
+- Native `parseCreationOptionsFromJSON`, `parseRequestOptionsFromJSON` and credential `toJSON` are preferred. Strict fallbacks decode/encode every WebAuthn binary member as canonical unpadded base64url and independent buffers.
+- Cancellation, unsupported capability, browser security failure, service failure, invalid response, expiry and identity mismatch return stable codes without exposing browser/service messages.
+
+### PRF and content-lock separation
+
+- Each ceremony carries one service-supplied public PRF evaluation input: canonical base64url decoding to exactly 32 bytes. The client neither generates nor persists it.
+- Registration distinguishes unavailable, enabled-without-output and available; authentication distinguishes unavailable and available. Present output must be exactly 32 bytes or finish is not called.
+- Extension results are inspected before serialization. Native/manual finish credentials retain at most registration's public `prf.enabled`; all raw PRF results are stripped from service-bound payloads.
+- Usable output is copied to a fresh local `Uint8Array` for the immediate future envelope caller and must be cleared there. It never enters truth/Vault/device/recovery data or remote request metadata.
+- Successful account operations explicitly return `accountAuthenticated: true` and `contentUnlocked: false`. Only a later separately validated P028/P029 credential-bound envelope path may unlock content.
+- P028 envelope metadata now requires `deviceId` only for device envelopes and `credentialId` only for passkey-PRF envelopes; transfer/recovery envelopes forbid both.
+
+### Files changed
+
+- `js/pocket-sync-account-client.js`
+- `js/pocket-sync-security-contract.js`
+- `tests/p031-sync-account-client.test.js`
+- `tests/p028-sync-security-contract.test.js`
+- `tests/p029-sync-crypto.test.js`
+- `docs/SYNC_ACCOUNT_PASSKEY.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 472 passed, 0 failed.
+- `node --check` passed for every changed/new JavaScript file.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P031 changes no production-loaded code or visible UI.
+
+### Recommended next implementation boundary
+
+Implement and security-review the Pocket account server/session adapter plus credential-bound passkey-PRF envelope orchestration, then join it to P027-P030 activation only after complete failure atomicity, recovery, revocation and human UI/copy paths are tested. Keep the foundation unloaded until that owner transition is ready as one reviewed production seam.
+
 ## POCKET TASK P030 - BUILD THE ENCRYPTED DEVICE STORE FOUNDATION
 
 Title: Build encrypted device store foundation

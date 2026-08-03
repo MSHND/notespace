@@ -15,6 +15,7 @@
   const AUTHENTICATION_TAG_BYTES = 16;
   const MASTER_KEY_BYTES = 32;
   const HKDF_SALT_BYTES = 32;
+  const PRF_EVALUATION_INPUT_BYTES = 32;
   const DERIVATION_VERSION = 1;
   const ENVELOPE_KINDS = Object.freeze([
     "device",
@@ -59,11 +60,19 @@
   const PASSKEY_PRF_POLICY = Object.freeze({
     passkeyAuthenticatesAccount: true,
     passkeyIsContentKey: false,
+    accountAuthenticationUnlocksContent: false,
     extensionIsOptional: true,
     actualCeremonyOutputRequired: true,
+    evaluationInputBytes: PRF_EVALUATION_INPUT_BYTES,
     outputUploaded: false,
     soleRecoveryMethod: false,
     domainSeparatedDerivationRequired: true,
+  });
+  const ACCOUNT_AUTHENTICATION_POLICY = Object.freeze({
+    passkeysOnly: true,
+    accountAuthenticationImpliesContentUnlock: false,
+    contentUnlockRequiresApprovedEnvelope: true,
+    serverVerificationRequired: true,
   });
   const DEVICE_STORE_BOUNDARY = Object.freeze({
     allowed: Object.freeze([
@@ -141,6 +150,7 @@
     "kind",
     "version",
     "deviceId",
+    "credentialId",
     "createdAt",
     "revokedAt",
     "kdf",
@@ -218,6 +228,12 @@
     return typeof value === "string"
       && value.length >= minimumLength
       && canonicalBase64urlByteLength(value) >= 0;
+  }
+
+  function validatePublicPrfEvaluationInput(value) {
+    return canonicalBase64urlByteLength(value) === PRF_EVALUATION_INPUT_BYTES
+      ? pass(value)
+      : fail("invalid-prf-evaluation-input");
   }
 
   function normaliseMetadata(input, fields) {
@@ -362,15 +378,23 @@
       return fail("invalid-key-envelope-metadata");
     }
     if (input.kind === "device") {
-      if (input.kdf !== DEVICE_ENVELOPE_KDF
+      if (!nonEmptyString(input.deviceId)
+          || input.credentialId !== undefined
+          || input.kdf !== DEVICE_ENVELOPE_KDF
           || input.kdfSalt !== undefined
           || input.derivationVersion !== undefined) {
         return fail("invalid-key-envelope-metadata");
       }
-    } else if (input.kdf !== DERIVED_ENVELOPE_KDF
-        || input.derivationVersion !== DERIVATION_VERSION
-        || canonicalBase64urlByteLength(input.kdfSalt) !== HKDF_SALT_BYTES) {
-      return fail("invalid-key-envelope-metadata");
+    } else {
+      const credentialIdentityValid = input.kind === "passkey-prf"
+        ? nonEmptyString(input.credentialId) && input.deviceId === undefined
+        : input.credentialId === undefined && input.deviceId === undefined;
+      if (!credentialIdentityValid
+          || input.kdf !== DERIVED_ENVELOPE_KDF
+          || input.derivationVersion !== DERIVATION_VERSION
+          || canonicalBase64urlByteLength(input.kdfSalt) !== HKDF_SALT_BYTES) {
+        return fail("invalid-key-envelope-metadata");
+      }
     }
     return pass(frozen(Object.assign(normaliseMetadata(input, ENVELOPE_METADATA_FIELDS),
       { contractVersion: SECURITY_CONTRACT_VERSION })));
@@ -526,6 +550,7 @@
     AUTHENTICATION_TAG_BYTES,
     MASTER_KEY_BYTES,
     HKDF_SALT_BYTES,
+    PRF_EVALUATION_INPUT_BYTES,
     DERIVATION_VERSION,
     ENVELOPE_KINDS,
     UNLOCK_PRIORITY,
@@ -534,9 +559,11 @@
     ACCOUNT_MODEL,
     MASTER_KEY_POLICY,
     PASSKEY_PRF_POLICY,
+    ACCOUNT_AUTHENTICATION_POLICY,
     DEVICE_STORE_BOUNDARY,
     ACTIVATION_REQUIREMENTS,
     validatePrfCeremonyResult,
+    validatePublicPrfEvaluationInput,
     selectUnlockPath,
     validateRecoveryReadiness,
     validateActivationReadiness,

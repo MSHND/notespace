@@ -2,7 +2,7 @@
 
 ## 1. Status and conventions
 
-This is the version 1 conceptual contract for a future Pocket-owned, provider-neutral remote adapter. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. This document defines operation shapes and invariants, not URLs, transport bindings, hosting, databases, identity vendors or infrastructure. P028/P029 implement no requests.
+This is the version 1 conceptual contract for a future Pocket-owned, provider-neutral remote adapter. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. This document defines operation shapes and invariants, not URLs, transport bindings, hosting, databases, identity vendors or infrastructure. P031 implements the unloaded strict client-side passkey ceremony boundary for the four begin/finish account operations; it supplies no transport and makes no request at module load.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
@@ -58,6 +58,7 @@ Response:
   "operationId": "opaque-operation-id",
   "ceremonyId": "opaque-ceremony-id",
   "expiresAt": "timestamp",
+  "prfEvaluationInput": "canonical-unpadded-base64url-encoding-32-public-random-bytes",
   "publicKeyCreationOptions": "standards-shaped-public-options"
 }
 ```
@@ -66,19 +67,19 @@ Response:
 
 Request contains `apiVersion`, `operationId`, `ceremonyId`, `deviceId` and the public credential creation response required for server-side WebAuthn verification. Client-only PRF `results` must be removed before serialisation. The service validates challenge, origin, relying-party scope, user presence/verification, credential uniqueness and expiry.
 
-Response contains an opaque `accountId`, `credentialId`, display-safe credential metadata and `credentialVersion`. It contains no private key, PRF output, content key or recovery material.
+Response contains the matching `operationId`, `ceremonyId` and `prfEvaluationInput`, plus opaque `accountId` and `credentialId`, positive `credentialVersion` and positive `accountPolicyVersion`. It contains no private key, PRF output, content key or recovery material.
 
 ## 4. Passkey authentication
 
 ### Begin authentication
 
-Request contains `apiVersion`, `operationId` and an optional opaque account locator. Response contains `ceremonyId`, expiry and standards-shaped public credential request options.
+Request contains `apiVersion`, `operationId` and an optional opaque account locator. Response contains the matching operation ID, `ceremonyId`, expiry, one canonical 32-byte public PRF evaluation input and standards-shaped public credential request options.
 
 ### Finish authentication
 
 Request contains `apiVersion`, `operationId`, `ceremonyId` and the public assertion response. Client-only PRF `results` are not included. The service validates the challenge, origin, relying-party scope, signature, user verification requirements, credential/account relationship and expiry.
 
-Response establishes an account-authorised session and returns only opaque account/device/credential references and policy versions. Authentication success does not assert that content is unlocked.
+Response repeats the bound operation, ceremony, credential and PRF-input identities, establishes account authorisation and returns only opaque account/credential references and policy versions. Authentication success does not assert that content is unlocked. P031 reports `accountAuthenticated: true` and `contentUnlocked: false`; later orchestration must independently open an approved content-key envelope.
 
 ## 5. Credential management
 
@@ -204,7 +205,7 @@ Authenticated request contains:
 
 The opaque envelope record has exact top-level fields `format`, `version`, `algorithm`, `nonce` and `ciphertext`: format `pocket.sync.master-key-envelope.opaque`, version 1, algorithm `AES-GCM-256`, a canonical 12-byte nonce and exactly 48 ciphertext bytes. The latter protects the 32-byte master key plus the 16-byte tag. Envelope ID, kind and version remain separate and are locally authenticated through P029 envelope AAD.
 
-Envelope metadata uses strict allowlists. `device` requires `kdf: none` and no KDF salt/derivation version. `passkey-prf`, `device-transfer` and `recovery` require `kdf: HKDF-SHA-256`, `derivationVersion: 1` and a canonical base64url salt decoding to exactly 32 bytes. The service may store that public salt; it must never receive raw derivation input, a wrapping key, PRF output, transfer secret, recovery root or master key.
+Envelope metadata uses strict allowlists. `device` requires an opaque `deviceId`, forbids `credentialId`, uses `kdf: none` and has no KDF salt/derivation version. `passkey-prf` requires an opaque `credentialId`, forbids `deviceId`, and uses `kdf: HKDF-SHA-256`, `derivationVersion: 1` and a canonical base64url salt decoding to exactly 32 bytes. `device-transfer` and `recovery` forbid both target identifiers and use those same HKDF fields. The service may store the public salt and credential binding; it must never receive raw derivation input, a wrapping key, PRF output, transfer secret, recovery root or master key.
 
 The service validates account/Pocket ownership, kind, exact format/size, KDF metadata, uniqueness and expected version, then returns the next envelope-set version. It cannot unwrap the envelope. Exact cryptographic layouts are defined in [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
 

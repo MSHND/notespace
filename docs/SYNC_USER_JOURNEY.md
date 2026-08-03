@@ -2,7 +2,7 @@
 
 ## Approved future journey — not yet in production
 
-This is the approved human journey for a future Synced Pocket. P027/P028 do not add these screens or turn sync on. There is no production account, passkey, emergency recovery, device transfer or remote service yet. P028 locks the security/recovery behaviour behind this journey without changing P027's existing copy.
+This is the approved human journey for a future Synced Pocket. P027-P031 do not add these screens or turn sync on. There is no production account, passkey UI, emergency recovery, device transfer or remote service yet. P031 adds only an unloaded strict client ceremony boundary and makes no approved copy change.
 
 The experience should feel like one simple choice: keep using a local Pocket, or turn on a protected Pocket that follows the human across their devices.
 
@@ -22,7 +22,7 @@ Pocket asks the human to use the device's normal secure gesture, such as Face ID
 
 This step proves account access. Pocket should not describe encryption keys, protocols or server details in the ordinary journey. Behind the scenes, account access and the random key that protects Pocket content remain separate security responsibilities. A passkey sign-in alone never becomes the content key.
 
-Where the actual passkey ceremony returns valid optional PRF output, Pocket may use it locally to help unlock the master key. Pocket must not promise this capability based on sign-in alone and must never upload PRF output. This step remains a future placeholder; P027/P028 invoke no passkey or device gesture.
+Where the actual passkey ceremony returns valid optional PRF output, Pocket may use it locally to help unlock the master key. Pocket must not promise this capability based on sign-in alone and must never upload PRF output. P031 can validate and extract that result locally, but remains unloaded and invokes no gesture in production. Visible sign-in, cancellation, unavailable-PRF and unlock/recovery experiences still require later copy and accessibility review.
 
 ## 3. Original-file notice
 
@@ -109,4 +109,4 @@ A later additional-device journey may ask an already trusted device to approve a
 
 ## What is deliberately absent today
 
-P027/P028 add no production Turn on sync button, sign-in screen, account, passkey, biometric request, emergency recovery package, device transfer, backend, network request, durable synced-device store, background sync, live synced owner or second Sync button. The locked architecture is documented in [SYNC_SECURITY_ARCHITECTURE.md](SYNC_SECURITY_ARCHITECTURE.md), [SYNC_REMOTE_API_CONTRACT.md](SYNC_REMOTE_API_CONTRACT.md) and [SYNC_THREAT_MODEL.md](SYNC_THREAT_MODEL.md); concrete production implementations still require review and tests.
+P027-P031 add no production Turn on sync button, sign-in screen, account session, biometric request, emergency recovery package, device transfer, backend, network request, background sync, live synced owner or second Sync button. The dormant account client is documented in [SYNC_ACCOUNT_PASSKEY.md](SYNC_ACCOUNT_PASSKEY.md); concrete UI, service, session and owner integration still require review and tests.

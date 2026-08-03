@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, and P030 supplies the concrete encrypted browser device store. Both implementation modules remain unloaded. None of these tasks enables sync, adds an account, contacts a service, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store and P031 supplies the strict account/passkey client ceremony boundary. All implementation modules remain unloaded. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -40,15 +40,19 @@ Version 1 recognises exactly:
 3. `device-transfer` — a one-time envelope delivered through an approved additional-device pairing; and
 4. `recovery` — the master key wrapped to a key derived from the offline recovery root.
 
-Each envelope has an opaque ID, kind, version, synced Pocket ID, creation metadata and optional revocation metadata. Envelope payloads are AES-GCM-256 authenticated ciphertext protecting exactly the 32-byte master key. A `device` envelope records `kdf: none`; derived envelopes record `kdf: HKDF-SHA-256`, a canonical 32-byte public salt and derivation version 1. Metadata never contains the raw wrapping key, derivation input or master key.
+Each envelope has an opaque ID, kind, version, synced Pocket ID, creation metadata and optional revocation metadata. Envelope payloads are AES-GCM-256 authenticated ciphertext protecting exactly the 32-byte master key. A `device` envelope is bound only to an opaque `deviceId` and records `kdf: none`. A `passkey-prf` envelope is bound only to its opaque `credentialId`. Transfer and recovery envelopes have neither target identifier. Derived envelopes record `kdf: HKDF-SHA-256`, a canonical 32-byte public salt and derivation version 1. Metadata never contains the raw wrapping key, derivation input or master key.
 
 ## 5. Passkey and optional PRF
 
 Passkeys are the account authentication method. The WebAuthn PRF extension is an optional local key-unlock enhancement, not an assumption about all passkeys.
 
+P031 implements the dormant client boundary for begin/finish registration and authentication. It requires resident credentials and user verification, requests no attestation or conditional mediation, enforces a server-supplied canonical 32-byte PRF evaluation input, and validates operation, ceremony, credential and expiry continuity. It prefers the native WebAuthn JSON conversion APIs with a strict fallback. See [Synced Pocket account and passkey client](SYNC_ACCOUNT_PASSKEY.md).
+
 Pocket may use the `passkey-prf` path only when the actual registration/authentication ceremony reports usable PRF extension output. Platform capability guesses, a successful passkey assertion, an extension request, or a credential's existence are insufficient. Missing PRF support/output is an unavailable capability and allows the next approved unlock path. Present but malformed, too-short or cryptographically invalid PRF/envelope material fails closed and must not silently fall through.
 
 PRF output remains on the client. Before key wrapping/unwrapping it is passed through HKDF-SHA-256 to a non-extractable AES-GCM-256 wrapping key. The exact versioned info binds the kind-specific label, synced Pocket ID, envelope ID and envelope version. It is never serialised into a WebAuthn response sent to the service, never used directly as the content key and never the sole recovery method.
+
+P031 inspects client extension results before credential serialisation, strips every PRF result from the service-bound JSON and returns a fresh 32-byte local copy only to its immediate caller. A successful passkey result explicitly remains `contentUnlocked: false`; later reviewed orchestration must validate and open the credential-bound envelope independently.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 

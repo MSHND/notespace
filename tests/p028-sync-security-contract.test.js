@@ -167,6 +167,20 @@ test("passkey authentication alone never unlocks content", () => {
   assert.equal(result.path, "unavailable");
   assert.equal(contract.PASSKEY_PRF_POLICY.passkeyIsContentKey, false);
   assert.equal(contract.PASSKEY_PRF_POLICY.soleRecoveryMethod, false);
+  assert.equal(contract.PASSKEY_PRF_POLICY.accountAuthenticationUnlocksContent, false);
+  assert.equal(contract.PASSKEY_PRF_POLICY.evaluationInputBytes, 32);
+  assert.equal(contract.ACCOUNT_AUTHENTICATION_POLICY.passkeysOnly, true);
+  assert.equal(contract.ACCOUNT_AUTHENTICATION_POLICY.accountAuthenticationImpliesContentUnlock, false);
+  assert.equal(contract.ACCOUNT_AUTHENTICATION_POLICY.contentUnlockRequiresApprovedEnvelope, true);
+});
+
+test("public PRF evaluation input is canonical base64url and exactly 32 bytes", () => {
+  const contract = loadContract();
+  const input = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  assert.equal(contract.PRF_EVALUATION_INPUT_BYTES, 32);
+  assert.equal(contract.validatePublicPrfEvaluationInput(input).ok, true);
+  assert.equal(contract.validatePublicPrfEvaluationInput(`${input}=`).ok, false);
+  assert.equal(contract.validatePublicPrfEvaluationInput("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").ok, false);
 });
 
 test("PRF availability requires actual valid ceremony output", () => {
@@ -310,6 +324,57 @@ test("content and envelope metadata builders are versioned and reject unknown fi
   assert.equal(contract.buildContentRecordMetadata({
     syncedPocketId: "pocket-opaque-1", revision: 2, encryptedRecordSize: 900, plaintext: PLAINTEXT_SENTINEL,
   }).ok, false);
+});
+
+test("envelope metadata binds device and passkey envelopes to separate identifiers", () => {
+  const contract = loadContract();
+  const common = {
+    syncedPocketId: "pocket-opaque-1",
+    envelopeId: "envelope-opaque-1",
+    version: 1,
+    createdAt: "2030-01-01T00:00:00Z",
+  };
+  const salt = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  assert.equal(contract.buildKeyEnvelopeMetadata({
+    ...common, kind: "device", deviceId: "device-opaque-1", kdf: "none",
+  }).ok, true);
+  assert.equal(contract.buildKeyEnvelopeMetadata({
+    ...common, kind: "device", credentialId: "credential-opaque-1", kdf: "none",
+  }).ok, false);
+  assert.equal(contract.buildKeyEnvelopeMetadata({
+    ...common,
+    kind: "passkey-prf",
+    credentialId: "credential-opaque-1",
+    kdf: "HKDF-SHA-256",
+    kdfSalt: salt,
+    derivationVersion: 1,
+  }).ok, true);
+  assert.equal(contract.buildKeyEnvelopeMetadata({
+    ...common,
+    kind: "passkey-prf",
+    deviceId: "device-opaque-1",
+    kdf: "HKDF-SHA-256",
+    kdfSalt: salt,
+    derivationVersion: 1,
+  }).ok, false);
+  for (const kind of ["device-transfer", "recovery"]) {
+    assert.equal(contract.buildKeyEnvelopeMetadata({
+      ...common,
+      kind,
+      deviceId: "device-opaque-1",
+      kdf: "HKDF-SHA-256",
+      kdfSalt: salt,
+      derivationVersion: 1,
+    }).ok, false);
+    assert.equal(contract.buildKeyEnvelopeMetadata({
+      ...common,
+      kind,
+      credentialId: "credential-opaque-1",
+      kdf: "HKDF-SHA-256",
+      kdfSalt: salt,
+      derivationVersion: 1,
+    }).ok, false);
+  }
 });
 
 test("recovery package is local-only and cannot pass the remote metadata validator", () => {

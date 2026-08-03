@@ -12,6 +12,8 @@ P029 implements the still-unloaded Web Crypto foundation: AES-GCM-256 content/ma
 
 P030 implements the still-unloaded encrypted browser device store. Future device persistence is one strict encrypted whole record, written device-first in one atomic transaction and protected from stale local writers by `storeRevision` compare-and-swap. See [Synced Pocket encrypted device store](SYNC_DEVICE_STORE.md).
 
+P031 implements the still-unloaded account/passkey client foundation. It validates exact begin/finish shapes, converts WebAuthn JSON through native APIs or a strict fallback, keeps PRF result bytes client-only and reports successful account authentication with content still locked. See [Synced Pocket account and passkey client](SYNC_ACCOUNT_PASSKEY.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -59,7 +61,7 @@ A separately designed Pocket master key will protect readable Pocket content. It
 
 P028 now locks that split: a passkey authenticates the account; a separately generated random 256-bit master key protects content; and independent `device`, optional `passkey-prf`, `device-transfer` and `recovery` envelopes unlock that key locally. A passkey assertion alone is never the content key. PRF is usable only when an actual ceremony returns valid output, and that output remains client-only.
 
-The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling, but whole-account key-use enforcement/rotation, WebAuthn ceremonies and the remote adapter remain unimplemented and require later review.
+The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 now supplies the strict unloaded WebAuthn client ceremony boundary, but server enforcement, account-session ownership, credential-bound envelope orchestration, whole-account key-use enforcement/rotation and the remote adapter remain unimplemented and require later review.
 
 ## 6. Emergency recovery is mandatory
 
@@ -188,10 +190,12 @@ The separately unloaded `PocketSyncCrypto` exposes strict format/context/key val
 
 The separately unloaded `PocketSyncDeviceStore` exposes strict record validation/migration, one IndexedDB driver and a narrow injected transaction state machine for read, insert-only creation and whole-record replacement. It performs no DOM, account, network, worker, timer or owner-adoption work.
 
+The separately unloaded `PocketSyncAccountClient` exposes strict request/response and WebAuthn option/credential validators, native/fallback WebAuthn JSON conversion, local-only PRF-result inspection, one browser adapter and one injected four-method account-service client. It performs no storage, encryption, DOM UI, network transport, owner adoption or content unlock.
+
 ## 15. Locked architecture and deferred implementation
 
 P028 locks the provider-neutral account/content-key split, envelope kinds, unlock order, mandatory recovery, trusted-device allowlist, remote-safe metadata boundary, conditional revision/idempotency semantics, additional-device architecture and conceptual account/credential/envelope/recovery/deletion operations.
 
-Before production integration, later work must implement and review WebAuthn ceremonies, live-owner use of the dormant device store, whole-account encryption-use enforcement/rotation, remote adapters/service enforcement, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint or infrastructure has been selected.
+Before production integration, later work must implement and review the WebAuthn server/session boundary and UI, credential-bound envelope orchestration, live-owner use of the dormant device store, whole-account encryption-use enforcement/rotation, remote adapters/service enforcement, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint or infrastructure has been selected.
 
 Only after those implementations pass focused security and ownership review should the unloaded P027/P028 contracts be adapted behind production ownership and Save seams.
