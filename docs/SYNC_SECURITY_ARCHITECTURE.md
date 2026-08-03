@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. It does not enable sync, load a new production module, add an account, contact a service, select infrastructure or change current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete, still-unloaded Web Crypto foundation. Neither task enables sync, loads a new production module, adds an account, contacts a service, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -25,7 +25,7 @@ A successful passkey sign-in alone does not unlock content. No server-held passw
 
 Each Synced Pocket receives a cryptographically random 256-bit master key generated locally. The master key is not derived from a filename, passphrase, account identifier, passkey credential identifier or recovery locator.
 
-Every content record uses authenticated encryption and a fresh nonce/IV. Nonce reuse with one key is forbidden. The authenticated context binds at least the security format version, synced Pocket ID and record purpose so ciphertext cannot be transplanted into another logical Pocket or record type unnoticed.
+Every content record and master-key envelope uses AES-GCM-256 with a fresh random 12-byte nonce and a 128-bit tag. Nonce reuse with one key is forbidden. Content AAD binds the exact format, version, algorithm, synced Pocket ID, revision and `portal.export.v1+json` content type. Envelope AAD binds the exact format, version, algorithm, synced Pocket ID, envelope ID, kind and envelope version. See [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
 
 Master-key access uses multiple independent envelopes. Removing or replacing one device, PRF, transfer or recovery envelope does not require re-encrypting the whole content record; only the affected wrapping relationship changes. Content re-encryption remains available for an actual master-key rotation.
 
@@ -40,7 +40,7 @@ Version 1 recognises exactly:
 3. `device-transfer` — a one-time envelope delivered through an approved additional-device pairing; and
 4. `recovery` — the master key wrapped to a key derived from the offline recovery root.
 
-Each envelope has an opaque ID, kind, version, synced Pocket ID, creation metadata and optional revocation metadata. Envelope payloads are authenticated ciphertext. Metadata never contains the raw wrapping key or raw master key.
+Each envelope has an opaque ID, kind, version, synced Pocket ID, creation metadata and optional revocation metadata. Envelope payloads are AES-GCM-256 authenticated ciphertext protecting exactly the 32-byte master key. A `device` envelope records `kdf: none`; derived envelopes record `kdf: HKDF-SHA-256`, a canonical 32-byte public salt and derivation version 1. Metadata never contains the raw wrapping key, derivation input or master key.
 
 ## 5. Passkey and optional PRF
 
@@ -48,7 +48,7 @@ Passkeys are the account authentication method. The WebAuthn PRF extension is an
 
 Pocket may use the `passkey-prf` path only when the actual registration/authentication ceremony reports usable PRF extension output. Platform capability guesses, a successful passkey assertion, an extension request, or a credential's existence are insufficient. Missing PRF support/output is an unavailable capability and allows the next approved unlock path. Present but malformed, too-short or cryptographically invalid PRF/envelope material fails closed and must not silently fall through.
 
-PRF output remains on the client. Before key wrapping/unwrapping it is passed through a documented, versioned, domain-separated derivation that binds the synced Pocket and envelope purpose. It is never serialised into a WebAuthn response sent to the service, never used directly as the content key and never the sole recovery method.
+PRF output remains on the client. Before key wrapping/unwrapping it is passed through HKDF-SHA-256 to a non-extractable AES-GCM-256 wrapping key. The exact versioned info binds the kind-specific label, synced Pocket ID, envelope ID and envelope version. It is never serialised into a WebAuthn response sent to the service, never used directly as the content key and never the sole recovery method.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 
@@ -107,7 +107,7 @@ The remote service may receive:
 
 It must never receive readable node labels, Notes, Outline, attachments, historical filenames, local filesystem paths/handles, Vault handles, source-owner tokens, raw master keys, raw device wrapping keys, raw PRF output, raw recovery roots, complete recovery packages or browser-safety recovery payloads.
 
-Strict allowlists apply per request/record. Unknown fields fail validation. An opaque encrypted record has a version, authenticated-encryption marker, nonce and ciphertext; readable fields cannot be added beside it.
+Strict allowlists apply per request/record. Unknown fields fail validation. An opaque content record has exact format `pocket.sync.content.opaque`, version 1, algorithm `AES-GCM-256`, a canonical 12-byte nonce and ciphertext containing at least the 16-byte tag; readable fields cannot be added beside it. A master-key envelope uses exact format `pocket.sync.master-key-envelope.opaque` and exactly 48 ciphertext bytes.
 
 ## 9. Mandatory recovery
 
@@ -183,10 +183,9 @@ Future synced recovery must be implemented as a separately versioned encrypted d
 
 ## 13. Remaining implementation review gates
 
-The architecture is locked; production implementation is still absent. Before loading sync code, later work must supply and review:
+The architecture and concrete cryptographic format are locked; production integration is still absent. Before loading sync code, later work must supply and review:
 
-- concrete cryptographic algorithms/parameters and test vectors consistent with these invariants;
-- a durable browser/device store with migrations and failure handling;
+- a versioned durable browser/device store with migrations, failure handling, encryption-use accounting and master-key rotation consistent with the P029 format and vectors;
 - real WebAuthn ceremonies and server-side verification;
 - endpoint-independent request adapters implementing the remote API contract;
 - additional-device and recovery UI with abuse/rate controls;

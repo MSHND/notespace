@@ -2,7 +2,7 @@
 
 ## 1. Scope and security goals
 
-This model covers the future Synced Pocket account, encrypted device record, remote encrypted record, key envelopes, recovery package and additional-device transfer defined by P027/P028. It does not change the threat model of today's local JSON and Vault owners.
+This model covers the future Synced Pocket account, encrypted device record, remote encrypted record, key envelopes, recovery package and additional-device transfer defined by P027/P028, plus P029's concrete unloaded cryptographic format. It does not change the threat model of today's local JSON and Vault owners.
 
 The primary goals are:
 
@@ -84,7 +84,12 @@ Local JSON/Vault files, file handles, source sessions and browser safety copies 
 | Device pairing interception | Steals master key envelope | Ephemeral authenticated agreement, explicit trusted-device approval, transcript binding, expiry/single-use | Approval on a compromised trusted device is not trustworthy |
 | Pairing prompt trick | Human approves attacker device | Display distinguishable device/pairing context and require explicit approval | Social engineering cannot be eliminated |
 | Metadata injection | Sends filenames/notes outside ciphertext | Per-shape allowlists; reject unknown fields; plaintext sentinel tests | Ciphertext size/timing metadata remains |
-| Nonce reuse | Breaks authenticated-encryption security | Fresh nonce per encryption and versioned record validation | Correct implementation/randomness must be reviewed and tested later |
+| AES-GCM nonce reuse | Breaks confidentiality/authentication under one key | P029 obtains a fresh random 12-byte nonce for every content/envelope encryption and exposes no caller nonce input | Durable cross-device counting and master-key rotation remain future work |
+| Ciphertext, nonce or tag tampering | Causes corrupted or attacker-controlled plaintext | AES-GCM uses a 128-bit tag; authentication failure returns no content or raw master key | Service can still delete, replay or withhold opaque records; revision policy handles replay separately |
+| Context transplant | Moves ciphertext to another Pocket, revision or envelope purpose | Compact JSON AAD binds format/version/algorithm plus Pocket ID and content revision/type or envelope ID/kind/version | Client must supply the intended current context correctly |
+| Cross-purpose derived-key reuse | Lets one unlock secret act in another role | HKDF-SHA-256 uses distinct versioned kind labels and binds Pocket ID, envelope ID/version and a 32-byte salt | A compromised runtime can still invoke keys available in that runtime |
+| Malformed opaque record | Exploits permissive decoding or version confusion | Strict field allowlists, exact version/algorithm/length checks and canonical unpadded base64url fail closed | New formats require explicit version and migration review |
+| Excessive AES-GCM key use | Raises random-nonce collision and usage risk | P029 declares a conservative ceiling of `2^31` encryptions per key, below `2^32` | The stateless module cannot count globally; durable enforcement and rotation are required before activation |
 | Activation interruption | Two active owners or partial conversion | Capture/recheck source session; durable device and conditional remote commit; mandatory recovery; adopt once at end | Staged encrypted records may need later garbage collection but are not truth |
 | Service outage | Save appears lost | Device-first durable encrypted record, explicit pending state and explicit Save retry | Other devices cannot receive updates during outage |
 | Account deletion misuse | Irreversible remote loss | Fresh authorisation, challenge, explicit confirm, idempotency and clear inventory | Service retention/deletion behaviour requires operational audit; local files remain separate |
@@ -94,27 +99,33 @@ Local JSON/Vault files, file handles, source sessions and browser safety copies 
 
 The recovery root has at least 256 bits of local randomness and is not a password. The package carries the root, version, opaque account locator, opaque Pocket ID, checksum and instructions. It contains no notes. A checksum detects transcription/file damage; it is not an authentication secret.
 
-Two domain-separated derivations ensure that a recovery account-authorisation proof is not a master-key wrapping key and vice versa. The service stores only the account-authorisation verifier/version and encrypted recovery envelope. It must not request or log the root.
+Two domain-separated derivations ensure that a recovery account-authorisation proof is not a master-key wrapping key and vice versa. P029 further derives the recovery wrapping key with HKDF-SHA-256 label `pocket.sync.recovery.master-key-wrapping.v1` and envelope-specific info. The service stores only the account-authorisation verifier/version, public 32-byte salt and encrypted recovery envelope. It must not request or log the root.
+
+## 6. Concrete crypto failure and memory boundary
+
+P029 retains raw master-key bytes only while importing and creating envelopes, and decrypted raw bytes only while importing/rewrapping. Plaintext JSON and derivation inputs likewise use temporary copies. Buffers are overwritten in `finally` where practical, but JavaScript garbage collection, engine copies, browser compromise and same-origin code mean perfect erasure is not claimed. Non-extractable `CryptoKey` prevents ordinary export, not authorised use by compromised code.
+
+Authentication-tag failure, malformed UTF-8/JSON and context mismatch are terminal for that operation. No partial plaintext is returned, no lower-trust context is guessed and errors contain stable non-secret reasons. Exact bytes and migration rules are in [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
 
 Successful use rotates both roles atomically enough that the old authorisation becomes invalid and a replacement local recovery copy is required. The UI must not claim recovery completed before rotation. Rate limiting, challenge expiry and non-enumerating errors reduce online abuse without converting the recovery root into a server-held secret.
 
-## 6. Original readable file risk
+## 7. Original readable file risk
 
 Turning on sync does not encrypt, move or delete the original JSON source. That file remains readable wherever the human left it. This is intentional transparency and protects against destructive conversion, but it means synced encryption does not retroactively protect that historical copy. Pocket must keep showing the exact P027 original-file notice and must never upload its filename/path.
 
 A source Vault remains protected under its existing Vault format, but P028 does not claim that Vault v1 and the synced encrypted-record format are interchangeable.
 
-## 7. Abuse and privacy controls
+## 8. Abuse and privacy controls
 
 Future service implementation must define conservative limits for ceremony creation, authentication failures, recovery attempts, pairing creation/approval, encrypted record sizes, envelope counts, device/credential counts and deletion attempts. Logs must exclude WebAuthn responses, PRF output, recovery proofs, ciphertext bodies and any submitted readable content.
 
 Credential labels and device labels can become personal metadata. If later UI allows them, collection must be optional/minimal, display escaping mandatory and remote retention documented. P028's executable metadata allowlists use opaque IDs and do not admit labels.
 
-## 8. Explicitly out of scope for P028
+## 9. Explicitly out of scope for P028/P029
 
-P028 does not provide:
+P028/P029 do not provide:
 
-- a formal cryptographic proof or algorithm/parameter selection;
+- a formal cryptographic proof, durable encryption-use counter or automatic master-key rotation;
 - protection after arbitrary code execution in the active origin/browser/device;
 - a backend, endpoint, provider, transport binding or deployment design;
 - service availability, verifiable deletion or anti-rollback transparency infrastructure;

@@ -2,7 +2,7 @@
 
 ## 1. Status and conventions
 
-This is the version 1 conceptual contract for a future Pocket-owned, provider-neutral remote adapter. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. This document defines operation shapes and invariants, not URLs, transport bindings, hosting, databases, identity vendors or infrastructure. P028 implements no requests.
+This is the version 1 conceptual contract for a future Pocket-owned, provider-neutral remote adapter. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. This document defines operation shapes and invariants, not URLs, transport bindings, hosting, databases, identity vendors or infrastructure. P028/P029 implement no requests.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
@@ -124,14 +124,14 @@ Request contains `apiVersion`, `operationId`, `syncedPocketId` and optionally a 
   "encryptedRecord": {
     "format": "pocket.sync.content.opaque",
     "version": 1,
-    "algorithm": "authenticated-encryption",
-    "nonce": "base64url",
-    "ciphertext": "base64url"
+    "algorithm": "AES-GCM-256",
+    "nonce": "<canonical unpadded base64url: 12 bytes>",
+    "ciphertext": "<canonical unpadded base64url: ciphertext plus 16-byte tag>"
   }
 }
 ```
 
-The service treats the record as opaque and never asks the client to supply readable metadata for indexing.
+This five-field shape is exact. The service rejects unknown fields, a nonce that is not exactly 12 decoded bytes, ciphertext shorter than the 16-byte tag, padding/non-canonical base64url, or any algorithm/version other than `AES-GCM-256`/1. Revision and synced Pocket ID remain outside the record and are bound locally through P029 content AAD. The service treats the record as opaque and never asks the client to supply readable metadata for indexing.
 
 ### Conditional upload
 
@@ -148,9 +148,9 @@ Request:
   "encryptedRecord": {
     "format": "pocket.sync.content.opaque",
     "version": 1,
-    "algorithm": "authenticated-encryption",
-    "nonce": "base64url",
-    "ciphertext": "base64url"
+    "algorithm": "AES-GCM-256",
+    "nonce": "<canonical unpadded base64url: 12 bytes>",
+    "ciphertext": "<canonical unpadded base64url: ciphertext plus 16-byte tag>"
   }
 }
 ```
@@ -202,7 +202,11 @@ Authenticated request contains:
 - purpose-bound metadata such as opaque target device/credential ID when applicable; and
 - expected envelope-set version.
 
-The service validates account/Pocket ownership, kind, format, size, uniqueness and expected version, then returns the next envelope-set version. It cannot unwrap the envelope.
+The opaque envelope record has exact top-level fields `format`, `version`, `algorithm`, `nonce` and `ciphertext`: format `pocket.sync.master-key-envelope.opaque`, version 1, algorithm `AES-GCM-256`, a canonical 12-byte nonce and exactly 48 ciphertext bytes. The latter protects the 32-byte master key plus the 16-byte tag. Envelope ID, kind and version remain separate and are locally authenticated through P029 envelope AAD.
+
+Envelope metadata uses strict allowlists. `device` requires `kdf: none` and no KDF salt/derivation version. `passkey-prf`, `device-transfer` and `recovery` require `kdf: HKDF-SHA-256`, `derivationVersion: 1` and a canonical base64url salt decoding to exactly 32 bytes. The service may store that public salt; it must never receive raw derivation input, a wrapping key, PRF output, transfer secret, recovery root or master key.
+
+The service validates account/Pocket ownership, kind, exact format/size, KDF metadata, uniqueness and expected version, then returns the next envelope-set version. It cannot unwrap the envelope. Exact cryptographic layouts are defined in [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
 
 ### Revoke envelope
 

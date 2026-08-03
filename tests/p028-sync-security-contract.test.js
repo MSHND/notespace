@@ -62,9 +62,9 @@ function opaqueRecord(overrides = {}) {
   return Object.assign({
     format: "pocket.sync.content.opaque",
     version: 1,
-    algorithm: "authenticated-encryption",
+    algorithm: "AES-GCM-256",
     nonce: "AAAAAAAAAAAAAAAA",
-    ciphertext: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    ciphertext: "AAAAAAAAAAAAAAAAAAAAAA",
   }, overrides);
 }
 
@@ -300,6 +300,9 @@ test("content and envelope metadata builders are versioned and reject unknown fi
     kind: "device-transfer",
     version: 1,
     createdAt: "2030-01-01T00:00:00Z",
+    kdf: "HKDF-SHA-256",
+    kdfSalt: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    derivationVersion: 1,
   });
   assert.equal(envelope.ok, true);
   assert.equal(envelope.value.contractVersion, 1);

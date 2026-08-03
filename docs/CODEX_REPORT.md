@@ -1,5 +1,80 @@
 # Codex report
 
+## POCKET TASK P029 - IMPLEMENT SYNC CRYPTO FOUNDATION
+
+Title: Implement sync crypto foundation
+
+Status: P029 adds the real provider-neutral Web Crypto foundation for the future Synced Pocket while keeping it unloaded. It locks and tests exact content/envelope formats, AAD, HKDF separation, non-extractable key lifecycles and strict P028 metadata validation. It does not enable sync or change any current production owner, Save, Vault or recovery behaviour.
+
+Commit title:
+
+- `P029 Implement sync crypto foundation`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `37a5f5e7b9e0d34d558ef748a3a8424b9436d399`
+- Starting title: `P028 Lock sync security architecture`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- `js/pocket-sync-crypto.js` remains absent from `index.html` and `sw.js`.
+- No production-loaded file, JSON/Vault format, current Vault crypto, source owner/session, Main Save, PE Save, browser recovery path or service-worker behaviour changed.
+
+### Concrete format and API
+
+- AES-GCM-256 protects content and 32-byte master-key envelopes with random 12-byte nonces, 128-bit tags and canonical unpadded base64url.
+- The master key is exactly 32 locally random bytes imported as a non-extractable AES-GCM key with only `encrypt`/`decrypt`. It is independent of accounts, passkeys, PRF output, recovery, filenames and human passwords.
+- HKDF-SHA-256 derives non-extractable wrapping keys from at least 32 bytes of high-entropy input, a random 32-byte salt and exact versioned `passkey-prf`, `device-transfer` or `recovery` labels/info. Direct device envelopes use a separately generated key and `kdf: none`.
+- Exact compact-JSON UTF-8 AAD binds content to format/version/algorithm/Pocket/revision/type and envelopes to format/version/algorithm/Pocket/envelope ID/kind/version.
+- `PocketSyncCrypto` exposes strict record/context/key validation; device and derived wrapping-key creation; master-key creation, opening and rewrapping; and content sealing/opening. It returns no raw master-key or derived-key bytes.
+- Temporary master/decrypted/plaintext/derivation buffers are cleared on a best-effort basis. No perfect JavaScript memory erasure is claimed.
+- Policy declares fewer than `2^32` operations per key (`2^31` ceiling); durable cross-device counting and rotation remain future work.
+
+### Vectors and executable coverage
+
+- Official RFC 5869 HKDF-SHA-256 test case 1 verifies the published PRK and 42-byte OKM through standards-compatible Web Crypto operations.
+- The NIST AES-256-GCM empty-plaintext known-answer test verifies tag `530f8afbc74536b9a963b4f1c4cb738b`.
+- `tests/fixtures/p029-sync-crypto-vectors.json` commits fixed synthetic Pocket vectors for exact content AAD/ciphertext, direct device envelope AAD/ciphertext, recovery HKDF info/derived-key behaviour and recovery envelope AAD/ciphertext.
+- Focused tests execute production modules in controlled VM contexts with deterministic randomness only at the test boundary. They cover non-extractability, fresh nonces, byte clearing, all envelope kinds, rewrapping, every bound context field, record/ciphertext tampering, strict canonical encoding/lengths, plaintext exclusion and the unchanged local Vault boundary.
+
+### Files changed
+
+- `js/pocket-sync-crypto.js`
+- `js/pocket-sync-security-contract.js`
+- `tests/fixtures/p029-sync-crypto-vectors.json`
+- `tests/p029-sync-crypto.test.js`
+- `tests/p028-sync-security-contract.test.js`
+- `docs/SYNC_CRYPTO_FORMAT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 25 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 414 passed, 0 failed.
+- `node --check` passed for every changed/new JavaScript file.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P029 changes no production-loaded code or visible UI.
+
+### Deliberately unimplemented
+
+P029 adds no live synced owner, Turn on sync UI, account, passkey ceremony, recovery UI/package flow, durable device store, IndexedDB/localStorage record, backend, endpoint, provider, network request, production loader, autosave, background sync, caller-controlled nonce or raw-key export.
+
+### Recommended next implementation boundary
+
+Design and review a versioned durable encrypted-device store and migrations that consume the P029 records, protect device wrapping keys, preserve P027 owner/Save atomicity and durably enforce encryption-use limits/master-key rotation. Keep account/WebAuthn and provider adapters behind separate reviewed boundaries before any production loading.
+
 ## POCKET TASK P028 - LOCK SYNC SECURITY, STORAGE AND RECOVERY ARCHITECTURE
 
 Title: Lock sync security architecture
