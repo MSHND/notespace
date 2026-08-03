@@ -69,7 +69,9 @@ An exact finish replay before rotation returns the same credential, still-valid 
 
 ## 8. Rotation-required and atomic rotation
 
-Recovery is not complete when the new credential/session is created. The key set records the recovery operation and credential and remains `rotation-required`. Only that credential's active session may rotate it.
+Recovery is not complete when the new credential/session is created. The key set records the recovery operation and credential and remains `rotation-required`. Only an active session authenticated with that recovered credential may make the initial rotation or receive a stored idempotent rotation replay.
+
+After rotation, the ready key set deliberately clears its consumed recovery-operation and recovery-credential fields. The completed recovery ceremony remains the durable authority binding the recovery operation, account, Pocket and recovered credential. `rotateRecovery` checks that ceremony and credential before it inspects a stored key-operation result, so another credential on the same account cannot receive the replacement locator.
 
 `rotateRecovery` requires matching operation, key-set and recovery versions, a next-version verifier, next-version recovery envelope and fresh envelope ID. One transaction:
 

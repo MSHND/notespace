@@ -1,5 +1,66 @@
 # Codex report
 
+## POCKET TASK P037 - BIND RECOVERY ROTATION REPLAY TO THE RECOVERED CREDENTIAL
+
+Title: Bind recovery rotation replay to the recovered credential
+
+Status: P037 closes P036's recovery-rotation replay ordering gap. Every initial rotation and stored idempotent replay now proves that the active session uses the credential created by the referenced completed recovery ceremony before a key-operation result can be returned.
+
+Commit title:
+
+- `P037 Bind recovery rotation replay to recovered credential`
+
+### Baseline and correction
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `5d2921b8835aeba412b6a477829758cb3fbcf8a1`
+- Starting title: `P036 Build key-envelope and recovery service core`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- P036 authorised the account session and checked an existing key-operation replay before checking that the session credential was the credential created by recovery. Another still-active credential on the account could therefore receive the stored successful rotation result and replacement locator.
+- P037 adds one internal completed-ceremony authorisation boundary before digest/replay handling. It requires a completed recovery ceremony matching the request operation, authorised account and Pocket, then requires the authorised session credential to equal the ceremony's `completedCredentialId`.
+- The completed recovery ceremony is the durable authority because successful rotation deliberately clears the consumed recovery-operation and recovery-credential fields from the ready key set.
+- Missing, pending or malformed ceremony state fails with `service-state-invalid`. A foreign account, Pocket or credential relationship fails with `service-authorisation-failed`, without exposing identifiers or stored rotation data.
+
+### Focused regression coverage
+
+- The new production-source test constructs an original account/session, binds its Pocket, initialises recovery, creates a recovered credential/session and completes rotation.
+- An exact idempotent replay through the still-active original credential is rejected before the stored locator is returned, makes no mutation and leaves the complete deterministic store snapshot unchanged.
+- The same exact replay through the recovered credential returns the original locator and versions with `replayed: true`, while creating no additional operation, locator, envelope, credential or session.
+- Changed operation data still fails as `service-operation-reuse`; unknown, pending, malformed and foreign completed ceremonies cannot authorise replay.
+- Frozen module exports and the exact fifteen-method service surface remain unchanged.
+
+### Files changed
+
+- `sync-service/pocket-sync-service-core.js`
+- `tests/p037-recovery-replay-authorisation.test.js`
+- `docs/SYNC_KEY_RECOVERY_SERVICE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p037-recovery-replay-authorisation.test.js` - 4 passed, 0 failed.
+- `node --test tests/p036-key-recovery-service-core.test.js` - 19 passed, 0 failed.
+- `node --test tests/p035-rp-id-hardening.test.js` - 4 passed, 0 failed.
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 565 passed, 0 failed.
+- `node --check` passed for the production service core and focused P037 test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+No record schema, route, request/response body, session lifecycle, browser integration, HTTP server, database, dependency, UI, owner, Main Save/PE Save path, service worker or production browser loader changed. Physical browser acceptance is not applicable because the service core remains dormant, undeployed and not browser-loaded.
+
 ## POCKET TASK P036 - BUILD KEY-ENVELOPE AND RECOVERY SERVICE CORE
 
 Title: Build key-envelope and recovery service core

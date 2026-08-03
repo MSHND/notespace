@@ -1850,6 +1850,28 @@ function createServiceCore(input) {
     return record;
   }
 
+  async function requireRecoveryRotationCredential(transaction, account, credential, request) {
+    const ceremony = await readRecord(
+      transaction,
+      COLLECTIONS.recoveryCeremonies,
+      request.recoveryOperationId
+    );
+    if (ceremony === null
+        || ceremony.operationId !== request.recoveryOperationId
+        || ceremony.finishDigest === null
+        || ceremony.completedCredentialId === null
+        || ceremony.completedSessionId === null
+        || ceremony.completedKeySetVersion === null) {
+      throw serviceError("service-state-invalid", 500);
+    }
+    if (ceremony.accountId !== account.accountId
+        || ceremony.syncedPocketId !== request.syncedPocketId
+        || ceremony.completedCredentialId !== credential.credentialId) {
+      throw serviceError("service-authorisation-failed", 403);
+    }
+    return ceremony;
+  }
+
   async function authoriseSession(transaction, sessionId, atMilliseconds) {
     if (sessionId === null) {
       throw serviceError("service-authentication-required", 401, { clearSession: false });
@@ -3236,6 +3258,7 @@ function createServiceCore(input) {
       const authorised = await authoriseSession(transaction, context.sessionId, at);
       const { account, credential } = authorised;
       await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      await requireRecoveryRotationCredential(transaction, account, credential, request);
       const digest = keyMutationDigest(account.accountId, "rotate-recovery", request);
       const replay = await existingKeyOperation(transaction, account, request,
         "rotate-recovery", digest);
