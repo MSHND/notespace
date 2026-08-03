@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store and P031 supplies the strict account/passkey client ceremony boundary. All implementation modules remain unloaded. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary and P032 supplies the strict same-origin remote transport plus account/content adapters. All implementation modules remain unloaded. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -53,6 +53,10 @@ Pocket may use the `passkey-prf` path only when the actual registration/authenti
 PRF output remains on the client. Before key wrapping/unwrapping it is passed through HKDF-SHA-256 to a non-extractable AES-GCM-256 wrapping key. The exact versioned info binds the kind-specific label, synced Pocket ID, envelope ID and envelope version. It is never serialised into a WebAuthn response sent to the service, never used directly as the content key and never the sole recovery method.
 
 P031 inspects client extension results before credential serialisation, strips every PRF result from the service-bound JSON and returns a fresh 32-byte local copy only to its immediate caller. A successful passkey result explicitly remains `contentUnlocked: false`; later reviewed orchestration must validate and open the credential-bound envelope independently.
+
+P032 implements the dormant request boundary beneath P031 and P028. One caller-supplied same-origin absolute-path root receives seven locked POST-only JSON routes with same-origin browser credentials, no-store caching, rejected redirects, no referrer and bounded JSON responses. The browser session is future server-owned cookie state; P032 stores no bearer token or session, retries nothing automatically and accepts only exact versioned response shapes. See [Synced Pocket remote client](SYNC_REMOTE_CLIENT.md).
+
+This client boundary does not implement server-side WebAuthn verification, secure cookie issuance, CSRF/session-fixation defenses, backend/session persistence, durable idempotency or authorization checks. The actual same-origin service origin remains unselected. Envelope, recovery, device-transfer and deletion remote operations also remain unimplemented, and no sync module is production-loaded.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 
@@ -194,7 +198,7 @@ The architecture and concrete cryptographic format are locked; production integr
 
 - live-owner integration of the versioned P030 device store, plus whole-account encryption-use enforcement and master-key rotation consistent with the P029 format and vectors;
 - real WebAuthn ceremonies and server-side verification;
-- endpoint-independent request adapters implementing the remote API contract;
+- the actual same-origin backend/session service behind P032, including server-side WebAuthn verification, authorisation, CSRF/session policy and durable conditional-write/idempotency enforcement;
 - additional-device and recovery UI with abuse/rate controls;
 - conflict review and account deletion UI;
 - synced-owner integration behind the existing ownership/Save seams; and

@@ -14,6 +14,8 @@ P030 implements the still-unloaded encrypted browser device store. Future device
 
 P031 implements the still-unloaded account/passkey client foundation. It validates exact begin/finish shapes, converts WebAuthn JSON through native APIs or a strict fallback, keeps PRF result bytes client-only and reports successful account authentication with content still locked. See [Synced Pocket account and passkey client](SYNC_ACCOUNT_PASSKEY.md).
 
+P032 implements the still-unloaded same-origin remote client foundation. It binds P031's exact account-service methods and P028's revision/download/conditional-write shapes to seven locked POST-only JSON routes, bounded responses and browser-managed same-origin credentials, with no automatic retry or persisted token. See [Synced Pocket remote client](SYNC_REMOTE_CLIENT.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -109,6 +111,8 @@ The remote boundary must never receive:
 
 P027 tests this with a distinctive plaintext sentinel and a separate key object. Neither appears in any remote adapter argument. P027 does not change the Pocket Vault format or claim that Vault v1 is the final synced-record format.
 
+P032 makes this boundary executable without loading it in production: request/response allowlists reject readable fields and substituted identities; downloaded size means decoded ciphertext including its authentication tag; HTTP 200 is committed and HTTP 409 is conflict; and ambiguous network failure is never guessed or automatically retried. The actual service and its enforcement remain unimplemented.
+
 ## 10. Remote revision contract
 
 Remote safety uses a stable synced Pocket identity and monotonically advancing integer revisions. Timestamps may be display metadata but never decide the winner.
@@ -192,10 +196,12 @@ The separately unloaded `PocketSyncDeviceStore` exposes strict record validation
 
 The separately unloaded `PocketSyncAccountClient` exposes strict request/response and WebAuthn option/credential validators, native/fallback WebAuthn JSON conversion, local-only PRF-result inspection, one browser adapter and one injected four-method account-service client. It performs no storage, encryption, DOM UI, network transport, owner adoption or content unlock.
 
+The separately unloaded `PocketSyncRemoteClient` exposes the frozen transport policy/route map, exact remote request/response validators, one bounded same-origin browser JSON transport, one P031-compatible account service and one P028-backed content service. It performs no storage, encryption, DOM UI, session/token persistence, automatic retry, owner adoption or Save integration.
+
 ## 15. Locked architecture and deferred implementation
 
 P028 locks the provider-neutral account/content-key split, envelope kinds, unlock order, mandatory recovery, trusted-device allowlist, remote-safe metadata boundary, conditional revision/idempotency semantics, additional-device architecture and conceptual account/credential/envelope/recovery/deletion operations.
 
-Before production integration, later work must implement and review the WebAuthn server/session boundary and UI, credential-bound envelope orchestration, live-owner use of the dormant device store, whole-account encryption-use enforcement/rotation, remote adapters/service enforcement, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint or infrastructure has been selected.
+Before production integration, later work must implement and review the WebAuthn server/session backend and UI, credential-bound envelope orchestration, live-owner use of the dormant device store, whole-account encryption-use enforcement/rotation, durable remote service enforcement behind P032, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint origin or infrastructure has been selected.
 
 Only after those implementations pass focused security and ownership review should the unloaded P027/P028 contracts be adapted behind production ownership and Save seams.

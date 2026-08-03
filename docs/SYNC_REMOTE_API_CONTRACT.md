@@ -2,11 +2,27 @@
 
 ## 1. Status and conventions
 
-This is the version 1 conceptual contract for a future Pocket-owned, provider-neutral remote adapter. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. This document defines operation shapes and invariants, not URLs, transport bindings, hosting, databases, identity vendors or infrastructure. P031 implements the unloaded strict client-side passkey ceremony boundary for the four begin/finish account operations; it supplies no transport and makes no request at module load.
+This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded client transport and strict account/content adapters described here, but it selects no endpoint origin, hosting, database, identity vendor or infrastructure and makes no request at module load. P031 remains the strict client-side WebAuthn ceremony owner.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
 Unknown fields fail validation. Remote records may contain public WebAuthn ceremony material, opaque identifiers, authenticated ciphertext and minimal operational metadata only. They may not contain readable Pocket content, filenames/paths, local handles, raw content keys, raw PRF results, raw recovery roots or complete recovery packages.
+
+### P032 transport binding
+
+The future service is reached beneath one caller-supplied same-origin absolute-path root. P032 accepts no full or scheme-relative URL and v1 has no cross-origin API. These locked suffixes are appended to that root:
+
+- `/account/passkeys/registration/begin`
+- `/account/passkeys/registration/finish`
+- `/account/passkeys/authentication/begin`
+- `/account/passkeys/authentication/finish`
+- `/pockets/revision/read`
+- `/pockets/content/download`
+- `/pockets/content/conditional-upload`
+
+All seven operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Future authentication uses a browser-managed same-origin cookie; P032 neither sends nor persists a bearer token. Secure cookie attributes, session rotation/fixation prevention, CSRF controls, authorisation and server persistence remain mandatory server responsibilities.
+
+Account/revision responses and their requests are limited to 262,144 UTF-8 bytes. Encrypted content download/upload JSON is limited to 16,777,216 UTF-8 bytes. P032 rejects declared or actually oversized responses, non-JSON/HTML bodies, redirects, malformed JSON and unexpected statuses. It never retries automatically.
 
 ## 2. Common result forms
 
@@ -109,11 +125,11 @@ Authenticated request:
 }
 ```
 
-Response contains the current non-negative integer `revision`, encrypted-record format/version and encrypted byte size. Timestamps never decide the winner.
+Response repeats `apiVersion`, `operationId` and `syncedPocketId`, and then contains exactly the current non-negative integer `revision`, `recordPresent`, `contentFormat`, `contentVersion` and `encryptedRecordSize`. Empty state is revision 0, false, null, null and 0. Present state has a positive revision, true, `pocket.sync.content.opaque`, version 1 and a positive size. Timestamps never decide the winner.
 
 ### Download encrypted record
 
-Request contains `apiVersion`, `operationId`, `syncedPocketId` and optionally a requested `revision`. Response contains the exact opaque encrypted record for that revision:
+Request contains exactly `apiVersion`, `operationId`, `syncedPocketId` and a positive requested `revision`. Response repeats those values, supplies `encryptedRecordSize`, and contains the exact opaque encrypted record for that revision:
 
 ```json
 {
@@ -122,6 +138,7 @@ Request contains `apiVersion`, `operationId`, `syncedPocketId` and optionally a 
   "operationId": "opaque-operation-id",
   "syncedPocketId": "opaque-pocket-id",
   "revision": 8,
+  "encryptedRecordSize": 32,
   "encryptedRecord": {
     "format": "pocket.sync.content.opaque",
     "version": 1,
@@ -132,7 +149,7 @@ Request contains `apiVersion`, `operationId`, `syncedPocketId` and optionally a 
 }
 ```
 
-This five-field shape is exact. The service rejects unknown fields, a nonce that is not exactly 12 decoded bytes, ciphertext shorter than the 16-byte tag, padding/non-canonical base64url, or any algorithm/version other than `AES-GCM-256`/1. Revision and synced Pocket ID remain outside the record and are bound locally through P029 content AAD. The service treats the record as opaque and never asks the client to supply readable metadata for indexing.
+The encrypted record's five-field shape is exact. `encryptedRecordSize` means decoded ciphertext bytes including the 16-byte authentication tag, excluding the nonce and JSON/base64url framing. The client and service reject unknown fields, a nonce that is not exactly 12 decoded bytes, ciphertext shorter than the tag, padding/non-canonical base64url, or any algorithm/version other than `AES-GCM-256`/1. Revision and synced Pocket ID remain outside the record and are bound locally through P029 content AAD. The service treats the record as opaque and never asks the client to supply readable metadata for indexing.
 
 ### Conditional upload
 
@@ -156,7 +173,7 @@ Request:
 }
 ```
 
-The server atomically commits only if its current revision equals `expectedRevision`. Success advances exactly once:
+The server atomically commits only if its current revision equals `expectedRevision`. HTTP 200 is accepted only with the exact committed body and advances exactly once:
 
 ```json
 {
@@ -170,7 +187,7 @@ The server atomically commits only if its current revision equals `expectedRevis
 }
 ```
 
-Conflict never writes and never masquerades as success:
+HTTP 409 is accepted only with the exact conflict body. Conflict never writes and never masquerades as success:
 
 ```json
 {
@@ -184,7 +201,7 @@ Conflict never writes and never masquerades as success:
 }
 ```
 
-The server records the result keyed by account, synced Pocket and `operationId`. Retrying the same exact logical operation uses the same operation ID, logical change ID, expected revision and encrypted record with `attemptKind: "idempotent-retry"`; it returns the original committed result with `replayed: true` and does not create another revision. A new logical content change uses a new operation ID and logical change ID. Reuse of an operation ID with different content or revision fails closed.
+HTTP/body disagreement fails closed: a conflict body on 200 and a committed body on 409 are both invalid. The server records the result keyed by account, synced Pocket and `operationId`. Retrying the same exact logical operation uses the same operation ID, logical change ID, expected revision and encrypted record with `attemptKind: "idempotent-retry"`; it returns the original committed result with `replayed: true` and does not create another revision. A new logical content change uses a new operation ID and logical change ID. Reuse of an operation ID with different content or revision fails closed. If a network response is lost after a possible commit, P032 reports ambiguity as unavailable and does not guess or retry automatically.
 
 ## 7. Key envelopes
 

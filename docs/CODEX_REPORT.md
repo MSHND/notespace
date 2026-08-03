@@ -1,5 +1,78 @@
 # Codex report
 
+## POCKET TASK P032 - BUILD REMOTE SESSION AND CONDITIONAL-WRITE CLIENT FOUNDATION
+
+Title: Build remote session and conditional-write client foundation
+
+Status: P032 adds the dormant provider-neutral same-origin client boundary for a future Pocket account/content service. It binds P031's exact passkey service to bounded JSON transport and binds P028's encrypted revision, download and conditional-write contracts without enabling sync or changing production behavior.
+
+Commit title:
+
+- `P032 Build remote session and conditional-write client`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `1a9b599f9a0f7fbe9105c36a3fa140934a8ec053`
+- Starting title: `P031 Build account and passkey client foundation`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- `js/pocket-sync-remote-client.js` remains absent from `index.html` and `sw.js` and performs no network or environment access when loaded.
+- No backend, provider, actual service origin, UI, account/session implementation, storage, token manager, live owner, Save integration, envelope/recovery/pairing operation, service-worker change or production loader was added.
+
+### Module, transport and session boundary
+
+- The global `PocketSyncRemoteClient` exports frozen `POLICY` and `ROUTES`, exact revision/download/upload validators, `createBrowserJsonTransport`, `createAccountService` and `createContentService`.
+- The browser transport accepts only a caller-supplied same-origin absolute-path service root. It appends locked route suffixes for four passkey operations plus revision read, content download and conditional upload; opaque identifiers stay in POST JSON bodies.
+- Fetch uses `mode` and `credentials` `same-origin`, `cache: no-store`, `redirect: error`, `referrerPolicy: no-referrer`, and exact JSON request/response content types. Requests are finite plain JSON, serialized exactly once, and no path retries automatically.
+- Future authentication is a server-owned browser cookie session. P032 does not create/read cookies or send/persist bearer tokens. Secure/HttpOnly/SameSite attributes, rotation, fixation/CSRF defenses, server WebAuthn verification and account/Pocket authorization remain server work.
+- Account/revision JSON has a 262,144-byte UTF-8 limit; content JSON has a 16,777,216-byte limit. Declared/actual oversize, redirects, HTML/non-JSON, malformed/non-object JSON and unexpected statuses fail closed. Stream reads cancel once oversized.
+
+### Account and encrypted content contracts
+
+- `createAccountService` exposes exactly P031's `beginRegistration`, `finishRegistration`, `beginAuthentication` and `finishAuthentication` and delegates validation to the actual P031 production contract. P031 retains begin-to-finish ceremony/PRF continuity; P032 has no ceremony cache and PRF results never cross transport.
+- Revision read is exact `{ apiVersion, operationId, syncedPocketId }` and accepts only coherent empty revision 0 or positive opaque-record metadata. Download additionally requires a positive revision and returns the exact matching P028 record.
+- Download size is decoded ciphertext bytes including the 16-byte authentication tag and excluding the nonce and JSON/base64url framing. Filenames, timestamps-as-authority, readable content, handles, keys and recovery/PRF secrets are excluded.
+- Conditional upload requires explicit API version and P028's exact expected revision, operation/logical-change IDs, attempt kind and encrypted record. HTTP 200 must be committed at exactly the next revision; HTTP 409 must be a non-writing newer-revision conflict.
+- An explicit idempotent retry may return the durable original result with `replayed: true`; a new change may not. Network ambiguity after dispatch remains an unavailable result: P032 never guesses success or automatically retries. Durable operation ownership and changed-payload replay rejection remain mandatory server enforcement.
+- Stable non-secret errors distinguish invalid service roots/routes/requests/responses, redirects, content type/size, authentication, authorization, rate limiting, service unavailability and other rejection. Native network and server response bodies are not exposed.
+
+### Files changed
+
+- `js/pocket-sync-remote-client.js`
+- `tests/helpers/p032-remote-fixtures.js`
+- `tests/p032-sync-remote-client.test.js`
+- `docs/SYNC_REMOTE_CLIENT.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p032-sync-remote-client.test.js` - 31 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 503 passed, 0 failed.
+- `node --check` passed for every changed/new JavaScript file.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P032 changes no production-loaded code or visible UI and its fetch/transport behavior is covered by injected deterministic production-module tests.
+
+### Recommended next implementation boundary
+
+Implement and security-review the same-origin server/session boundary behind P032: server-side WebAuthn verification, secure cookie/CSRF policy, account/Pocket authorization, durable revision CAS and operation-idempotency persistence, response/body limits and abuse controls. Keep envelope/recovery operations and owner/Save integration separate until the complete activation, mandatory recovery and conflict journeys can be reviewed as one owner-safe production seam.
+
 ## POCKET TASK P031 - BUILD ACCOUNT AND PASSKEY CLIENT FOUNDATION
 
 Title: Build account and passkey client foundation
