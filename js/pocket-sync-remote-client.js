@@ -630,7 +630,9 @@ persisting session state, retrying work, or changing a Pocket owner.
     identifier(input.syncedPocketId);
     identifier(input.operationId);
     identifier(input.logicalChangeId);
-    revision(input.expectedRevision);
+    if (revision(input.expectedRevision) >= Number.MAX_SAFE_INTEGER) {
+      throw remoteError("remote-request-invalid");
+    }
     const built = contract.buildConditionalWriteRequest(input);
     if (!isObject(built) || built.ok !== true) throw remoteError("remote-request-invalid");
     return frozen(built.value);
@@ -661,6 +663,7 @@ persisting session state, retrying work, or changing a Pocket owner.
           || response.status !== "committed"
           || response.wrote !== true
           || response.operationId !== request.operationId
+          || !Number.isSafeInteger(response.revision)
           || response.revision !== request.expectedRevision + 1
           || typeof response.replayed !== "boolean"
           || (request.attemptKind === "new-change" && response.replayed !== false)) {

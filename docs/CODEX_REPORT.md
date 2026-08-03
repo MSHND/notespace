@@ -1,5 +1,60 @@
 # Codex report
 
+## POCKET TASK P033 - HARDEN REMOTE REVISION BOUNDARY
+
+Title: Harden remote revision boundary
+
+Status: P033 closes the final-safe-integer edge in P032's dormant conditional-upload client. An expected revision that cannot advance safely now fails before transport, and a committed response must explicitly contain both a safe integer and the exact next revision.
+
+Commit title:
+
+- `P033 Harden remote revision boundary`
+
+### Baseline and finding
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `19ddb0669ba86267c686a9b707c56e3bd140c7ab`
+- Starting title: `P032 Build remote session and conditional-write client`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- Actual P032 source admitted `expectedRevision: Number.MAX_SAFE_INTEGER`; its proposed next revision was `9007199254740992`, which is not a JavaScript safe integer. The reachable baseline path made one transport call and accepted that unsafe committed revision.
+
+### Correction
+
+- `validateConditionalUploadRequest()` still requires a non-negative safe integer and now additionally rejects `expectedRevision >= Number.MAX_SAFE_INTEGER` with `remote-request-invalid` before P028 validation or transport.
+- The HTTP 200 committed-response branch now explicitly requires `Number.isSafeInteger(response.revision)` and exact equality with `request.expectedRevision + 1`; unsafe committed revisions use `remote-response-invalid`.
+- Revision zero remains valid. `Number.MAX_SAFE_INTEGER - 1` remains advanceable and a committed `Number.MAX_SAFE_INTEGER` is accepted when it is exactly next.
+- HTTP 409 conflict validation remains unchanged: `actualRevision` must be a safe integer greater than the expected revision.
+- Revision reads, downloads, incorrect-revision rejection, idempotent replay and network handling remain unchanged.
+
+### Files changed
+
+- `js/pocket-sync-remote-client.js`
+- `tests/p032-sync-remote-client.test.js`
+- `docs/SYNC_REMOTE_CLIENT.md`
+- `docs/CODEX_REPORT.md`
+
+The remote-client contract now states the same advanceable-request and safe committed-response boundary. No backend, UI, owner, Main Save, PE Save, storage schema, account/passkey flow, route, response limit, service-worker file or production loader changed. The remote client remains unloaded, so no loaded production behaviour changed.
+
+### Validation
+
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 505 passed, 0 failed.
+- `node --check` passed for `js/pocket-sync-remote-client.js` and the changed focused test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P033 changes only the unloaded remote client, its executable Node test and documentation.
+
 ## POCKET TASK P032 - BUILD REMOTE SESSION AND CONDITIONAL-WRITE CLIENT FOUNDATION
 
 Title: Build remote session and conditional-write client foundation

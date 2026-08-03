@@ -659,6 +659,49 @@ test("conditional upload requires explicit API version and preserves P028 durabl
   );
 });
 
+test("P033 rejects an unadvanceable expected revision before transport", async () => {
+  const { api } = loadProduction();
+  let calls = 0;
+  const service = contentService(api, () => {
+    calls += 1;
+    return { status: 200, body: fixtures.committed() };
+  });
+
+  await assert.rejects(
+    service.conditionalUpload(fixtures.uploadRequest({
+      expectedRevision: Number.MAX_SAFE_INTEGER,
+    })),
+    remoteErrorCode("remote-request-invalid")
+  );
+  assert.equal(calls, 0);
+});
+
+test("P033 accepts the final safe advance and rejects unsafe committed revisions", async () => {
+  const { api } = loadProduction();
+  let calls = 0;
+  const finalSafe = contentService(api, () => {
+    calls += 1;
+    return {
+      status: 200,
+      body: fixtures.committed({ revision: Number.MAX_SAFE_INTEGER }),
+    };
+  });
+  const result = await finalSafe.conditionalUpload(fixtures.uploadRequest({
+    expectedRevision: Number.MAX_SAFE_INTEGER - 1,
+  }));
+  assert.equal(result.revision, Number.MAX_SAFE_INTEGER);
+  assert.equal(calls, 1);
+
+  const unsafe = contentService(api, () => ({
+    status: 200,
+    body: fixtures.committed({ revision: Number.MAX_SAFE_INTEGER + 1 }),
+  }));
+  await assert.rejects(
+    unsafe.conditionalUpload(fixtures.uploadRequest()),
+    remoteErrorCode("remote-response-invalid")
+  );
+});
+
 test("committed and conflict bodies must agree with HTTP 200 and 409", async () => {
   const { api } = loadProduction();
   const committedService = contentService(api, () => ({ status: 200, body: fixtures.committed() }));

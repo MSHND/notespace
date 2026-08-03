@@ -75,9 +75,9 @@ The request is exactly `{ apiVersion, operationId, syncedPocketId, revision }` w
 
 ### Conditional upload
 
-The request requires explicit `apiVersion: 1` and is validated through P028's `buildConditionalWriteRequest`. It carries only the opaque Pocket ID, expected revision, operation ID, logical-change ID, attempt kind and encrypted record.
+The request requires explicit `apiVersion: 1` and is validated through P028's `buildConditionalWriteRequest`. It carries only the opaque Pocket ID, expected revision, operation ID, logical-change ID, attempt kind and encrypted record. The remote client additionally requires `expectedRevision` to be a non-negative safe integer strictly below `Number.MAX_SAFE_INTEGER`, so the next revision remains safe.
 
-HTTP 200 must be the exact committed result: it wrote, advanced to exactly `expectedRevision + 1`, repeats the operation ID and states whether an idempotent retry replayed the original result. A `new-change` may not claim replay. HTTP 409 must be the exact non-writing conflict result with `actualRevision` greater than the expected revision. A conflict can never be represented as success.
+HTTP 200 must be the exact committed result: it wrote, returned a safe-integer revision exactly equal to `expectedRevision + 1`, repeats the operation ID and states whether an idempotent retry replayed the original result. A `new-change` may not claim replay. HTTP 409 must be the exact non-writing conflict result with a safe-integer `actualRevision` greater than the expected revision. A conflict can never be represented as success.
 
 The client never retries automatically. A deliberate idempotent retry must reuse the exact logical request and may receive the original committed result without creating a revision. A network failure after dispatch is reported as unavailable even if the server might have committed; the client does not guess, send a second request or convert ambiguity into success. Durable server-side operation-ID ownership and rejection of reuse with different ciphertext remain mandatory server work.
 
