@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, and P034 supplies the dormant server-side safety and persistence state machine. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034 supplies the dormant server-side safety and persistence state machine, and P035 binds its version-1 RP ID exactly to the configured trusted-origin hostname. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -57,6 +57,8 @@ P031 inspects client extension results before credential serialisation, strips e
 P032 implements the dormant request boundary beneath P031 and P028. One caller-supplied same-origin absolute-path root receives seven locked POST-only JSON routes with same-origin browser credentials, no-store caching, rejected redirects, no referrer and bounded JSON responses. The browser session is future server-owned cookie state; P032 stores no bearer token or session, retries nothing automatically and accepts only exact versioned response shapes. See [Synced Pocket remote client](SYNC_REMOTE_CLIENT.md).
 
 P034 now implements the server-side state machine beneath that client boundary. It validates an exact same-origin request context, strict records and relationships, uses one injected atomic transaction boundary, rotates sessions atomically, enforces account/Pocket authorisation, and durably records conditional-write results for exact idempotent replay. Its only content record is the current P028/P029 opaque ciphertext. See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md).
+
+P035 makes the version-1 WebAuthn RP policy deliberately narrower than WebAuthn's full permitted scope: the RP ID must equal the trusted-origin hostname exactly. Ports remain origin transport detail and are not part of the RP ID. Some registrable parent domains can be valid WebAuthn RP IDs, but Pocket does not accept them without a later public-suffix-aware deployment review.
 
 P034 still does not implement a real WebAuthn verifier, HTTP/header/cookie adapter, durable database, rate limiting, deployment or selected same-origin service origin. Envelope, recovery, device-transfer and deletion remote operations also remain unimplemented, and no sync module is production-loaded.
 

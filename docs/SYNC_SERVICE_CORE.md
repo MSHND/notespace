@@ -57,7 +57,7 @@ The factory accepts exactly:
 }
 ```
 
-Unknown or missing fields fail. `trustedOrigin` must be one canonical HTTPS origin with no path beyond `/`, query, fragment or credentials. `rpId` must be that origin's host or a valid parent-domain scope. The RP name is non-empty and bounded. Credential algorithms are a non-empty, duplicate-free array of safe integers. Ceremony lifetime is a positive safe integer no greater than ten minutes. Session lifetime is a positive safe integer no greater than ninety days.
+Unknown or missing fields fail. `trustedOrigin` must be one canonical HTTPS origin with no path beyond `/`, query, fragment or credentials. In version 1, `rpId` must exactly equal that origin's canonical hostname. An explicit origin port is not part of the RP ID. WebAuthn can permit some registrable parent-domain RP IDs, but safely accepting them requires public-suffix-aware deployment policy. P035 deliberately does not add that complexity: parent-domain scope is unsupported and Pocket fails closed until a real deployment demonstrates a need for broader scope. The RP name is non-empty and bounded. Credential algorithms are a non-empty, duplicate-free array of safe integers. Ceremony lifetime is a positive safe integer no greater than ten minutes. Session lifetime is a positive safe integer no greater than ninety days.
 
 The injected `randomBytes(count)` must return exactly that many bytes in a `Uint8Array`; all generated opaque IDs use 32 bytes encoded as canonical unpadded base64url. `now()` must return a finite millisecond timestamp. The core starts no timer and reads no environment, file, browser store, process argument or global configuration.
 
@@ -84,7 +84,7 @@ Every method receives exactly `{ context, body }`. Context is exactly:
 
 `contentType` may include a valid UTF-8 charset parameter. Method, exact Origin, Fetch Metadata, content type and nullable opaque session ID are checked before body handling, store access, randomness or verifier work. Missing or `null` origins, cross-site and same-site requests, GET, forms, unknown fields and bearer-token substitutes fail closed.
 
-P034 models the decision. P035 must map real HTTP headers and the secure browser-managed session cookie into this exact context.
+P034 models the decision. A future P036 adapter must map real HTTP headers and the secure browser-managed session cookie into this exact context.
 
 Successful methods return exactly `{ status, body, session }`. Only successful registration or authentication completion returns a session instruction. P034 never emits a cookie header. Conflict is an exact normal result with status 409 and `session: null`; other failures throw stable, non-secret service errors.
 
@@ -164,7 +164,7 @@ Session IDs use 32 random bytes. The response body never carries one. Instead, c
 }
 ```
 
-P035 must turn that instruction into a correctly scoped secure cookie. The new session and any prior-session revocation are one atomic transaction. A failed commit leaves the prior session active and creates no replacement. Sessions neither slide nor receive background cleanup.
+The future P036 adapter must turn that instruction into a correctly scoped secure cookie. The new session and any prior-session revocation are one atomic transaction. A failed commit leaves the prior session active and creates no replacement. Sessions neither slide nor receive background cleanup.
 
 ## 9. Account and Pocket authorisation
 
@@ -193,9 +193,9 @@ Stable errors contain only a code, safe HTTP status and narrowly applicable `ret
 
 Raw PRF output, master keys, recovery roots and device wrapping keys are rejected by strict request/verifier schemas. Only a Pocket record contains ciphertext, and no accepted record contains readable Pocket fields.
 
-## 12. Deferred P035 boundary
+## 12. Deferred P036 adapter boundary
 
-P035 must provide and review:
+P036 should provide and review:
 
 - a real HTTP adapter for the seven locked routes;
 - exact header/body limits and context mapping;
@@ -205,7 +205,7 @@ P035 must provide and review:
 - rate limits and operational rollback/backup policy; and
 - the unresolved no-locator account-discovery policy.
 
-P035 must not weaken P034's state machine. Provider, runtime, database, deployment origin, envelope/recovery/pairing/deletion operations, production UI and current owner/Save integration remain unselected or separately deferred.
+P036 must not weaken P034/P035's state machine and exact-host RP-ID policy. Provider, runtime, database, deployment origin, envelope/recovery/pairing/deletion operations, production UI and current owner/Save integration remain unselected or separately deferred.
 
 ## 13. Validation status
 

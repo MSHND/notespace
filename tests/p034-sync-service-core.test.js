@@ -16,7 +16,7 @@ const ROOT = path.resolve(__dirname, "..");
 const MODULE_PATH = "sync-service/pocket-sync-service-core.js";
 const NOW = Date.parse("2032-01-01T00:00:00.000Z");
 const ORIGIN = "https://sync.pocket.example";
-const RP_ID = "pocket.example";
+const RP_ID = "sync.pocket.example";
 const CREDENTIAL_ALGORITHMS = Object.freeze([-7]);
 
 function source(file) {

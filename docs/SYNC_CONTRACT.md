@@ -18,6 +18,8 @@ P032 implements the still-unloaded same-origin remote client foundation. It bind
 
 P034 implements the dormant, undeployed server-side safety state machine behind those seven routes. It enforces exact request context, strict account/credential/session/ceremony/Pocket/operation records, atomic session rotation, account/Pocket authorisation and durable conditional-write idempotency through an injected transaction boundary. It adds no HTTP server, real verifier, database or deployment. See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md).
 
+P035 hardens that factory boundary by requiring the version-1 WebAuthn RP ID to equal the canonical trusted-origin hostname exactly. Parent-domain RP scope remains deliberately unsupported until a real deployment needs and can review public-suffix-aware policy.
+
 ## 2. Two human modes
 
 ### Local Pocket

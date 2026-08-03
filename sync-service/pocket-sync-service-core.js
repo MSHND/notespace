@@ -804,16 +804,17 @@ function validateOrigin(value) {
   return parsed;
 }
 
-function validateRpId(value, origin) {
-  if (typeof value !== "string"
-      || value !== value.trim()
-      || value !== value.toLowerCase()
-      || value.endsWith(".")
-      || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(value)
-      || !(origin.hostname === value || origin.hostname.endsWith(`.${value}`))) {
+function validateRpId(rpId, trustedOrigin) {
+  const trustedOriginHostname = trustedOrigin.hostname;
+  if (typeof rpId !== "string"
+      || rpId !== rpId.trim()
+      || rpId !== rpId.toLowerCase()
+      || rpId.endsWith(".")
+      || !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(rpId)
+      || rpId !== trustedOriginHostname) {
     throw serviceError("service-core-invalid");
   }
-  return value;
+  return rpId;
 }
 
 function validateFactoryConfig(input) {

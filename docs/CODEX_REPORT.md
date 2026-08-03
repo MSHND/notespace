@@ -1,5 +1,73 @@
 # Codex report
 
+## POCKET TASK P035 - HARDEN WEBAUTHN RP ID VALIDATION
+
+Title: Harden WebAuthn RP ID validation
+
+Status: P035 removes P034's permissive hostname-suffix RP-ID acceptance. The dormant service-core factory now accepts only an RP ID exactly equal to the canonical trusted-origin hostname, so configuration cannot accidentally widen passkey credential scope.
+
+Commit title:
+
+- `P035 Harden WebAuthn RP ID validation`
+
+### Baseline and finding
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `8e58a9047b81e3331ac1cf6106ba54dfbff09209`
+- Starting title: `P034 Build sync service safety core`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- P034 accepted `origin.hostname === rpId || origin.hostname.endsWith('.' + rpId)`. That admitted any syntactically matching suffix, including top-level/public-suffix-style values such as `com`.
+
+### Exact-host version-1 correction
+
+- `validateRpId()` now obtains `trustedOrigin.hostname` and accepts only `rpId === trustedOriginHostname`.
+- An explicit trusted-origin port remains valid but is not part of the RP ID.
+- Whitespace, uppercase/non-canonical text, trailing dots, schemes, ports, paths, queries, fragments, credentials, parents, higher suffixes, siblings and unrelated hosts all fail with the existing `service-core-invalid` error.
+- Invalid RP configuration fails during factory creation before a store transaction, random generation, clock read or verifier call.
+- WebAuthn can permit some registrable parent-domain RP IDs. P035 intentionally does not implement that scope because safe support requires public-suffix-aware deployment policy. Version 1 fails closed until a real deployment demonstrates a need.
+
+### Files changed
+
+- `sync-service/pocket-sync-service-core.js`
+- `tests/p035-rp-id-hardening.test.js`
+- `tests/p034-sync-service-core.test.js` (factory fixture updated to the exact-host policy)
+- `docs/SYNC_SERVICE_CORE.md`
+- `docs/SYNC_REMOTE_API_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/CODEX_REPORT.md`
+
+No request, ceremony, record, transaction, session, revision, conditional-write, account/Pocket, browser loader or loaded production behaviour changed.
+
+### Validation
+
+- `node --test tests/p035-rp-id-hardening.test.js` - 4 passed, 0 failed.
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 542 passed, 0 failed.
+- `node --check` passed for the changed production core and focused P035 test.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+No Public Suffix List, dependency, parent-domain support, DNS/network lookup, HTTP adapter/server, WebAuthn verifier, database, deployment, host/provider/origin selection, cookie, UI, owner, Main Save/PE Save integration, service-worker change or browser production loader was added.
+
+Physical browser acceptance: not applicable. The service core remains server-side, undeployed and not production-loaded.
+
+### Recommended P036 boundary
+
+Proceed with the previously deferred reviewed HTTP/header/cookie adapter, standards-compliant WebAuthn verifier adapter and durable database transaction adapter around P034/P035's exact interfaces. Preserve exact-host RP policy unless a concrete deployment later justifies a separately reviewed public-suffix-aware expansion.
+
 ## POCKET TASK P034 - BUILD SYNC SERVICE SAFETY CORE
 
 Title: Build sync service safety core
@@ -101,7 +169,7 @@ P034 adds no HTTP server, real WebAuthn verifier, production database, ORM, host
 
 Physical browser acceptance: not applicable. P034 is server-side, undeployed and not production-loaded.
 
-### Recommended P035 boundary
+### Recommended adapter boundary (moved to P036 after P035 hardening)
 
 Supply one reviewed HTTP/header/cookie adapter, one standards-compliant WebAuthn verifier adapter and one real durable database transaction adapter around P034's exact interfaces. Add request-size/rate limits, secure cookie issuance/clearing and operational rollback/backup policy without weakening the state machine or loading sync in today's Pocket. Keep provider/origin selection, envelope/recovery/pairing/deletion APIs, account-discovery UI and owner/Save integration separately reviewed.
 
