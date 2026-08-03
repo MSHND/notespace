@@ -1,5 +1,79 @@
 # Codex report
 
+## POCKET TASK P030 - BUILD THE ENCRYPTED DEVICE STORE FOUNDATION
+
+Title: Build encrypted device store foundation
+
+Status: P030 adds the dormant production-capable IndexedDB foundation for a future Synced Pocket's encrypted device state. It stores one strictly validated current encrypted record, protects replacement with local compare-and-swap and transaction completion, and keeps P027/P028/P029 ownership, security and crypto boundaries intact. It does not enable sync or change current production behaviour.
+
+Commit title:
+
+- `P030 Build encrypted device store foundation`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `66a55f8b6e65e130e24ca2030e5e04b0a18aed63`
+- Starting title: `P029 Implement sync crypto foundation`
+- Implementation date: 2026-08-03
+- Branch: `main`
+- `js/pocket-sync-device-store.js` remains absent from `index.html` and `sw.js`.
+- No live synced owner, UI, account, passkey ceremony, backend, provider, endpoint, network request, service-worker change, current Save integration, JSON/Vault owner or browser-recovery change was added.
+
+### Concrete database and record
+
+- IndexedDB database `pocket.sync.device.v1`, version 1, contains exactly one `pockets` object store keyed by `syncedPocketId`, with no indexes or auxiliary/history/log stores.
+- Strict `pocket.sync.device-state` schema version 1 holds `storeRevision`, opaque Pocket/device identities, one non-extractable device `CryptoKey`, its P029 device envelope, one P029 encrypted content record, minimal P028 pending/conflict metadata and per-device key-use accounting.
+- Pending metadata refers to the sole `content.record`; ciphertext is not duplicated. Strict allowlists exclude readable content, filenames/paths/handles, Vault/recovery secrets, raw keys, tokens, browser-safety payloads and UI/search state.
+- The module delegates P028/P029 context, metadata, conditional-request, encrypted-record and non-extractable key checks rather than weakening their formats.
+
+### Atomicity, concurrency and failure
+
+- Initial creation requires `storeRevision: 1`, uses insert-only `add` semantics and resolves only at transaction completion.
+- Replacement reads and validates the current record, checks expected `storeRevision`, requires exactly the next revision, prevents remote/counter rollback and writes the complete new record in one readwrite transaction.
+- Only the IndexedDB transaction `complete` event reports success. Request, validation, clone and transaction failures preserve the prior whole state. Stale concurrent tabs receive `device-store-revision-conflict` and cannot silently overwrite the winner.
+- Restored device keys must remain non-extractable AES-GCM-256 keys with exact usages. Unsupported structured cloning fails closed as `device-key-storage-unsupported`; there is no raw/JWK, plaintext or extractable-key fallback.
+- Browser eviction/site-data clearing can remove device state. P030 does not request persistent storage and does not claim hardware-backed key storage. Encrypted remote state and the human recovery copy remain essential.
+
+### Versions and migrations
+
+- Database and record schema version 1 are the only supported versions. The explicit narrow migration seam has no registered migrations.
+- Higher versions and lower versions without an explicit migration fail closed. There is no destructive reset, `deleteDatabase`, start-fresh fallback, timestamp migration or automatic malformed-record deletion.
+- A future shell may replace the narrow IndexedDB driver only while preserving the exact record and transaction contract; no shell was added.
+
+### Files changed
+
+- `js/pocket-sync-device-store.js`
+- `tests/helpers/p030-memory-device-store-driver.js`
+- `tests/p030-sync-device-store.test.js`
+- `docs/PRODUCT_PRINCIPLES.md`
+- `docs/SYNC_DEVICE_STORE.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 25 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 443 passed, 0 failed.
+- `node --check` passed for every changed/new JavaScript file.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+Physical browser acceptance: not applicable. P030 changes no production-loaded code or visible UI.
+
+### Recommended next implementation boundary
+
+Implement and review the account/WebAuthn ceremony and remote adapter/service boundaries, including activation-time device-store capability checks, whole-account key-use enforcement/rotation and recovery/device-transfer flows, while keeping all code unloaded until the complete adoption and one-owner Save path is ready for security review.
+
 ## POCKET TASK P029 - IMPLEMENT SYNC CRYPTO FOUNDATION
 
 Title: Implement sync crypto foundation

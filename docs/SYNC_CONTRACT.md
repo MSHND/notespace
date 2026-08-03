@@ -10,6 +10,8 @@ P028 locks the complementary versioned security, trusted-device storage, mandato
 
 P029 implements the still-unloaded Web Crypto foundation: AES-GCM-256 content/master-key envelopes, HKDF-SHA-256 derived wrapping keys, exact compact-JSON AAD, canonical base64url and non-extractable key lifecycles. It does not activate sync or change ownership/Save. See [Synced Pocket cryptographic format](SYNC_CRYPTO_FORMAT.md).
 
+P030 implements the still-unloaded encrypted browser device store. Future device persistence is one strict encrypted whole record, written device-first in one atomic transaction and protected from stale local writers by `storeRevision` compare-and-swap. See [Synced Pocket encrypted device store](SYNC_DEVICE_STORE.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -57,7 +59,7 @@ A separately designed Pocket master key will protect readable Pocket content. It
 
 P028 now locks that split: a passkey authenticates the account; a separately generated random 256-bit master key protects content; and independent `device`, optional `passkey-prf`, `device-transfer` and `recovery` envelopes unlock that key locally. A passkey assertion alone is never the content key. PRF is usable only when an actual ceremony returns valid output, and that output remains client-only.
 
-The concrete cryptographic algorithm/parameter selection is now locked and tested by P029. WebAuthn ceremonies, durable store, operational key-use limits/rotation and the remote adapter remain unimplemented and require later review.
+The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling, but whole-account key-use enforcement/rotation, WebAuthn ceremonies and the remote adapter remain unimplemented and require later review.
 
 ## 6. Emergency recovery is mandatory
 
@@ -184,10 +186,12 @@ The separately unloaded `PocketSyncSecurityContract` exposes version/policy cons
 
 The separately unloaded `PocketSyncCrypto` exposes strict format/context/key validation, device and HKDF wrapping-key creation, master-key bundle creation/opening/rewrapping, and content sealing/opening. It uses Web Crypto only and performs no storage, DOM, account or network work.
 
+The separately unloaded `PocketSyncDeviceStore` exposes strict record validation/migration, one IndexedDB driver and a narrow injected transaction state machine for read, insert-only creation and whole-record replacement. It performs no DOM, account, network, worker, timer or owner-adoption work.
+
 ## 15. Locked architecture and deferred implementation
 
 P028 locks the provider-neutral account/content-key split, envelope kinds, unlock order, mandatory recovery, trusted-device allowlist, remote-safe metadata boundary, conditional revision/idempotency semantics, additional-device architecture and conceptual account/credential/envelope/recovery/deletion operations.
 
-Before production integration, later work must implement and review WebAuthn ceremonies, durable device storage/migrations and encryption-use limits, remote adapters/service enforcement, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint or infrastructure has been selected.
+Before production integration, later work must implement and review WebAuthn ceremonies, live-owner use of the dormant device store, whole-account encryption-use enforcement/rotation, remote adapters/service enforcement, recovery/device-transfer UI and abuse controls, conflict review, deletion/retention operations and synced-owner browser recovery. No provider, endpoint or infrastructure has been selected.
 
 Only after those implementations pass focused security and ownership review should the unloaded P027/P028 contracts be adapted behind production ownership and Save seams.

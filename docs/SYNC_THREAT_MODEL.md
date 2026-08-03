@@ -2,7 +2,7 @@
 
 ## 1. Scope and security goals
 
-This model covers the future Synced Pocket account, encrypted device record, remote encrypted record, key envelopes, recovery package and additional-device transfer defined by P027/P028, plus P029's concrete unloaded cryptographic format. It does not change the threat model of today's local JSON and Vault owners.
+This model covers the future Synced Pocket account, encrypted device/remote records, key envelopes, recovery package and additional-device transfer defined by P027/P028, P029's concrete cryptographic format and P030's concrete unloaded encrypted device store. It does not change the threat model of today's local JSON and Vault owners.
 
 The primary goals are:
 
@@ -34,6 +34,7 @@ Integrity/availability assets:
 - synced Pocket ID and record format versions;
 - encrypted content record, nonce and authenticated context;
 - confirmed remote revision and exact pending encrypted record;
+- local `storeRevision`, encryption-use counters and complete-record atomicity;
 - envelope set, versions and revocations;
 - recovery-authorisation version/rotation state; and
 - local JSON/Vault owner/session plus existing safety recovery data.
@@ -48,7 +49,7 @@ The human is trusted to approve intended passkey/device-transfer actions and kee
 
 ### Browser/device client
 
-The client performs content encryption/decryption, key wrapping, PRF handling and source-owner checks. Ordinary browser/device protection and non-extractable keys reduce exposure. A fully compromised browser, origin script, extension, OS or device can observe readable content and may misuse unlocked keys; client JavaScript cannot prove otherwise.
+The client performs content encryption/decryption, key wrapping, PRF handling, source-owner checks and whole-record IndexedDB persistence. Ordinary browser/device protection and non-extractable keys reduce exposure. A fully compromised browser, origin script, extension, OS or device can observe readable content, modify its database and may misuse unlocked keys; client JavaScript cannot prove otherwise.
 
 ### Authenticator
 
@@ -89,7 +90,13 @@ Local JSON/Vault files, file handles, source sessions and browser safety copies 
 | Context transplant | Moves ciphertext to another Pocket, revision or envelope purpose | Compact JSON AAD binds format/version/algorithm plus Pocket ID and content revision/type or envelope ID/kind/version | Client must supply the intended current context correctly |
 | Cross-purpose derived-key reuse | Lets one unlock secret act in another role | HKDF-SHA-256 uses distinct versioned kind labels and binds Pocket ID, envelope ID/version and a 32-byte salt | A compromised runtime can still invoke keys available in that runtime |
 | Malformed opaque record | Exploits permissive decoding or version confusion | Strict field allowlists, exact version/algorithm/length checks and canonical unpadded base64url fail closed | New formats require explicit version and migration review |
-| Excessive AES-GCM key use | Raises random-nonce collision and usage risk | P029 declares a conservative ceiling of `2^31` encryptions per key, below `2^32` | The stateless module cannot count globally; durable enforcement and rotation are required before activation |
+| Malformed or maliciously modified local database record | Injects plaintext, wrong identities/keys or weakened formats | P030 validates the complete strict record, restored `CryptoKey` and P028/P029 content/envelope boundaries before returning it; no silent repair/deletion | Same-origin or device compromise can replace both data and executing validation code |
+| Local database rollback | Restores an older confirmed revision or lower usage count | Whole-record replacement rejects remote revision and same-generation usage rollback | A privileged attacker can restore an entire older database snapshot; remote comparison is still required when integrated |
+| Stale concurrent tab | Silently overwrites a newer local Save | Transactional `storeRevision` compare-and-swap lets only one same-revision writer win | Later UI must explain the stable local conflict result |
+| IndexedDB transaction interruption | Leaves pending/content/revision fields from different moments | One whole-record readwrite transaction; success only on `complete`; abort retains prior state | Browser storage corruption outside IndexedDB's transaction guarantees remains platform risk |
+| CryptoKey clone or restoration failure | Encourages raw/extractable key fallback or creates unreadable state | Stable fail-closed unsupported result; no export, serialisation, plaintext or extractable substitute | Browser/device implementations differ, so activation must verify support before owner adoption |
+| Browser storage eviction or site-data clearing | Removes the encrypted device record and device key | State is not called impossible to lose; remote ciphertext and human recovery copy remain essential | Offline reopening on that device may require recovery or another trusted-device path |
+| Excessive AES-GCM key use | Raises random-nonce collision and usage risk | P029 declares a `2^31` ceiling; P030 persists monotonic per-device counters below it | Per-device counts cannot prove a global cross-device total; remote/account enforcement and rotation remain required |
 | Activation interruption | Two active owners or partial conversion | Capture/recheck source session; durable device and conditional remote commit; mandatory recovery; adopt once at end | Staged encrypted records may need later garbage collection but are not truth |
 | Service outage | Save appears lost | Device-first durable encrypted record, explicit pending state and explicit Save retry | Other devices cannot receive updates during outage |
 | Account deletion misuse | Irreversible remote loss | Fresh authorisation, challenge, explicit confirm, idempotency and clear inventory | Service retention/deletion behaviour requires operational audit; local files remain separate |
@@ -109,23 +116,29 @@ Authentication-tag failure, malformed UTF-8/JSON and context mismatch are termin
 
 Successful use rotates both roles atomically enough that the old authorisation becomes invalid and a replacement local recovery copy is required. The UI must not claim recovery completed before rotation. Rate limiting, challenge expiry and non-enumerating errors reduce online abuse without converting the recovery root into a server-held secret.
 
-## 7. Original readable file risk
+## 7. Encrypted device-store failure boundary
+
+P030 stores exactly one current encrypted record per opaque Pocket ID. Unknown fields and schema versions fail closed, and failed reads do not silently delete or repair evidence. Initial `add` and later whole-record replacements resolve only after IndexedDB transaction completion. The database has no history, operation log, telemetry, secondary index or duplicate pending ciphertext.
+
+IndexedDB durability is a browser acceptance boundary, not a guarantee against eviction, site-data clearing, compromised local software or device loss. P030 does not request `navigator.storage.persist()`. Non-extractable `CryptoKey` prevents ordinary export but is not necessarily hardware-backed and remains usable by authorised or compromised same-origin code.
+
+## 8. Original readable file risk
 
 Turning on sync does not encrypt, move or delete the original JSON source. That file remains readable wherever the human left it. This is intentional transparency and protects against destructive conversion, but it means synced encryption does not retroactively protect that historical copy. Pocket must keep showing the exact P027 original-file notice and must never upload its filename/path.
 
 A source Vault remains protected under its existing Vault format, but P028 does not claim that Vault v1 and the synced encrypted-record format are interchangeable.
 
-## 8. Abuse and privacy controls
+## 9. Abuse and privacy controls
 
 Future service implementation must define conservative limits for ceremony creation, authentication failures, recovery attempts, pairing creation/approval, encrypted record sizes, envelope counts, device/credential counts and deletion attempts. Logs must exclude WebAuthn responses, PRF output, recovery proofs, ciphertext bodies and any submitted readable content.
 
 Credential labels and device labels can become personal metadata. If later UI allows them, collection must be optional/minimal, display escaping mandatory and remote retention documented. P028's executable metadata allowlists use opaque IDs and do not admit labels.
 
-## 9. Explicitly out of scope for P028/P029
+## 10. Explicitly out of scope for P028/P029/P030
 
-P028/P029 do not provide:
+P028/P029/P030 do not provide:
 
-- a formal cryptographic proof, durable encryption-use counter or automatic master-key rotation;
+- a formal cryptographic proof, global cross-device encryption-use counter or automatic master-key rotation;
 - protection after arbitrary code execution in the active origin/browser/device;
 - a backend, endpoint, provider, transport binding or deployment design;
 - service availability, verifiable deletion or anti-rollback transparency infrastructure;

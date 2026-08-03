@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete, still-unloaded Web Crypto foundation. Neither task enables sync, loads a new production module, adds an account, contacts a service, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, and P030 supplies the concrete encrypted browser device store. Both implementation modules remain unloaded. None of these tasks enables sync, adds an account, contacts a service, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -66,18 +66,17 @@ An unlock path is selected only when its capability, required envelope and crypt
 
 ## 7. Trusted-device store
 
-The intended future browser store is IndexedDB behind a replaceable platform adapter. P028 does not open or write that store.
+P030 implements the unloaded browser store as IndexedDB database `pocket.sync.device.v1`, version 1, with exactly one `pockets` object store keyed by `syncedPocketId` and no indexes. The driver sits behind a narrow replaceable transaction boundary; production loaders do not load it.
 
-The future durable device store may contain only:
+One strict `pocket.sync.device-state` schema-1 record may contain only:
 
-- a non-extractable Web Crypto device key, or device key material wrapped to an origin/device protection boundary;
-- a wrapped master-key envelope;
-- opaque account, device and synced Pocket IDs;
+- a non-extractable AES-GCM-256 Web Crypto device key with `encrypt`/`decrypt` usages;
+- its concrete P029 `device` master-key envelope and exact context/metadata;
+- opaque device and synced Pocket IDs;
 - the latest encrypted content record;
-- the last confirmed remote revision;
-- the exact pending encrypted sync record and its operation identifiers;
-- a conflict marker; and
-- envelope, record, migration and schema versions.
+- the last confirmed remote revision, pending operation identifiers and an optional conflict marker;
+- monotonic local content/envelope encryption-use counters and master-key generation; and
+- record/schema/store revisions.
 
 It must not contain:
 
@@ -90,7 +89,11 @@ It must not contain:
 - a browser-safety recovery payload; or
 - a silent writable handle to the former source file.
 
-The device record is an encrypted replica of the synced owner, not another truth owner. Current browser safety recovery remains owned by existing local JSON/Vault paths until a later reviewed integration explicitly defines a synced-owner recovery record.
+Pending metadata refers to the one current encrypted content record; it does not duplicate ciphertext. P030 delegates the concrete content, envelope, key and metadata checks to P029/P028. Unknown fields, malformed material and unsupported versions fail closed.
+
+Initial creation is insert-only at `storeRevision: 1`. Replacement reads and validates the current whole record, compares the expected local store revision, requires exactly the next revision, prevents remote/counter rollback and writes the whole replacement in one readwrite transaction. Success resolves only at transaction completion. Stale tabs receive `device-store-revision-conflict`; validation, request and transaction failures retain the previous complete record.
+
+The device record is the encrypted durable representation of the future synced owner, not another truth owner. Current browser safety recovery remains owned by existing local JSON/Vault paths until a later reviewed integration explicitly defines a synced-owner recovery record. IndexedDB can be evicted or cleared, so remote ciphertext and the human-held recovery copy remain necessary. P030 neither requests persistent-storage permission nor claims hardware-backed key storage.
 
 Web clients cannot honestly promise hardware-backed key storage or integrity on every browser. Non-extractability limits ordinary application export; it does not defeat same-origin code execution, browser compromise, device compromise, malicious extensions or memory inspection. End-to-end encryption still trusts the currently served Pocket client: a compromised Pocket release running while unlocked could read content or invoke available keys.
 
@@ -185,7 +188,7 @@ Future synced recovery must be implemented as a separately versioned encrypted d
 
 The architecture and concrete cryptographic format are locked; production integration is still absent. Before loading sync code, later work must supply and review:
 
-- a versioned durable browser/device store with migrations, failure handling, encryption-use accounting and master-key rotation consistent with the P029 format and vectors;
+- live-owner integration of the versioned P030 device store, plus whole-account encryption-use enforcement and master-key rotation consistent with the P029 format and vectors;
 - real WebAuthn ceremonies and server-side verification;
 - endpoint-independent request adapters implementing the remote API contract;
 - additional-device and recovery UI with abuse/rate controls;
