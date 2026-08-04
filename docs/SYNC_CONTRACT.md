@@ -26,6 +26,8 @@ P037 binds initial recovery rotation and stored replay to the credential created
 
 P039 adds the concrete dormant local activation orchestrator. It saves and freezes the current JSON/Vault source, creates P029 keys/content/envelopes, stages one encrypted P030 activation draft, registers through P031, performs P038 content/envelope/recovery mutations in fixed order, pauses safely until the local recovery copy is confirmed, cleans temporary recovery material and adopts only through an injected owner boundary. It remains unloaded and does not change current ownership or Save. See [Synced Pocket activation orchestration](SYNC_ACTIVATION_ORCHESTRATION.md).
 
+P040 finalises that dormant owner hand-off correctly. Source-session checks remain mandatory through the last pre-adoption check. Once the owner adapter succeeds, the old JSON/Vault session is intentionally retired; the final encrypted `adopted` marker uses P030 compare-and-swap without consulting it. A valid adopted replay likewise needs no former local source.
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -85,7 +87,7 @@ The human must save the recovery copy. Choosing **I’ll do this later** pauses 
 
 Activation accepts only a current local `json` or `vault` owner. `none` and `detached` are rejected.
 
-The orchestration captures the exact source-owner session before asynchronous work. It rechecks that session after asynchronous boundaries. If the file, Vault session or owner changes, activation fails closed and does not adopt the staged synced owner.
+The orchestration captures the exact source-owner session before asynchronous work. It rechecks that session after asynchronous boundaries while JSON/Vault remains authoritative, including immediately before adoption. If the file, Vault session or owner changes before that transition, activation fails closed and does not adopt the staged synced owner. After successful adoption, the retired source is never checked again.
 
 If the source has unsaved content, activation first calls the existing local Save boundary. Cancellation or failure stops activation. Pocket does not create a synced Pocket from content that differs silently from the backup file.
 
@@ -104,7 +106,7 @@ P027's original conceptual tested order is:
 
 P028 adds locked completion gates around that P027 sequence. Production activation must also register an account credential, generate the 256-bit master key locally, durably establish its device envelope, create a recovery envelope and confirm that the human saved the recovery copy. **Sync is ready** is allowed only after those gates, the initial conditional remote commit and final owner adoption all succeed for the same current source session.
 
-P039 now implements that complete order in a separate unloaded owner: source Save and one payload freeze; recovery-copy destination permission; local P029 material; encrypted P030 draft; P031 registration; initial P038 content commit; device envelope; optional PRF envelope or explicit skip; recovery initialisation; local package confirmation; secret cleanup; source-session recheck; owner adoption last. Explicit resume reuses durable IDs and exact idempotent requests rather than inventing another history.
+P039 implements that complete order in a separate unloaded owner: source Save and one payload freeze; recovery-copy destination permission; local P029 material; encrypted P030 draft; P031 registration; initial P038 content commit; device envelope; optional PRF envelope or explicit skip; recovery initialisation; local package confirmation; secret cleanup; source-session recheck; owner adoption last. P040 then persists the adopted marker without depending on the session that transition retired. Explicit resume reuses durable IDs and exact idempotent requests rather than inventing another history; an adopted replay returns directly from validated encrypted state.
 
 Adoption occurs only after the initial device and remote writes succeed. Before that point, the local JSON/Vault owner remains active. A staged device record is not authoritative merely because it was written.
 

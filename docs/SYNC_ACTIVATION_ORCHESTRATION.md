@@ -2,7 +2,7 @@
 
 ## Status
 
-P039 adds one dormant browser module, `js/pocket-sync-activation.js`. It is not loaded by `index.html`, cached by `sw.js`, connected to current Pocket ownership, or called by Main Save or PE Save. It selects no service origin and adds no UI.
+P039 adds one dormant browser module, `js/pocket-sync-activation.js`. P040 corrects its final authority hand-off so a successfully retired JSON/Vault session is never consulted after synced-owner adoption. The module is not loaded by `index.html`, cached by `sw.js`, connected to current Pocket ownership, or called by Main Save or PE Save. It selects no service origin and adds no UI.
 
 The module is the concrete local conductor for the reviewed P027–P038 foundations. It does not replace their cryptography, device storage, passkey validation, transport validation or service state machines.
 
@@ -26,9 +26,9 @@ Activation accepts only a current JSON or Vault owner. The captured session must
 3. uses the existing local Save boundary once when dirty;
 4. verifies the same session again;
 5. freezes one readable payload once;
-6. rechecks the session after asynchronous boundaries and immediately before adoption.
+6. rechecks the session after asynchronous boundaries while that source still owns Pocket, including immediately before adoption.
 
-The readable payload is passed only to P029 content sealing. It is never stored in the device record or sent remotely. Resume captures the currently active source again and requires its owner kind and continuity value to match the encrypted draft. A different JSON file or Vault cannot inherit a staged activation.
+The readable payload is passed only to P029 content sealing. It is never stored in the device record or sent remotely. Resume captures the currently active source again and requires its owner kind and continuity value to match an unfinished encrypted draft. A different JSON file or Vault cannot inherit a staged activation. A strictly valid `adopted` draft instead returns its durable success state without capturing or checking the deliberately retired source.
 
 ## Recovery-copy decision before remote work
 
@@ -141,12 +141,16 @@ P039 validates the P028 activation gates in explicit pre-adoption mode, rechecks
 }
 ```
 
-The adapter must be idempotent for an activation ID. If adoption fails, the source remains active and the ready encrypted draft survives. Resume then performs only the adoption attempt. A completed local replay returns success without another remote call, recovery-copy write or owner transition.
+The adapter must be idempotent for an activation ID and independently reject a stale transition. P040 requires the draft to be exactly `ready-for-adoption` and checks the source immediately before calling that adapter. There is no asynchronous operation between that check and the call.
+
+If the adapter reports failure, the source remains active and the ready encrypted draft survives. Resume then performs only the adoption attempt. If it reports success, the synced owner is authoritative and the old source may cease to be current. P040 never checks that retired source again. One private finaliser encrypts the `adopted` marker and replaces the same P030 record through its existing `storeRevision` compare-and-swap boundary.
+
+A completed local replay reads and validates the encrypted draft first, then returns success without source capture/check, another remote call, cryptographic mutation, recovery-copy write, device write or owner transition. If final marker encryption or persistence fails after the adapter has succeeded, Pocket reports `owner-adoption-finalisation-failed` with `adopted: true` and `sourceOwnerPreserved: false`; it neither lies that the source survived nor retries or reverses the transition.
 
 ## Deliberately absent
 
 P039 adds no UI, live synced owner, Save branch, HTTP/cookie adapter, selected origin, database, provider, deployment, dependency, service-worker entry, timer, worker, polling or background retry.
 
-## P040 boundary
+## P041 boundary
 
-P040 should add dormant emergency-recovery orchestration for a new device: local recovery-package intake, begin/finish recovery, proof derivation through a reviewed adapter, local recovery-envelope opening, content validation, replacement root/verifier/envelope creation, atomic remote rotation, replacement-copy confirmation and new-device state persistence. It must remain separate from production loading and owner integration.
+P041 should add dormant emergency-recovery orchestration for a new device: local recovery-package intake, begin/finish recovery, proof derivation through a reviewed adapter, local recovery-envelope opening, content validation, replacement root/verifier/envelope creation, atomic remote rotation, replacement-copy confirmation and new-device state persistence. It must remain separate from production loading and owner integration.

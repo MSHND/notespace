@@ -1,5 +1,72 @@
 # Codex report
 
+## POCKET TASK P040 - FINALISE OWNER ADOPTION AFTER THE SOURCE SESSION IS RETIRED
+
+Title: Finalise owner adoption after source retirement
+
+Status: P040 corrects the dormant P039 authority transition. The JSON/Vault source remains mandatory through the final pre-adoption check, but successful synced-owner adoption deliberately retires it and no later activation persistence or replay depends on it.
+
+Commit title:
+
+- `P040 Finalise owner adoption after source retirement`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `3014bb8f1453732c407ebaa1ec60dcf0bb084203`
+- Starting title: `P039 Build local sync activation orchestration`
+- Implementation date: 2026-08-04
+- Branch: `main`
+- Public exports remain exactly `POLICY` and `createActivationOrchestrator`; the created surface remains exactly `activate` and `resume`.
+
+### Corrected transition boundary
+
+- P039 previously called `adoptSyncedOwner()` through the general source-bound `checked()` helper and then used the same source-bound persistence path. A real successful transition could therefore retire the source and be falsely reported as `source-session-changed`.
+- P040 requires exact `ready-for-adoption`, validates every existing P028 gate and checks the source immediately before calling the owner adapter directly. Every earlier persistence path remains source-bound.
+- After explicit adapter success, one private finaliser validates and encrypts only the `adopted` draft transition, advances the P030 store revision once and replaces the same whole record through existing compare-and-swap. It never checks the retired source.
+- A valid adopted resume opens and validates encrypted state first, then returns success without source capture/check, owner transition, remote work, cryptographic mutation, recovery-copy write or device write.
+- Adapter failure still preserves the source and ready draft as resumable `owner-adoption-failed`. A genuine pre-adoption source change still prevents the owner call.
+- Encryption or device persistence failure after adapter success returns `owner-adoption-finalisation-failed`, `adopted: true`, `sourceOwnerPreserved: false` and `resumable: false`. It exposes no native error, does not retry and does not pretend the old owner can be restored.
+
+### Files changed
+
+- `js/pocket-sync-activation.js`
+- `tests/p040-owner-adoption-finalisation.test.js`
+- `docs/SYNC_ACTIVATION_ORCHESTRATION.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/CODEX_REPORT.md`
+
+### Validation
+
+- `node --test tests/p040-owner-adoption-finalisation.test.js` - 9 passed, 0 failed.
+- `node --test tests/p039-sync-activation.test.js` - 22 passed, 0 failed.
+- `node --test tests/p038-key-recovery-remote-client.test.js` - 11 passed, 0 failed.
+- `node --test tests/p037-recovery-replay-authorisation.test.js` - 4 passed, 0 failed.
+- `node --test tests/p036-key-recovery-service-core.test.js` - 19 passed, 0 failed.
+- `node --test tests/p035-rp-id-hardening.test.js` - 4 passed, 0 failed.
+- `node --test tests/p034-sync-service-core.test.js` - 33 passed, 0 failed.
+- `node --test tests/p032-sync-remote-client.test.js` - 33 passed, 0 failed.
+- `node --test tests/p031-sync-account-client.test.js` - 27 passed, 0 failed.
+- `node --test tests/p030-sync-device-store.test.js` - 29 passed, 0 failed.
+- `node --test tests/p029-sync-crypto.test.js` - 25 passed, 0 failed.
+- `node --test tests/p028-sync-security-contract.test.js` - 27 passed, 0 failed.
+- `node --test tests/p027-sync-contract.test.js` - 36 passed, 0 failed.
+- `node --test tests/p019-vault-ownership.test.js` - 148 passed, 0 failed.
+- `node --test tests/pe-persistence-contract.test.js` - 96 passed, 0 failed.
+- `node --test tests/device-changes-resolution.test.js` - 69 passed, 0 failed.
+- `node --test tests/p018-popout-isolation.test.js` - 15 passed, 0 failed.
+- Total: 607 passed, 0 failed.
+- `node --check` passed for both changed JavaScript files.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+No emergency recovery, UI, production loader, live synced owner, Main Save/PE Save change, HTTP server/adapter, cookie handling, database, provider, host/domain/origin selection, deployment file, dependency, service-worker change, timer, worker, polling or background retry was added. Physical browser acceptance is not applicable because P040 remains dormant and unloaded.
+
+### Recommended P041 boundary
+
+Build dormant emergency-recovery orchestration for a new device: recovery-package intake; begin/finish recovery; local proof derivation through a reviewed adapter; recovery-envelope opening and encrypted-content validation; replacement root/verifier/envelope; atomic remote rotation; replacement-copy confirmation; and new-device encrypted-state persistence. Keep UI, live owner/Save integration and deployment separate.
+
 ## POCKET TASK P039 - BUILD LOCAL SYNC ACTIVATION ORCHESTRATION
 
 Title: Build local sync activation orchestration

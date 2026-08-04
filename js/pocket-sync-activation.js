@@ -538,6 +538,48 @@ without adding UI, a live synced owner, background work, or deployment state.
       return nextDraft;
     }
 
+    async function persistAdoptedDraft(execution) {
+      const current = execution.record;
+      if (!current || execution.draft.stage !== "ready-for-adoption"
+          || execution.draft.adopted !== false) {
+        throw activationError("activation-state-invalid");
+      }
+      const nextRevision = current.storeRevision + 1;
+      const nextDraft = validateDraft(Object.assign({}, jsonClone(execution.draft), {
+        stage: "adopted",
+        adopted: true,
+        updatedAt: validateTimestamp(config.now),
+      }), config);
+      const draftContext = {
+        syncedPocketId: nextDraft.syncedPocketId,
+        revision: nextRevision,
+        contentType: config.crypto.FORMAT.contentType,
+      };
+      const encryptedDraft = await config.crypto.sealContent(
+        nextDraft,
+        current.deviceWrappingKey,
+        draftContext
+      );
+      const usage = {
+        masterKeyGeneration: current.usage.masterKeyGeneration,
+        contentEncryptionsOnDevice: current.usage.contentEncryptionsOnDevice + 1,
+        envelopeEncryptionsOnDevice: current.usage.envelopeEncryptionsOnDevice,
+      };
+      const nextRecord = cloneRecord(current, { usage });
+      nextRecord.storeRevision = nextRevision;
+      nextRecord.activationDraft = { context: draftContext, record: encryptedDraft };
+      nextRecord.usage = usage;
+      nextRecord.schemaVersion = deviceFormat.recordSchemaVersion;
+      const stored = await config.deviceStore.replacePocket(
+        nextDraft.syncedPocketId,
+        current.storeRevision,
+        nextRecord
+      );
+      execution.record = stored;
+      execution.draft = nextDraft;
+      return nextDraft;
+    }
+
     function changedDraft(draft, changes) {
       return Object.assign({}, jsonClone(draft), changes);
     }
@@ -905,6 +947,9 @@ without adding UI, a live synced owner, background work, or deployment state.
       if (execution.draft.stage === "adopted") {
         return successResult(execution.draft);
       }
+      if (execution.draft.stage !== "ready-for-adoption") {
+        throw activationError("activation-state-invalid");
+      }
       const readiness = config.securityContract.validateActivationReadiness({
         activationPhase: "pre-adoption",
         sourceSaved: execution.draft.sourceSaved,
@@ -918,7 +963,6 @@ without adding UI, a live synced owner, background work, or deployment state.
         syncedOwnerAdopted: false,
       });
       if (!readiness || readiness.ok !== true) throw activationError("activation-state-invalid");
-      await ensureCurrent(execution);
       const owner = deepFreeze({
         ownerKind: "synced",
         activationId: execution.draft.activationId,
@@ -927,22 +971,31 @@ without adding UI, a live synced owner, background work, or deployment state.
         confirmedRemoteRevision: 1,
         syncPending: false,
       });
+      await ensureCurrent(execution);
       let adopted;
-      try { adopted = await checked(execution, execution.dependencies.adoptSyncedOwner(owner)); }
-      catch (error) {
-        if (error?.code === "source-session-changed") throw error;
-        adopted = null;
-      }
-      if (!(adopted === true || (adopted && adopted.ok === true))) {
+      try { adopted = await execution.dependencies.adoptSyncedOwner(owner); }
+      catch (_error) { adopted = null; }
+      const accepted = adopted === true || (isObject(adopted)
+        && Object.keys(adopted).length === 1 && adopted.ok === true);
+      if (!accepted) {
         return safeFailure("owner-adoption-failed", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, resumable: true, recoveryCopyRequired: false,
         });
       }
-      await persistDraft(execution, changedDraft(execution.draft, {
-        stage: "adopted",
-        adopted: true,
-      }));
+      try {
+        await persistAdoptedDraft(execution);
+      } catch (_error) {
+        return safeFailure("owner-adoption-finalisation-failed", {
+          activationId: execution.draft.activationId,
+          adopted: true,
+          sourceOwnerPreserved: false,
+          locallyDurable: true,
+          remotelyCommitted: true,
+          recoveryCopyStored: true,
+          resumable: false,
+        });
+      }
       return successResult(execution.draft, owner);
     }
 
@@ -1202,23 +1255,28 @@ without adding UI, a live synced owner, background work, or deployment state.
       } catch (_error) {
         return safeFailure("invalid-activation-input");
       }
-      let sourceSession;
-      let continuity;
+      const execution = {
+        dependencies, sourceSession: null, destination: null, record: null, draft: null,
+      };
       try {
-        sourceSession = dependencies.captureSourceSession();
-        continuity = sourceContinuity(sourceSession);
-      } catch (error) {
-        return safeFailure(error?.code === "unsupported-source-owner"
-          ? "unsupported-source-owner" : "invalid-activation-input");
-      }
-      const execution = { dependencies, sourceSession, destination: null, record: null, draft: null };
-      try {
-        await ensureCurrent(execution);
-        await checked(execution, config.deviceStore.open());
-        const found = await checked(execution, config.deviceStore.readActivation(options.activationId));
+        await config.deviceStore.open();
+        const found = await config.deviceStore.readActivation(options.activationId);
         if (!found) return safeFailure("activation-state-invalid");
         execution.record = found.record;
         execution.draft = validateDraft(found.draft, config);
+        if (execution.draft.activationId !== options.activationId) {
+          return safeFailure("activation-state-invalid");
+        }
+        if (execution.draft.stage === "adopted") return successResult(execution.draft);
+        let continuity;
+        try {
+          execution.sourceSession = dependencies.captureSourceSession();
+          continuity = sourceContinuity(execution.sourceSession);
+        } catch (error) {
+          return safeFailure(error?.code === "unsupported-source-owner"
+            ? "unsupported-source-owner" : "invalid-activation-input");
+        }
+        await ensureCurrent(execution);
         if (execution.draft.activationId !== options.activationId
             || execution.draft.sourceOwnerKind !== continuity.ownerKind
             || execution.draft.sourceContinuityId !== continuity.continuityId) {
