@@ -16,13 +16,18 @@ and a narrow atomic transaction boundary without activating a synced owner.
   });
   const FORMAT = Object.freeze({
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 2,
+    recordSchemaVersion: 3,
+    recoveryStagingKind: "pocket.sync.recovery-staging",
+    recoveryStagingSchemaVersion: 1,
     firstStoreRevision: 1,
   });
   const MIGRATION_POLICY = Object.freeze({
     currentDatabaseVersion: CONFIG.databaseVersion,
     currentRecordSchemaVersion: FORMAT.recordSchemaVersion,
-    registeredRecordMigrations: Object.freeze(["1-to-2-encrypted-activation-draft"]),
+    registeredRecordMigrations: Object.freeze([
+      "1-to-2-encrypted-activation-draft",
+      "2-to-3-encrypted-recovery-draft",
+    ]),
     destructiveResetAllowed: false,
   });
   const TOP_LEVEL_FIELDS = Object.freeze([
@@ -37,9 +42,13 @@ and a narrow atomic transaction boundary without activating a synced owner.
     "remote",
     "usage",
     "activationDraft",
+    "recoveryDraft",
   ]);
-  const LEGACY_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
-    (field) => field !== "activationDraft"
+  const VERSION_ONE_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
+    (field) => !["activationDraft", "recoveryDraft"].includes(field)
+  ));
+  const VERSION_TWO_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
+    (field) => field !== "recoveryDraft"
   ));
   const DEVICE_ENVELOPE_FIELDS = Object.freeze(["context", "metadata", "record"]);
   const DEVICE_METADATA_FIELDS = Object.freeze([
@@ -53,6 +62,10 @@ and a narrow atomic transaction boundary without activating a synced owner.
     "kdf",
   ]);
   const CONTENT_FIELDS = Object.freeze(["context", "record"]);
+  const RECOVERY_STAGING_FIELDS = Object.freeze([
+    "kind", "schemaVersion", "storeRevision", "syncedPocketId", "deviceId",
+    "deviceWrappingKey", "recoveryDraft",
+  ]);
   const REMOTE_FIELDS = Object.freeze(["confirmedRevision", "pending", "conflict"]);
   const PENDING_FIELDS = Object.freeze([
     "expectedRevision",
@@ -344,6 +357,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
       syncedPocketId,
       storeRevision
     );
+    const recoveryDraft = validateActivationDraft(
+      record.recoveryDraft,
+      syncedPocketId,
+      storeRevision
+    );
     return freezeValue({
       kind: FORMAT.recordKind,
       schemaVersion: FORMAT.recordSchemaVersion,
@@ -356,14 +374,24 @@ and a narrow atomic transaction boundary without activating a synced owner.
       remote,
       usage,
       activationDraft,
+      recoveryDraft,
     }, deviceWrappingKey);
   }
 
   function migrateVersionOneRecord(input) {
-    const legacy = exactObject(input, LEGACY_TOP_LEVEL_FIELDS, "device-state-invalid");
+    const legacy = exactObject(input, VERSION_ONE_TOP_LEVEL_FIELDS, "device-state-invalid");
     return validateCurrentRecord(Object.assign({}, legacy, {
       schemaVersion: FORMAT.recordSchemaVersion,
       activationDraft: null,
+      recoveryDraft: null,
+    }));
+  }
+
+  function migrateVersionTwoRecord(input) {
+    const previous = exactObject(input, VERSION_TWO_TOP_LEVEL_FIELDS, "device-state-invalid");
+    return validateCurrentRecord(Object.assign({}, previous, {
+      schemaVersion: FORMAT.recordSchemaVersion,
+      recoveryDraft: null,
     }));
   }
 
@@ -372,7 +400,42 @@ and a narrow atomic transaction boundary without activating a synced owner.
       throw deviceStoreError("device-state-invalid");
     }
     if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
+    if (input.schemaVersion === 2) return migrateVersionTwoRecord(input);
     return validateCurrentRecord(input);
+  }
+
+  function validateRecoveryStagingRecord(input) {
+    const record = exactObject(input, RECOVERY_STAGING_FIELDS, "recovery-staging-invalid");
+    if (record.kind !== FORMAT.recoveryStagingKind
+        || record.schemaVersion !== FORMAT.recoveryStagingSchemaVersion) {
+      throw deviceStoreError("recovery-staging-schema-invalid");
+    }
+    const storeRevision = positiveInteger(record.storeRevision, "device-store-revision-invalid");
+    const syncedPocketId = identifier(record.syncedPocketId, "device-state-identity-invalid");
+    const deviceId = identifier(record.deviceId, "device-state-identity-invalid");
+    const deviceWrappingKey = validateDeviceWrappingKey(record.deviceWrappingKey);
+    const recoveryDraft = validateActivationDraft(
+      record.recoveryDraft,
+      syncedPocketId,
+      storeRevision
+    );
+    if (recoveryDraft === null) throw deviceStoreError("recovery-staging-draft-invalid");
+    return freezeValue({
+      kind: FORMAT.recoveryStagingKind,
+      schemaVersion: FORMAT.recoveryStagingSchemaVersion,
+      storeRevision,
+      syncedPocketId,
+      deviceId,
+      deviceWrappingKey,
+      recoveryDraft,
+    }, deviceWrappingKey);
+  }
+
+  function validateStoredRecord(input) {
+    if (input && input.kind === FORMAT.recoveryStagingKind) {
+      return validateRecoveryStagingRecord(input);
+    }
+    return migrateRecord(input);
   }
 
   function migrateRecord(input) {
@@ -381,6 +444,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     }
     if (input.schemaVersion === FORMAT.recordSchemaVersion) return validateCurrentRecord(input);
     if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
+    if (input.schemaVersion === 2) return migrateVersionTwoRecord(input);
     if (Number.isSafeInteger(input.schemaVersion)
         && input.schemaVersion >= 0
         && input.schemaVersion < FORMAT.recordSchemaVersion) {
@@ -463,10 +527,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
         const found = await transaction.getAll();
         transaction.checkpoint("after-read-before-validation");
         if (!Array.isArray(found)) throw deviceStoreError("device-store-read-invalid");
-        return found.map((record) => migrateRecord(record));
+        return found.map((record) => validateStoredRecord(record));
       });
       let match = null;
       for (const record of records) {
+        if (record.kind !== FORMAT.recordKind) continue;
         if (record.activationDraft === null) continue;
         let draft;
         try {
@@ -484,6 +549,131 @@ and a narrow atomic transaction boundary without activating a synced owner.
         }
       }
       return match;
+    }
+
+    async function readStoredRecord(syncedPocketIdInput) {
+      requireOpen();
+      const syncedPocketId = identifier(syncedPocketIdInput, "device-state-identity-invalid");
+      return driver.transaction("readonly", async (transaction) => {
+        const found = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        return found === undefined ? null : validateStoredRecord(found);
+      });
+    }
+
+    async function readRecoveryAttempt(recoveryAttemptIdInput) {
+      requireOpen();
+      const recoveryAttemptId = identifier(
+        recoveryAttemptIdInput,
+        "recovery-attempt-identity-invalid"
+      );
+      const records = await driver.transaction("readonly", async (transaction) => {
+        if (typeof transaction.getAll !== "function") {
+          throw deviceStoreError("device-store-driver-invalid");
+        }
+        const found = await transaction.getAll();
+        transaction.checkpoint("after-read-before-validation");
+        if (!Array.isArray(found)) throw deviceStoreError("device-store-read-invalid");
+        return found.map((record) => validateStoredRecord(record));
+      });
+      let match = null;
+      for (const record of records) {
+        const encryptedDraft = record.kind === FORMAT.recoveryStagingKind
+          ? record.recoveryDraft
+          : record.kind === FORMAT.recordKind ? record.recoveryDraft : null;
+        if (encryptedDraft === null) continue;
+        let draft;
+        try {
+          draft = await cryptoContract().openContent(
+            encryptedDraft.record,
+            record.deviceWrappingKey,
+            encryptedDraft.context
+          );
+        } catch (_error) {
+          throw deviceStoreError("recovery-staging-draft-invalid");
+        }
+        if (draft && draft.recoveryAttemptId === recoveryAttemptId) {
+          if (match !== null) throw deviceStoreError("recovery-attempt-identity-conflict");
+          match = Object.freeze({ record, draft: freezeValue(draft, record.deviceWrappingKey) });
+        }
+      }
+      return match;
+    }
+
+    async function createRecoveryStaging(input) {
+      requireOpen();
+      return driver.transaction("readwrite", async (transaction) => {
+        const syncedPocketId = identifier(input?.syncedPocketId, "device-state-identity-invalid");
+        const current = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        if (current !== undefined) throw deviceStoreError("device-store-already-exists");
+        const record = validateRecoveryStagingRecord(input);
+        if (record.storeRevision !== FORMAT.firstStoreRevision) {
+          throw deviceStoreError("device-store-revision-invalid");
+        }
+        transaction.checkpoint("after-validation-before-write");
+        await transaction.add(record);
+        transaction.checkpoint("after-write-before-commit");
+        return record;
+      });
+    }
+
+    async function replaceRecoveryStaging(syncedPocketIdInput, expectedRevisionInput, input) {
+      requireOpen();
+      const syncedPocketId = identifier(syncedPocketIdInput, "device-state-identity-invalid");
+      const expectedRevision = positiveInteger(
+        expectedRevisionInput,
+        "device-store-revision-invalid"
+      );
+      return driver.transaction("readwrite", async (transaction) => {
+        const found = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        if (found === undefined) throw deviceStoreError("device-store-not-found");
+        const current = validateRecoveryStagingRecord(found);
+        if (current.storeRevision !== expectedRevision) {
+          throw deviceStoreError("device-store-revision-conflict");
+        }
+        const next = validateRecoveryStagingRecord(input);
+        if (expectedRevision >= Number.MAX_SAFE_INTEGER
+            || next.storeRevision !== expectedRevision + 1
+            || next.syncedPocketId !== current.syncedPocketId
+            || next.deviceId !== current.deviceId) {
+          throw deviceStoreError("device-store-revision-invalid");
+        }
+        transaction.checkpoint("after-validation-before-write");
+        await transaction.put(next);
+        transaction.checkpoint("after-write-before-commit");
+        return next;
+      });
+    }
+
+    async function promoteRecoveryStaging(syncedPocketIdInput, expectedRevisionInput, input) {
+      requireOpen();
+      const syncedPocketId = identifier(syncedPocketIdInput, "device-state-identity-invalid");
+      const expectedRevision = positiveInteger(
+        expectedRevisionInput,
+        "device-store-revision-invalid"
+      );
+      return driver.transaction("readwrite", async (transaction) => {
+        const found = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        if (found === undefined) throw deviceStoreError("device-store-not-found");
+        const current = validateRecoveryStagingRecord(found);
+        if (current.storeRevision !== expectedRevision) {
+          throw deviceStoreError("device-store-revision-conflict");
+        }
+        const next = validateRecord(input);
+        if (expectedRevision >= Number.MAX_SAFE_INTEGER
+            || next.storeRevision !== expectedRevision + 1
+            || next.syncedPocketId !== current.syncedPocketId
+            || next.deviceId !== current.deviceId) {
+          throw deviceStoreError("device-store-revision-invalid");
+        }
+        transaction.checkpoint("after-validation-before-write");
+        await transaction.put(next);
+        transaction.checkpoint("after-write-before-commit");
+        return next;
+      });
     }
 
     async function createPocket(input) {
@@ -542,8 +732,13 @@ and a narrow atomic transaction boundary without activating a synced owner.
       open: openStore,
       readPocket,
       readActivation,
+      readStoredRecord,
+      readRecoveryAttempt,
       createPocket,
       replacePocket,
+      createRecoveryStaging,
+      replaceRecoveryStaging,
+      promoteRecoveryStaging,
       close: closeStore,
     });
   }
@@ -754,6 +949,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     FORMAT,
     MIGRATION_POLICY,
     validateRecord,
+    validateRecoveryStagingRecord,
     migrateRecord,
     validateReplacement,
     createStore,
@@ -761,9 +957,17 @@ and a narrow atomic transaction boundary without activating a synced owner.
     open: () => getDefaultStore().open(),
     readPocket: (syncedPocketId) => getDefaultStore().readPocket(syncedPocketId),
     readActivation: (activationId) => getDefaultStore().readActivation(activationId),
+    readStoredRecord: (syncedPocketId) => getDefaultStore().readStoredRecord(syncedPocketId),
+    readRecoveryAttempt: (recoveryAttemptId) => getDefaultStore()
+      .readRecoveryAttempt(recoveryAttemptId),
     createPocket: (record) => getDefaultStore().createPocket(record),
     replacePocket: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .replacePocket(syncedPocketId, expectedStoreRevision, record),
+    createRecoveryStaging: (record) => getDefaultStore().createRecoveryStaging(record),
+    replaceRecoveryStaging: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
+      .replaceRecoveryStaging(syncedPocketId, expectedStoreRevision, record),
+    promoteRecoveryStaging: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
+      .promoteRecoveryStaging(syncedPocketId, expectedStoreRevision, record),
     close: () => getDefaultStore().close(),
   });
 })(typeof window !== "undefined" ? window : globalThis);

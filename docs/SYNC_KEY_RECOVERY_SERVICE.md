@@ -65,7 +65,7 @@ The response exposes the public derivation metadata but not the stored verifier 
 
 `finishRecovery` requires the bound ceremony/device/version, verifies the recovery proof, then verifies a new passkey registration. One transaction creates the credential, appends it to the account, creates a normal account session, advances the key set to `rotation-required` and completes the ceremony. The response returns the still-active recovery envelope so the client can unwrap locally. It makes no content-unlocked claim.
 
-An exact finish replay before rotation returns the same credential, still-valid session and recovery envelope. It creates nothing twice. Changed replay fails. Once consumed, that recovery version cannot begin a second ceremony.
+An exact finish replay before rotation returns the same credential, still-valid session and recovery envelope. It creates nothing twice. Changed replay fails. P041 durably stages the exact safe finish continuation before dispatch, so network ambiguity resumes without another proof derivation, passkey, credential or session. Once consumed, that recovery version cannot begin a second ceremony.
 
 ## 8. Rotation-required and atomic rotation
 
@@ -85,7 +85,7 @@ After rotation, the ready key set deliberately clears its consumed recovery-oper
 
 A conflict or failed commit retains the prior complete recovery path. A successful rotation rejects the old locator, removes the old verifier from active state and removes old recovery-envelope ciphertext from service state. Already exfiltrated ciphertext cannot be remotely recalled, which remains an unavoidable limitation.
 
-The response says a replacement recovery copy is required. The service does not generate that package or claim that the human saved it.
+P041 adds the recovered device envelope before rotation and supplies the post-addition key-set version. The response says a replacement recovery copy is required. P041 builds and writes it locally only after the new locator exists; the service does not generate that package or claim that the human saved it.
 
 ## 9. Recovery package boundary
 
@@ -101,6 +101,6 @@ Malformed stored records or relationships fail closed without repair, deletion o
 
 ## 11. Deferred work
 
-P037 must implement the unloaded local orchestration: envelope creation/opening, recovery-package creation and replacement-copy confirmation, extension of the same-origin client transport, and owner-safe staged activation. It must keep roots, master keys and PRF output local.
+P038 supplies the unloaded exact browser communication boundary and P041 supplies dormant local envelope opening, recovery-package replacement and encrypted recovery staging through the existing service methods. P041 stops at `ready-for-adoption` and keeps roots, master keys and PRF output local.
 
-P038 must eventually supply a reviewed production recovery-proof algorithm/adapter together with the real HTTP/cookie, WebAuthn and durable-database adapters, abuse controls and operational rollback policy. P036 supplies none of those and remains undeployed.
+Still required are P042's one synced-owner/Save controller, a reviewed production recovery-proof algorithm/adapter, the real HTTP/cookie, WebAuthn and durable-database adapters, abuse controls and operational rollback policy. The service remains undeployed.

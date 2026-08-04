@@ -379,14 +379,17 @@ operations without activating sync, storage, account, or transport behaviour.
     }
   }
 
-  async function createRecoveryAuthorisationVerifier(secretBytes) {
+  async function createRecoveryAuthorisationVerifier(secretBytes, version = 1) {
+    if (!Number.isSafeInteger(version) || version < 1) {
+      throw cryptoError("recovery-verifier-version-invalid");
+    }
     const salt = randomBytes(FORMAT.hkdfSaltBytes);
     const kdfSalt = encodeBase64Url(salt);
     try {
       const verifier = await deriveRecoveryAuthorisationVerifier(secretBytes, kdfSalt);
       return Object.freeze({
         format: "pocket.sync.recovery-authorisation-verifier.opaque",
-        version: 1,
+        version,
         kdf: FORMAT.kdf,
         kdfSalt,
         derivationVersion: FORMAT.derivationVersion,

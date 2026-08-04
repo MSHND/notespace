@@ -202,12 +202,32 @@ The core starts no background cleanup, timer, queue, polling or retry. Expired/r
 | Malformed or cross-route envelope response | P038 exact allowlists, kind/KDF rules, 48-byte P029 envelope validation and operation/Pocket/envelope correlation reject substituted responses | A compromised same-origin runtime can still observe valid opaque values available to that runtime |
 | HTTP/body disagreement on key mutation | P038 accepts 200 only for exact committed bodies and 409 only for exact conflicts; malformed status/body pairs fail closed | Network failure after dispatch remains ambiguous until an explicit idempotent retry |
 | Recovery verifier disclosure | Recovery begin accepts only public verifier derivation metadata and rejects the stored verifier value or an envelope | The later proof adapter must still protect its internal verification material and abuse boundary |
-| Recovery package or PRF leakage | Exact requests reject package/root fields; P031 registration serialisation removes client-only PRF result bytes before finish recovery transport | Future orchestration must keep the package/root and PRF output out of all service calls |
+| Recovery package or PRF leakage | Exact requests reject package/root fields; P031 registration serialisation removes client-only PRF result bytes before finish recovery transport; P041 keeps package/root encrypted locally and clears transient PRF output | A compromised same-origin runtime can still inspect secrets while deliberately used |
 | Partial verifier/envelope/locator rotation | New records, old revocations, key-set update and immutable result commit together | Operational database rollback could resurrect old state unless deployment rollback policy is designed |
 | Compromised recovery-proof adapter | Exact input/output isolation prevents direct store mutation or secret return | A verifier that falsely approves a proof can authorise account recovery and new passkey creation |
 | Database disclosure of derived verifier | Stored verifier is purpose-specific and distinct from recovery wrapping material | Proof-algorithm strength and offline-guessing resistance remain P038 review work |
 | Authorised malicious envelope replacement | Ownership, version and idempotency remain enforced | An authorised client can deny future unlock by installing unusable encrypted material; the service cannot inspect it |
 | Malformed persisted key/recovery state | Every accessed record and cross-record relationship fails closed without repair/reset | A real adapter needs safe corruption reporting and reviewed restore procedures |
+
+### P041 emergency-recovery orchestration
+
+| Failure or attacker action | P041 enforcement | Remaining boundary |
+| --- | --- | --- |
+| Malicious or swapped recovery package | Exact P028 package validation plus P029 Pocket/envelope AAD and AES-GCM authentication fail closed | A stolen valid package remains intentional recovery authority until rotation |
+| Recovery target changes mid-process | Only `none`/`detached` targets are accepted; opaque continuity is rechecked after asynchronous boundaries | A live adapter must supply a continuity marker that changes reliably |
+| Root, proof or package visible in raw device storage | One P029-encrypted whole recovery draft is the only staging representation; raw-store tests exclude those fields and sentinels | Same-origin compromise able to use the device key can open encrypted drafts |
+| Duplicate credential after ambiguous finish | Exact proof/credential continuation is persisted before dispatch; explicit resume replays finish without WebAuthn | Abandonment before continuation durability cannot be guessed or auto-repaired |
+| Stale or expired ceremony | P038 validates expiry and P041 stops without creating another ceremony automatically | The human must explicitly start a later reviewed recovery attempt |
+| Returned recovery-envelope substitution | Pocket, kind, envelope ID/version and KDF context are authenticated locally by P029 | Compromise of valid old root remains within its intended authority |
+| Content revision changes during recovery | Revision is read immediately before exact-revision download; mismatch stops before envelope addition/rotation | A later explicit resume may observe a new stable revision |
+| Malformed decrypted Pocket | Readable content must pass the injected Pocket-domain validator and is never persisted/returned | The eventual production validator must remain aligned with current Pocket schema rules |
+| Device envelope added but rotation incomplete | Stable encrypted IDs/envelope and key-set version permit explicit continuation; readiness remains false | The device envelope may remain remotely active if recovery is abandoned |
+| Rotation commits but replacement copy is not stored | New root/package/locator remain only in the encrypted draft; resume repeats no remote operation and writes the exact package | Loss of local staged state before copy storage can make recovery authority unavailable |
+| Old copy used after rotation | Service atomically revokes the old locator and erases old active envelope ciphertext | Previously exfiltrated ciphertext cannot be recalled, though its locator no longer starts recovery |
+| Replacement package accidentally uploaded | Exact remote validators reject root/package fields and P041 sends the package only to the injected local writer | A malicious local writer can still disclose the human-authorised package |
+| Duplicate rotation | Pending state precedes dispatch; exact explicit retry uses durable operation identity and P037 recovered-credential authorisation | Network ambiguity remains visible until explicit resume |
+| Stale recovery-draft writer | P030 whole-record compare-and-swap rejects stale staging and promotion | Database rollback may restore an older internally valid encrypted stage |
+| Ready state adopted prematurely | P041 has no owner adapter and returns `adopted: false`; the final record remains `ready-for-adoption` | P042 must enforce one explicit owner/session transition |
 
 ## 10. Abuse and privacy controls
 
@@ -215,9 +235,9 @@ Future service implementation must define conservative limits for ceremony creat
 
 Credential labels and device labels can become personal metadata. If later UI allows them, collection must be optional/minimal, display escaping mandatory and remote retention documented. P028's executable metadata allowlists use opaque IDs and do not admit labels.
 
-## 11. Explicitly out of scope for P027-P039
+## 11. Explicitly out of scope for P027-P041
 
-P027-P039 do not provide:
+P027-P041 do not provide:
 
 - a formal cryptographic proof, global cross-device encryption-use counter or automatic master-key rotation;
 - protection after arbitrary code execution in the active origin/browser/device;

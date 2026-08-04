@@ -290,13 +290,18 @@ test("database, object-store, key-path and record constants are exact", () => {
   });
   assert.deepEqual(plain(apis.deviceStore.FORMAT), {
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 2,
+    recordSchemaVersion: 3,
+    recoveryStagingKind: "pocket.sync.recovery-staging",
+    recoveryStagingSchemaVersion: 1,
     firstStoreRevision: 1,
   });
   assert.deepEqual(plain(apis.deviceStore.MIGRATION_POLICY), {
     currentDatabaseVersion: 1,
-    currentRecordSchemaVersion: 2,
-    registeredRecordMigrations: ["1-to-2-encrypted-activation-draft"],
+    currentRecordSchemaVersion: 3,
+    registeredRecordMigrations: [
+      "1-to-2-encrypted-activation-draft",
+      "2-to-3-encrypted-recovery-draft",
+    ],
     destructiveResetAllowed: false,
   });
 });
@@ -512,7 +517,7 @@ test("top-level kind, fields and schema versions fail closed", () => {
   wrongKind.kind = "other";
   expectValidationCode(() => apis.deviceStore.validateRecord(wrongKind), "device-state-kind-invalid");
   const higher = clone(initial.record);
-  higher.schemaVersion = 3;
+  higher.schemaVersion = 4;
   expectValidationCode(() => apis.deviceStore.migrateRecord(higher), "device-state-schema-unsupported");
   const lower = clone(initial.record);
   lower.schemaVersion = 0;

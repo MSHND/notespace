@@ -2,7 +2,7 @@
 
 ## 1. Scope and status
 
-P030 implements the dormant browser device-store foundation for a future Synced Pocket. P039 extends its strict record with one optional encrypted activation draft and no new store. `js/pocket-sync-device-store.js` remains absent from `index.html` and `sw.js`; it does not create a live synced owner, change Save, show UI, contact a service or alter current JSON/Vault recovery.
+P030 implements the dormant browser device-store foundation for a future Synced Pocket. P039 added one optional encrypted activation draft. P041 adds a strict encrypted emergency-recovery staging variant and one optional encrypted recovery draft, still in the same database and object store. `js/pocket-sync-device-store.js` remains absent from `index.html` and `sw.js`; it does not create a live synced owner, change Save, show UI, contact a service or alter current JSON/Vault recovery.
 
 The store follows Pocket's [product principles](PRODUCT_PRINCIPLES.md): preserve one complete state, keep storage machinery invisible, persist no readable content or raw unlock secret, and use the smallest replaceable mechanism that meets the contract.
 
@@ -22,12 +22,12 @@ This database is separate from `pocketLite.recentFile.v1`, which stores only rec
 
 ## 3. Exact record schema
 
-Record schema version 2 is the following strict whole-record shape. `deviceWrappingKey` is an actual structured-cloned `CryptoKey`, not the displayed placeholder string. `activationDraft` is null outside activation or one P029 encrypted record. Its readable logical fields never appear in raw IndexedDB state.
+Record schema version 3 is the following strict whole-record shape. `deviceWrappingKey` is an actual structured-cloned `CryptoKey`, not the displayed placeholder string. `activationDraft` and `recoveryDraft` are null outside their dormant orchestration or one P029 encrypted record. Their readable logical fields never appear in raw IndexedDB state.
 
 ```json
 {
   "kind": "pocket.sync.device-state",
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "storeRevision": 1,
   "syncedPocketId": "opaque-pocket-id",
   "deviceId": "opaque-device-id",
@@ -86,7 +86,8 @@ Record schema version 2 is the following strict whole-record shape. `deviceWrapp
     "contentEncryptionsOnDevice": 1,
     "envelopeEncryptionsOnDevice": 1
   },
-  "activationDraft": null
+  "activationDraft": null,
+  "recoveryDraft": null
 }
 ```
 
@@ -94,7 +95,7 @@ Unknown fields fail closed. P030 delegates content/envelope/context/key validati
 
 ## 4. Encrypted-only persistent boundary
 
-Persistent state contains only opaque identity/revision metadata, the non-extractable device wrapping key, its encrypted master-key envelope, one encrypted content record, minimal pending/conflict state, encryption-use counters and an optional encrypted activation draft. It contains no readable nodes, labels, Notes, Outline, JSON payload, filename/path/handle, Vault password, plaintext recovery root/package, raw key, PRF output, transfer secret, browser-safety recovery payload, account password/token or UI/search state.
+Persistent state contains only opaque identity/revision metadata, the non-extractable device wrapping key, its encrypted master-key envelope, one encrypted content record, minimal pending/conflict state, encryption-use counters and optional encrypted activation/recovery drafts. It contains no readable nodes, labels, Notes, Outline, JSON payload, filename/path/handle, Vault password, plaintext recovery root/package, raw key, PRF output, transfer secret, browser-safety recovery payload, account password/token or UI/search state.
 
 During P039 activation, the draft may temporarily contain the recovery root and complete local-only recovery package inside ciphertext. P029 seals that draft with the non-extractable device key and binds it to the Pocket ID and current `storeRevision`. After recovery-copy confirmation, P039 replaces the draft with a cleaned state containing neither value before owner adoption. The raw record never exposes either temporary value.
 
@@ -108,7 +109,9 @@ Initial creation requires `storeRevision: 1` and IndexedDB `add` semantics, so i
 
 Success is reported only after the IndexedDB transaction `complete` event, not after an individual `add` or `put` request. Request failure, validation failure, stale comparison, abort or interruption therefore leaves the previous whole record unchanged. A stale tab receives `device-store-revision-conflict` and cannot silently overwrite the winner. P030 adds no tab election, lease, polling, timer or background reconciliation.
 
-Reading returns `null` for an absent Pocket and otherwise returns only a fully validated record. `readActivation(activationId)` scans the same one store, opens candidate drafts through P029 and requires one matching encrypted identity; it adds no index or plaintext lookup record. Malformed, duplicate, plaintext-bearing and unsupported-version records fail closed without repair, weakening or automatic deletion.
+Reading returns `null` for an absent Pocket and otherwise returns only a fully validated record. `readActivation(activationId)` and `readRecoveryAttempt(recoveryAttemptId)` scan the same one store, open candidate drafts through P029 and require one matching encrypted identity; they add no index or plaintext lookup record. Malformed, duplicate, plaintext-bearing and unsupported-version records fail closed without repair, weakening or automatic deletion.
+
+P041 recovery begins with the separate strict record kind `pocket.sync.recovery-staging`. It is keyed by the opaque Pocket ID but cannot pass ordinary-device validation because it has no device envelope or content before the master key is recovered. It contains exactly the device key and one encrypted draft. `createRecoveryStaging` is insert-only, `replaceRecoveryStaging` is compare-and-swap, and `promoteRecoveryStaging` atomically replaces it with one fully valid ordinary device record. No plaintext marker, second store or fallback storage is used.
 
 ## 6. Remote and usage invariants
 
@@ -118,7 +121,7 @@ Per-device content and envelope encryption counters are durable, monotonic withi
 
 ## 7. Versions and migrations
 
-Database version 1 remains unchanged. Record schema version 2 is current. The one registered `1-to-2-encrypted-activation-draft` migration validates the complete schema-1 record and returns the same state with `activationDraft: null`; it does not reset, rewrite or weaken the record. Unknown higher versions and lower versions without an explicit version-by-version migration fail closed.
+Database version 1 remains unchanged. Record schema version 3 is current. The registered migrations are `1-to-2-encrypted-activation-draft` and `2-to-3-encrypted-recovery-draft`. Each validates the complete prior record and adds only its new nullable encrypted-draft field. Neither resets, rewrites or weakens existing content. Unknown higher versions and lower versions without an explicit version-by-version migration fail closed.
 
 Every P039 stage update re-encrypts the complete draft and replaces the whole record through the existing compare-and-swap transaction. Remote success is not advanced in the draft until that replacement commits. A stale local writer therefore cannot move activation backwards or overwrite a newer confirmed stage.
 
@@ -134,4 +137,4 @@ This record is the encrypted durable device representation of a future Synced Po
 
 The state machine uses a narrow injected transaction driver. A future desktop or native shell may replace the IndexedDB driver while preserving this exact record, validation, insert-only creation, transaction-completion and compare-and-swap contract. P030 does not add a shell.
 
-P039 now supplies dormant activation/adoption orchestration through injected seams. Still unimplemented are the live synced owner and Save integration, UI, real HTTP/cookie/database adapters, emergency recovery on a new device, transfer UI, whole-account usage enforcement/key rotation, conflict UX, synced-owner browser recovery, storage-persistence UX and all production loading.
+P039/P040 supply dormant activation/adoption staging and P041 supplies dormant emergency recovery through injected seams. Still unimplemented are the live synced owner and Save integration, UI, real HTTP/cookie/database adapters, transfer UI, whole-account usage enforcement/key rotation, conflict UX, synced-owner browser recovery, storage-persistence UX and all production loading.

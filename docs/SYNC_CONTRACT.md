@@ -28,6 +28,8 @@ P039 adds the concrete dormant local activation orchestrator. It saves and freez
 
 P040 finalises that dormant owner hand-off correctly. Source-session checks remain mandatory through the last pre-adoption check. Once the owner adapter succeeds, the old JSON/Vault session is intentionally retired; the final encrypted `adopted` marker uses P030 compare-and-swap without consulting it. A valid adopted replay likewise needs no former local source.
 
+P041 adds dormant emergency-recovery orchestration for an empty or detached new device. It validates a local-only recovery package, stages encrypted continuation before every remote operation, creates one recovery passkey, opens the old recovery envelope and current content locally, adds the new device envelope, rotates recovery, confirms the replacement local copy and promotes one P030 record to `ready-for-adoption`. It does not adopt an owner or change Save. See [Synced Pocket emergency-recovery orchestration](SYNC_EMERGENCY_RECOVERY_ORCHESTRATION.md).
+
 ## 2. Two human modes
 
 ### Local Pocket
@@ -75,11 +77,11 @@ A separately designed Pocket master key will protect readable Pocket content. It
 
 P028 now locks that split: a passkey authenticates the account; a separately generated random 256-bit master key protects content; and independent `device`, optional `passkey-prf`, `device-transfer` and `recovery` envelopes unlock that key locally. A passkey assertion alone is never the content key. PRF is usable only when an actual ceremony returns valid output, and that output remains client-only.
 
-The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 supplies the strict unloaded WebAuthn client ceremony boundary; P034 supplies strict ceremony/account/session persistence; and P036 supplies strict remote envelope/recovery state around injected verifiers. Real verifier/HTTP/cookie/database adapters, local credential-bound envelope orchestration and whole-account key-use enforcement/rotation remain unimplemented and require later review.
+The concrete cryptographic algorithm/parameter selection is locked and tested by P029. P030 durably enforces per-device use counters below that policy ceiling. P031 supplies the strict unloaded WebAuthn client ceremony boundary; P034 supplies strict ceremony/account/session persistence; and P036 supplies strict remote envelope/recovery state around injected verifiers. P039 and P041 provide dormant local activation/recovery envelope orchestration. Real verifier/HTTP/cookie/database adapters, additional-device orchestration and whole-account key-use enforcement/rotation remain unimplemented and require later review.
 
 ## 6. Emergency recovery is mandatory
 
-P039 implements the dormant activation half of the locked recovery architecture. Activation creates a local random recovery root of at least 256 bits, a separately derived account-recovery verifier, a separately derived master-key wrapping envelope and a local-only recovery package. The raw root and package are never uploaded. Emergency recovery on a new device remains deferred.
+P039 implements the dormant activation half of the locked recovery architecture. Activation creates a local random recovery root of at least 256 bits, a separately derived account-recovery verifier, a separately derived master-key wrapping envelope and a local-only recovery package. The raw root and package are never uploaded. P041 implements the dormant new-device recovery half through an injected proof adapter, rotates the recovery authority and confirms the replacement local copy, but stops before owner adoption.
 
 The human must save the recovery copy. Choosing **I’ll do this later** pauses activation and preserves the current JSON/Vault owner. It cannot show **Sync is ready**. Successful emergency recovery rotates the root, verifier and envelope, invalidates the old recovery authorisation and requires a replacement recovery copy.
 
@@ -206,7 +208,7 @@ The separately unloaded `PocketSyncSecurityContract` exposes version/policy cons
 
 The separately unloaded `PocketSyncCrypto` exposes strict format/context/key validation, device and HKDF wrapping-key creation, purpose-separated recovery-verifier derivation, master-key bundle creation/opening/rewrapping, and content sealing/opening. It uses Web Crypto only and performs no storage, DOM, account or network work.
 
-The separately unloaded `PocketSyncDeviceStore` exposes strict record validation/migration, one IndexedDB driver and a narrow injected transaction state machine for read, encrypted activation lookup, insert-only creation and whole-record replacement. Schema 2 adds only an optional P029-encrypted activation draft; schema-1 records remain readable. It performs no DOM, account, network, worker, timer or owner-adoption work.
+The separately unloaded `PocketSyncDeviceStore` exposes strict record validation/migration, one IndexedDB driver and a narrow injected transaction state machine for read, encrypted activation/recovery lookup, insert-only creation and whole-record replacement/promotion. Schema 3 adds only an optional P029-encrypted recovery draft after schema 2's activation draft; schema-1 and schema-2 records remain readable. It performs no DOM, account, network, worker, timer or owner-adoption work.
 
 The separately unloaded `PocketSyncAccountClient` exposes strict request/response and WebAuthn option/credential validators, native/fallback WebAuthn JSON conversion, local-only PRF-result inspection, one browser adapter and one injected four-method account-service client. P039 adds a safe registration-finish continuation so a committed-but-ambiguous finish can be explicitly resumed without another passkey creation. It performs no storage, encryption, DOM UI, network transport, owner adoption or content unlock.
 
@@ -216,10 +218,12 @@ The dormant CommonJS `sync-service/pocket-sync-service-core.js` exports frozen `
 
 The separately unloaded `PocketSyncActivation` exports frozen `POLICY` and `createActivationOrchestrator`; the created surface is exactly `activate` and `resume`. It owns no UI, source writer, recovery-copy format, transport, service session or live owner implementation.
 
+The separately unloaded `PocketSyncEmergencyRecovery` exports frozen `POLICY` and `createRecoveryOrchestrator`; the created surface is exactly `recover` and `resume`. It owns no UI, proof algorithm, file picker/writer, transport, service session or live owner implementation.
+
 ## 15. Locked architecture and deferred implementation
 
 P028 locks the provider-neutral account/content-key split, envelope kinds, unlock order, mandatory recovery, trusted-device allowlist, remote-safe metadata boundary, conditional revision/idempotency semantics, additional-device architecture and conceptual account/credential/envelope/recovery/deletion operations.
 
-Before production integration, later work must supply and review the real WebAuthn verifier, HTTP/header/cookie adapter, durable database transaction adapter and abuse controls around P034; credential-bound envelope orchestration; live-owner use of the dormant device store; whole-account encryption-use enforcement/rotation; recovery/device-transfer UI; conflict review; deletion/retention operations; and synced-owner browser recovery. No provider, endpoint origin or infrastructure has been selected.
+Before production integration, later work must supply and review the real WebAuthn/recovery-proof verifier adapters, HTTP/header/cookie adapter, durable database transaction adapter and abuse controls around P034; one live synced-owner/Save controller for activation-ready and recovery-ready device records; whole-account encryption-use enforcement/rotation; recovery/device-transfer UI; conflict review; deletion/retention operations; and synced-owner browser recovery. No provider, endpoint origin or infrastructure has been selected.
 
 Only after those implementations pass focused security and ownership review should the unloaded P027/P028 contracts be adapted behind production ownership and Save seams.

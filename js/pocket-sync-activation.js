@@ -468,6 +468,7 @@ without adding UI, a live synced owner, background work, or deployment state.
       remote: changes?.remote || record.remote,
       usage: changes?.usage || record.usage,
       activationDraft: record.activationDraft,
+      recoveryDraft: record.recoveryDraft,
     };
   }
 
@@ -1221,6 +1222,7 @@ without adding UI, a live synced owner, background work, or deployment state.
             },
             usage: execution.initialUsage,
             activationDraft: null,
+            recoveryDraft: null,
           };
           await checked(execution, config.deviceStore.open());
           if (await checked(execution, config.deviceStore.readPocket(options.syncedPocketId)) !== null) {

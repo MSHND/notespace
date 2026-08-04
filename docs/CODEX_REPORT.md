@@ -1,5 +1,97 @@
 # Codex report
 
+## POCKET TASK P041 - BUILD DORMANT EMERGENCY RECOVERY ORCHESTRATION
+
+Title: Build dormant emergency recovery orchestration
+
+Status: P041 joins the actual P028-P040 browser and service boundaries in one dormant new-device recovery conductor. It validates a local recovery package, stages encrypted continuation before remote work, creates one recovery passkey, opens and validates current content locally, adds the recovered device envelope, rotates recovery, confirms the replacement local copy and stops at a durable non-authoritative `ready-for-adoption` state.
+
+Commit title:
+
+- `P041 Build dormant emergency recovery orchestration`
+
+### Baseline and scope
+
+- Repository: `MSHND/notespace`
+- Fetched and confirmed starting `origin/main`: `1b555cef14190f007c23939d28211e7502ec5bf0`
+- Starting title: `P040 Finalise owner adoption after source retirement`
+- Implementation date: 2026-08-04
+- Branch: `main`
+- New frozen production export: `PocketSyncEmergencyRecovery.POLICY` and `createRecoveryOrchestrator`.
+- Created orchestrator surface: exactly asynchronous `recover` and `resume`.
+- P041 remains absent from every production loader and supplies no UI, proof algorithm, live owner or Save integration.
+
+### Recovery conductor
+
+- Only an exact `none` or `detached` target can start. The opaque target continuity is rechecked after asynchronous boundaries, and destination permission for the replacement recovery copy is obtained before keys, staging, WebAuthn or remote recovery.
+- The P028 recovery package is strictly rebuilt/validated. Its root and locator remain local and enter only the P029-encrypted recovery draft.
+- Proof derivation remains an exact injected one-method boundary. P031's production browser adapter and registration serialiser are exercised; raw PRF output remains transient, is cleared best-effort and creates no P041 passkey-PRF envelope.
+- Begin and finish requests are durably staged before dispatch. Exact explicit replay after ambiguity uses the same request and creates no second proof, credential or session.
+- P029 authenticates the old recovery envelope locally before content service access. The current revision and download are correlated, decrypted locally and passed through an injected structural Pocket validator; readable payload is never stored or returned.
+- One new device envelope is created and committed with stable idempotency identity. A fresh distinct root produces independently salted next-version verifier and recovery envelope material. Rotation uses the post-device-add key-set version and the recovered credential's completed recovery operation.
+- The old locator is rejected after committed rotation, old recovery-envelope ciphertext is erased remotely, and the replacement locator starts the next valid recovery authority.
+- Replacement-copy failure pauses after remote rotation with the exact package encrypted locally. Resume requests a fresh in-memory destination, writes the same package and repeats no remote work.
+
+### P030 staging and final cleanup
+
+- P030 record schema 3 adds nullable encrypted `recoveryDraft`; schema-1 and schema-2 records migrate non-destructively.
+- One strict `pocket.sync.recovery-staging` variant uses the existing database/object store, a non-extractable device key, whole-draft P029 encryption and compare-and-swap. It never pretends that incomplete recovery is an ordinary device record.
+- `createRecoveryStaging`, `replaceRecoveryStaging` and `promoteRecoveryStaging` keep insertion, continuation and final promotion atomic. Recovery-attempt lookup reads both staging and final ordinary encrypted drafts and rejects duplicate identities.
+- Final promotion retains the new device envelope, authenticated encrypted content and confirmed revision. The safe encrypted `ready-for-adoption` draft removes old/new roots and packages, both locators, proof, challenge/begin/finish credential continuation, PRF output, recovery-envelope ciphertext and readable payload.
+- Ready-state replay is inert and returns `adopted: false`. No owner adapter exists in P041.
+- P029's recovery-verifier helper now accepts an explicit positive version while retaining version 1 as the default used by P039.
+
+### Files changed
+
+- `js/pocket-sync-emergency-recovery.js`
+- `js/pocket-sync-device-store.js`
+- `js/pocket-sync-crypto.js`
+- `js/pocket-sync-activation.js`
+- `tests/p041-emergency-recovery.test.js`
+- `tests/p030-sync-device-store.test.js`
+- `docs/SYNC_EMERGENCY_RECOVERY_ORCHESTRATION.md`
+- `docs/SYNC_DEVICE_STORE.md`
+- `docs/SYNC_KEY_RECOVERY_SERVICE.md`
+- `docs/SYNC_KEY_RECOVERY_REMOTE_CLIENT.md`
+- `docs/SYNC_SECURITY_ARCHITECTURE.md`
+- `docs/SYNC_THREAT_MODEL.md`
+- `docs/SYNC_CONTRACT.md`
+- `docs/SYNC_USER_JOURNEY.md`
+- `docs/CODEX_REPORT.md`
+
+### Production compatibility and validation
+
+- The primary P041 path uses the actual P039/P040 activation orchestrator to create initial encrypted content and a valid recovery package, then recovers through actual P028 security validation, P029 Web Crypto, P030 device stores, P031 browser adapter/serialiser, P038 clients and P034-P037 service core with deterministic test-only store/verifier/proof seams.
+- It proves one new credential/session, authenticated old-envelope/content opening, one new device envelope, one recovery rotation, old-locator rejection, replacement-locator authority, replacement-copy confirmation, final device-envelope reopening and absence of readable content/root/package/proof from raw local/remote state.
+- `tests/p041-emergency-recovery.test.js`: 22 passed, 0 failed.
+- `tests/p040-owner-adoption-finalisation.test.js`: 9 passed, 0 failed.
+- `tests/p039-sync-activation.test.js`: 22 passed, 0 failed.
+- `tests/p038-key-recovery-remote-client.test.js`: 11 passed, 0 failed.
+- `tests/p037-recovery-replay-authorisation.test.js`: 4 passed, 0 failed.
+- `tests/p036-key-recovery-service-core.test.js`: 19 passed, 0 failed.
+- `tests/p035-rp-id-hardening.test.js`: 4 passed, 0 failed.
+- `tests/p034-sync-service-core.test.js`: 33 passed, 0 failed.
+- `tests/p032-sync-remote-client.test.js`: 33 passed, 0 failed.
+- `tests/p031-sync-account-client.test.js`: 27 passed, 0 failed.
+- `tests/p030-sync-device-store.test.js`: 29 passed, 0 failed.
+- `tests/p029-sync-crypto.test.js`: 25 passed, 0 failed.
+- `tests/p028-sync-security-contract.test.js`: 27 passed, 0 failed.
+- `tests/p027-sync-contract.test.js`: 36 passed, 0 failed.
+- `tests/p019-vault-ownership.test.js`: 148 passed, 0 failed.
+- `tests/pe-persistence-contract.test.js`: 96 passed, 0 failed.
+- `tests/device-changes-resolution.test.js`: 69 passed, 0 failed.
+- `tests/p018-popout-isolation.test.js`: 15 passed, 0 failed.
+- Total: 629 passed, 0 failed.
+- `node --check` passed for all six changed JavaScript files.
+- `git diff --check` passed.
+- The prohibited `node tools/pocket-check.js` and `npm run check` commands were not run.
+
+No production recovery-proof algorithm, UI, live owner, Main Save/PE Save change, HTTP server/adapter, database, provider, host/domain/origin selection, deployment file, dependency, browser loader, service-worker change, timer, worker, polling or background retry was added. Physical browser acceptance is not applicable because P041 remains dormant and unloaded.
+
+### Recommended P042 boundary
+
+Build one dormant synced-owner and explicit Save controller able to adopt either a P039/P040 activation-ready device record or a P041 recovery-ready device record. Preserve one owner/session authority and one device-first explicit Save path. Keep UI, deployment and the reviewed recovery-proof adapter separate.
+
 ## POCKET TASK P040 - FINALISE OWNER ADOPTION AFTER THE SOURCE SESSION IS RETIRED
 
 Title: Finalise owner adoption after source retirement

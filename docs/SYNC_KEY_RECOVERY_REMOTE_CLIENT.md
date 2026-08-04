@@ -39,6 +39,8 @@ The module generates, derives, wraps and unwraps no keys. It creates no proof or
 
 Focused tests run the production client in a VM against the actual P036/P037 service core and deterministic P034 store through a test-only in-process transport. All eight operations, a stored committed replay and a durable conflict pass both production boundaries.
 
-## P039 boundary
+## P039-P041 orchestration status
 
-P039 should provide reviewed local orchestration: local key/recovery-root generation, P029 wrapping/unwrapping, recovery-package creation and confirmation, device-first persistence, explicit staged activation and owner-safe cancellation. It must still not deploy a service. The real HTTP/cookie adapter, WebAuthn/recovery-proof adapters, durable database, selected origin and deployment controls remain separate work.
+P039/P040 provide dormant device-first activation and the final source-authority transition. P041 now uses the exact P038 content, envelope and recovery services for dormant emergency recovery: it stages before begin/finish, unwraps locally, validates encrypted content, adds a device envelope, rotates recovery and confirms the replacement local copy. It creates no second transport and leaves P038 request/response shapes unchanged.
+
+P041 stops at `ready-for-adoption` and remains unloaded. P042 must provide the one dormant synced-owner/Save controller. The real HTTP/cookie adapter, WebAuthn/recovery-proof adapters, durable database, selected origin and deployment controls remain separate work.

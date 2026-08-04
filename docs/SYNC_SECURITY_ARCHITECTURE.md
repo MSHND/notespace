@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034-P037 supply the dormant service state machines, P038 aligns the unloaded browser client with their key-envelope/recovery methods, and P039 joins them in one dormant local activation flow. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
+P028 locks the provider-neutral security, device-storage and recovery design for the future Synced Pocket. P029 supplies its concrete Web Crypto foundation, P030 supplies the concrete encrypted browser device store, P031 supplies the strict account/passkey client ceremony boundary, P032 supplies the strict same-origin remote transport plus account/content adapters, P034-P037 supply the dormant service state machines, P038 aligns the unloaded browser client with their key-envelope/recovery methods, P039/P040 provide dormant activation authority transition, and P041 provides dormant emergency-recovery orchestration up to `ready-for-adoption`. All implementation modules remain unloaded or undeployed. None enables sync, adds a production account, contacts a service at module load, selects infrastructure or changes current local JSON/Vault ownership and recovery.
 
 The product contract assumes a Pocket-owned account/sync service: Pocket controls the human-facing account relationship and security policy. That does not select or expose any hosting, storage or identity provider.
 
@@ -62,7 +62,7 @@ P035 makes the version-1 WebAuthn RP policy deliberately narrower than WebAuthn'
 
 P036 enforces key-set compare-and-swap, active/ciphertext-free revoked envelope records, durable key-operation idempotency, opaque recovery locators, proof/passkey recovery ceremonies, single-use `rotation-required` state and atomic verifier/envelope/locator rotation. The service never receives the root, master key or PRF output. See [Synced Pocket key-envelope and recovery service core](SYNC_KEY_RECOVERY_SERVICE.md).
 
-The aligned client/core still do not implement a real WebAuthn verifier, recovery-proof algorithm, HTTP/header/cookie adapter, durable database, rate limiting, deployment, selected same-origin service origin, local cryptographic/recovery-package orchestration, device transfer or deletion. No sync module is production-loaded and no synced owner exists.
+The aligned client/core still do not implement a real WebAuthn verifier, recovery-proof algorithm, HTTP/header/cookie adapter, durable database, rate limiting, deployment, selected same-origin service origin, device transfer or deletion. P039 and P041 implement local cryptographic/package orchestration only behind dormant injected boundaries. No sync module is production-loaded and no synced owner exists.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 
@@ -206,7 +206,9 @@ The service relays opaque pairing messages only. It never receives plaintext Poc
 
 P028 does not change the current browser safety-copy model, Vault recovery prompt, JSON/Vault file format, Vault crypto, Main Save, PE Save, P016/P017 gates or source-session checks. P027 remains unloaded. No synced secrets enter truth JSON, Vault files, node data, local-source recovery payloads or historical filenames.
 
-Future synced recovery must be implemented as a separately versioned encrypted device record behind the existing one-owner discipline. It must not cause current local safety data to be uploaded or repurposed.
+P041 implements synced emergency recovery as a separately versioned encrypted same-store staging record behind the existing one-owner discipline. The old root opens the returned recovery envelope locally, current content decrypts and validates locally, and new device/recovery envelopes are created locally. Only opaque proof, safe credential and ciphertext reach the service. Current local safety data is neither uploaded nor repurposed.
+
+The final P041 record remains non-authoritative at `ready-for-adoption`; it contains a safe encrypted recovery draft but no root, package, locator, proof, challenge or credential continuation. A later explicit owner transition is required.
 
 ## 13. Remaining implementation review gates
 
@@ -215,7 +217,7 @@ The architecture, concrete cryptographic format and dormant initial-activation o
 - live-owner integration of the versioned P030 device store, plus whole-account encryption-use enforcement and master-key rotation consistent with the P029 format and vectors;
 - the real WebAuthn verifier adapter for P034's ceremony state machine;
 - an actual same-origin HTTP/header/cookie adapter and durable database implementation around P034, plus abuse limits and operational recovery;
-- P040 emergency-recovery orchestration on a new device, then additional-device and recovery UI with abuse/rate controls;
+- P042 synced-owner/Save integration for activation-ready and recovery-ready device records, then additional-device and recovery UI with abuse/rate controls;
 - conflict review and account deletion UI;
 - synced-owner integration behind the existing ownership/Save seams; and
 - security review for origin policy, content security, dependencies and operational controls.
