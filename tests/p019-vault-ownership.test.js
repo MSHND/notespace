@@ -902,6 +902,8 @@ function createVaultContext(options = {}) {
     "js/pocket-crypto.js",
     "js/pocket-vault.js",
     "js/pocket-vault-io-browser.js",
+    "js/pocket-sync-owner-controller.js",
+    "js/pocket-owner-save-boundary.js",
     "js/pocket-file-opening.js",
     "js/pocket-vault-recovery-viewer.js",
     "js/pocket-vault-recovery.js",

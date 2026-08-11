@@ -511,6 +511,7 @@ function createIntegrationContext(options = {}) {
     "js/pocket-history-status.js",
     "js/pocket-io-browser.js",
     DEVICE_CHANGES_SOURCE,
+    "js/pocket-owner-save-boundary.js",
     "js/pocket-node-popout-model.js",
     "js/pocket-node-popout-target.js",
     "js/pocket-node-popout-editor.js",

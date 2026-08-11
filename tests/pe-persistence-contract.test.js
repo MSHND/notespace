@@ -23,6 +23,7 @@ const FULL_CONTRACT_SCRIPTS = CORE_INDEX_SCRIPTS.concat([
   "js/pocket-history-status.js",
   "js/pocket-io-browser.js",
   "js/pocket-device-changes.js",
+  "js/pocket-owner-save-boundary.js",
   "js/pocket-node-popout-model.js",
   "js/pocket-node-popout-target.js",
   "js/pocket-node-popout-editor.js",

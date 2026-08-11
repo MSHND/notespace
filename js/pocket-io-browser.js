@@ -132,7 +132,7 @@ function pocketFileState() {
   if (typeof state.pocketFile.detachedDeviceChanges !== "boolean") {
     state.pocketFile.detachedDeviceChanges = false;
   }
-  if (!["none", "json", "vault", "detached"].includes(state.pocketFile.ownerKind)) {
+  if (!["none", "json", "vault", "synced", "detached"].includes(state.pocketFile.ownerKind)) {
     state.pocketFile.ownerKind = state.pocketFile.detachedDeviceChanges === true
       ? "detached"
       : (truthFileHandle ? "json" : "none");
@@ -330,8 +330,8 @@ function setPocketFileSession(handle, displayName, options = {}) {
     && options.pipSession !== true;
   const nextPip = options.pipSession === true;
   const requestedKind = cleanText(options.ownerKind, 24);
-  const nextOwnerKind = requestedKind === "vault"
-    ? "vault"
+  const nextOwnerKind = requestedKind === "vault" || requestedKind === "synced"
+    ? requestedKind
     : (nextDetached ? "detached" : ((nextHandle || nextPip) ? "json" : "none"));
   const vaultContract = window.PocketVault;
   if (nextOwnerKind === "vault") {
@@ -351,8 +351,11 @@ function setPocketFileSession(handle, displayName, options = {}) {
   if (nextOwnerKind === "vault" && !nextVaultSessionId) {
     throw new Error("Pocket could not verify the unlocked Vault session.");
   }
-  const nextWritable = !!nextHandle || nextPip;
+  const nextWritable = !!nextHandle || nextPip || nextOwnerKind === "synced";
   const session = pocketFileState();
+  if (session.ownerKind === "synced" && nextOwnerKind !== "synced") {
+    window.PocketOwnerSaveBoundary?.retireSyncedOwner?.();
+  }
   const targetChanged = truthFileHandle !== nextHandle
     || session.writable !== nextWritable
     || session.pipSession !== nextPip
@@ -406,6 +409,7 @@ function clearPocketFileSession(options = {}) {
     || session.detachedDeviceChanges === true
     || session.ownerKind !== "none"
     || !!session.vaultSessionId;
+  if (session.ownerKind === "synced") window.PocketOwnerSaveBoundary?.retireSyncedOwner?.();
   truthFileHandle = null;
   session.writable = false;
   session.displayName = "";
@@ -547,6 +551,8 @@ function adoptPocketDocumentFromPip(snapshot) {
 function canShowPocketTree() {
   const session = pocketFileState();
   return hasWritablePocketFile()
+    || (session.ownerKind === "synced"
+      && window.PocketOwnerSaveBoundary?.hasSyncedOwner?.() === true)
     || (isPipMode && session.pipSession === true)
     || session.detachedDeviceChanges === true;
 }
@@ -1035,8 +1041,8 @@ async function writeTruthFile(payload, options = {}) {
   }
   const expectedSession = options.expectedSession || null;
   const ownerKind = expectedSession?.ownerKind || pocketDocumentOwnerKind();
-  if (ownerKind === "vault") {
-    return { ok: false, reason: "vault-encrypted-owner" };
+  if (ownerKind === "vault" || ownerKind === "synced") {
+    return { ok: false, reason: ownerKind === "vault" ? "vault-encrypted-owner" : "synced-encrypted-owner" };
   }
   const activeHandle = expectedSession ? expectedSession.handle : truthFileHandle;
   const expectedSessionIsCurrent = () => !expectedSession || isPocketFileSaveSessionCurrent(expectedSession);
@@ -1454,7 +1460,7 @@ async function exportTree(options = {}) {
         permissionPending ? "file-permission-pending" : "no-pocket-file"
       );
     }
-    if (saveSession.ownerKind !== "vault" && shouldPauseForStaleExportGuard(options)) {
+    if (!["vault", "synced"].includes(saveSession.ownerKind) && shouldPauseForStaleExportGuard(options)) {
       return exportTreeResult(options, false, "stale-guard");
     }
     const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
@@ -1474,24 +1480,26 @@ async function exportTree(options = {}) {
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, "no-changes");
     }
-    // Freeze a point-in-time snapshot so edits during save are not mixed
-    // into this payload and their ops are preserved as unsaved.
-    const payload = buildPocketPayload(nowIso());
-    if (saveSession.ownerKind !== "vault") saveLastSaveSnapshot(payload);
+    // The boundary invokes this once. Synced Save passes it straight to P042.
+    let payload = null;
+    const freezePayload = () => {
+      if (payload === null) {
+        payload = buildPocketPayload(nowIso());
+        if (!["vault", "synced"].includes(saveSession.ownerKind)) saveLastSaveSnapshot(payload);
+      }
+      return payload;
+    };
     state.activeSaveOperationCeiling = saveStartHighestSequence;
     let writeResult;
     try {
-      if (saveSession.ownerKind === "vault") {
-        const vaultIo = window.PocketVaultBrowserIo;
-        writeResult = vaultIo && typeof vaultIo.writeActiveVaultPayload === "function"
-          ? await vaultIo.writeActiveVaultPayload(payload, {
-            expectedSession: saveSession,
-            vaultDialogToken: options.vaultDialogToken,
-          })
-          : { ok: false, reason: "vault-locked" };
-      } else {
-        writeResult = await writeTruthFile(payload, { expectedSession: saveSession });
-      }
+      const boundary = window.PocketOwnerSaveBoundary;
+      writeResult = boundary && typeof boundary.save === "function"
+        ? await boundary.save({
+          expectedSession: saveSession,
+          freezePayload,
+          vaultDialogToken: options.vaultDialogToken,
+        })
+        : { ok: false, reason: "owner-save-boundary-unavailable" };
     } finally {
       state.activeSaveOperationCeiling = 0;
     }
@@ -1506,7 +1514,7 @@ async function exportTree(options = {}) {
       return exportTreeResult(options, false, "file-session-changed");
     }
     if (writeResult.ok) {
-      if (saveSession.ownerKind === "vault") {
+      if (["vault", "synced"].includes(saveSession.ownerKind)) {
         if (typeof markVaultSavedNow === "function") markVaultSavedNow();
       } else {
         markSavedNow(payload);
@@ -1527,8 +1535,10 @@ async function exportTree(options = {}) {
           writtenPayload: payload,
           coveredSequence: saveStartHighestSequence,
         }) === true
+        : saveSession.ownerKind === "synced"
+          ? true
         : (state.ops.length > 0 ? saveLocalSafetySnapshot("newer-change-after-save") : true);
-      if (saveSession.ownerKind !== "vault" && state.ops.length === 0) clearLocalSafetySnapshot();
+      if (!["vault", "synced"].includes(saveSession.ownerKind) && state.ops.length === 0) clearLocalSafetySnapshot();
       if (saveSession.ownerKind === "vault" && state.ops.length > 0 && newerSafetyStored) {
         setStatus(`Encrypted Vault saved. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} remain encrypted in browser recovery.`, "warn", { durationMs: 6200 });
       } else if (saveSession.ownerKind === "vault" && !newerSafetyStored) {
@@ -1539,6 +1549,8 @@ async function exportTree(options = {}) {
         setStatus(`${backupProofLabel()}. ${state.ops.length} newer change${state.ops.length === 1 ? "" : "s"} still local.`, "ok", { durationMs: 5600 });
       } else if (saveSession.ownerKind === "vault") {
         setStatus("Encrypted Vault saved.", "ok", { durationMs: 5200 });
+      } else if (saveSession.ownerKind === "synced") {
+        setStatus("Saved.", "ok", { durationMs: 5200 });
       } else if (writeResult.target === "opened-file") {
         setStatus("Saved to Pocket file.", "ok", { durationMs: 5200 });
       } else if (writeResult.target === "picked-file") {
@@ -1548,10 +1560,12 @@ async function exportTree(options = {}) {
       }
       flashSaveChip(newerSafetyStored ? "Safe" : "Check");
       clearConflictGuard();
-      if (saveSession.ownerKind !== "vault") persistPipSnapshot();
+      if (!["vault", "synced"].includes(saveSession.ownerKind)) persistPipSnapshot();
       refocusTreeNavigation(state.selectedId);
-      return exportTreeResult(options, true, saveSession.ownerKind === "vault" ? "vault-truth-file" : "truth-file", {
-        target: writeResult.target || (saveSession.ownerKind === "vault" ? "vault" : "truth-file"),
+      return exportTreeResult(options, true, saveSession.ownerKind === "vault" ? "vault-truth-file"
+        : (saveSession.ownerKind === "synced" ? "synced-save" : "truth-file"), {
+        target: writeResult.target || (saveSession.ownerKind === "vault" ? "vault"
+          : (saveSession.ownerKind === "synced" ? "synced" : "truth-file")),
         sourceIdentity: writeResult.sourceIdentity || capturePocketEditorSourceIdentity(),
       });
     }
@@ -1574,6 +1588,11 @@ async function exportTree(options = {}) {
       setStatus(message, "warn", { durationMs: 7200 });
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, reason);
+    }
+    if (saveSession.ownerKind === "synced") {
+      setStatus("Pocket could not confirm that Save. Your changes remain in memory.", "warn", { durationMs: 7200 });
+      refocusTreeNavigation(state.selectedId);
+      return exportTreeResult(options, false, writeResult.reason || "synced-save-failed");
     }
     if (options.downloadFallback === false) {
       const message = writeResult.permissionDenied

@@ -1,7 +1,8 @@
 /* Synced Pocket dormant owner and explicit Save controller.
 
-This module is intentionally unloaded. It owns one in-memory synced target and
-uses the existing encrypted device record for explicit, conditional Saves.
+This module is dormant until a later explicit owner-adoption flow supplies a
+controller. It owns one in-memory synced target and uses the existing encrypted
+device record for explicit, conditional Saves.
 */
 
 (function initialisePocketSyncOwnerController(global) {
