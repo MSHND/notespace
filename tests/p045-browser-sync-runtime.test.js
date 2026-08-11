@@ -127,7 +127,13 @@ function createHarness(options = {}) {
   let passkeyCalls = 0;
   let pickerCalls = 0;
   let copyFails = options.copyFails === true;
+  let detailsDirty = typeof options.detailsDraft === "string";
+  let inlineDirty = typeof options.inlineDraft === "string";
+  let detailsCommitCalls = 0;
+  let inlineCommitCalls = 0;
   const writes = [];
+  const savedPayloads = [];
+  const frozenPayloads = [];
   const idb = createIndexedDb();
   const context = {
     crypto: webcrypto,
@@ -136,14 +142,47 @@ function createHarness(options = {}) {
     Boolean, JSON, Date, Error, TypeError, Promise, Set,
     atob(value) { return Buffer.from(value, "base64").toString("binary"); },
     btoa(value) { return Buffer.from(value, "binary").toString("base64"); },
-    state: { ops: options.dirty ? [{ sequence: 1 }] : [] },
+    state: {
+      ops: options.dirty ? [{ sequence: 1 }] : [],
+      nodes: [{ id: "one", label: "Original title", parentId: "root" }],
+      inlineEdit: options.inlineDraft ? { id: "one", isNew: false, originalLabel: "Original title" } : {},
+    },
     capturePocketFileSaveSession() {
       return { id: sessionId, handle: { local: true }, ownerKind, vaultSessionId: "", pipSession: false, detachedDeviceChanges: false };
     },
     isPocketFileSaveSessionCurrent(value) {
       return !!value && value.id === sessionId && value.ownerKind === ownerKind;
     },
-    hasPocketUnsavedChanges() { return context.state.ops.length > 0; },
+    hasUnsavedDetailsEditorChanges() { return detailsDirty; },
+    hasUnsavedInlineTitleDraft() { return inlineDirty; },
+    hasPocketUnsavedChanges() {
+      return context.state.ops.length > 0 || detailsDirty || inlineDirty || ownerKind === "detached";
+    },
+    saveDetailsEditor() {
+      detailsCommitCalls += 1;
+      if (options.detailsCommitFails) return;
+      context.state.nodes[0].details = options.detailsDraft;
+      detailsDirty = false;
+      context.state.ops.push({ sequence: context.state.ops.length + 1, type: "details_edit" });
+      if (options.editorChangesOwner) sessionId += 1;
+    },
+    captureActiveInlineEditForOwnerSwitch() {
+      return inlineDirty
+        ? { ok: true, active: true, id: "one", rawValue: options.inlineDraft }
+        : { ok: true, active: false };
+    },
+    commitActiveInlineEditForOwnerSwitch(captured, commitOptions = {}) {
+      inlineCommitCalls += 1;
+      if (options.inlineCommitFails || !captured?.ok || commitOptions.isCurrent?.() !== true) {
+        return { ok: false, reason: "commit-failed" };
+      }
+      context.state.nodes[0].label = captured.rawValue;
+      context.state.inlineEdit = {};
+      inlineDirty = false;
+      context.state.ops.push({ sequence: context.state.ops.length + 1, type: "rename" });
+      if (options.editorChangesOwner) sessionId += 1;
+      return { ok: true, changed: true, kind: "rename" };
+    },
     isPocketEditorSourceIdentityCurrent() { return false; },
     setPocketFileSession(_handle, _name, setup = {}) {
       ownerKind = setup.ownerKind || "json";
@@ -152,6 +191,7 @@ function createHarness(options = {}) {
     async exportTree() {
       saveCalls += 1;
       if (options.saveResult) return options.saveResult;
+      savedPayloads.push(plain({ nodes: context.state.nodes }));
       context.state.ops = [];
       if (options.saveChangesOwner === true) {
         ownerKind = "json";
@@ -161,7 +201,9 @@ function createHarness(options = {}) {
     },
     buildPocketPayload() {
       freezeCalls += 1;
-      return { schema: "portal.export.v1", nodes: [{ id: "one", label: READABLE }] };
+      const payload = { schema: "portal.export.v1", nodes: plain(context.state.nodes) };
+      frozenPayloads.push(payload);
+      return payload;
     },
   };
   const api = loadRuntime(context);
@@ -229,9 +271,10 @@ function createHarness(options = {}) {
     environment,
   });
   return {
-    context, runtime, idb, remoteCalls, writes,
+    context, runtime, idb, remoteCalls, writes, savedPayloads, frozenPayloads,
     get ownerKind() { return ownerKind; }, get freezeCalls() { return freezeCalls; },
     get saveCalls() { return saveCalls; }, get passkeyCalls() { return passkeyCalls; }, get pickerCalls() { return pickerCalls; },
+    get detailsCommitCalls() { return detailsCommitCalls; }, get inlineCommitCalls() { return inlineCommitCalls; },
     allowCopy() { copyFails = false; },
   };
 }
@@ -314,6 +357,60 @@ test("P045 detects source replacement during its explicit dirty-source Save", as
   assert.equal(harness.remoteCalls.length, 0);
 });
 
+test("P045a commits a live details draft before local Save and the one activation freeze", async () => {
+  const details = "P045A-DETAILS-MUST-REACH-THE-SOURCE-AND-CIPHERTEXT";
+  const harness = createHarness({ detailsDraft: details });
+  const result = await harness.runtime.activate();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.detailsCommitCalls, 1);
+  assert.equal(harness.saveCalls, 1);
+  assert.equal(harness.freezeCalls, 1);
+  assert.equal(harness.savedPayloads[0].nodes[0].details, details);
+  assert.equal(harness.frozenPayloads[0].nodes[0].details, details);
+  assert.equal(harness.remoteCalls.some((call) => JSON.stringify(call.body).includes(details)), false);
+  assert.equal(harness.ownerKind, "synced");
+});
+
+test("P045a commits a live inline-title draft before local Save and the one activation freeze", async () => {
+  const title = "P045A title retained before activation";
+  const harness = createHarness({ inlineDraft: title });
+  const result = await harness.runtime.activate();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.inlineCommitCalls, 1);
+  assert.equal(harness.saveCalls, 1);
+  assert.equal(harness.freezeCalls, 1);
+  assert.equal(harness.savedPayloads[0].nodes[0].label, title);
+  assert.equal(harness.frozenPayloads[0].nodes[0].label, title);
+  assert.equal(harness.remoteCalls.some((call) => JSON.stringify(call.body).includes(title)), false);
+  assert.equal(harness.ownerKind, "synced");
+});
+
+test("P045a stops safely when an editor draft cannot commit or its source changes", async () => {
+  for (const options of [
+    { detailsDraft: "Retain details", detailsCommitFails: true, expected: "editor-draft-commit-failed" },
+    { inlineDraft: "Retain title", inlineCommitFails: true, expected: "editor-draft-commit-failed" },
+    { detailsDraft: "Stale details", editorChangesOwner: true, expected: "source-session-changed" },
+  ]) {
+    const harness = createHarness(options);
+    const result = await harness.runtime.activate();
+    assert.equal(result.reason, options.expected);
+    assert.equal(harness.ownerKind, "json");
+    assert.equal(harness.pickerCalls, 0);
+    assert.equal(harness.idb.observations.opens, 0);
+    assert.equal(harness.passkeyCalls, 0);
+    assert.equal(harness.remoteCalls.length, 0);
+  }
+});
+
+test("P045a leaves clean active editor seams on the existing clean-source path", async () => {
+  const harness = createHarness();
+  const result = await harness.runtime.activate();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.detailsCommitCalls, 0);
+  assert.equal(harness.inlineCommitCalls, 0);
+  assert.equal(harness.saveCalls, 0);
+});
+
 test("P045 maps browser passkey cancellation safely and does not adopt", async () => {
   const harness = createHarness({ passkeyError: Object.assign(new Error("cancelled"), { name: "NotAllowedError" }) });
   const result = await harness.runtime.activate();
@@ -352,6 +449,19 @@ test("P045 explicitly resumes an outstanding local recovery copy without duplica
   assert.equal(harness.ownerKind, "synced");
   assert.equal(harness.remoteCalls.length, remoteCount);
   assert.equal(harness.pickerCalls, 2);
+});
+
+test("P045a refuses explicit resume when later local work would not be part of the staged payload", async () => {
+  const harness = createHarness({ copyFails: true });
+  const first = await harness.runtime.activate();
+  assert.equal(first.reason, "recovery-copy-not-stored");
+  const remoteCount = harness.remoteCalls.length;
+  harness.context.state.ops.push({ sequence: 1, type: "later-local-edit" });
+  harness.allowCopy();
+  const resumed = await harness.runtime.resume({ activationId: first.activationId });
+  assert.equal(resumed.reason, "source-has-unsaved-changes");
+  assert.equal(harness.ownerKind, "json");
+  assert.equal(harness.remoteCalls.length, remoteCount);
 });
 
 test("P045 clean Vault sources skip local Save and unsupported owners fail closed", async () => {

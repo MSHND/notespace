@@ -59,6 +59,38 @@
     return global.hasPocketUnsavedChanges() === true;
   }
 
+  function prepareEditorDrafts(snapshot) {
+    // Activation freezes from the tree, so live editor drafts must join that truth first.
+    if (!sourceSessionCurrent(snapshot)) return "source-session-changed";
+    if (global.hasUnsavedDetailsEditorChanges?.() === true) {
+      if (typeof global.saveDetailsEditor !== "function") return "editor-draft-commit-failed";
+      try { global.saveDetailsEditor(); } catch (_error) { return "editor-draft-commit-failed"; }
+      if (!sourceSessionCurrent(snapshot)) return "source-session-changed";
+      if (global.hasUnsavedDetailsEditorChanges?.() === true) return "editor-draft-commit-failed";
+    }
+    if (global.hasUnsavedInlineTitleDraft?.() === true) {
+      if (typeof global.captureActiveInlineEditForOwnerSwitch !== "function"
+          || typeof global.commitActiveInlineEditForOwnerSwitch !== "function") {
+        return "editor-draft-commit-failed";
+      }
+      let captured;
+      let committed;
+      try {
+        captured = global.captureActiveInlineEditForOwnerSwitch();
+        committed = global.commitActiveInlineEditForOwnerSwitch(captured, {
+          isCurrent: () => sourceSessionCurrent(snapshot),
+        });
+      } catch (_error) {
+        return "editor-draft-commit-failed";
+      }
+      if (!sourceSessionCurrent(snapshot)) return "source-session-changed";
+      if (!captured?.ok || !committed?.ok || global.hasUnsavedInlineTitleDraft?.() === true) {
+        return "editor-draft-commit-failed";
+      }
+    }
+    return "";
+  }
+
   function browserRandom(environment) {
     return (length) => {
       const crypto = environment.crypto || global.crypto;
@@ -237,6 +269,8 @@
     async function activate() {
       const snapshot = sourceSession();
       if (!snapshot) return safeFailure("unsupported-source-owner");
+      const draftResult = prepareEditorDrafts(snapshot);
+      if (draftResult) return safeFailure(draftResult);
       const random = browserRandom(environment);
       const syncedPocketId = crypto.encodeBase64Url(random(32));
       const deviceId = crypto.encodeBase64Url(random(32));
@@ -250,6 +284,11 @@
       }
       const snapshot = sourceSession();
       if (!snapshot) return safeFailure("unsupported-source-owner");
+      try {
+        if (global.hasPocketUnsavedChanges?.() === true) return safeFailure("source-has-unsaved-changes");
+      } catch (_error) {
+        return safeFailure("source-has-unsaved-changes");
+      }
       return orchestrator.resume(dependenciesFor(snapshot), { activationId: input.activationId });
     }
 

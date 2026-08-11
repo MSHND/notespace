@@ -444,12 +444,6 @@ function capturePocketFileSaveSession() {
   };
 }
 
-function hasPocketUnsavedChanges() {
-  const session = capturePocketFileSaveSession();
-  return (Array.isArray(state.ops) && state.ops.length > 0)
-    || session.detachedDeviceChanges === true;
-}
-
 function capturePocketFileOwnerForAdoption() {
   const session = pocketFileState();
   return {
@@ -1468,6 +1462,13 @@ async function exportTree(options = {}) {
     }
     if (!["vault", "synced"].includes(saveSession.ownerKind) && shouldPauseForStaleExportGuard(options)) {
       return exportTreeResult(options, false, "stale-guard");
+    }
+    const activeEditorDraft = (
+      (typeof hasUnsavedDetailsEditorChanges === "function" && hasUnsavedDetailsEditorChanges())
+      || (typeof hasUnsavedInlineTitleDraft === "function" && hasUnsavedInlineTitleDraft())
+    );
+    if (activeEditorDraft) {
+      return exportTreeResult(options, false, "editor-draft-active");
     }
     const opsAtSaveStart = Array.isArray(state.ops) ? state.ops.length : 0;
     const saveStartHighestSequence = typeof getPocketHighestOperationSequence === "function"

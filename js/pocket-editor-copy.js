@@ -120,10 +120,18 @@ function hasUnsavedInlineTitleDraft() {
   return cleanText(draft.value, 221) !== cleanText(draft.edit.originalLabel, 220);
 }
 
-function hasUnsavedPocketLiteChanges() {
+function hasPocketUnsavedChanges() {
+  const session = typeof capturePocketFileSaveSession === "function"
+    ? capturePocketFileSaveSession()
+    : null;
   return (Array.isArray(state.ops) && state.ops.length > 0)
+    || session?.detachedDeviceChanges === true
     || hasUnsavedDetailsEditorChanges()
     || hasUnsavedInlineTitleDraft();
+}
+
+function hasUnsavedPocketLiteChanges() {
+  return hasPocketUnsavedChanges();
 }
 
 function handlePocketLiteBeforeUnload(ev) {

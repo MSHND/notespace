@@ -5669,3 +5669,35 @@ test("active inline-title draft gates owner switching and successful adoption cl
     assert.equal(candidate.writes.length, 0);
   });
 });
+
+test("P045a uses one persistence dirty read and raw export refuses uncommitted editor drafts", async () => {
+  const { context, vaultHandle } = await contextWithCleanVault();
+  const state = lexicalState(context);
+  state.ops = [];
+  state.selectedId = state.nodes[0].id;
+  context.openDetailsEditorForSelectedNode();
+  context.__ui.elements.get("detailEditorBody").value = "P045a uncommitted details";
+  assert.equal(context.hasUnsavedDetailsEditorChanges(), true);
+  assert.equal(context.hasPocketUnsavedChanges(), true);
+  const blocked = await context.exportTree({ returnDetails: true, downloadFallback: false });
+  assert.equal(blocked.reason, "editor-draft-active");
+  assert.equal(vaultHandle.writes.length, 0);
+  assert.notEqual(state.nodes[0].details, "P045a uncommitted details");
+  context.saveDetailsEditor();
+  assert.equal(state.nodes[0].details, "P045a uncommitted details");
+  assert.equal(state.ops.some((operation) => operation?.type === "details_edit"), true);
+
+  attachInlineDraft(context, { id: state.nodes[0].id, value: "P045a inline title" });
+  assert.equal(context.hasUnsavedInlineTitleDraft(), true);
+  assert.equal(context.hasPocketUnsavedChanges(), true);
+  const inline = context.captureActiveInlineEditForOwnerSwitch();
+  const committed = context.commitActiveInlineEditForOwnerSwitch(inline, { isCurrent: () => true });
+  assert.equal(committed.ok, true);
+  assert.equal(state.nodes[0].label, "P045a inline title");
+  assert.equal(state.ops.some((operation) => operation?.type === "rename"), true);
+
+  context.setDetachedPocketDocumentSession();
+  state.ops = [];
+  assert.equal(context.capturePocketFileSaveSession().detachedDeviceChanges, true);
+  assert.equal(context.hasPocketUnsavedChanges(), true);
+});
