@@ -192,6 +192,7 @@ async function createHarness(options = {}) {
   let replaceCount = 0;
   const deviceStore = Object.freeze({
     readPocket: store.readPocket.bind(store),
+    readActivation: store.readActivation.bind(store),
     readRecoveryAttempt: store.readRecoveryAttempt.bind(store),
     async replacePocket(...input) {
       replaceCount += 1;

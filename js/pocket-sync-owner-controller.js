@@ -9,6 +9,19 @@ device record for explicit, conditional Saves.
   "use strict";
 
   const OWNER_INPUT_FIELDS = Object.freeze(["syncedPocketId", "masterKey"]);
+  const ACTIVATION_OWNER_FIELDS = Object.freeze([
+    "ownerKind", "activationId", "syncedPocketId", "deviceId",
+    "confirmedRemoteRevision", "syncPending",
+  ]);
+  const ACTIVATION_DRAFT_FIELDS = Object.freeze([
+    "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
+    "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
+    "deviceEnvelope", "prfEnvelope", "prfStatus", "recoveryEnvelope",
+    "recoveryVerifier", "recoveryRoot", "recoveryPackage",
+    "registrationContinuation", "account", "confirmedRemoteRevision",
+    "keySetVersion", "recoveryVersion", "accountLocator", "pendingOperation",
+    "sourceSaved", "recoveryCopyStored", "adopted", "createdAt", "updatedAt",
+  ]);
   const SAVE_INPUT_FIELDS = Object.freeze(["freezePayload"]);
   const RECOVERY_DEPENDENCY_FIELDS = Object.freeze([
     "captureRecoveryTarget", "isRecoveryTargetCurrent",
@@ -113,6 +126,55 @@ device record for explicit, conditional Saves.
     });
   }
 
+  function activationOwner(input) {
+    const value = exactObject(input, ACTIVATION_OWNER_FIELDS, "activation-not-eligible");
+    if (value.ownerKind !== "synced"
+        || value.confirmedRemoteRevision !== 1
+        || value.syncPending !== false) {
+      throw controllerError("activation-not-eligible");
+    }
+    return Object.freeze({
+      activationId: identifier(value.activationId, "activation-not-eligible"),
+      syncedPocketId: identifier(value.syncedPocketId, "activation-not-eligible"),
+      deviceId: identifier(value.deviceId, "activation-not-eligible"),
+    });
+  }
+
+  function activationRecordIsReady(found, requested) {
+    const record = found?.record;
+    const draft = found?.draft;
+    if (!isObject(draft) || Object.keys(draft).length !== ACTIVATION_DRAFT_FIELDS.length
+        || !ACTIVATION_DRAFT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(draft, field))) {
+      return false;
+    }
+    if (!record || !draft || record.kind !== "pocket.sync.device-state"
+        || record.syncedPocketId !== requested.syncedPocketId
+        || record.deviceId !== requested.deviceId
+        || record.remote?.confirmedRevision !== 1
+        || record.remote?.pending !== null || record.remote?.conflict !== null
+        || draft.activationId !== requested.activationId
+        || draft.syncedPocketId !== requested.syncedPocketId
+        || draft.deviceId !== requested.deviceId
+        || draft.stage !== "ready-for-adoption"
+        || draft.adopted !== false
+        || draft.sourceSaved !== true
+        || draft.recoveryCopyStored !== true
+        || draft.confirmedRemoteRevision !== 1
+        || draft.pendingOperation !== null
+        || draft.kind !== "pocket.sync.activation-draft"
+        || draft.schemaVersion !== 1
+        || !["json", "vault"].includes(draft.sourceOwnerKind)
+        || typeof draft.sourceContinuityId !== "string" || draft.sourceContinuityId.length < 1
+        || !Number.isSafeInteger(draft.keySetVersion) || draft.keySetVersion < 2
+        || draft.recoveryVersion !== 1 || typeof draft.accountLocator !== "string"
+        || draft.accountLocator.length < 1 || draft.recoveryRoot !== null
+        || draft.recoveryPackage !== null || draft.registrationContinuation !== null
+        || !isObject(draft.account) || !isObject(draft.content)
+        || draft.content.context?.syncedPocketId !== requested.syncedPocketId
+        || draft.content.context?.revision !== 1) return false;
+    return true;
+  }
+
   function ownerSnapshot(owner) {
     if (!owner) return null;
     return freeze({
@@ -180,6 +242,31 @@ device record for explicit, conditional Saves.
     function releaseSyncedOwner() {
       advanceGeneration();
       owner = null;
+      return true;
+    }
+
+    async function refreshOwnerRecord(session, capturedOwner) {
+      let stored;
+      try { stored = await config.deviceStore.readPocket(capturedOwner.syncedPocketId); }
+      catch (_error) { return false; }
+      if (!isSyncedOwnerSaveSessionCurrent(session)) return false;
+      if (!stored || stored.syncedPocketId !== capturedOwner.syncedPocketId) return false;
+      if (stored.storeRevision === capturedOwner.record.storeRevision) return true;
+      if (stored.remote?.confirmedRevision !== capturedOwner.record.remote.confirmedRevision
+          || stored.remote?.pending !== null || stored.remote?.conflict !== null
+          || stored.content?.context?.revision !== capturedOwner.record.content.context.revision) {
+        return false;
+      }
+      try {
+        await config.crypto.openContent(
+          stored.content.record,
+          capturedOwner.masterKey,
+          stored.content.context
+        );
+      } catch (_error) { return false; }
+      if (!isSyncedOwnerSaveSessionCurrent(session)) return false;
+      owner.record = stored;
+      owner.knownRemoteRevision = stored.remote.confirmedRevision;
       return true;
     }
 
@@ -254,12 +341,60 @@ device record for explicit, conditional Saves.
       return freeze({ ok: true, owner: installOwner(found.record, bundle.masterKey), recoveryAttemptId: candidate.recoveryAttemptId });
     }
 
+    async function adoptReadyActivation(input) {
+      let requested;
+      try { requested = activationOwner(input); }
+      catch (_error) { return result("activation-not-eligible"); }
+      if (typeof config.deviceStore.readActivation !== "function") {
+        return result("activation-state-unavailable");
+      }
+      let found;
+      try { found = await config.deviceStore.readActivation(requested.activationId); }
+      catch (_error) { return result("activation-state-unavailable"); }
+      if (!activationRecordIsReady(found, requested)) return result("activation-not-eligible");
+
+      let bundle;
+      try {
+        bundle = await config.crypto.openMasterKeyBundle(
+          found.record.deviceEnvelope.record,
+          found.record.deviceWrappingKey,
+          found.record.deviceEnvelope.context,
+          []
+        );
+        config.crypto.validateNonExtractableAesKey(bundle?.masterKey);
+        await config.crypto.openContent(
+          found.record.content.record,
+          bundle.masterKey,
+          found.record.content.context
+        );
+      } catch (_error) { return result("activation-state-invalid"); }
+      return freeze({ ok: true, owner: installOwner(found.record, bundle.masterKey) });
+    }
+
     async function nextRecoveryDraft(current, storeRevision) {
       if (current.recoveryDraft === null) return null;
       const draft = await config.crypto.openContent(
         current.recoveryDraft.record,
         current.deviceWrappingKey,
         current.recoveryDraft.context
+      );
+      const context = {
+        syncedPocketId: current.syncedPocketId,
+        revision: storeRevision,
+        contentType: config.crypto.FORMAT.contentType,
+      };
+      return {
+        context,
+        record: await config.crypto.sealContent(draft, current.deviceWrappingKey, context),
+      };
+    }
+
+    async function nextActivationDraft(current, storeRevision) {
+      if (current.activationDraft === null) return null;
+      const draft = await config.crypto.openContent(
+        current.activationDraft.record,
+        current.deviceWrappingKey,
+        current.activationDraft.context
       );
       const context = {
         syncedPocketId: current.syncedPocketId,
@@ -289,7 +424,7 @@ device record for explicit, conditional Saves.
           contentEncryptionsOnDevice,
           envelopeEncryptionsOnDevice: current.usage.envelopeEncryptionsOnDevice,
         },
-        activationDraft: current.activationDraft,
+        activationDraft: await nextActivationDraft(current, storeRevision),
         recoveryDraft: await nextRecoveryDraft(current, storeRevision),
       };
     }
@@ -324,6 +459,10 @@ device record for explicit, conditional Saves.
       const session = captureSyncedOwnerSaveSession();
       if (!session) return result("no-synced-owner");
       const capturedOwner = owner;
+      if (!await refreshOwnerRecord(session, capturedOwner)) {
+        return isSyncedOwnerSaveSessionCurrent(session)
+          ? result("owner-state-unavailable") : result("stale-owner-session");
+      }
       if (capturedOwner.record.remote.pending !== null) return result("pending-save-exists");
 
       let payload;
@@ -427,6 +566,7 @@ device record for explicit, conditional Saves.
 
     return Object.freeze({
       adoptSyncedOwner,
+      adoptReadyActivation,
       adoptReadyRecovery,
       releaseSyncedOwner,
       captureSyncedOwnerSaveSession,

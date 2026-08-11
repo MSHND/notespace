@@ -60,6 +60,18 @@ function loadProduction(extra = {}) {
     atob(value) { return Buffer.from(value, "base64").toString("binary"); },
     btoa(value) { return Buffer.from(value, "binary").toString("base64"); },
   }, extra);
+  let liveOwnerKind = "json";
+  let liveSessionId = 1;
+  context.setPocketFileSession = (_handle, _name, options = {}) => {
+    liveOwnerKind = options.ownerKind || "json";
+    liveSessionId += 1;
+  };
+  context.capturePocketFileSaveSession = () => ({ id: liveSessionId, ownerKind: liveOwnerKind });
+  context.isPocketFileSaveSessionCurrent = (session) => !!session
+    && session.id === liveSessionId && session.ownerKind === liveOwnerKind;
+  context.isPocketEditorSourceIdentityCurrent = () => false;
+  context.__setLiveOwner = (ownerKind) => { liveOwnerKind = ownerKind; liveSessionId += 1; };
+  context.__liveOwnerKind = () => liveOwnerKind;
   context.window = context;
   context.globalThis = context;
   vm.createContext(context);
@@ -67,6 +79,9 @@ function loadProduction(extra = {}) {
     "js/pocket-sync-security-contract.js",
     "js/pocket-sync-crypto.js",
     "js/pocket-sync-device-store.js",
+    "js/pocket-sync-owner-controller.js",
+    "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation-owner-bridge.js",
     "js/pocket-sync-account-client.js",
     "js/pocket-sync-remote-client.js",
     MODULE,
@@ -79,6 +94,9 @@ function loadProduction(extra = {}) {
     account: context.PocketSyncAccountClient,
     remote: context.PocketSyncRemoteClient,
     activation: context.PocketSyncActivation,
+    syncedOwner: context.PocketSyncOwnerController,
+    ownerBoundary: context.PocketOwnerSaveBoundary,
+    activationBridge: context.PocketSyncActivationOwnerBridge,
   };
 }
 
@@ -96,6 +114,7 @@ function registrationCredential(prfAvailable = true) {
 
 function createHarness(options = {}) {
   const production = loadProduction();
+  production.context.__setLiveOwner(options.ownerKind || "json");
   const serviceDriver = createMemoryServiceStore();
   let serviceRandom = 0;
   const core = createServiceCore({
@@ -194,6 +213,20 @@ function createHarness(options = {}) {
   const sharedDeviceState = createSharedDeviceStoreState();
   const deviceDriver = createMemoryDeviceStoreDriver(sharedDeviceState);
   const deviceStore = production.deviceStore.createStore(deviceDriver);
+  let syncRandom = 0;
+  const syncedOwnerController = production.syncedOwner.createSyncedOwnerController({
+    crypto: production.crypto,
+    deviceStore,
+    contentService,
+    randomBytes(length) { syncRandom += 1; return bytes(length, 180 + syncRandom); },
+  });
+  const bridgeBoundary = options.ownerInstallFails === true
+    ? Object.freeze({ installSyncedOwnerForSave() { return false; } })
+    : production.ownerBoundary;
+  const activationOwnerBridge = production.activationBridge.createActivationOwnerBridge({
+    syncedOwnerController,
+    ownerSaveBoundary: bridgeBoundary,
+  });
   let activationRandom = 0;
   const activationConfig = {
     securityContract: production.security,
@@ -258,7 +291,10 @@ function createHarness(options = {}) {
     async adoptSyncedOwner(owner) {
       events.push("adopt");
       adopted.push(plain(owner));
-      return adoptionShouldFail ? { ok: false } : { ok: true };
+      if (adoptionShouldFail) return { ok: false };
+      return options.liveOwnerBridge === true
+        ? activationOwnerBridge.adoptSyncedOwner(owner)
+        : { ok: true };
     },
   });
   return {
@@ -266,9 +302,12 @@ function createHarness(options = {}) {
     core,
     serviceDriver,
     deviceStore,
+    deviceDriver,
     sharedDeviceState,
     orchestrator,
     activationConfig,
+    syncedOwnerController,
+    activationOwnerBridge,
     dependencies,
     sourceSession,
     events,
@@ -354,6 +393,162 @@ test("actual P029-P038 modules complete activation device-first and adopt last",
   const serviceText = JSON.stringify(harness.serviceDriver.snapshot());
   assert.doesNotMatch(serviceText, new RegExp(READABLE));
   assert.doesNotMatch(serviceText, /rootMaterial|pocket-recovery-package/);
+});
+
+test("P044 bridges the key-free P039 owner descriptor into P042 and the live P043 owner", async () => {
+  const harness = createHarness({ liveOwnerBridge: true });
+  const before = harness.context.capturePocketFileSaveSession();
+  const result = await harness.orchestrator.activate(harness.dependencies, {
+    syncedPocketId: "pocket-p044-live",
+    deviceId: "device-p044-live",
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(Object.keys(harness.adopted[0]), [
+    "ownerKind", "activationId", "syncedPocketId", "deviceId",
+    "confirmedRemoteRevision", "syncPending",
+  ]);
+  assert.equal(JSON.stringify(harness.adopted[0]).includes("masterKey"), false);
+  assert.equal(JSON.stringify(harness.adopted[0]).includes("deviceWrappingKey"), false);
+  assert.equal(harness.context.__liveOwnerKind(), "synced");
+  assert.equal(harness.context.isPocketFileSaveSessionCurrent(before), false);
+  assert.deepEqual(plain(harness.syncedOwnerController.getSyncedOwnerState()), {
+    syncedPocketId: "pocket-p044-live",
+    confirmedRemoteRevision: 1,
+    knownRemoteRevision: 1,
+    pending: false,
+    generation: 1,
+  });
+  const saved = await harness.ownerBoundary.save({
+    expectedSession: harness.context.capturePocketFileSaveSession(),
+    freezePayload: async () => ({ sentinel: READABLE, change: "P044 explicit Save" }),
+  });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.confirmedRemoteRevision, 2);
+  const uploads = harness.remoteCalls.filter((call) => call.route === "conditionalUpload");
+  assert.equal(uploads.length, 2);
+  assert.equal(JSON.stringify(uploads[1].body).includes(READABLE), false);
+});
+
+test("P044 bridge failure preserves the local source and explicit resume adopts without repeated remote work", async () => {
+  const harness = createHarness({ liveOwnerBridge: true, ownerInstallFails: true });
+  const first = await harness.orchestrator.activate(harness.dependencies, {
+    syncedPocketId: "pocket-p044-resume",
+    deviceId: "device-p044-resume",
+  });
+  assert.equal(first.reason, "owner-adoption-failed");
+  assert.equal(harness.context.__liveOwnerKind(), "json");
+  assert.equal(harness.syncedOwnerController.getSyncedOwnerState(), null);
+  const remoteCount = harness.remoteCalls.length;
+  const copyCount = harness.copies.length;
+  const bridge = harness.activationBridge.createActivationOwnerBridge({
+    syncedOwnerController: harness.syncedOwnerController,
+    ownerSaveBoundary: harness.ownerBoundary,
+  });
+  const resumedDependencies = Object.freeze({
+    ...harness.dependencies,
+    adoptSyncedOwner: async (owner) => bridge.adoptSyncedOwner(owner),
+  });
+  const resumed = await harness.orchestrator.resume(resumedDependencies, {
+    activationId: first.activationId,
+  });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
+  assert.equal(harness.context.__liveOwnerKind(), "synced");
+  assert.equal(harness.remoteCalls.length, remoteCount);
+  assert.equal(harness.copies.length, copyCount);
+});
+
+test("P044 activation adoption rejects mismatched, unknown, non-ready and corrupted local state", async () => {
+  const harness = createHarness({ liveOwnerBridge: true, ownerInstallFails: true });
+  const ready = await harness.orchestrator.activate(harness.dependencies, {
+    syncedPocketId: "pocket-p044-invalid",
+    deviceId: "device-p044-invalid",
+  });
+  assert.equal(ready.reason, "owner-adoption-failed");
+  const descriptor = {
+    ownerKind: "synced",
+    activationId: ready.activationId,
+    syncedPocketId: "pocket-p044-invalid",
+    deviceId: "device-p044-invalid",
+    confirmedRemoteRevision: 1,
+    syncPending: false,
+  };
+  for (const value of [
+    { ...descriptor, activationId: "unknown-activation" },
+    { ...descriptor, syncedPocketId: "wrong-pocket" },
+    { ...descriptor, deviceId: "wrong-device" },
+    { ...descriptor, confirmedRemoteRevision: 2 },
+    { ...descriptor, syncPending: true },
+  ]) {
+    const result = await harness.syncedOwnerController.adoptReadyActivation(value);
+    assert.equal(result.ok, false);
+    assert.equal(harness.syncedOwnerController.getSyncedOwnerState(), null);
+    assert.equal(harness.context.__liveOwnerKind(), "json");
+  }
+
+  const nonReady = createHarness({ copyFails: true });
+  const paused = await nonReady.orchestrator.activate(nonReady.dependencies, {
+    syncedPocketId: "pocket-p044-nonready",
+    deviceId: "device-p044-nonready",
+  });
+  assert.equal((await nonReady.syncedOwnerController.adoptReadyActivation({
+    ownerKind: "synced", activationId: paused.activationId,
+    syncedPocketId: "pocket-p044-nonready", deviceId: "device-p044-nonready",
+    confirmedRemoteRevision: 1, syncPending: false,
+  })).ok, false);
+
+  const raw = harness.sharedDeviceState.records.get("pocket-p044-invalid");
+  raw.deviceEnvelope.record.ciphertext = raw.deviceEnvelope.record.ciphertext.replace(/^./, "A");
+  const corrupted = await harness.syncedOwnerController.adoptReadyActivation(descriptor);
+  assert.equal(corrupted.ok, false);
+  assert.equal(harness.syncedOwnerController.getSyncedOwnerState(), null);
+  assert.equal(harness.context.__liveOwnerKind(), "json");
+
+  const contentCorrupt = createHarness({ liveOwnerBridge: true, ownerInstallFails: true });
+  const contentReady = await contentCorrupt.orchestrator.activate(contentCorrupt.dependencies, {
+    syncedPocketId: "pocket-p044-content-corrupt",
+    deviceId: "device-p044-content-corrupt",
+  });
+  const contentRecord = contentCorrupt.sharedDeviceState.records.get("pocket-p044-content-corrupt");
+  contentRecord.content.record.ciphertext = contentRecord.content.record.ciphertext.replace(/^./, "A");
+  const contentResult = await contentCorrupt.syncedOwnerController.adoptReadyActivation({
+    ownerKind: "synced", activationId: contentReady.activationId,
+    syncedPocketId: "pocket-p044-content-corrupt", deviceId: "device-p044-content-corrupt",
+    confirmedRemoteRevision: 1, syncPending: false,
+  });
+  assert.equal(contentResult.ok, false);
+  assert.equal(contentCorrupt.syncedOwnerController.getSyncedOwnerState(), null);
+  assert.equal(contentCorrupt.context.__liveOwnerKind(), "json");
+});
+
+test("P044 keeps the synced owner live when P039 finalisation fails after adoption", async () => {
+  const harness = createHarness({ liveOwnerBridge: true, ownerInstallFails: true });
+  const ready = await harness.orchestrator.activate(harness.dependencies, {
+    syncedPocketId: "pocket-p044-finalisation",
+    deviceId: "device-p044-finalisation",
+  });
+  assert.equal(ready.reason, "owner-adoption-failed");
+  const bridge = harness.activationBridge.createActivationOwnerBridge({
+    syncedOwnerController: harness.syncedOwnerController,
+    ownerSaveBoundary: Object.freeze({
+      installSyncedOwnerForSave(controller) {
+        const installed = harness.ownerBoundary.installSyncedOwnerForSave(controller);
+        if (installed) harness.deviceDriver.failAt("after-validation-before-write");
+        return installed;
+      },
+    }),
+  });
+  const dependencies = Object.freeze({
+    ...harness.dependencies,
+    async adoptSyncedOwner(owner) {
+      return bridge.adoptSyncedOwner(owner);
+    },
+  });
+  const result = await harness.orchestrator.resume(dependencies, { activationId: ready.activationId });
+  assert.equal(result.reason, "owner-adoption-finalisation-failed");
+  assert.equal(result.adopted, true);
+  assert.equal(harness.context.__liveOwnerKind(), "synced");
+  assert.equal(harness.syncedOwnerController.getSyncedOwnerState().syncedPocketId, "pocket-p044-finalisation");
 });
 
 test("recovery-copy failure pauses safely and explicit resume reuses remote state and package", async () => {
