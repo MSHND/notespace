@@ -68,9 +68,9 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-test("P032 module is dormant and absent from production loaders", () => {
+test("P032 module remains inert when P045 loads its injected-client contract", () => {
   assert.doesNotThrow(() => new vm.Script(source(MODULE_PATH)));
-  assert.doesNotMatch(source("index.html"), /pocket-sync-remote-client\.js/);
+  assert.match(source("index.html"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncRemoteClient/);
 });
@@ -797,6 +797,6 @@ test("production source has no storage, token, worker, retry, logging, crypto, o
   assert.doesNotMatch(moduleSource, /localStorage|sessionStorage|indexedDB|document\.cookie|serviceWorker|BroadcastChannel|SharedWorker|WebSocket|EventSource|XMLHttpRequest|setTimeout|setInterval|console\.|telemetry|oauth|provider.sdk/i);
   assert.doesNotMatch(moduleSource, /crypto\.subtle|\.encrypt\s*\(|\.decrypt\s*\(|setPocketFileSession|ownerKind|exportTree|Authorization\s*:/);
   assert.doesNotMatch(moduleSource, /while\s*\([^)]*(retry|attempt)|for\s*\([^)]*(retry|attempt)/i);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-remote-client\.js/);
+  assert.match(source("index.html"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-remote-client\.js/);
 });

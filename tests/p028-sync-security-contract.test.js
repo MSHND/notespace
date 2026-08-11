@@ -79,10 +79,10 @@ function writeRequest(overrides = {}) {
   }, overrides);
 }
 
-test("P028 security contract is dormant and absent from production loaders", () => {
+test("P028 security contract remains inert when P045 loads it as a browser foundation", () => {
   const contractSource = source(CONTRACT_SOURCE);
   assert.doesNotThrow(() => new vm.Script(contractSource));
-  assert.doesNotMatch(source("index.html"), /pocket-sync-security-contract\.js/);
+  assert.match(source("index.html"), /pocket-sync-security-contract\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-security-contract\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncSecurityContract/);
 });

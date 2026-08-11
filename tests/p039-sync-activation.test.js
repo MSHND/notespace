@@ -340,7 +340,7 @@ test("P039 module is one dormant, inert and exact frozen activation boundary", (
   assert.deepEqual(Object.keys(context.PocketSyncActivation), ["POLICY", "createActivationOrchestrator"]);
   assert.equal(Object.isFrozen(context.PocketSyncActivation), true);
   assert.equal(Object.isFrozen(context.PocketSyncActivation.POLICY), true);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-activation\.js/);
+  assert.match(source("index.html"), /pocket-sync-activation\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-activation\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncActivation/);
 });
@@ -498,7 +498,10 @@ test("P044 activation adoption rejects mismatched, unknown, non-ready and corrup
   })).ok, false);
 
   const raw = harness.sharedDeviceState.records.get("pocket-p044-invalid");
-  raw.deviceEnvelope.record.ciphertext = raw.deviceEnvelope.record.ciphertext.replace(/^./, "A");
+  raw.deviceEnvelope.record.ciphertext = raw.deviceEnvelope.record.ciphertext.replace(
+    /^./,
+    (character) => character === "A" ? "B" : "A"
+  );
   const corrupted = await harness.syncedOwnerController.adoptReadyActivation(descriptor);
   assert.equal(corrupted.ok, false);
   assert.equal(harness.syncedOwnerController.getSyncedOwnerState(), null);
@@ -510,7 +513,10 @@ test("P044 activation adoption rejects mismatched, unknown, non-ready and corrup
     deviceId: "device-p044-content-corrupt",
   });
   const contentRecord = contentCorrupt.sharedDeviceState.records.get("pocket-p044-content-corrupt");
-  contentRecord.content.record.ciphertext = contentRecord.content.record.ciphertext.replace(/^./, "A");
+  contentRecord.content.record.ciphertext = contentRecord.content.record.ciphertext.replace(
+    /^./,
+    (character) => character === "A" ? "B" : "A"
+  );
   const contentResult = await contentCorrupt.syncedOwnerController.adoptReadyActivation({
     ownerKind: "synced", activationId: contentReady.activationId,
     syncedPocketId: "pocket-p044-content-corrupt", deviceId: "device-p044-content-corrupt",

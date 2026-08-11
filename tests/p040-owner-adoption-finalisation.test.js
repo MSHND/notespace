@@ -253,7 +253,7 @@ test("P040 preserves the dormant exact activation surfaces", () => {
   const production = loadProduction();
   assert.deepEqual(Object.keys(production.activation), ["POLICY", "createActivationOrchestrator"]);
   assert.equal(Object.isFrozen(production.activation), true);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-activation\.js/);
+  assert.match(source("index.html"), /pocket-sync-activation\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-activation\.js/);
   const harness = createHarness();
   assert.deepEqual(Object.keys(harness.orchestrator), ["activate", "resume"]);

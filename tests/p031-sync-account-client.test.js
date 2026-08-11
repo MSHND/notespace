@@ -246,9 +246,9 @@ function errorCode(error) {
   return error && error.code;
 }
 
-test("P031 account client is dormant and absent from production loaders", () => {
+test("P031 account client remains inert when P045 loads it as a browser foundation", () => {
   assert.doesNotThrow(() => new vm.Script(source(MODULE_PATH)));
-  assert.doesNotMatch(source("index.html"), /pocket-sync-account-client\.js/);
+  assert.match(source("index.html"), /pocket-sync-account-client\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-account-client\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncAccountClient/);
 });

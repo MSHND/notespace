@@ -273,9 +273,9 @@ test.before(async () => {
   initial = await buildDeviceState(apis);
 });
 
-test("P030 is dormant and absent from production loaders", () => {
+test("P030 remains inert when P045 loads it as a browser foundation", () => {
   assert.doesNotThrow(() => new vm.Script(source(MODULE_PATH)));
-  assert.doesNotMatch(source("index.html"), /pocket-sync-device-store\.js/);
+  assert.match(source("index.html"), /pocket-sync-device-store\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-device-store\.js/);
   assert.doesNotMatch(source("js/pocket-state.js"), /ownerKind:\s*["']synced["']/);
 });

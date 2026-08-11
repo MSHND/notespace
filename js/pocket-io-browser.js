@@ -444,6 +444,12 @@ function capturePocketFileSaveSession() {
   };
 }
 
+function hasPocketUnsavedChanges() {
+  const session = capturePocketFileSaveSession();
+  return (Array.isArray(state.ops) && state.ops.length > 0)
+    || session.detachedDeviceChanges === true;
+}
+
 function capturePocketFileOwnerForAdoption() {
   const session = pocketFileState();
   return {
@@ -1467,7 +1473,7 @@ async function exportTree(options = {}) {
     const saveStartHighestSequence = typeof getPocketHighestOperationSequence === "function"
       ? getPocketHighestOperationSequence()
       : opsAtSaveStart;
-    if (opsAtSaveStart === 0 && saveSession.detachedDeviceChanges !== true) {
+    if (!hasPocketUnsavedChanges()) {
       clearLocalSafetySnapshot();
       setStatus(
         saveSession.ownerKind === "vault"

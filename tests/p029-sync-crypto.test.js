@@ -135,9 +135,9 @@ async function probeKey(key, aad = new Uint8Array()) {
   return base64url(new Uint8Array(encrypted));
 }
 
-test("P029 module is dormant, standards-compatible and absent from production loaders", () => {
+test("P029 module is inert, standards-compatible and loaded only as a P045 browser foundation", () => {
   assert.doesNotThrow(() => new vm.Script(source(MODULE_PATH)));
-  assert.doesNotMatch(source("index.html"), /pocket-sync-crypto\.js/);
+  assert.match(source("index.html"), /pocket-sync-crypto\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-crypto\.js/);
   assert.ok(createModule().api);
 });

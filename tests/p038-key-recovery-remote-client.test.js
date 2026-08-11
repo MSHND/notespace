@@ -117,7 +117,7 @@ function registrationCredential(id) {
 
 test("P038 keeps one dormant client with exact frozen route, export and service surfaces", () => {
   const { api } = loadProduction();
-  assert.doesNotMatch(source("index.html"), /pocket-sync-remote-client\.js/);
+  assert.match(source("index.html"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncRemoteClient/);
   assert.deepEqual(Object.keys(api.ROUTES), ["beginRegistration", "finishRegistration",
