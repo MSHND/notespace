@@ -82,7 +82,7 @@
       && typeof identity.sourceFileName === "string"
       && identity.sourceFileName.length <= 120
       && typeof identity.sourcePipSession === "boolean"
-      && ["json", "vault", "detached"].includes(identity.sourceOwnerKind)
+      && ["json", "vault", "synced", "detached"].includes(identity.sourceOwnerKind)
       && typeof identity.sourceVaultSessionId === "string"
       && identity.sourceVaultSessionId.length <= 120
       && (identity.sourceOwnerKind !== "vault" || identity.sourceVaultSessionId.length > 0);

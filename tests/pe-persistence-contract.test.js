@@ -207,6 +207,41 @@ function editorPayload(context, node, overrides = {}) {
   };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+function installTestSyncedOwner(context, options = {}) {
+  let generation = 1;
+  let active = true;
+  let saves = 0;
+  const controller = {
+    captureSyncedOwnerSaveSession() {
+      return active ? { generation } : null;
+    },
+    isSyncedOwnerSaveSessionCurrent(session) {
+      return active && session?.generation === generation;
+    },
+    async saveSyncedOwner({ freezePayload }) {
+      saves += 1;
+      const payload = await freezePayload();
+      options.onFrozen?.(payload);
+      if (options.gate) await options.gate.promise;
+      return options.result || { ok: true, reason: "saved", confirmedRemoteRevision: 2 };
+    },
+    releaseSyncedOwner() {
+      active = false;
+      generation += 1;
+      return true;
+    },
+    get saves() { return saves; },
+  };
+  assert.equal(context.PocketOwnerSaveBoundary.installSyncedOwnerForSave(controller), true);
+  return controller;
+}
+
 function snapshotSaveBoundary(context, nodeId) {
   const state = lexicalState(context);
   const node = state.nodes.find((candidate) => candidate.id === nodeId);
@@ -3172,6 +3207,112 @@ test("applyAndSave requests the controlled export surface after a changed apply"
   assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
 });
 
+test("P043a PE Save under synced ownership reaches exportTree and the P042 save seam", async () => {
+  const context = createFullContractContext();
+  const node = syntheticNode("synced_pe", { details: "Before" });
+  const state = resetState(context, [node]);
+  let frozenPayload = null;
+  const controller = installTestSyncedOwner(context, {
+    onFrozen(payload) { frozenPayload = plain(payload); },
+  });
+  let exportCalls = 0;
+  const actualExportTree = context.exportTree;
+  context.exportTree = async (options) => {
+    exportCalls += 1;
+    return actualExportTree(options);
+  };
+  let fileWrites = 0;
+  context.writeTruthFile = async () => { fileWrites += 1; return { ok: false, reason: "must-not-write-file" }; };
+
+  const opening = editorPayload(context, node, { body: "Synced PE change" });
+  assert.equal(opening.sourceOwnerKind, "synced");
+  const result = await context.PocketNodePopoutEditor.applyAndSave(opening);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, true);
+  assert.equal(result.exported, true);
+  assert.equal(result.exportReason, "synced-save");
+  assert.equal(exportCalls, 1);
+  assert.equal(controller.saves, 1);
+  assert.equal(fileWrites, 0);
+  assert.equal(state.nodes[0].details, "Synced PE change");
+  assert.equal(state.ops.length, 0);
+  assert.equal(frozenPayload.mainThoughtTree[0].details, "Synced PE change");
+});
+
+test("P043a synced PE non-success remains applied but unconfirmed without owner fallback", async () => {
+  for (const reason of [
+    "revision-conflict",
+    "remote-outcome-unknown",
+    "stale-owner-session",
+    "remote-success-local-confirmation-failed",
+  ]) {
+    const context = createFullContractContext();
+    const node = syntheticNode(`synced_pe_${reason}`, { details: "Before" });
+    const state = resetState(context, [node]);
+    const controller = installTestSyncedOwner(context, { result: { ok: false, reason } });
+    let fileWrites = 0;
+    context.writeTruthFile = async () => { fileWrites += 1; return { ok: true, target: "opened-file" }; };
+
+    const result = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, node, {
+      body: `Unconfirmed ${reason}`,
+    }));
+
+    assert.equal(result.ok, false, reason);
+    assert.equal(result.applied, true, reason);
+    assert.equal(result.exported, false, reason);
+    assert.equal(result.reason, reason, reason);
+    assert.equal(controller.saves, 1, reason);
+    assert.equal(fileWrites, 0, reason);
+    assert.equal(state.nodes[0].details, `Unconfirmed ${reason}`, reason);
+    assert.equal(state.ops.length, 1, reason);
+  }
+});
+
+test("P043a rejects stale synced PE identities before applying or saving", async () => {
+  const context = createFullContractContext();
+  const node = syntheticNode("synced_pe_stale", { details: "Before" });
+  const state = resetState(context, [node]);
+  const first = installTestSyncedOwner(context);
+  const opening = editorPayload(context, node, { body: "Must not apply" });
+  const second = installTestSyncedOwner(context);
+
+  const result = await context.PocketNodePopoutEditor.applyAndSave(opening);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "file-session-changed");
+  assert.equal(state.nodes[0].details, "Before");
+  assert.equal(state.ops.length, 0);
+  assert.equal(first.saves, 0);
+  assert.equal(second.saves, 0);
+});
+
+test("P043a synced Save retains edits made after its frozen payload", async () => {
+  const context = createFullContractContext();
+  const node = syntheticNode("synced_newer_edit", { details: "Before" });
+  const state = resetState(context, [node]);
+  context.recordOp({ type: "details_edit", id: node.id, path: "Synthetic", changed: "notes" });
+  const frozen = deferred();
+  const gate = deferred();
+  installTestSyncedOwner(context, {
+    onFrozen() { frozen.resolve(); },
+    gate,
+  });
+
+  const saving = context.exportTree({ returnDetails: true, downloadFallback: false });
+  await frozen.promise;
+  state.nodes[0].details = "Newer local edit";
+  state.nodes[0].updatedAt = "2026-01-01T00:00:01.000Z";
+  context.recordOp({ type: "details_edit", id: node.id, path: "Synthetic", changed: "notes" });
+  gate.resolve();
+  const result = await saving;
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reason, "synced-save");
+  assert.equal(state.nodes[0].details, "Newer local edit");
+  assert.equal(state.ops.length, 1);
+});
+
 test("native v1 Outline save keeps canonical IDs, depths, collapse state, and independently edited Notes", async () => {
   const context = createFullContractContext();
   const rawNode = fixture("current-outline-v1.json").mainThoughtTree[0];
@@ -3496,6 +3637,16 @@ test("generated editable Outline runtime emits the exact v1 schema and both inde
   assert.equal(runtime.saveCalls[0].mode, "outline");
   assert.equal(runtime.saveCalls[0].body, "Parent\n  Child");
   assert.equal(runtime.saveCalls[0].outline.length, 2);
+});
+
+test("generated PE runtime accepts and forwards a synced source identity", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    sourceOwnerKind: "synced",
+    sourceVaultSessionId: "",
+  }));
+  runtime.controls.get("saveBtn").dispatch("click");
+  assert.equal(runtime.saveCalls.length, 1);
+  assert.equal(runtime.saveCalls[0].sourceOwnerKind, "synced");
 });
 
 test("generated runtime carries source identity, adopts successful revision and save-as identity, then saves again", async () => {

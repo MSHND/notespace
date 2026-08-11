@@ -554,6 +554,7 @@
       && typeof payload.sourcePipSession === "boolean"
       && (payload.sourceOwnerKind === "json"
         || payload.sourceOwnerKind === "vault"
+        || payload.sourceOwnerKind === "synced"
         || payload.sourceOwnerKind === "detached")
       && typeof payload.sourceVaultSessionId === "string"
       && payload.sourceVaultSessionId.length <= 120
