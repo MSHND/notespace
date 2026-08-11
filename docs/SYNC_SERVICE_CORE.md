@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. It is CommonJS Node code in the existing repository. It is not loaded by `index.html`, `sw.js` or any browser module, and it adds no HTTP server, cookie parser, WebAuthn implementation, database driver, deployment configuration, provider, host, origin, UI, owner or Save integration.
+P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. P046 adds the adjacent provider-neutral `sync-service/pocket-sync-http-adapter.js`, which maps exact same-origin HTTP requests and the browser-managed session cookie into this core. Neither module is loaded by `index.html`, `sw.js` or any browser module, and neither adds a listener, WebAuthn implementation, database driver, deployment configuration, provider, host, origin, UI, owner or Save integration.
 
 The core is the smallest deterministic state machine that can later sit behind P032's seven locked routes. It independently validates request context, relationships and opaque encrypted records before committing. It never accepts readable Pocket content or a content-unlock secret.
 
@@ -95,7 +95,7 @@ Every method receives exactly `{ context, body }`. Context is exactly:
 
 `contentType` may include a valid UTF-8 charset parameter. Method, exact Origin, Fetch Metadata, content type and nullable opaque session ID are checked before body handling, store access, randomness or verifier work. Missing or `null` origins, cross-site and same-site requests, GET, forms, unknown fields and bearer-token substitutes fail closed.
 
-The core models the decision. A future adapter must map real HTTP headers and the secure browser-managed session cookie into this exact context.
+The core models the decision. P046 now checks real HTTP headers and the secure browser-managed session cookie before body parsing, then passes this exact context to the core invocation.
 
 Successful methods return exactly `{ status, body, session }`. Only successful passkey registration, authentication or recovery completion returns a session instruction. The core never emits a cookie header. Conflict is an exact normal result with status 409 and `session: null`; other failures throw stable, non-secret service errors.
 
@@ -179,7 +179,7 @@ Session IDs use 32 random bytes. The response body never carries one. Instead, c
 }
 ```
 
-A future HTTP adapter must turn that instruction into a correctly scoped secure cookie. The new session and any prior-session revocation are one atomic transaction. A failed commit leaves the prior session active and creates no replacement. Sessions neither slide nor receive background cleanup.
+P046 turns that instruction into one `__Host-pocket-sync-session` cookie with `Secure`, `HttpOnly`, `SameSite=Strict` and `Path=/`, with no Domain attribute. The new session and any prior-session revocation are one atomic transaction. A failed commit leaves the prior session active and creates no replacement. Sessions neither slide nor receive background cleanup.
 
 ## 9. Account and Pocket authorisation
 
@@ -208,19 +208,16 @@ Stable errors contain only a code, safe HTTP status and narrowly applicable `ret
 
 Raw PRF output, master keys, recovery roots and device wrapping keys are rejected by strict request/verifier schemas. Only a Pocket record contains ciphertext, and no accepted record contains readable Pocket fields.
 
-## 12. Deferred adapter and P037 boundary
+## 12. Deferred deployment and P037 boundary
 
-Later adapter work must provide and review:
+P046 provides the strict in-process HTTP/session mapping for all fifteen locked routes, exact route dispatch, bounded fatal-UTF-8 JSON parsing, safe errors and cookie clearing. Later deployment work must still provide and review:
 
-- a real HTTP adapter for the seven locked routes;
-- exact header/body limits and context mapping;
-- Secure, HttpOnly, SameSite cookie issuance/clearing and fixation protection;
 - a standards-compliant WebAuthn verifier adapter;
 - a real durable transaction implementation matching the exact store surface;
 - rate limits and operational rollback/backup policy; and
 - the unresolved no-locator account-discovery policy.
 
-P037 owns local envelope/recovery orchestration, recovery-package creation and future transport extension. Later adapters must not weaken the P034-P036 state machine or exact-host RP-ID policy. Provider, runtime, database, deployment origin, production UI and current owner/Save integration remain unselected.
+P037 owns local envelope/recovery orchestration, recovery-package creation and future transport extension. A provider wrapper must not weaken the P034-P036 state machine, P046 request/cookie policy or exact-host RP-ID policy. Provider, runtime, database, deployment origin, production UI and current owner/Save integration remain unselected.
 
 ## 13. Validation status
 

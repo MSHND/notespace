@@ -2,7 +2,7 @@
 
 ## 1. Status and conventions
 
-This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded account/content transport, and P038 extends that same dormant browser client across the P036/P037 key-envelope/recovery methods. P034-P037 implement the corresponding dormant, undeployed service-core state machines. None selects an endpoint origin, HTTP adapter, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
+This is the version 1 contract for a future Pocket-owned, provider-neutral remote service. Pocket owns the product account relationship and policy; no underlying service is exposed for human configuration. P032 implements the still-unloaded account/content transport, and P038 extends that same dormant browser client across the P036/P037 key-envelope/recovery methods. P034-P037 implement the corresponding dormant, undeployed service-core state machines. P046 adds the undeployed provider-neutral HTTP/session adapter which maps exact same-origin requests and the `__Host-pocket-sync-session` cookie to that core. It selects no endpoint origin, hosting, database, identity vendor or infrastructure. P031 remains the strict client-side WebAuthn ceremony owner.
 
 Every request and response carries `apiVersion: 1`. Identifiers are opaque, unguessable strings. Authenticated account context is transport/session state and is never inferred from a filename. Product v1 permits one ordinary synced Pocket, but requests still carry `syncedPocketId`.
 
@@ -28,7 +28,7 @@ The future service is reached beneath one caller-supplied same-origin absolute-p
 - `/account/recovery/finish`
 - `/account/recovery/rotate`
 
-All fifteen operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Future authentication uses a browser-managed same-origin cookie; the client neither sends nor persists a bearer token. P034-P037 enforce an exact POST/Origin/Fetch-Metadata/content-type/session context, atomic state and durable idempotency. A later HTTP adapter must map real headers and Secure/HttpOnly/SameSite cookies into that boundary and supply abuse controls.
+All fifteen operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Authentication uses a browser-managed same-origin cookie; the client neither sends nor persists a bearer token. P046 maps exact POST/Origin/Fetch-Metadata/content-type/session requests to P034-P037, bounds UTF-8 JSON streams and emits only Secure, HttpOnly, SameSite=Strict, host-prefixed cookies. Rate and abuse controls remain a required deployment composition.
 
 Account/revision/key/recovery responses and their requests are limited to 262,144 UTF-8 bytes. Encrypted content download/upload JSON is limited to 16,777,216 UTF-8 bytes. P032/P038 reject declared or actually oversized responses, non-JSON/HTML bodies, redirects, malformed JSON and unexpected statuses. They never retry automatically.
 
@@ -213,7 +213,7 @@ HTTP/body disagreement fails closed: a conflict body on 200 and a committed body
 
 ### P034 service-core enforcement
 
-`sync-service/pocket-sync-service-core.js` is the dormant CommonJS state machine behind these seven route shapes. It has no HTTP listener, cookie parser, database driver, real WebAuthn verifier, selected origin or deployment. Its exact request context must be produced by a later HTTP adapter before any request body, store or verifier work occurs.
+`sync-service/pocket-sync-service-core.js` is the dormant CommonJS state machine behind these route shapes. `sync-service/pocket-sync-http-adapter.js` is the corresponding undeployed adapter for all fifteen locked paths. It has no listener, host, database driver, real WebAuthn verifier, recovery-proof verifier or selected deployment origin. A future provider wrapper must compose those remaining deployment responsibilities.
 
 For version 1, P035 requires the configured WebAuthn RP ID to equal the trusted-origin hostname exactly. An explicit origin port is excluded from the RP ID. The service core does not accept parent-domain scope or attempt public-suffix classification; broader WebAuthn scope remains a later deployment-policy decision.
 
@@ -225,7 +225,7 @@ See [Synced Pocket service safety core](SYNC_SERVICE_CORE.md) for the factory, t
 
 ## 7. Key envelopes
 
-P036 enforces the following operations inside the dormant service core. P038 implements their exact unloaded browser-client validators and same-origin suffixes `/pockets/envelopes/list`, `/pockets/envelopes/download`, `/pockets/envelopes/add` and `/pockets/envelopes/revoke`. No production loader or real HTTP adapter invokes them.
+P036 enforces the following operations inside the dormant service core. P038 implements their exact unloaded browser-client validators and same-origin suffixes `/pockets/envelopes/list`, `/pockets/envelopes/download`, `/pockets/envelopes/add` and `/pockets/envelopes/revoke`. P046 dispatches those paths only when a future provider wrapper explicitly invokes it; no production browser loader points at it.
 
 ### List permitted envelope metadata
 
@@ -256,7 +256,7 @@ Revoking an ordinary envelope does not rewrite the encrypted content record. Rec
 
 ## 8. Emergency recovery
 
-P036 enforces same-origin suffixes `/account/recovery/initialise`, `/account/recovery/begin`, `/account/recovery/finish` and `/account/recovery/rotate`. P038 implements their exact unloaded browser-client request/response boundary. No selected origin or real HTTP/cookie adapter exists, so production Pocket still cannot call them.
+P036 enforces same-origin suffixes `/account/recovery/initialise`, `/account/recovery/begin`, `/account/recovery/finish` and `/account/recovery/rotate`. P038 implements their exact unloaded browser-client request/response boundary. P046 can dispatch them in-process but no selected origin, hosting wrapper or browser runtime points at it, so production Pocket still cannot call them.
 
 ### Initialise recovery
 

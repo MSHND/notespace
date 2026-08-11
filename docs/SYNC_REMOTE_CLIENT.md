@@ -60,7 +60,7 @@ Small account/revision/key/recovery JSON is limited to 262,144 bytes. Encrypted 
 
 Future authentication is a browser-managed, same-origin secure session cookie. The client supplies `credentials: "same-origin"`; it does not create, inspect or persist session state. There is no bearer-token header, token storage, refresh manager or cross-origin API in v1.
 
-The future server must set and validate the cookie with an appropriate Secure, HttpOnly, SameSite, scope, rotation and expiry policy; bind the session to verified account ceremonies; prevent session fixation; enforce CSRF defenses appropriate to the final deployment; and revalidate account, credential and Pocket ownership on every request. P032 cannot provide those server controls.
+P046 now provides the undeployed provider-neutral mapping for that server boundary: it accepts only exact same-origin POST JSON routes, maps the core's session instructions to one `__Host-pocket-sync-session` cookie with Secure, HttpOnly, SameSite=Strict and Path=/, and clears only core-directed invalid sessions. It has no listener or selected host. A deployment wrapper must still bind it to real HTTPS, abuse/rate controls, a durable store and real verifier implementations. P032 cannot provide those server controls.
 
 ## P031 account service
 
@@ -103,4 +103,4 @@ Exact schemas exclude readable Pocket content, filenames, paths, handles, keys, 
 
 ## Remaining implementation
 
-Still required are the actual same-origin HTTP/cookie service and origin selection; real WebAuthn and recovery-proof adapters; durable database; rate/abuse controls; local key/recovery-package and activation orchestration; device transfer and deletion; conflict UI; live synced-owner adoption; Save integration; and production security review. P038 stays unloaded until those pieces form one reviewed owner transition and Save path.
+Still required are origin/hosting selection and a listener wrapper; real WebAuthn and recovery-proof adapters; durable database; rate/abuse controls; local key/recovery-package and activation orchestration; device transfer and deletion; conflict UI; live synced-owner adoption; Save integration; and production security review. P038 stays unloaded until those pieces form one reviewed owner transition and Save path.

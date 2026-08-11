@@ -151,7 +151,7 @@ async function finishRecoveryFlow(harness, locator) {
   return { begin, finish, credential };
 }
 
-test("P036 extends the one dormant core with exact frozen surfaces and no browser loading", () => {
+test("P036 core remains isolated from the P046 HTTP adapter and browser loading", () => {
   assert.deepEqual(Object.keys(serviceModule), ["POLICY", "COLLECTIONS", "createServiceCore"]);
   assert.deepEqual(Object.values(serviceModule.COLLECTIONS), COLLECTIONS);
   assert.equal(Object.isFrozen(serviceModule.COLLECTIONS), true);
@@ -160,7 +160,10 @@ test("P036 extends the one dormant core with exact frozen surfaces and no browse
   assert.equal(Object.isFrozen(harness.core), true);
   assert.doesNotMatch(source("index.html"), /pocket-sync-service-core/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-service-core/);
-  assert.deepEqual(fs.readdirSync(path.join(ROOT, "sync-service")), ["pocket-sync-service-core.js"]);
+  assert.deepEqual(fs.readdirSync(path.join(ROOT, "sync-service")).sort(), [
+    "pocket-sync-http-adapter.js",
+    "pocket-sync-service-core.js",
+  ]);
 });
 
 test("factory requires the exact isolated recovery verifier before any dependency use", () => {
