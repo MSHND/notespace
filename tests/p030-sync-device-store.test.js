@@ -696,7 +696,7 @@ test("usage counters cannot roll back within one master-key generation", async (
   assert.deepEqual(plain((await store.readPocket(initial.record.syncedPocketId)).usage), plain(initial.record.usage));
 });
 
-test("usage ceiling fails closed while a higher master-key generation may reset counters", async () => {
+test("usage ceiling fails closed while master-key rotation preserves device-key lifetime usage", async () => {
   const ceiling = apis.crypto.POLICY.maximumEncryptionsPerKey;
   const atCeiling = clone(initial.record);
   atCeiling.usage.masterKeyContentEncryptions = ceiling;
@@ -711,15 +711,34 @@ test("usage ceiling fails closed while a higher master-key generation may reset 
     usage: {
       masterKeyGeneration: 2,
       masterKeyContentEncryptions: 0,
-      deviceWrappingKeyEncryptions: 0,
+      deviceWrappingKeyEncryptions: initial.record.usage.deviceWrappingKeyEncryptions,
     },
   });
   const result = await store.replacePocket(initial.record.syncedPocketId, 1, rotated);
   assert.deepEqual(plain(result.usage), {
     masterKeyGeneration: 2,
     masterKeyContentEncryptions: 0,
-    deviceWrappingKeyEncryptions: 0,
+    deviceWrappingKeyEncryptions: initial.record.usage.deviceWrappingKeyEncryptions,
   });
+  const loweredDeviceUsage = committedRecord(result, {
+    usage: {
+      masterKeyGeneration: 3,
+      masterKeyContentEncryptions: 0,
+      deviceWrappingKeyEncryptions: result.usage.deviceWrappingKeyEncryptions - 1,
+    },
+  });
+  await expectCode(
+    store.replacePocket(initial.record.syncedPocketId, 2, loweredDeviceUsage),
+    "device-usage-rollback"
+  );
+  const increasedDeviceUsage = committedRecord(result, {
+    usage: {
+      masterKeyGeneration: 3,
+      masterKeyContentEncryptions: 0,
+      deviceWrappingKeyEncryptions: result.usage.deviceWrappingKeyEncryptions + 1,
+    },
+  });
+  await store.replacePocket(initial.record.syncedPocketId, 2, increasedDeviceUsage);
 });
 
 test("distinctive readable content remains inside ciphertext only", async () => {

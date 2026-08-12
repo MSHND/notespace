@@ -376,6 +376,73 @@ async function createActivatedHarness(options = {}) {
   };
 }
 
+function createMeasuredRecovery(harness, options = {}) {
+  const writes = [];
+  const policy = { maximumEncryptionsPerKey: harness.crypto.POLICY.maximumEncryptionsPerKey };
+  let downloaded = false;
+  let deviceEnvelopeEncryptions = 0;
+  let deviceDraftEncryptionsAfterDownload = 0;
+
+  async function capture(input) {
+    const draft = await harness.crypto.openContent(
+      input.recoveryDraft.record, input.deviceWrappingKey, input.recoveryDraft.context
+    );
+    writes.push({ stage: draft.stage, usage: input.usage.deviceWrappingKeyEncryptions });
+  }
+
+  const deviceStore = Object.freeze({
+    ...harness.recoveryStore,
+    async createRecoveryStaging(input) {
+      await capture(input);
+      return harness.recoveryStore.createRecoveryStaging(input);
+    },
+    async replaceRecoveryStaging(syncedPocketId, expectedRevision, input) {
+      await capture(input);
+      return harness.recoveryStore.replaceRecoveryStaging(syncedPocketId, expectedRevision, input);
+    },
+    async promoteRecoveryStaging(syncedPocketId, expectedRevision, input) {
+      await capture(input);
+      return harness.recoveryStore.promoteRecoveryStaging(syncedPocketId, expectedRevision, input);
+    },
+  });
+  const crypto = Object.freeze({
+    ...harness.crypto,
+    POLICY: policy,
+    async sealContent(...input) {
+      if (downloaded) deviceDraftEncryptionsAfterDownload += 1;
+      return harness.crypto.sealContent(...input);
+    },
+    async openMasterKeyBundle(record, wrappingKey, context, plans) {
+      if (Array.isArray(plans) && plans.length === 1
+          && plans[0]?.context?.envelopeKind === "device") deviceEnvelopeEncryptions += 1;
+      return harness.crypto.openMasterKeyBundle(record, wrappingKey, context, plans);
+    },
+  });
+  const contentService = Object.freeze({
+    ...harness.contentService,
+    async downloadEncryptedRecord(input) {
+      const result = await harness.contentService.downloadEncryptedRecord(input);
+      downloaded = true;
+      if (typeof options.capacityOffset === "number") {
+        const current = Array.from(harness.recoveryState.records.values())[0];
+        policy.maximumEncryptionsPerKey = current.usage.deviceWrappingKeyEncryptions
+          + options.capacityOffset;
+      }
+      return result;
+    },
+  });
+  return Object.freeze({
+    writes,
+    get deviceEnvelopeEncryptions() { return deviceEnvelopeEncryptions; },
+    get deviceDraftEncryptionsAfterDownload() { return deviceDraftEncryptionsAfterDownload; },
+    create() {
+      return harness.recovery.createRecoveryOrchestrator({
+        ...harness.recoveryConfig, crypto, deviceStore, contentService,
+      });
+    },
+  });
+}
+
 test("P041 is one dormant inert exact recovery boundary", () => {
   let reads = 0;
   const context = { Object, Array, Number, String, Boolean, JSON, Error, Promise };
@@ -536,6 +603,49 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
   assert.equal(harness.recoveryEvents.length, eventCount);
   assert.equal(harness.webAuthnCreates, 1);
   assert.equal(harness.proofDerivations, 1);
+});
+
+test("P049c counts every device-key encryption in recovery staging and promotion", async () => {
+  const harness = await createActivatedHarness();
+  const measured = createMeasuredRecovery(harness);
+  const result = await measured.create().recover(harness.recoveryDependencies, {
+    deviceId: "device-p049c-counted",
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const contentReady = measured.writes.findIndex((write) => write.stage === "content-ready");
+  assert.ok(contentReady > 0);
+  assert.equal(measured.writes[contentReady].usage - measured.writes[contentReady - 1].usage, 2);
+  assert.equal(measured.deviceEnvelopeEncryptions, 1);
+  assert.equal(measured.deviceDraftEncryptionsAfterDownload > 0, true);
+  const finalRecord = await harness.recoveryStore.readPocket(harness.originalPackage.syncedPocketId);
+  assert.equal(finalRecord.usage.deviceWrappingKeyEncryptions, measured.writes.at(-1).usage);
+  assert.equal(measured.writes[0].usage, 1);
+});
+
+test("P049c reserves device-key capacity for the envelope plus recovery-draft transition", async (t) => {
+  await t.test("ceiling-minus-one fails before either new AES-GCM operation", async () => {
+    const harness = await createActivatedHarness();
+    const measured = createMeasuredRecovery(harness, { capacityOffset: 1 });
+    const result = await measured.create().recover(harness.recoveryDependencies, {
+      deviceId: "device-p049c-no-capacity",
+    });
+    assert.equal(result.ok, false);
+    assert.equal(measured.deviceEnvelopeEncryptions, 0);
+    assert.equal(measured.deviceDraftEncryptionsAfterDownload, 0);
+  });
+
+  await t.test("capacity for two encryptions reaches the strict stored-counter bound", async () => {
+    const harness = await createActivatedHarness();
+    const measured = createMeasuredRecovery(harness, { capacityOffset: 3 });
+    await measured.create().recover(harness.recoveryDependencies, {
+      deviceId: "device-p049c-two-capacity",
+    });
+    const contentReady = measured.writes.findIndex((write) => write.stage === "content-ready");
+    assert.ok(contentReady > 0);
+    assert.equal(measured.writes[contentReady].usage - measured.writes[contentReady - 1].usage, 2);
+    assert.equal(measured.deviceEnvelopeEncryptions, 1);
+    assert.equal(measured.deviceDraftEncryptionsAfterDownload, 1);
+  });
 });
 
 test("ambiguous finish resumes the exact continuation without another proof or credential", async () => {

@@ -519,11 +519,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
     if (next.usage.masterKeyGeneration < current.usage.masterKeyGeneration) {
       throw deviceStoreError("device-usage-rollback");
     }
-    if (next.usage.masterKeyGeneration === current.usage.masterKeyGeneration
-        && (next.usage.masterKeyContentEncryptions
-          < current.usage.masterKeyContentEncryptions
-          || next.usage.deviceWrappingKeyEncryptions
-          < current.usage.deviceWrappingKeyEncryptions)) {
+    if ((next.usage.masterKeyGeneration === current.usage.masterKeyGeneration
+          && next.usage.masterKeyContentEncryptions
+            < current.usage.masterKeyContentEncryptions)
+        || next.usage.deviceWrappingKeyEncryptions
+          < current.usage.deviceWrappingKeyEncryptions) {
       throw deviceStoreError("device-usage-rollback");
     }
     return next;

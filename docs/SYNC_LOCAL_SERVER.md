@@ -26,7 +26,7 @@ This is developer-operated infrastructure, not Pocket UI configuration.
 6. Apply the checked-in schema explicitly with `npm run sync:db:migrate`.
 7. Start only the local server with `npm run sync:server`.
 
-The migration command reads only `sync-service/migrations/001-pocket-sync-store.sql`, uses the operator connection value through `pg`, closes its pool and exits. It does not create databases or users, accept a migration-path argument, print credentials or inspect record data.
+The migration command reads only `sync-service/migrations/001-pocket-sync-store.sql`, uses the operator connection value through `pg`, verifies the resulting fixed `public.pocket_sync_records` and `public.pocket_sync_schema` contract, closes its pool and exits. The same verifier runs before the local server listens. Controlled tests cover valid metadata plus missing relations, columns, constraints, exact collection allowlist entries, JSON/version agreement, metadata identity/version and malformed pre-existing tables. It does not create databases or users, accept a migration-path argument, print credentials or inspect record data.
 
 ## Deferred before any deployment
 

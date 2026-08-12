@@ -22,12 +22,12 @@ This database is separate from `pocketLite.recentFile.v1`, which stores only rec
 
 ## 3. Exact record schema
 
-Record schema version 3 is the following strict whole-record shape. `deviceWrappingKey` is an actual structured-cloned `CryptoKey`, not the displayed placeholder string. `activationDraft` and `recoveryDraft` are null outside their dormant orchestration or one P029 encrypted record. Their readable logical fields never appear in raw IndexedDB state.
+Record schema version 4 is the following strict whole-record shape. `deviceWrappingKey` is an actual structured-cloned `CryptoKey`, not the displayed placeholder string. `activationDraft` and `recoveryDraft` are null outside their dormant orchestration or one P029 encrypted record. Their readable logical fields never appear in raw IndexedDB state.
 
 ```json
 {
   "kind": "pocket.sync.device-state",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "storeRevision": 1,
   "syncedPocketId": "opaque-pocket-id",
   "deviceId": "opaque-device-id",
@@ -117,11 +117,11 @@ P041 recovery begins with the separate strict record kind `pocket.sync.recovery-
 
 With no pending write, content revision equals confirmed remote revision and conflict is null. With pending state, expected revision equals confirmed revision, content revision is exactly confirmed plus one, and pending metadata plus `content.record` must form a valid P028 conditional-write request. A conflict requires that pending operation and a newer actual remote revision.
 
-Per-long-lived-key encryption counters are durable and monotonic within a master-key generation: `masterKeyContentEncryptions` counts Pocket-content encryptions with that master key, while `deviceWrappingKeyEncryptions` counts direct device-envelope and encrypted activation/recovery-draft seals with that device key. Each must remain below P029's operational ceiling. Schema 4 explicitly migrates the old aggregates without reducing them; where the former split cannot prove a precise allocation, it retains the complete legacy envelope count against the device key. These local counters cannot prove the global total across every device; a later remote/account rotation policy must enforce the whole-account ceiling.
+Per-long-lived-key encryption counters are durable and conservative: `masterKeyContentEncryptions` counts Pocket-content encryptions with that master key and may reset only when `masterKeyGeneration` increases. `deviceWrappingKeyEncryptions` counts direct device-envelope plus encrypted activation/recovery-draft seals with that device key and can never decrease across an ordinary record replacement, independently of master-key generation. Recovery reserves capacity for the complete transition before creating the device envelope and its following encrypted draft, so both AES-GCM encryptions are included. Each counter must remain below P029's operational ceiling. Schema 4 explicitly migrates the old aggregates without reducing them; where the former split cannot prove a precise allocation, it retains the complete legacy envelope count against the device key. These local counters cannot prove the global total across every device; a later remote/account rotation policy must enforce the whole-account ceiling.
 
 ## 7. Versions and migrations
 
-Database version 1 remains unchanged. Record schema version 3 is current. The registered migrations are `1-to-2-encrypted-activation-draft` and `2-to-3-encrypted-recovery-draft`. Each validates the complete prior record and adds only its new nullable encrypted-draft field. Neither resets, rewrites or weakens existing content. Unknown higher versions and lower versions without an explicit version-by-version migration fail closed.
+Database version 1 remains unchanged. Record schema version 4 is current. The registered migrations are `1-to-2-encrypted-activation-draft`, `2-to-3-encrypted-recovery-draft` and `3-to-4-per-long-lived-key-usage`. Each validates the complete prior record and adds only its reviewed encrypted-draft or usage fields. Neither resets, rewrites or weakens existing content. Unknown higher versions and lower versions without an explicit version-by-version migration fail closed.
 
 Every P039 stage update re-encrypts the complete draft and replaces the whole record through the existing compare-and-swap transaction. Remote success is not advanced in the draft until that replacement commits. A stale local writer therefore cannot move activation backwards or overwrite a newer confirmed stage.
 

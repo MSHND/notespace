@@ -233,6 +233,50 @@ test("P049b retains every unawaited façade operation through transaction finali
   });
 });
 
+test("P049c retains synchronous façade failures through transaction finalisation", async (t) => {
+  await t.test("an unawaited invalid record rolls back a callback success", async () => {
+    const controlled = createControlledPool();
+    const store = createPostgresStore({ pool: controlled.pool });
+    await assert.rejects(store.transact("readwrite", async (tx) => {
+      tx.insert("accounts", "bad-record", { storeVersion: 1, unsupported: undefined });
+      return "callback-success";
+    }), code("store-record-invalid"));
+    assert.equal(controlled.queries.some((entry) => entry.sql === "COMMIT"), false);
+    assert.equal(controlled.queries.filter((entry) => entry.sql === "ROLLBACK").length, 1);
+  });
+
+  await t.test("an unawaited invalid collection or key rolls back without SQL", async () => {
+    for (const [collection, key, expected] of [
+      ["invalid-collection", "key", "store-collection-invalid"],
+      ["accounts", "", "store-key-invalid"],
+    ]) {
+      const controlled = createControlledPool();
+      const store = createPostgresStore({ pool: controlled.pool });
+      await assert.rejects(store.transact("readwrite", async (tx) => {
+        tx.insert(collection, key, record(1));
+        return "callback-success";
+      }), code(expected));
+      assert.equal(controlled.queries.some((entry) => entry.sql === "COMMIT"), false);
+      assert.equal(controlled.queries.filter((entry) => entry.sql === "ROLLBACK").length, 1);
+      assert.equal(controlled.queries.some((entry) => entry.sql.startsWith("INSERT")), false);
+    }
+  });
+
+  await t.test("a fully awaited synchronous failure retains its existing error", async () => {
+    const controlled = createControlledPool();
+    const store = createPostgresStore({ pool: controlled.pool });
+    await store.transact("readwrite", async (tx) => {
+      await assert.rejects(
+        tx.insert("accounts", "bad-record", { storeVersion: 1, unsupported: undefined }),
+        code("store-record-invalid")
+      );
+      return "handled";
+    });
+    assert.equal(controlled.queries.filter((entry) => entry.sql === "COMMIT").length, 1);
+    assert.equal(controlled.queries.some((entry) => entry.sql === "ROLLBACK"), false);
+  });
+});
+
 test("P047 keeps insert insert-only and binds hostile values as PostgreSQL parameters", async () => {
   const hostileKey = "record'); DROP TABLE pocket_sync_records; --";
   const hostileRecord = record(1, { opaque: "'); SELECT secret; --" });

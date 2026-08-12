@@ -491,20 +491,21 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       return Object.assign({}, jsonClone(draft), changes);
     }
 
-    function nextDeviceWrappingKeyEncryptionCount(record) {
+    function nextDeviceWrappingKeyEncryptionCount(record, increment = 1) {
       const maximum = config.crypto.POLICY?.maximumEncryptionsPerKey;
       const previous = record ? record.usage?.deviceWrappingKeyEncryptions : 0;
       // The durable counter is validated by the store, but this check must run
       // before invoking AES-GCM so an exhausted key is never used again.
       if (!Number.isSafeInteger(maximum) || maximum < 1
           || !Number.isSafeInteger(previous) || previous < 0
-          || previous >= maximum - 1) {
+          || !Number.isSafeInteger(increment) || increment < 1
+          || increment >= maximum || previous > maximum - increment - 1) {
         throw recoveryError("device-usage-limit-reached");
       }
-      return previous + 1;
+      return previous + increment;
     }
 
-    async function persistDraft(execution, nextInput) {
+    async function persistDraft(execution, nextInput, deviceKeyEncryptionIncrement = 1) {
       const current = execution.record;
       const nextRevision = current ? current.storeRevision + 1 : 1;
       const nextDraft = validateDraft(Object.assign({}, nextInput, {
@@ -516,7 +517,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         contentType: config.crypto.FORMAT.contentType,
       };
       const key = current ? current.deviceWrappingKey : execution.deviceWrappingKey;
-      const deviceWrappingKeyEncryptions = nextDeviceWrappingKeyEncryptionCount(current);
+      const deviceWrappingKeyEncryptions = nextDeviceWrappingKeyEncryptionCount(
+        current, deviceKeyEncryptionIncrement
+      );
       const encrypted = await checked(execution, config.crypto.sealContent(nextDraft, key, context));
       const nextRecord = {
         kind: format.recoveryStagingKind,
@@ -775,6 +778,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       }
       let wrapped;
       try {
+        // This transition creates both a device-key-wrapped master-key envelope
+        // and the next encrypted recovery draft. Reserve capacity before either.
+        nextDeviceWrappingKeyEncryptionCount(execution.record, 2);
         wrapped = await openMaster(execution, [{
           context: deviceContext,
           wrappingKey: execution.record.deviceWrappingKey,
@@ -799,7 +805,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         content: { context: contentContext, record: downloaded.encryptedRecord },
         deviceEnvelope,
         pendingOperation: null,
-      }));
+      }), 2);
       return null;
     }
 

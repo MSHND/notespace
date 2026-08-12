@@ -171,21 +171,41 @@ function createPostgresStore(options) {
 
     function track(operation) {
       const pending = Promise.resolve(operation);
-      operations.add(pending);
+      const tracked = { pending, observed: false };
+      operations.add(tracked);
       // Observe rejection now, but retain every started operation until finalisation.
       pending.catch(() => {});
-      return pending;
+      function observe() {
+        tracked.observed = true;
+      }
+      return Object.freeze({
+        then(onFulfilled, onRejected) {
+          observe();
+          return pending.then(onFulfilled, onRejected);
+        },
+        catch(onRejected) {
+          observe();
+          return pending.catch(onRejected);
+        },
+        finally(onFinally) {
+          observe();
+          return pending.finally(onFinally);
+        },
+      });
     }
 
     function start(factory) {
-      try { return track(factory()); }
-      catch (error) { return Promise.reject(error); }
+      let operation;
+      try { operation = factory(); }
+      catch (error) { operation = Promise.reject(error); }
+      return track(operation);
     }
 
     async function settleOperations() {
       // A transaction callback may accidentally omit await.  Do not commit until
       // every façade operation it started has settled successfully.
-      await Promise.all([...operations]);
+      await Promise.all([...operations].map((operation) => operation.observed
+        ? operation.pending.catch(() => {}) : operation.pending));
     }
 
     const transaction = Object.freeze({
@@ -255,7 +275,7 @@ function createPostgresStore(options) {
       return result;
     } catch (error) {
       primaryError = error;
-      await Promise.allSettled([...operations]);
+      await Promise.allSettled([...operations].map((operation) => operation.pending));
       completed = true;
       if (began && !committed) {
         try {

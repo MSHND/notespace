@@ -58,6 +58,42 @@ function key(collection, recordKey) {
   return `${collection}\u0000${recordKey}`;
 }
 
+function validSchemaFixture() {
+  return {
+    columns: [
+      { table_name: "pocket_sync_records", column_name: "collection", data_type: "text", is_nullable: "NO" },
+      { table_name: "pocket_sync_records", column_name: "record_key", data_type: "text", is_nullable: "NO" },
+      { table_name: "pocket_sync_records", column_name: "store_version", data_type: "bigint", is_nullable: "NO" },
+      { table_name: "pocket_sync_records", column_name: "record", data_type: "jsonb", is_nullable: "NO" },
+      { table_name: "pocket_sync_schema", column_name: "schema_name", data_type: "text", is_nullable: "NO" },
+      { table_name: "pocket_sync_schema", column_name: "schema_version", data_type: "integer", is_nullable: "NO" },
+    ],
+    constraints: [
+      { relation: "public.pocket_sync_records", contype: "p", definition: "PRIMARY KEY (collection, record_key)" },
+      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (length(record_key)>0)" },
+      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (store_version>0 AND store_version<=9007199254740991)" },
+      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations'))" },
+      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" },
+      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)" },
+      { relation: "public.pocket_sync_schema", contype: "p", definition: "PRIMARY KEY (schema_name)" },
+    ],
+    version: 1,
+  };
+}
+
+function schemaPool(fixture) {
+  return {
+    async query(sql) {
+      if (sql.includes("information_schema.columns")) return { rowCount: fixture.columns.length, rows: fixture.columns };
+      if (sql.includes("FROM pg_constraint")) return { rowCount: fixture.constraints.length, rows: fixture.constraints };
+      if (sql.includes("SELECT schema_version FROM public.pocket_sync_schema")) {
+        return { rowCount: 1, rows: [{ schema_version: fixture.version }] };
+      }
+      throw new Error("native catalog detail");
+    },
+  };
+}
+
 function createPoolClass(state) {
   return class ControlledPool {
     constructor(options) {
@@ -356,6 +392,64 @@ test("P049b rejects metadata-only PostgreSQL schemas with an unsafe collection a
   await assert.rejects(verifyPocketSyncSchema(pool), (error) => error?.code === "sync-server-schema-invalid");
 });
 
+test("P049c production schema verifier fails closed for every reviewed malformed catalog contract", async (t) => {
+  await assert.doesNotReject(verifyPocketSyncSchema(schemaPool(validSchemaFixture())));
+  const cases = [
+    ["missing records table", (fixture) => {
+      fixture.columns = fixture.columns.filter((row) => row.table_name !== "pocket_sync_records");
+      fixture.constraints = fixture.constraints.filter((row) => row.relation !== "public.pocket_sync_records");
+    }],
+    ["wrong records column type", (fixture) => {
+      fixture.columns.find((row) => row.column_name === "store_version").data_type = "integer";
+    }],
+    ["nullable required column", (fixture) => {
+      fixture.columns.find((row) => row.column_name === "record_key").is_nullable = "YES";
+    }],
+    ["wrong records primary key", (fixture) => {
+      fixture.constraints.find((row) => row.relation === "public.pocket_sync_records" && row.contype === "p")
+        .definition = "PRIMARY KEY (record_key)";
+    }],
+    ["missing lower version bound", (fixture) => {
+      fixture.constraints.find((row) => row.definition.includes("store_version>0"))
+        .definition = "CHECK (store_version<=9007199254740991)";
+    }],
+    ["missing upper version bound", (fixture) => {
+      fixture.constraints.find((row) => row.definition.includes("store_version>0"))
+        .definition = "CHECK (store_version>0)";
+    }],
+    ["missing approved collection", (fixture) => {
+      fixture.constraints.find((row) => row.definition.includes("collection IN"))
+        .definition = "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies'))";
+    }],
+    ["extra collection", (fixture) => {
+      fixture.constraints.find((row) => row.definition.includes("collection IN"))
+        .definition = "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations','unsafeExtra'))";
+    }],
+    ["missing JSON object check", (fixture) => {
+      fixture.constraints = fixture.constraints.filter((row) => !row.definition.includes("jsonb_typeof(record)='object'"));
+    }],
+    ["weakened JSON store-version agreement", (fixture) => {
+      fixture.constraints.find((row) => row.definition.includes("storeVersion") && row.definition.includes("NUMERIC"))
+        .definition = "CHECK (jsonb_typeof(record->'storeVersion')='number')";
+    }],
+    ["wrong metadata version", (fixture) => { fixture.version = 2; }],
+    ["malformed metadata table", (fixture) => {
+      fixture.columns.find((row) => row.table_name === "pocket_sync_schema" && row.column_name === "schema_version")
+        .data_type = "bigint";
+    }],
+    ["non-public lookalike relation", (fixture) => {
+      fixture.constraints.forEach((row) => { row.relation = row.relation.replace("public.", "other."); });
+    }],
+  ];
+  for (const [name, mutate] of cases) await t.test(name, async () => {
+    const fixture = structuredClone(validSchemaFixture());
+    mutate(fixture);
+    await assert.rejects(verifyPocketSyncSchema(schemaPool(fixture)), (error) =>
+      error?.code === "sync-server-schema-invalid" && !error.message.includes("native")
+    );
+  });
+});
+
 test("P049 keeps the migration explicit, fixed-path and safely closed", async () => {
   const originalLoad = Module._load;
   const cached = require.cache[MIGRATION_PATH];
@@ -391,6 +485,42 @@ test("P049 keeps the migration explicit, fixed-path and safely closed", async ()
     await assert.rejects(applyLocalMigration("postgres://operator:secret@127.0.0.1/pocket"),
       (error) => error && error.code === "sync-server-migration-failed" && !error.message.includes("secret"));
     assert.equal(ended, 2);
+  } finally {
+    Module._load = originalLoad;
+    require.cache[MIGRATION_PATH] = cached;
+  }
+});
+
+test("P049c migration rejects a malformed pre-existing public relation after CREATE IF NOT EXISTS", async () => {
+  const originalLoad = Module._load;
+  const cached = require.cache[MIGRATION_PATH];
+  const calls = [];
+  let ended = 0;
+  const fixture = validSchemaFixture();
+  fixture.columns.find((row) => row.column_name === "record").data_type = "text";
+  class Pool {
+    constructor(options) { calls.push(options); }
+    async query(sql) {
+      calls.push(sql);
+      if (sql.includes("information_schema.columns")) return { rowCount: fixture.columns.length, rows: fixture.columns };
+      if (sql.includes("FROM pg_constraint")) return { rowCount: fixture.constraints.length, rows: fixture.constraints };
+      if (sql.includes("SELECT schema_version FROM public")) return { rowCount: 1, rows: [{ schema_version: 1 }] };
+      return { rowCount: null, rows: [] };
+    }
+    async end() { ended += 1; }
+  }
+  Module._load = function patchedLoad(name, parent, isMain) {
+    if (name === "pg") return { Pool };
+    return originalLoad.call(this, name, parent, isMain);
+  };
+  delete require.cache[MIGRATION_PATH];
+  try {
+    const { applyLocalMigration } = require(MIGRATION_PATH);
+    await assert.rejects(applyLocalMigration("postgres://operator:secret@127.0.0.1/pocket"),
+      (error) => error?.code === "sync-server-migration-failed" && !error.message.includes("native")
+    );
+    assert.equal(calls[1], source("sync-service/migrations/001-pocket-sync-store.sql"));
+    assert.equal(ended, 1);
   } finally {
     Module._load = originalLoad;
     require.cache[MIGRATION_PATH] = cached;
