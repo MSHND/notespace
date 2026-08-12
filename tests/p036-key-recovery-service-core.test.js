@@ -151,7 +151,7 @@ async function finishRecoveryFlow(harness, locator) {
   return { begin, finish, credential };
 }
 
-test("P036 core remains isolated from P046-P048 server adapters and browser loading", () => {
+test("P036 core remains isolated from P046-P049 server adapters and browser loading", () => {
   assert.deepEqual(Object.keys(serviceModule), ["POLICY", "COLLECTIONS", "createServiceCore"]);
   assert.deepEqual(Object.values(serviceModule.COLLECTIONS), COLLECTIONS);
   assert.equal(Object.isFrozen(serviceModule.COLLECTIONS), true);
@@ -164,10 +164,16 @@ test("P036 core remains isolated from P046-P048 server adapters and browser load
   assert.doesNotMatch(source("sw.js"), /pocket-sync-postgres-store/);
   assert.doesNotMatch(source("index.html"), /pocket-sync-webauthn-verifier/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-webauthn-verifier/);
+  assert.doesNotMatch(source("index.html"), /pocket-sync-server/);
+  assert.doesNotMatch(source("sw.js"), /pocket-sync-server/);
   assert.deepEqual(fs.readdirSync(path.join(ROOT, "sync-service")).sort(), [
     "migrations",
+    "pocket-sync-db-migrate.js",
     "pocket-sync-http-adapter.js",
     "pocket-sync-postgres-store.js",
+    "pocket-sync-server-config.js",
+    "pocket-sync-server-runtime.js",
+    "pocket-sync-server.js",
     "pocket-sync-service-core.js",
     "pocket-sync-webauthn-verifier.js",
   ]);
@@ -624,7 +630,7 @@ test("production source remains provider-neutral and free of background/browser 
     assert.doesNotMatch(text, forbidden);
   }
   const packageJson = JSON.parse(source("package.json"));
-  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2" });
+  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2", pg: "8.22.0" });
   assert.equal(Object.hasOwn(packageJson, "devDependencies"), false);
-  assert.equal(Object.keys(packageJson.scripts).some((name) => /p036|sync-service/i.test(name)), false);
+  assert.equal(Object.keys(packageJson.scripts).some((name) => /p036/i.test(name)), false);
 });

@@ -214,10 +214,10 @@ Raw PRF output, master keys, recovery roots and device wrapping keys are rejecte
 
 ## 12. Deferred deployment and P037 boundary
 
-P046 provides the strict in-process HTTP/session mapping for all fifteen locked routes, exact route dispatch, bounded fatal-UTF-8 JSON parsing, safe errors and cookie clearing. P048 provides the real but undeployed server verification adapter. Later deployment work must still provide and review:
+P046 provides the strict in-process HTTP/session mapping for all fifteen locked routes, exact route dispatch, bounded fatal-UTF-8 JSON parsing, safe errors and cookie clearing. P048 provides the real but undeployed server verification adapter. P049 composes those modules with P047's ordinary PostgreSQL pool boundary into a loopback-only local HTTPS executable, without choosing a host or enabling browser Sync. Later deployment work must still provide and review:
 
-- composition that supplies P048's verifier with the HTTP adapter and service core, plus physical browser/authenticator acceptance testing;
-- composition that constructs an ordinary PostgreSQL pool, separately applies the P047 migration, and supplies the durable store adapter;
+- physical browser/authenticator acceptance testing for P048's verifier with the composed service;
+- production recovery-proof verification, deployment composition and separately reviewed PostgreSQL migration operations;
 - rate limits and operational rollback/backup policy; and
 - the unresolved no-locator account-discovery policy.
 

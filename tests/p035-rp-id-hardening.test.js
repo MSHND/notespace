@@ -173,11 +173,11 @@ test("parent, public, sibling, non-canonical and URL-like RP IDs fail before any
   });
 });
 
-test("P035 adds no browser loader or package script", () => {
+test("P035 adds no browser loader or P035 package script", () => {
   assert.doesNotMatch(source("index.html"), /pocket-sync-service-core|p035-rp-id/i);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-service-core|p035-rp-id/i);
   const packageJson = JSON.parse(source("package.json"));
-  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2" });
+  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2", pg: "8.22.0" });
   assert.equal(Object.hasOwn(packageJson, "devDependencies"), false);
-  assert.equal(Object.keys(packageJson.scripts).some((name) => /p035|sync-service/i.test(name)), false);
+  assert.equal(Object.keys(packageJson.scripts).some((name) => /p035/i.test(name)), false);
 });

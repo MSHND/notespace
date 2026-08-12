@@ -1401,14 +1401,16 @@ test("service records exclude readable Pocket and unlock secrets; only Pocket st
   assert.equal(JSON.stringify(operation).includes(ciphertext), false);
 });
 
-test("package and production loader boundaries retain the P048 server-only dependency", () => {
+test("package and production loader boundaries retain the P048/P049 server-only dependencies", () => {
   const packageJson = JSON.parse(source("package.json"));
   assert.deepEqual(Object.keys(packageJson), ["private", "scripts", "dependencies"]);
-  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2" });
+  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2", pg: "8.22.0" });
   assert.deepEqual(Object.keys(packageJson.scripts), [
     "check",
     "mod:dry-remove-enter-preflight",
     "mod:remove-enter-preflight",
+    "sync:db:migrate",
+    "sync:server",
   ]);
   assert.doesNotMatch(source("index.html"), /sync-service\//);
   assert.doesNotMatch(source("sw.js"), /sync-service\//);

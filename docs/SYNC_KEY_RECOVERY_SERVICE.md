@@ -103,4 +103,4 @@ Malformed stored records or relationships fail closed without repair, deletion o
 
 P038 supplies the unloaded exact browser communication boundary and P041 supplies dormant local envelope opening, recovery-package replacement and encrypted recovery staging through the existing service methods. P041 stops at `ready-for-adoption` and keeps roots, master keys and PRF output local.
 
-Still required are P042's one synced-owner/Save controller, a reviewed production recovery-proof algorithm/adapter, the real HTTP/cookie, WebAuthn and durable-database adapters, abuse controls and operational rollback policy. The service remains undeployed.
+P049 now composes the real HTTP/cookie, WebAuthn and durable-database adapters into a local loopback HTTPS executable, but injects an explicit unavailable recovery-proof verifier. Still required are P042's one synced-owner/Save controller, a reviewed production recovery-proof algorithm/adapter, public deployment, abuse controls and operational rollback policy. The service remains undeployed.

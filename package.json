@@ -3,9 +3,12 @@
   "scripts": {
     "check": "node tools/pocket-check.js",
     "mod:dry-remove-enter-preflight": "node tools/pocket-mod-index.js remove-script js/pocket-enter-preflight.js --dry-run",
-    "mod:remove-enter-preflight": "node tools/pocket-mod-index.js remove-script js/pocket-enter-preflight.js"
+    "mod:remove-enter-preflight": "node tools/pocket-mod-index.js remove-script js/pocket-enter-preflight.js",
+    "sync:db:migrate": "node sync-service/pocket-sync-db-migrate.js",
+    "sync:server": "node sync-service/pocket-sync-server.js"
   },
   "dependencies": {
-    "@simplewebauthn/server": "13.3.2"
+    "@simplewebauthn/server": "13.3.2",
+    "pg": "8.22.0"
   }
 }
