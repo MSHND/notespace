@@ -32,6 +32,7 @@
   var unsavedCancelBtn = document.getElementById("unsavedCancelBtn");
   var returnFocus = null;
   var outlineContextReturnFocus = null;
+  var outlineContextTargetId = "";
   var saveInFlight = false;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
   function setDirty(next) { if (readOnly) { dirty = false; document.body.classList.remove("isDirty"); return; } dirty = !!next; if (dirty) editGeneration += 1; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
@@ -163,6 +164,7 @@
     outlineContextMenu.style.top = "";
     var focusTarget = outlineContextReturnFocus;
     outlineContextReturnFocus = null;
+    outlineContextTargetId = "";
     if (options.restoreFocus !== false && focusTarget && focusTarget.isConnected && typeof focusTarget.focus === "function") {
       requestAnimationFrame(function () { focusTarget.focus({ preventScroll: true }); });
     }
@@ -198,6 +200,7 @@
     if (!outlineSelectedIds.has(blockId)) selectSingleOutlineBlock(blockId);
     else updateOutlineSelectionChrome();
     openOutlineContextMenu(ev, row);
+    outlineContextTargetId = blockId;
   }
   function handleOutlineContextMenuKeydown(ev) {
     if (!outlineContextMenuIsOpen()) return;
@@ -265,6 +268,19 @@
     var end = index + 1;
     while (end < outline.length && outlineDepth(end) > rootDepth) end += 1;
     return end;
+  }
+  function insertOutlineSibling(targetBlockId, direction) {
+    if (readOnly || mode !== "outline" || !Array.isArray(outline) || (direction !== "above" && direction !== "below")) return false;
+    syncOutlineFromDom();
+    var targetIndex = blockIndexById(targetBlockId);
+    if (targetIndex < 0) return false;
+    var insertAt = direction === "above" ? targetIndex : outlineSubtreeEndIndex(targetIndex);
+    var block = makeBlock("", outlineDepth(targetIndex));
+    outline.splice(insertAt, 0, block);
+    selectSingleOutlineBlock(block.id);
+    setDirty(true);
+    renderOutline(insertAt);
+    return true;
   }
   function outlineSelectionToText() {
     var lines = [];
@@ -511,7 +527,7 @@
       text.textContent = block.text || "";
       text.addEventListener("input", function () { block.text = text.textContent || ""; setDirty(true); });
       text.addEventListener("keydown", function (ev) {
-        if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); syncOutlineFromDom(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); setDirty(true); renderOutline(index + 1); return; }
+        if (ev.key === "Enter" && !ev.shiftKey) { if (!readOnly) { ev.preventDefault(); insertOutlineSibling(ensureBlockId(block), "below"); } return; }
         if (ev.key === "Tab") { ev.preventDefault(); syncOutlineFromDom(); var delta = ev.shiftKey ? -1 : 1; block.depth = Math.max(0, Math.min(8, (Number(block.depth) || 0) + delta)); setDirty(true); renderOutline(index); return; }
         if (ev.key === "Backspace" && !text.textContent && outline.length > 1) { ev.preventDefault(); syncOutlineFromDom(); outline.splice(index, 1); setDirty(true); renderOutline(Math.max(0, index - 1)); }
       });
@@ -519,7 +535,7 @@
       row.appendChild(toggle);
       row.appendChild(text);
       outlinePane.appendChild(row);
-      if (index === focusIndex) requestAnimationFrame(function () { text.focus(); });
+      if (index === focusIndex) requestAnimationFrame(function () { text.focus({ preventScroll: true }); });
     });
   }
   function setMode(nextMode) { if (readOnly) return false; if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } mode = nextMode === "outline" ? "outline" : "text"; updateModeChrome(); if (mode === "outline") renderOutline(0); else bodyInput.focus({ preventScroll: true }); return true; }
@@ -761,6 +777,12 @@
       ev.preventDefault();
       ev.stopPropagation();
       var action = button.getAttribute("data-outline-action") || "";
+      if (action === "insert-above" || action === "insert-below") {
+        var contextTargetId = outlineContextTargetId;
+        closeOutlineContextMenu({ restoreFocus: false });
+        if (!insertOutlineSibling(contextTargetId, action === "insert-above" ? "above" : "below")) setSaveState("insert unavailable", "failed");
+        return;
+      }
       if (mode !== "outline" || !hasOutlineSelection()) {
         closeOutlineContextMenu({ restoreFocus: true });
         setSaveState("select outline rows first", "failed");

@@ -113,6 +113,8 @@
   <div id="outlineContextMenu" class="outlineContextMenu" role="menu" aria-label="Outline selection actions" hidden>
     <button type="button" role="menuitem" data-outline-action="copy">Copy</button>
     <button type="button" role="menuitem" data-outline-action="paste">Paste after selection</button>
+    <button type="button" role="menuitem" data-outline-action="insert-above"${disabledEditorControl}>Insert above</button>
+    <button type="button" role="menuitem" data-outline-action="insert-below"${disabledEditorControl}>Insert below</button>
     <button type="button" role="menuitem" data-outline-action="duplicate">Duplicate</button>
     <button type="button" role="menuitem" data-outline-action="delete">Delete</button>
   </div>

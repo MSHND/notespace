@@ -3961,6 +3961,137 @@ test("generated Outline runtime retains subtree Copy, Paste-after-selection, Dup
   );
 });
 
+test("generated Outline runtime inserts context siblings at the target row with selection, focus, and save integrity", async () => {
+  const template = source("js/pocket-node-popout-template.js");
+  assert.match(template, /data-outline-action="insert-above"/);
+  assert.match(template, /data-outline-action="insert-below"/);
+  const payload = runtimeEditablePayload({
+    id: "runtime_outline_siblings",
+    title: "Outline siblings",
+    body: "A\n  B\nC",
+    mode: "outline",
+    outline: [
+      { id: "sibling_a", text: "A", depth: 0, collapsed: false },
+      { id: "sibling_b", text: "B", depth: 1, collapsed: false },
+      { id: "sibling_c", text: "C", depth: 0, collapsed: false },
+    ],
+  });
+  const runtime = executeControlledRuntime(payload);
+  const pane = runtime.controls.get("outlinePane");
+  const insertBelow = runtime.document.createElement("button");
+  insertBelow.setAttribute("data-outline-action", "insert-below");
+  const insertAbove = runtime.document.createElement("button");
+  insertAbove.setAttribute("data-outline-action", "insert-above");
+  runtime.controls.get("outlineContextMenu").appendChild(insertBelow);
+  runtime.controls.get("outlineContextMenu").appendChild(insertAbove);
+
+  pane.children[0].children[0].dispatch("click");
+  pane.children[1].children[0].dispatch("click", { ctrlKey: true });
+  pane.dispatch("contextmenu", { target: pane.children[1].children[2], clientX: 20, clientY: 20 });
+  runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertBelow });
+
+  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "", "C"]);
+  const insertedBelow = pane.children[2];
+  const insertedBelowId = insertedBelow.getAttribute("data-block-id");
+  assert.notEqual(insertedBelowId, "sibling_a");
+  assert.notEqual(insertedBelowId, "sibling_b");
+  assert.notEqual(insertedBelowId, "sibling_c");
+  assert.equal(Number(insertedBelow.style.paddingLeft.replace("px", "")), 26);
+  assert.equal(insertedBelow.getAttribute("aria-selected"), "true");
+  assert.equal(pane.children.filter((row) => row.getAttribute("aria-selected") === "true").length, 1);
+  assert.strictEqual(runtime.document.activeElement, insertedBelow.children[2]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(runtime.saveCalls.length, 0);
+
+  pane.children[3].children[0].dispatch("click", { shiftKey: true });
+  assert.deepEqual(pane.children.map((row) => row.getAttribute("aria-selected")), ["false", "false", "true", "true"]);
+
+  pane.dispatch("contextmenu", { target: pane.children[1].children[2], clientX: 20, clientY: 20 });
+  runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertAbove });
+  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "", "B", "", "C"]);
+  assert.equal(Number(pane.children[1].style.paddingLeft.replace("px", "")), 26);
+  assert.strictEqual(runtime.document.activeElement, pane.children[1].children[2]);
+
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.equal(runtime.saveCalls.length, 1);
+  assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.text, block.depth, block.collapsed]), [
+    ["A", 0, false], ["", 1, false], ["B", 1, false], ["", 1, false], ["C", 0, false],
+  ]);
+  assert.equal(runtime.saveCalls[0].outline.filter((block) => block.text === "").length, 2);
+});
+
+test("generated Outline runtime inserts above a parent without splitting its branch", async () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "above_a", text: "A", depth: 0, collapsed: false },
+      { id: "above_b", text: "B", depth: 1, collapsed: false },
+      { id: "above_b1", text: "B1", depth: 2, collapsed: true },
+      { id: "above_c", text: "C", depth: 1, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const insertAbove = runtime.document.createElement("button");
+  insertAbove.setAttribute("data-outline-action", "insert-above");
+  runtime.controls.get("outlineContextMenu").appendChild(insertAbove);
+
+  pane.dispatch("contextmenu", { target: pane.children[1].children[2], clientX: 20, clientY: 20 });
+  runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertAbove });
+  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "", "B", "B1", "C"]);
+  assert.strictEqual(runtime.document.activeElement, pane.children[1].children[2]);
+
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.id, block.text, block.depth, block.collapsed]), [
+    ["above_a", "A", 0, false],
+    [runtime.saveCalls[0].outline[1].id, "", 1, false],
+    ["above_b", "B", 1, false],
+    ["above_b1", "B1", 2, true],
+    ["above_c", "C", 1, false],
+  ]);
+});
+
+test("generated Outline runtime routes Enter through below-sibling subtree insertion", async () => {
+  const payload = runtimeEditablePayload({
+    id: "runtime_outline_enter_sibling",
+    title: "Outline Enter sibling",
+    body: "A\n  B\n    B1\n      B1a\n    B2\n  C",
+    mode: "outline",
+    outline: [
+      { id: "enter_a", text: "A", depth: 0, collapsed: false },
+      { id: "enter_b", text: "B", depth: 1, collapsed: true },
+      { id: "enter_b1", text: "B1", depth: 2, collapsed: false },
+      { id: "enter_b1a", text: "B1a", depth: 3, collapsed: true },
+      { id: "enter_b2", text: "B2", depth: 2, collapsed: false },
+      { id: "enter_c", text: "C", depth: 1, collapsed: false },
+    ],
+  });
+  const runtime = executeControlledRuntime(payload);
+  const pane = runtime.controls.get("outlinePane");
+  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "C"]);
+
+  const enter = pane.children[1].children[2].dispatch("keydown", { key: "Enter" });
+  assert.equal(enter.defaultPrevented, true);
+  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "", "C"]);
+  assert.strictEqual(runtime.document.activeElement, pane.children[2].children[2]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(runtime.saveCalls.length, 0);
+
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.id, block.text, block.depth, block.collapsed]), [
+    ["enter_a", "A", 0, false],
+    ["enter_b", "B", 1, true],
+    ["enter_b1", "B1", 2, false],
+    ["enter_b1a", "B1a", 3, true],
+    ["enter_b2", "B2", 2, false],
+    [runtime.saveCalls[0].outline[5].id, "", 1, false],
+    ["enter_c", "C", 1, false],
+  ]);
+  assert.notEqual(runtime.saveCalls[0].outline[5].id, "enter_b");
+});
+
 test("generated runtime preserves P007 Escape ordering for menu, dialog, row editing, and close", () => {
   const payload = runtimeEditablePayload({
     id: "runtime_escape",
