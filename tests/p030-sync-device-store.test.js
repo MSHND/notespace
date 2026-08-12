@@ -741,6 +741,69 @@ test("usage ceiling fails closed while master-key rotation preserves device-key 
   await store.replacePocket(initial.record.syncedPocketId, 2, increasedDeviceUsage);
 });
 
+test("P049d reserves durable encryption usage without changing logical record state", async () => {
+  const { store, driver } = await openMemoryStore(apis);
+  await store.createPocket(initial.record);
+  const before = await store.readPocket(initial.record.syncedPocketId);
+  const reserved = await store.reservePocketEncryptionUsage(
+    before.syncedPocketId,
+    before.storeRevision,
+    before.usage,
+    { masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 2 }
+  );
+  assert.equal(reserved.storeRevision, before.storeRevision);
+  assert.equal(reserved.usage.masterKeyContentEncryptions,
+    before.usage.masterKeyContentEncryptions + 1);
+  assert.equal(reserved.usage.deviceWrappingKeyEncryptions,
+    before.usage.deviceWrappingKeyEncryptions + 2);
+  assert.deepEqual(plain(reserved.content), plain(before.content));
+  assert.deepEqual(plain(reserved.deviceEnvelope), plain(before.deviceEnvelope));
+  assert.deepEqual(plain(reserved.remote), plain(before.remote));
+  assert.equal(reserved.activationDraft, before.activationDraft);
+  assert.equal(reserved.recoveryDraft, before.recoveryDraft);
+  await expectCode(store.reservePocketEncryptionUsage(
+    before.syncedPocketId, before.storeRevision, before.usage,
+    { masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 0 }
+  ), "device-usage-reservation-conflict");
+  await expectCode(store.reservePocketEncryptionUsage(
+    before.syncedPocketId, before.storeRevision + 1, reserved.usage,
+    { masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 0 }
+  ), "device-store-revision-conflict");
+  const wrongGeneration = Object.assign({}, reserved.usage, {
+    masterKeyGeneration: reserved.usage.masterKeyGeneration + 1,
+  });
+  await expectCode(store.reservePocketEncryptionUsage(
+    before.syncedPocketId, before.storeRevision, wrongGeneration,
+    { masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 0 }
+  ), "device-usage-reservation-conflict");
+  const staleLogical = committedRecord(before);
+  await expectCode(
+    store.replacePocket(before.syncedPocketId, before.storeRevision, staleLogical),
+    "device-usage-rollback"
+  );
+  const ceiling = apis.crypto.POLICY.maximumEncryptionsPerKey;
+  const atLimit = Object.assign({}, reserved.usage, {
+    masterKeyContentEncryptions: ceiling - 1,
+  });
+  const current = await store.readPocket(before.syncedPocketId);
+  const nearLimit = clone(current);
+  nearLimit.usage = atLimit;
+  nearLimit.storeRevision += 1;
+  nearLimit.remote.confirmedRevision = nearLimit.content.context.revision;
+  nearLimit.remote.pending = null;
+  await store.replacePocket(before.syncedPocketId, before.storeRevision, nearLimit);
+  await expectCode(store.reservePocketEncryptionUsage(
+    before.syncedPocketId, nearLimit.storeRevision, nearLimit.usage,
+    { masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 0 }
+  ), "device-usage-limit-reached");
+  driver.failAt("during-commit");
+  await assert.rejects(store.reservePocketEncryptionUsage(
+    before.syncedPocketId, nearLimit.storeRevision, nearLimit.usage,
+    { masterKeyContentEncryptions: 0, deviceWrappingKeyEncryptions: 1 }
+  ));
+  assert.deepEqual(plain((await store.readPocket(before.syncedPocketId)).usage), plain(nearLimit.usage));
+});
+
 test("distinctive readable content remains inside ciphertext only", async () => {
   const state = await buildDeviceState(apis, {
     payload: { nodeLabel: SENTINEL, notes: SENTINEL, outline: [SENTINEL] },

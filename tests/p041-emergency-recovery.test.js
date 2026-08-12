@@ -378,6 +378,7 @@ async function createActivatedHarness(options = {}) {
 
 function createMeasuredRecovery(harness, options = {}) {
   const writes = [];
+  const events = [];
   const policy = { maximumEncryptionsPerKey: harness.crypto.POLICY.maximumEncryptionsPerKey };
   let downloaded = false;
   let deviceEnvelopeEncryptions = 0;
@@ -400,6 +401,18 @@ function createMeasuredRecovery(harness, options = {}) {
       await capture(input);
       return harness.recoveryStore.replaceRecoveryStaging(syncedPocketId, expectedRevision, input);
     },
+    async reserveRecoveryStagingEncryptionUsage(syncedPocketId, revision, usage, increment) {
+      events.push(`reserve:${increment}`);
+      if (downloaded && typeof options.capacityOffset === "number"
+          && usage + increment >= policy.maximumEncryptionsPerKey) {
+        const error = new Error("capacity");
+        error.code = "device-usage-limit-reached";
+        throw error;
+      }
+      return harness.recoveryStore.reserveRecoveryStagingEncryptionUsage(
+        syncedPocketId, revision, usage, increment
+      );
+    },
     async promoteRecoveryStaging(syncedPocketId, expectedRevision, input) {
       await capture(input);
       return harness.recoveryStore.promoteRecoveryStaging(syncedPocketId, expectedRevision, input);
@@ -409,12 +422,16 @@ function createMeasuredRecovery(harness, options = {}) {
     ...harness.crypto,
     POLICY: policy,
     async sealContent(...input) {
+      events.push("seal-draft");
       if (downloaded) deviceDraftEncryptionsAfterDownload += 1;
       return harness.crypto.sealContent(...input);
     },
     async openMasterKeyBundle(record, wrappingKey, context, plans) {
       if (Array.isArray(plans) && plans.length === 1
-          && plans[0]?.context?.envelopeKind === "device") deviceEnvelopeEncryptions += 1;
+          && plans[0]?.context?.envelopeKind === "device") {
+        deviceEnvelopeEncryptions += 1;
+        events.push("seal-device-envelope");
+      }
       return harness.crypto.openMasterKeyBundle(record, wrappingKey, context, plans);
     },
   });
@@ -433,6 +450,7 @@ function createMeasuredRecovery(harness, options = {}) {
   });
   return Object.freeze({
     writes,
+    events,
     get deviceEnvelopeEncryptions() { return deviceEnvelopeEncryptions; },
     get deviceDraftEncryptionsAfterDownload() { return deviceDraftEncryptionsAfterDownload; },
     create() {
@@ -620,6 +638,10 @@ test("P049c counts every device-key encryption in recovery staging and promotion
   const finalRecord = await harness.recoveryStore.readPocket(harness.originalPackage.syncedPocketId);
   assert.equal(finalRecord.usage.deviceWrappingKeyEncryptions, measured.writes.at(-1).usage);
   assert.equal(measured.writes[0].usage, 1);
+  const reserveTwo = measured.events.indexOf("reserve:2");
+  const deviceEnvelopeSeal = measured.events.indexOf("seal-device-envelope");
+  assert.ok(reserveTwo >= 0 && reserveTwo < deviceEnvelopeSeal);
+  assert.ok(measured.events.indexOf("reserve:1") < measured.events.lastIndexOf("seal-draft"));
 });
 
 test("P049c reserves device-key capacity for the envelope plus recovery-draft transition", async (t) => {
@@ -894,6 +916,15 @@ test("P030 recovery staging is strict, encrypted, CAS protected and migrates old
   const found = await store.readRecoveryAttempt("attempt-p041-staging");
   assert.equal(found.draft.rootMaterial, b64(32, 44));
   assert.doesNotMatch(JSON.stringify(Array.from(state.records.values())), /rootMaterial/);
+  const reservedStaging = await store.reserveRecoveryStagingEncryptionUsage(
+    context.syncedPocketId, 1, 1, 2
+  );
+  assert.equal(reservedStaging.storeRevision, 1);
+  assert.equal(reservedStaging.usage.deviceWrappingKeyEncryptions, 3);
+  assert.deepEqual(plain(reservedStaging.recoveryDraft), plain(record.recoveryDraft));
+  await assert.rejects(store.reserveRecoveryStagingEncryptionUsage(
+    context.syncedPocketId, 1, 1, 1
+  ), (error) => error.code === "device-usage-reservation-conflict");
   await assert.rejects(store.replaceRecoveryStaging(context.syncedPocketId, 2, {
     ...record, storeRevision: 2,
   }), (error) => error.code === "device-store-revision-conflict");

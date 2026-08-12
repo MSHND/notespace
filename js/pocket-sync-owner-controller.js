@@ -75,7 +75,8 @@ device record for explicit, conditional Saves.
         || !isObject(crypto.FORMAT) || typeof crypto.FORMAT.contentType !== "string") {
       throw controllerError("owner-controller-crypto-invalid");
     }
-    if (!isObject(config.deviceStore) || ["readPocket", "readRecoveryAttempt", "replacePocket"]
+    if (!isObject(config.deviceStore) || ["readPocket", "readRecoveryAttempt", "replacePocket",
+      "reservePocketEncryptionUsage"]
       .some((name) => typeof config.deviceStore[name] !== "function")) {
       throw controllerError("owner-controller-device-store-invalid");
     }
@@ -407,7 +408,27 @@ device record for explicit, conditional Saves.
       };
     }
 
-    async function nextRecord(current, content, remote, masterKeyContentEncryptions) {
+    function draftResealCount(current) {
+      return (current.activationDraft === null ? 0 : 1)
+        + (current.recoveryDraft === null ? 0 : 1);
+    }
+
+    async function reserveOwnerUsage(session, current, masterIncrement, deviceIncrement) {
+      if (masterIncrement === 0 && deviceIncrement === 0) return current;
+      const reserved = await config.deviceStore.reservePocketEncryptionUsage(
+        current.syncedPocketId,
+        current.storeRevision,
+        current.usage,
+        {
+          masterKeyContentEncryptions: masterIncrement,
+          deviceWrappingKeyEncryptions: deviceIncrement,
+        }
+      );
+      if (isSyncedOwnerSaveSessionCurrent(session)) owner.record = reserved;
+      return reserved;
+    }
+
+    async function nextRecord(current, content, remote) {
       const storeRevision = increment(current.storeRevision, "device-store-revision-exhausted");
       return {
         kind: current.kind,
@@ -421,10 +442,8 @@ device record for explicit, conditional Saves.
         remote,
         usage: {
           masterKeyGeneration: current.usage.masterKeyGeneration,
-          masterKeyContentEncryptions,
-          deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions
-            + (current.activationDraft === null ? 0 : 1)
-            + (current.recoveryDraft === null ? 0 : 1),
+          masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions,
+          deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions,
         },
         activationDraft: await nextActivationDraft(current, storeRevision),
         recoveryDraft: await nextRecoveryDraft(current, storeRevision),
@@ -469,17 +488,25 @@ device record for explicit, conditional Saves.
       let content;
       let pending;
       const retryingPending = capturedOwner.record.remote.pending !== null;
+      let current = capturedOwner.record;
       if (retryingPending) {
         if (capturedOwner.record.remote.conflict !== null) return result("revision-conflict", { conflict: true });
+        try {
+          current = await reserveOwnerUsage(session, current, 0, draftResealCount(current));
+        } catch (_error) { return result("pending-persistence-failed"); }
+        if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
         pending = Object.assign({}, capturedOwner.record.remote.pending, { attemptKind: "idempotent-retry" });
-        encryptedRecord = capturedOwner.record.content.record;
-        content = capturedOwner.record.content;
+        encryptedRecord = current.content.record;
+        content = current.content;
       } else {
         let payload;
         try { payload = await save.freezePayload(); }
         catch (_error) { return result("payload-freeze-failed"); }
+        try { current = await reserveOwnerUsage(session, current, 1, draftResealCount(current)); }
+        catch (_error) { return result("pending-persistence-failed"); }
+        if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
         try {
-          const expectedRevision = capturedOwner.record.remote.confirmedRevision;
+          const expectedRevision = current.remote.confirmedRevision;
           const contentContext = {
             syncedPocketId: capturedOwner.syncedPocketId,
             revision: increment(expectedRevision, "remote-revision-exhausted"),
@@ -498,14 +525,11 @@ device record for explicit, conditional Saves.
 
       let pendingRecord;
       try { pendingRecord = await nextRecord(
-        capturedOwner.record,
+        current,
         content,
-        { confirmedRevision: pending.expectedRevision, pending, conflict: null },
-        retryingPending
-          ? capturedOwner.record.usage.masterKeyContentEncryptions
-          : increment(capturedOwner.record.usage.masterKeyContentEncryptions, "content-encryption-limit-reached")
+        { confirmedRevision: pending.expectedRevision, pending, conflict: null }
       ); } catch (_error) { return result("pending-persistence-failed"); }
-      try { await replaceOwnerRecord(session, capturedOwner.record, pendingRecord); }
+      try { await replaceOwnerRecord(session, current, pendingRecord); }
       catch (_error) {
         return isSyncedOwnerSaveSessionCurrent(session)
           ? result("pending-persistence-failed") : result("stale-owner-session");
@@ -536,14 +560,21 @@ device record for explicit, conditional Saves.
           return result("remote-outcome-unknown");
         }
         let conflictRecord;
-        try { conflictRecord = await nextRecord(owner.record, owner.record.content, {
+        let conflictCurrent = owner.record;
+        try {
+          conflictCurrent = await reserveOwnerUsage(
+            session, conflictCurrent, 0, draftResealCount(conflictCurrent)
+          );
+          if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
+          conflictRecord = await nextRecord(conflictCurrent, conflictCurrent.content, {
           confirmedRevision: owner.record.remote.confirmedRevision,
           pending: owner.record.remote.pending,
           conflict: { actualRevision: response.actualRevision, operationId: pending.operationId },
-        }, owner.record.usage.masterKeyContentEncryptions); } catch (_error) {
+          });
+        } catch (_error) {
           return result("revision-conflict", { conflict: true });
         }
-        try { await replaceOwnerRecord(session, owner.record, conflictRecord); }
+        try { await replaceOwnerRecord(session, conflictCurrent, conflictRecord); }
         catch (_error) {}
         if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
         return result("revision-conflict", { conflict: true });
@@ -557,14 +588,21 @@ device record for explicit, conditional Saves.
 
       owner.knownRemoteRevision = response.revision;
       let confirmedRecord;
-      try { confirmedRecord = await nextRecord(owner.record, owner.record.content, {
+      let confirmedCurrent = owner.record;
+      try {
+        confirmedCurrent = await reserveOwnerUsage(
+          session, confirmedCurrent, 0, draftResealCount(confirmedCurrent)
+        );
+        if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
+        confirmedRecord = await nextRecord(confirmedCurrent, confirmedCurrent.content, {
         confirmedRevision: response.revision,
         pending: null,
         conflict: null,
-      }, owner.record.usage.masterKeyContentEncryptions); } catch (_error) {
+        });
+      } catch (_error) {
         return result("remote-success-local-confirmation-failed", { knownRemoteRevision: response.revision });
       }
-      try { await replaceOwnerRecord(session, owner.record, confirmedRecord); }
+      try { await replaceOwnerRecord(session, confirmedCurrent, confirmedRecord); }
       catch (_error) {
         return isSyncedOwnerSaveSessionCurrent(session)
           ? result("remote-success-local-confirmation-failed", { knownRemoteRevision: response.revision })

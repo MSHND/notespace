@@ -168,7 +168,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     ], "recovery-crypto-invalid");
     requireMethods(config.deviceStore, [
       "open", "readStoredRecord", "readRecoveryAttempt", "createRecoveryStaging",
-      "replaceRecoveryStaging", "promoteRecoveryStaging",
+      "replaceRecoveryStaging", "reserveRecoveryStagingEncryptionUsage", "promoteRecoveryStaging",
     ], "recovery-device-store-invalid");
     requireMethods(config.accountContract, [
       "serializeRegistrationCredential", "validateFinishRegistrationRequest",
@@ -491,21 +491,21 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       return Object.assign({}, jsonClone(draft), changes);
     }
 
-    function nextDeviceWrappingKeyEncryptionCount(record, increment = 1) {
-      const maximum = config.crypto.POLICY?.maximumEncryptionsPerKey;
-      const previous = record ? record.usage?.deviceWrappingKeyEncryptions : 0;
-      // The durable counter is validated by the store, but this check must run
-      // before invoking AES-GCM so an exhausted key is never used again.
-      if (!Number.isSafeInteger(maximum) || maximum < 1
-          || !Number.isSafeInteger(previous) || previous < 0
-          || !Number.isSafeInteger(increment) || increment < 1
-          || increment >= maximum || previous > maximum - increment - 1) {
-        throw recoveryError("device-usage-limit-reached");
-      }
-      return previous + increment;
+    async function reserveDeviceWrappingKeyUsage(execution, increment) {
+      const current = execution.record;
+      if (!current) throw recoveryError("recovery-state-invalid");
+      const reserved = await checked(execution,
+        config.deviceStore.reserveRecoveryStagingEncryptionUsage(
+          current.syncedPocketId,
+          current.storeRevision,
+          current.usage.deviceWrappingKeyEncryptions,
+          increment
+        ));
+      execution.record = reserved;
+      return reserved;
     }
 
-    async function persistDraft(execution, nextInput, deviceKeyEncryptionIncrement = 1) {
+    async function persistDraft(execution, nextInput, alreadyReserved = false) {
       const current = execution.record;
       const nextRevision = current ? current.storeRevision + 1 : 1;
       const nextDraft = validateDraft(Object.assign({}, nextInput, {
@@ -517,9 +517,10 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         contentType: config.crypto.FORMAT.contentType,
       };
       const key = current ? current.deviceWrappingKey : execution.deviceWrappingKey;
-      const deviceWrappingKeyEncryptions = nextDeviceWrappingKeyEncryptionCount(
-        current, deviceKeyEncryptionIncrement
-      );
+      if (current && !alreadyReserved) await reserveDeviceWrappingKeyUsage(execution, 1);
+      const reserved = execution.record;
+      const deviceWrappingKeyEncryptions = reserved
+        ? reserved.usage.deviceWrappingKeyEncryptions : 1;
       const encrypted = await checked(execution, config.crypto.sealContent(nextDraft, key, context));
       const nextRecord = {
         kind: format.recoveryStagingKind,
@@ -533,7 +534,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       };
       const stored = current
         ? await checked(execution, config.deviceStore.replaceRecoveryStaging(
-          nextDraft.syncedPocketId, current.storeRevision, nextRecord
+          nextDraft.syncedPocketId, reserved.storeRevision, nextRecord
         ))
         : await checked(execution, config.deviceStore.createRecoveryStaging(nextRecord));
       execution.record = stored;
@@ -780,7 +781,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       try {
         // This transition creates both a device-key-wrapped master-key envelope
         // and the next encrypted recovery draft. Reserve capacity before either.
-        nextDeviceWrappingKeyEncryptionCount(execution.record, 2);
+        await reserveDeviceWrappingKeyUsage(execution, 2);
         wrapped = await openMaster(execution, [{
           context: deviceContext,
           wrappingKey: execution.record.deviceWrappingKey,
@@ -805,7 +806,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         content: { context: contentContext, record: downloaded.encryptedRecord },
         deviceEnvelope,
         pendingOperation: null,
-      }), 2);
+      }), true);
       return null;
     }
 
@@ -1061,9 +1062,11 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       const envelope = execution.draft.deviceEnvelope;
       const createdAt = timestamp(config.now);
       try {
-        const deviceWrappingKeyEncryptions = nextDeviceWrappingKeyEncryptionCount(current);
+        await reserveDeviceWrappingKeyUsage(execution, 1);
+        const reserved = execution.record;
+        const deviceWrappingKeyEncryptions = reserved.usage.deviceWrappingKeyEncryptions;
         const encryptedDraft = await checked(execution, config.crypto.sealContent(
-          safeDraft, current.deviceWrappingKey, draftContext
+          safeDraft, reserved.deviceWrappingKey, draftContext
         ));
         const finalRecord = {
           kind: format.recordKind,
@@ -1071,7 +1074,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           storeRevision: nextRevision,
           syncedPocketId: safeDraft.syncedPocketId,
           deviceId: safeDraft.deviceId,
-          deviceWrappingKey: current.deviceWrappingKey,
+          deviceWrappingKey: reserved.deviceWrappingKey,
           deviceEnvelope: {
             context: {
               syncedPocketId: safeDraft.syncedPocketId,
@@ -1102,7 +1105,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           recoveryDraft: { context: draftContext, record: encryptedDraft },
         };
         const stored = await checked(execution, config.deviceStore.promoteRecoveryStaging(
-          safeDraft.syncedPocketId, current.storeRevision, finalRecord
+          safeDraft.syncedPocketId, reserved.storeRevision, finalRecord
         ));
         execution.record = stored;
         execution.draft = safeDraft;

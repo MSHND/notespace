@@ -189,11 +189,16 @@ async function createHarness(options = {}) {
     },
   });
   const baseReplace = store.replacePocket.bind(store);
+  const baseReserve = store.reservePocketEncryptionUsage.bind(store);
   let replaceCount = 0;
   const deviceStore = Object.freeze({
     readPocket: store.readPocket.bind(store),
     readActivation: store.readActivation.bind(store),
     readRecoveryAttempt: store.readRecoveryAttempt.bind(store),
+    async reservePocketEncryptionUsage(...input) {
+      events.push("reserve");
+      return baseReserve(...input);
+    },
     async replacePocket(...input) {
       replaceCount += 1;
       events.push(replaceCount === 1 ? "persist-pending" : "persist-confirmed");
@@ -327,7 +332,7 @@ test("P042 freezes once, encrypts before durable pending state, then conditional
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(freezes, 1);
-  assert.deepEqual(harness.events, ["freeze", "encrypt", "persist-pending", "upload", "persist-confirmed"]);
+  assert.deepEqual(harness.events, ["freeze", "reserve", "encrypt", "persist-pending", "upload", "persist-confirmed"]);
   assert.equal(harness.calls.length, 1);
   assert.equal(harness.calls[0].expectedRevision, 0);
   assert.equal(JSON.stringify(harness.calls[0]).includes(SENTINEL), false);
@@ -419,6 +424,7 @@ test("P042 records known remote success separately when local confirmation fails
     deviceStore: Object.freeze({
       readPocket: harness.store.readPocket.bind(harness.store),
       readRecoveryAttempt: harness.store.readRecoveryAttempt.bind(harness.store),
+      reservePocketEncryptionUsage: harness.store.reservePocketEncryptionUsage.bind(harness.store),
       async replacePocket(...input) {
         calls += 1;
         if (calls === 2) throw new Error("local confirmation unavailable");
@@ -453,6 +459,7 @@ test("P042 stale sessions never upload before replacement or mutate a replacemen
     deviceStore: Object.freeze({
       readPocket: beforeUpload.store.readPocket.bind(beforeUpload.store),
       readRecoveryAttempt: beforeUpload.store.readRecoveryAttempt.bind(beforeUpload.store),
+      reservePocketEncryptionUsage: beforeUpload.store.reservePocketEncryptionUsage.bind(beforeUpload.store),
       async replacePocket(...input) { if (first) { first = false; await pendingGate.promise; } return originalReplace(...input); },
     }),
     contentService: Object.freeze({
@@ -495,6 +502,7 @@ test("P042 does not apply a returned remote success to an owner replaced before 
     deviceStore: Object.freeze({
       readPocket: harness.store.readPocket.bind(harness.store),
       readRecoveryAttempt: harness.store.readRecoveryAttempt.bind(harness.store),
+      reservePocketEncryptionUsage: harness.store.reservePocketEncryptionUsage.bind(harness.store),
       async replacePocket(...input) {
         replacements += 1;
         if (replacements === 2) await confirmationGate.promise;

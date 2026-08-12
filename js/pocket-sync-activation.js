@@ -184,6 +184,7 @@ without adding UI, a live synced owner, background work, or deployment state.
     ], "activation-crypto-invalid");
     requireMethods(config.deviceStore, [
       "open", "readPocket", "readActivation", "createPocket", "replacePocket",
+      "reservePocketEncryptionUsage",
     ], "activation-device-store-invalid");
     requireMethods(config.accountClient, [
       "registerPasskey", "finishRegistration", "authenticatePasskey",
@@ -495,6 +496,19 @@ without adding UI, a live synced owner, background work, or deployment state.
       return value;
     }
 
+    async function reserveDeviceWrappingKeyUsage(execution, increment) {
+      const current = execution.record;
+      if (!current) throw activationError("activation-state-invalid");
+      const reserved = await checked(execution, config.deviceStore.reservePocketEncryptionUsage(
+        current.syncedPocketId,
+        current.storeRevision,
+        current.usage,
+        { masterKeyContentEncryptions: 0, deviceWrappingKeyEncryptions: increment }
+      ));
+      execution.record = reserved;
+      return reserved;
+    }
+
     async function persistDraft(execution, nextDraftInput, changes) {
       const current = execution.record;
       const nextRevision = current ? current.storeRevision + 1 : 1;
@@ -507,18 +521,16 @@ without adding UI, a live synced owner, background work, or deployment state.
         contentType: config.crypto.FORMAT.contentType,
       };
       const deviceKey = current ? current.deviceWrappingKey : execution.deviceWrappingKey;
+      if (current) await reserveDeviceWrappingKeyUsage(execution, 1);
+      const reserved = execution.record;
       const encryptedDraft = await checked(
         execution,
         config.crypto.sealContent(nextDraft, deviceKey, draftContext)
       );
-      const usage = current ? {
-        masterKeyGeneration: current.usage.masterKeyGeneration,
-        masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions,
-        deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions + 1,
-      } : execution.initialUsage;
+      const usage = reserved ? reserved.usage : execution.initialUsage;
       let nextRecord;
       if (current) {
-        nextRecord = cloneRecord(current, { remote: changes?.remote, usage });
+        nextRecord = cloneRecord(reserved, { remote: changes?.remote, usage });
         nextRecord.storeRevision = nextRevision;
       } else {
         nextRecord = execution.initialRecord;
@@ -529,7 +541,7 @@ without adding UI, a live synced owner, background work, or deployment state.
       const stored = current
         ? await checked(execution, config.deviceStore.replacePocket(
           nextDraft.syncedPocketId,
-          current.storeRevision,
+          reserved.storeRevision,
           nextRecord
         ))
         : await checked(execution, config.deviceStore.createPocket(nextRecord));
@@ -555,24 +567,22 @@ without adding UI, a live synced owner, background work, or deployment state.
         revision: nextRevision,
         contentType: config.crypto.FORMAT.contentType,
       };
+      await reserveDeviceWrappingKeyUsage(execution, 1);
+      const reserved = execution.record;
       const encryptedDraft = await config.crypto.sealContent(
         nextDraft,
-        current.deviceWrappingKey,
+        reserved.deviceWrappingKey,
         draftContext
       );
-      const usage = {
-        masterKeyGeneration: current.usage.masterKeyGeneration,
-        masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions,
-        deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions + 1,
-      };
-      const nextRecord = cloneRecord(current, { usage });
+      const usage = reserved.usage;
+      const nextRecord = cloneRecord(reserved, { usage });
       nextRecord.storeRevision = nextRevision;
       nextRecord.activationDraft = { context: draftContext, record: encryptedDraft };
       nextRecord.usage = usage;
       nextRecord.schemaVersion = deviceFormat.recordSchemaVersion;
       const stored = await config.deviceStore.replacePocket(
         nextDraft.syncedPocketId,
-        current.storeRevision,
+        reserved.storeRevision,
         nextRecord
       );
       execution.record = stored;

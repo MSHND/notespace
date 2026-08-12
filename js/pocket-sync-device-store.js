@@ -81,6 +81,9 @@ and a narrow atomic transaction boundary without activating a synced owner.
     "masterKeyContentEncryptions",
     "deviceWrappingKeyEncryptions",
   ]);
+  const USAGE_INCREMENT_FIELDS = Object.freeze([
+    "masterKeyContentEncryptions", "deviceWrappingKeyEncryptions",
+  ]);
   const VERSION_THREE_USAGE_FIELDS = Object.freeze([
     "masterKeyGeneration", "contentEncryptionsOnDevice", "envelopeEncryptionsOnDevice",
   ]);
@@ -341,6 +344,45 @@ and a narrow atomic transaction boundary without activating a synced owner.
       throw deviceStoreError("device-usage-limit-reached");
     }
     return value;
+  }
+
+  function usageReservationConflict() {
+    throw deviceStoreError("device-usage-reservation-conflict");
+  }
+
+  function usageReservationIncrements(input) {
+    const increments = exactObject(input, USAGE_INCREMENT_FIELDS, "device-usage-invalid");
+    const value = Object.freeze({
+      masterKeyContentEncryptions: nonNegativeInteger(
+        increments.masterKeyContentEncryptions, "device-usage-invalid"
+      ),
+      deviceWrappingKeyEncryptions: nonNegativeInteger(
+        increments.deviceWrappingKeyEncryptions, "device-usage-invalid"
+      ),
+    });
+    if (value.masterKeyContentEncryptions === 0 && value.deviceWrappingKeyEncryptions === 0) {
+      throw deviceStoreError("device-usage-invalid");
+    }
+    return value;
+  }
+
+  function reserveUsage(current, expectedUsageInput, incrementsInput) {
+    const expectedUsage = validateUsage(expectedUsageInput);
+    const increments = usageReservationIncrements(incrementsInput);
+    if (current.usage.masterKeyGeneration !== expectedUsage.masterKeyGeneration
+        || current.usage.masterKeyContentEncryptions !== expectedUsage.masterKeyContentEncryptions
+        || current.usage.deviceWrappingKeyEncryptions
+          !== expectedUsage.deviceWrappingKeyEncryptions) {
+      usageReservationConflict();
+    }
+    const nextUsage = validateUsage({
+      masterKeyGeneration: current.usage.masterKeyGeneration,
+      masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions
+        + increments.masterKeyContentEncryptions,
+      deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions
+        + increments.deviceWrappingKeyEncryptions,
+    });
+    return validateRecord(Object.assign({}, current, { usage: nextUsage }));
   }
 
   function validateCurrentRecord(input) {
@@ -773,6 +815,71 @@ and a narrow atomic transaction boundary without activating a synced owner.
       });
     }
 
+    async function reservePocketEncryptionUsage(
+      syncedPocketIdInput,
+      expectedStoreRevisionInput,
+      expectedUsageInput,
+      incrementsInput
+    ) {
+      requireOpen();
+      const syncedPocketId = identifier(syncedPocketIdInput, "device-state-identity-invalid");
+      const expectedStoreRevision = positiveInteger(
+        expectedStoreRevisionInput, "device-store-revision-invalid"
+      );
+      return driver.transaction("readwrite", async (transaction) => {
+        const found = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        if (found === undefined) throw deviceStoreError("device-store-not-found");
+        const current = migrateRecord(found);
+        if (current.storeRevision !== expectedStoreRevision) {
+          throw deviceStoreError("device-store-revision-conflict");
+        }
+        const next = reserveUsage(current, expectedUsageInput, incrementsInput);
+        transaction.checkpoint("after-validation-before-write");
+        await transaction.put(next);
+        transaction.checkpoint("after-write-before-commit");
+        return next;
+      });
+    }
+
+    async function reserveRecoveryStagingEncryptionUsage(
+      syncedPocketIdInput,
+      expectedStoreRevisionInput,
+      expectedDeviceWrappingKeyEncryptionsInput,
+      incrementInput
+    ) {
+      requireOpen();
+      const syncedPocketId = identifier(syncedPocketIdInput, "device-state-identity-invalid");
+      const expectedStoreRevision = positiveInteger(
+        expectedStoreRevisionInput, "device-store-revision-invalid"
+      );
+      const expectedDeviceWrappingKeyEncryptions = nonNegativeInteger(
+        expectedDeviceWrappingKeyEncryptionsInput, "recovery-staging-usage-invalid"
+      );
+      const increment = positiveInteger(incrementInput, "recovery-staging-usage-invalid");
+      return driver.transaction("readwrite", async (transaction) => {
+        const found = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        if (found === undefined) throw deviceStoreError("device-store-not-found");
+        const current = migrateRecoveryStagingRecord(found);
+        if (current.storeRevision !== expectedStoreRevision) {
+          throw deviceStoreError("device-store-revision-conflict");
+        }
+        if (current.usage.deviceWrappingKeyEncryptions !== expectedDeviceWrappingKeyEncryptions) {
+          usageReservationConflict();
+        }
+        const next = validateRecoveryStagingRecord(Object.assign({}, current, {
+          usage: {
+            deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions + increment,
+          },
+        }));
+        transaction.checkpoint("after-validation-before-write");
+        await transaction.put(next);
+        transaction.checkpoint("after-write-before-commit");
+        return next;
+      });
+    }
+
     function closeStore() {
       driver.close();
       opened = false;
@@ -787,8 +894,10 @@ and a narrow atomic transaction boundary without activating a synced owner.
       readRecoveryAttempt,
       createPocket,
       replacePocket,
+      reservePocketEncryptionUsage,
       createRecoveryStaging,
       replaceRecoveryStaging,
+      reserveRecoveryStagingEncryptionUsage,
       promoteRecoveryStaging,
       close: closeStore,
     });
@@ -1014,9 +1123,13 @@ and a narrow atomic transaction boundary without activating a synced owner.
     createPocket: (record) => getDefaultStore().createPocket(record),
     replacePocket: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .replacePocket(syncedPocketId, expectedStoreRevision, record),
+    reservePocketEncryptionUsage: (syncedPocketId, expectedStoreRevision, expectedUsage, increments) => getDefaultStore()
+      .reservePocketEncryptionUsage(syncedPocketId, expectedStoreRevision, expectedUsage, increments),
     createRecoveryStaging: (record) => getDefaultStore().createRecoveryStaging(record),
     replaceRecoveryStaging: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .replaceRecoveryStaging(syncedPocketId, expectedStoreRevision, record),
+    reserveRecoveryStagingEncryptionUsage: (syncedPocketId, expectedStoreRevision, expectedUsage, increment) => getDefaultStore()
+      .reserveRecoveryStagingEncryptionUsage(syncedPocketId, expectedStoreRevision, expectedUsage, increment),
     promoteRecoveryStaging: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .promoteRecoveryStaging(syncedPocketId, expectedStoreRevision, record),
     close: () => getDefaultStore().close(),
