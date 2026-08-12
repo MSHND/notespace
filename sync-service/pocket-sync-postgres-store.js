@@ -14,7 +14,7 @@ const COLLECTIONS = Object.freeze([
   "keyOperations",
 ]);
 
-const TABLE = "pocket_sync_records";
+const TABLE = "public.pocket_sync_records";
 const SQL = Object.freeze({
   beginReadOnly: "BEGIN READ ONLY",
   beginReadWrite: "BEGIN",
@@ -172,22 +172,20 @@ function createPostgresStore(options) {
     function track(operation) {
       const pending = Promise.resolve(operation);
       operations.add(pending);
-      pending.then(
-        () => { operations.delete(pending); },
-        () => { operations.delete(pending); }
-      );
+      // Observe rejection now, but retain every started operation until finalisation.
+      pending.catch(() => {});
       return pending;
     }
 
     function start(factory) {
       try { return track(factory()); }
-      catch (error) { return track(Promise.reject(error)); }
+      catch (error) { return Promise.reject(error); }
     }
 
     async function settleOperations() {
       // A transaction callback may accidentally omit await.  Do not commit until
       // every façade operation it started has settled successfully.
-      while (operations.size > 0) await Promise.all([...operations]);
+      await Promise.all([...operations]);
     }
 
     const transaction = Object.freeze({
@@ -250,8 +248,8 @@ function createPostgresStore(options) {
       await query(mode === "readonly" ? SQL.beginReadOnly : SQL.beginReadWrite);
       began = true;
       const result = await callback(transaction);
-      await settleOperations();
       completed = true;
+      await settleOperations();
       await query(SQL.commit);
       committed = true;
       return result;

@@ -294,7 +294,7 @@ test("database, object-store, key-path and record constants are exact", () => {
     recordKind: "pocket.sync.device-state",
     recordSchemaVersion: 4,
     recoveryStagingKind: "pocket.sync.recovery-staging",
-    recoveryStagingSchemaVersion: 1,
+    recoveryStagingSchemaVersion: 2,
     firstStoreRevision: 1,
   });
   assert.deepEqual(plain(apis.deviceStore.MIGRATION_POLICY), {

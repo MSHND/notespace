@@ -491,6 +491,19 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       return Object.assign({}, jsonClone(draft), changes);
     }
 
+    function nextDeviceWrappingKeyEncryptionCount(record) {
+      const maximum = config.crypto.POLICY?.maximumEncryptionsPerKey;
+      const previous = record ? record.usage?.deviceWrappingKeyEncryptions : 0;
+      // The durable counter is validated by the store, but this check must run
+      // before invoking AES-GCM so an exhausted key is never used again.
+      if (!Number.isSafeInteger(maximum) || maximum < 1
+          || !Number.isSafeInteger(previous) || previous < 0
+          || previous >= maximum - 1) {
+        throw recoveryError("device-usage-limit-reached");
+      }
+      return previous + 1;
+    }
+
     async function persistDraft(execution, nextInput) {
       const current = execution.record;
       const nextRevision = current ? current.storeRevision + 1 : 1;
@@ -503,6 +516,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         contentType: config.crypto.FORMAT.contentType,
       };
       const key = current ? current.deviceWrappingKey : execution.deviceWrappingKey;
+      const deviceWrappingKeyEncryptions = nextDeviceWrappingKeyEncryptionCount(current);
       const encrypted = await checked(execution, config.crypto.sealContent(nextDraft, key, context));
       const nextRecord = {
         kind: format.recoveryStagingKind,
@@ -512,6 +526,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         deviceId: nextDraft.deviceId,
         deviceWrappingKey: key,
         recoveryDraft: { context, record: encrypted },
+        usage: { deviceWrappingKeyEncryptions },
       };
       const stored = current
         ? await checked(execution, config.deviceStore.replaceRecoveryStaging(
@@ -1040,6 +1055,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       const envelope = execution.draft.deviceEnvelope;
       const createdAt = timestamp(config.now);
       try {
+        const deviceWrappingKeyEncryptions = nextDeviceWrappingKeyEncryptionCount(current);
         const encryptedDraft = await checked(execution, config.crypto.sealContent(
           safeDraft, current.deviceWrappingKey, draftContext
         ));
@@ -1074,7 +1090,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           usage: {
             masterKeyGeneration: 1,
             masterKeyContentEncryptions: 0,
-            deviceWrappingKeyEncryptions: 2,
+            deviceWrappingKeyEncryptions,
           },
           activationDraft: null,
           recoveryDraft: { context: draftContext, record: encryptedDraft },

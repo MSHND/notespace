@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS pocket_sync_records (
+CREATE TABLE IF NOT EXISTS public.pocket_sync_records (
   collection TEXT NOT NULL,
   record_key TEXT NOT NULL CHECK (length(record_key) > 0),
   store_version BIGINT NOT NULL CHECK (store_version > 0 AND store_version <= 9007199254740991),
@@ -21,11 +21,11 @@ CREATE TABLE IF NOT EXISTS pocket_sync_records (
   )
 );
 
-CREATE TABLE IF NOT EXISTS pocket_sync_schema (
+CREATE TABLE IF NOT EXISTS public.pocket_sync_schema (
   schema_name TEXT PRIMARY KEY,
   schema_version INTEGER NOT NULL CHECK (schema_version = 1)
 );
 
-INSERT INTO pocket_sync_schema (schema_name, schema_version)
+INSERT INTO public.pocket_sync_schema (schema_name, schema_version)
 VALUES ('pocket-sync-store', 1)
 ON CONFLICT (schema_name) DO NOTHING;

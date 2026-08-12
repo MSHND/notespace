@@ -738,12 +738,13 @@ test("malformed packages and existing local Pocket identities fail before remote
     }, key, context);
     await harness.recoveryStore.createRecoveryStaging({
       kind: harness.deviceStore.FORMAT.recoveryStagingKind,
-      schemaVersion: 1,
+      schemaVersion: harness.deviceStore.FORMAT.recoveryStagingSchemaVersion,
       storeRevision: 1,
       syncedPocketId: context.syncedPocketId,
       deviceId: "existing-device-p041",
       deviceWrappingKey: key,
       recoveryDraft: { context, record: encrypted },
+      usage: { deviceWrappingKeyEncryptions: 1 },
     });
     const callCount = harness.remoteCalls.length;
     const result = await harness.recoveryOrchestrator.recover(harness.recoveryDependencies, {
@@ -771,12 +772,13 @@ test("P030 recovery staging is strict, encrypted, CAS protected and migrates old
   }, key, context);
   const record = {
     kind: production.deviceStore.FORMAT.recoveryStagingKind,
-    schemaVersion: 1,
+    schemaVersion: production.deviceStore.FORMAT.recoveryStagingSchemaVersion,
     storeRevision: 1,
     syncedPocketId: context.syncedPocketId,
     deviceId: "device-p041-staging",
     deviceWrappingKey: key,
     recoveryDraft: { context, record: encrypted },
+    usage: { deviceWrappingKeyEncryptions: 1 },
   };
   await store.createRecoveryStaging(record);
   const found = await store.readRecoveryAttempt("attempt-p041-staging");
@@ -788,6 +790,12 @@ test("P030 recovery staging is strict, encrypted, CAS protected and migrates old
   assert.throws(() => production.deviceStore.validateRecoveryStagingRecord({
     ...record, plaintext: PAYLOAD,
   }), (error) => error.code === "recovery-staging-invalid");
+  const legacyStaging = Object.assign({}, record, { schemaVersion: 1 });
+  delete legacyStaging.usage;
+  state.records.set(context.syncedPocketId, legacyStaging);
+  const migratedStaging = await store.readRecoveryAttempt("attempt-p041-staging");
+  assert.equal(migratedStaging.record.schemaVersion, 2);
+  assert.equal(migratedStaging.record.usage.deviceWrappingKeyEncryptions, 1);
 
   const legacy = await (async () => {
     const wrappingKey = await production.crypto.generateDeviceWrappingKey();

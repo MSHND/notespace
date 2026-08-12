@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Pool } = require("pg");
 const { readDatabaseConnection } = require("./pocket-sync-server-config.js");
+const { verifyPocketSyncSchema } = require("./pocket-sync-postgres-schema.js");
 
 const MIGRATION_PATH = path.join(__dirname, "migrations", "001-pocket-sync-store.sql");
 
@@ -25,6 +26,7 @@ async function applyLocalMigration(connectionString) {
   if (!pool || typeof pool.query !== "function" || typeof pool.end !== "function") throw migrationError();
   try {
     await pool.query(sql);
+    await verifyPocketSyncSchema(pool);
   } catch (_error) {
     throw migrationError();
   } finally {

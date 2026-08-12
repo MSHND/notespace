@@ -9,6 +9,7 @@ const { createHttpAdapter } = require("./pocket-sync-http-adapter.js");
 const { createServiceCore } = require("./pocket-sync-service-core.js");
 const { createPostgresStore } = require("./pocket-sync-postgres-store.js");
 const { createWebAuthnVerifier } = require("./pocket-sync-webauthn-verifier.js");
+const { verifyPocketSyncSchema } = require("./pocket-sync-postgres-schema.js");
 
 const CONFIG_FIELDS = Object.freeze([
   "trustedOrigin",
@@ -189,20 +190,6 @@ function listenOptions(value) {
   return value;
 }
 
-async function verifySchema(pool) {
-  let result;
-  try {
-    result = await pool.query(
-      "SELECT schema_version FROM pocket_sync_schema WHERE schema_name = $1",
-      ["pocket-sync-store"]
-    );
-  } catch (_error) { throw runtimeError(); }
-  if (!result || result.rowCount !== 1 || !Array.isArray(result.rows)
-      || result.rows.length !== 1 || result.rows[0]?.schema_version !== 1) {
-    throw runtimeError();
-  }
-}
-
 function createSyncServerRuntime(configuration) {
   validatePlatform();
   const config = validateConfiguration(configuration);
@@ -248,7 +235,7 @@ function createSyncServerRuntime(configuration) {
     if (started || shutdown) throw runtimeError();
     try {
       await pool.query("SELECT 1");
-      await verifySchema(pool);
+      await verifyPocketSyncSchema(pool);
     } catch (_error) {
       await close();
       throw runtimeError();

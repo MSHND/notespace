@@ -9,6 +9,7 @@ const path = require("node:path");
 const { Readable } = require("node:stream");
 
 const { createLocalServerConfig, createUnavailableRecoveryProofVerifier } = require("../sync-service/pocket-sync-server-config.js");
+const { verifyPocketSyncSchema } = require("../sync-service/pocket-sync-postgres-schema.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const RUNTIME_PATH = require.resolve("../sync-service/pocket-sync-server-runtime.js");
@@ -65,7 +66,25 @@ function createPoolClass(state) {
 
     async query(sql) {
       state.preflight.push(sql);
-      if (sql === "SELECT schema_version FROM pocket_sync_schema WHERE schema_name = $1") {
+      if (sql.includes("information_schema.columns")) {
+        return { rowCount: 6, rows: [
+          { table_name: "pocket_sync_records", column_name: "collection", data_type: "text", is_nullable: "NO" },
+          { table_name: "pocket_sync_records", column_name: "record_key", data_type: "text", is_nullable: "NO" },
+          { table_name: "pocket_sync_records", column_name: "store_version", data_type: "bigint", is_nullable: "NO" },
+          { table_name: "pocket_sync_records", column_name: "record", data_type: "jsonb", is_nullable: "NO" },
+          { table_name: "pocket_sync_schema", column_name: "schema_name", data_type: "text", is_nullable: "NO" },
+          { table_name: "pocket_sync_schema", column_name: "schema_version", data_type: "integer", is_nullable: "NO" },
+        ] };
+      }
+      if (sql.includes("FROM pg_constraint")) {
+        const checks = ["CHECK (length(record_key)>0)", "CHECK (store_version>0 AND store_version<=9007199254740991)", "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations'))", "CHECK (jsonb_typeof(record)='object')", "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)"];
+        return { rowCount: 8, rows: [
+          { relation: "public.pocket_sync_records", contype: "p", definition: "PRIMARY KEY (collection, record_key)" },
+          ...checks.map((definition) => ({ relation: "public.pocket_sync_records", contype: "c", definition })),
+          { relation: "public.pocket_sync_schema", contype: "p", definition: "PRIMARY KEY (schema_name)" },
+        ] };
+      }
+      if (sql === "SELECT schema_version FROM public.pocket_sync_schema WHERE schema_name=$1") {
         return { rows: [{ schema_version: 1 }], rowCount: 1 };
       }
       if (sql !== "SELECT 1") throw new Error("unexpected pool query");
@@ -98,21 +117,21 @@ function createPoolClass(state) {
             const row = state.rows.get(rowKey);
             return row ? { rows: [copy(row)], rowCount: 1 } : { rows: [], rowCount: 0 };
           }
-          if (sql.startsWith("INSERT INTO pocket_sync_records")) {
+          if (sql.startsWith("INSERT INTO public.pocket_sync_records")) {
             if (state.rows.has(rowKey)) { const error = new Error("duplicate"); error.code = "23505"; throw error; }
             const after = { store_version: values[2], record: JSON.parse(values[3]) };
             mutations.push({ key: rowKey, before: undefined });
             state.rows.set(rowKey, after);
             return { rows: [], rowCount: 1 };
           }
-          if (sql.startsWith("UPDATE pocket_sync_records")) {
+          if (sql.startsWith("UPDATE public.pocket_sync_records")) {
             const before = state.rows.get(rowKey);
             if (!before || String(before.store_version) !== String(values[2])) return { rows: [], rowCount: 0 };
             mutations.push({ key: rowKey, before: copy(before) });
             state.rows.set(rowKey, { store_version: values[3], record: JSON.parse(values[4]) });
             return { rows: [], rowCount: 1 };
           }
-          if (sql.startsWith("DELETE FROM pocket_sync_records")) {
+          if (sql.startsWith("DELETE FROM public.pocket_sync_records")) {
             const before = state.rows.get(rowKey);
             if (!before || String(before.store_version) !== String(values[2])) return { rows: [], rowCount: 0 };
             mutations.push({ key: rowKey, before: copy(before) });
@@ -237,10 +256,7 @@ test("P049 composes the real adapter, core, P047 store and P048 verifier through
     assert.equal(Object.isFrozen(runtime), true);
     await runtime.listen({ host: "127.0.0.1", port: 8443 });
     assert.deepEqual(state.options, [{ connectionString: "postgres://operator:secret@127.0.0.1/pocket" }]);
-    assert.deepEqual(state.preflight, [
-      "SELECT 1",
-      "SELECT schema_version FROM pocket_sync_schema WHERE schema_name = $1",
-    ]);
+    assert.equal(state.preflight[0], "SELECT 1");
     assert.deepEqual(state.listens, [{ host: "127.0.0.1", port: 8443 }]);
 
     const begin = await send(context.server, { request: request(`${SERVICE_ROOT}/account/passkeys/registration/begin`, {
@@ -249,7 +265,7 @@ test("P049 composes the real adapter, core, P047 store and P048 verifier through
     assert.equal(begin.statusCode, 200);
     assert.equal(Object.hasOwn(begin.headers, "set-cookie"), false);
     const ceremonyId = begin.json().ceremonyId;
-    assert.equal(state.sql.some((entry) => entry.sql.startsWith("INSERT INTO pocket_sync_records") && entry.values[0] === "ceremonies"), true);
+    assert.equal(state.sql.some((entry) => entry.sql.startsWith("INSERT INTO public.pocket_sync_records") && entry.values[0] === "ceremonies"), true);
 
     const beforeRejected = state.connects;
     const rejected = await send(context.server, { request: request(`${SERVICE_ROOT}/account/passkeys/registration/begin`, {}, { origin: "https://wrong.example" }) });
@@ -314,6 +330,32 @@ test("P049 local configuration fails closed and the recovery proof verifier cann
   }
 });
 
+test("P049b rejects metadata-only PostgreSQL schemas with an unsafe collection allowlist", async () => {
+  const pool = {
+    async query(sql) {
+      if (sql.includes("information_schema.columns")) return { rows: [
+        { table_name: "pocket_sync_records", column_name: "collection", data_type: "text", is_nullable: "NO" },
+        { table_name: "pocket_sync_records", column_name: "record_key", data_type: "text", is_nullable: "NO" },
+        { table_name: "pocket_sync_records", column_name: "store_version", data_type: "bigint", is_nullable: "NO" },
+        { table_name: "pocket_sync_records", column_name: "record", data_type: "jsonb", is_nullable: "NO" },
+        { table_name: "pocket_sync_schema", column_name: "schema_name", data_type: "text", is_nullable: "NO" },
+        { table_name: "pocket_sync_schema", column_name: "schema_version", data_type: "integer", is_nullable: "NO" },
+      ] };
+      if (sql.includes("FROM pg_constraint")) return { rows: [
+        { relation: "public.pocket_sync_records", contype: "p", definition: "PRIMARY KEY (collection, record_key)" },
+        { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (length(record_key)>0)" },
+        { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (store_version>0 AND store_version<=9007199254740991)" },
+        { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','unsafeExtra'))" },
+        { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" },
+        { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)" },
+        { relation: "public.pocket_sync_schema", contype: "p", definition: "PRIMARY KEY (schema_name)" },
+      ] };
+      return { rowCount: 1, rows: [{ schema_version: 1 }] };
+    },
+  };
+  await assert.rejects(verifyPocketSyncSchema(pool), (error) => error?.code === "sync-server-schema-invalid");
+});
+
 test("P049 keeps the migration explicit, fixed-path and safely closed", async () => {
   const originalLoad = Module._load;
   const cached = require.cache[MIGRATION_PATH];
@@ -321,7 +363,17 @@ test("P049 keeps the migration explicit, fixed-path and safely closed", async ()
   let ended = 0;
   class Pool {
     constructor(options) { calls.push(options); }
-    async query(sql) { calls.push(sql); return { rows: [], rowCount: null }; }
+    async query(sql) {
+      calls.push(sql);
+      if (sql.includes("information_schema.columns")) return { rowCount: 6, rows: [
+        { table_name: "pocket_sync_records", column_name: "collection", data_type: "text", is_nullable: "NO" }, { table_name: "pocket_sync_records", column_name: "record_key", data_type: "text", is_nullable: "NO" }, { table_name: "pocket_sync_records", column_name: "store_version", data_type: "bigint", is_nullable: "NO" }, { table_name: "pocket_sync_records", column_name: "record", data_type: "jsonb", is_nullable: "NO" }, { table_name: "pocket_sync_schema", column_name: "schema_name", data_type: "text", is_nullable: "NO" }, { table_name: "pocket_sync_schema", column_name: "schema_version", data_type: "integer", is_nullable: "NO" },
+      ] };
+      if (sql.includes("FROM pg_constraint")) return { rowCount: 8, rows: [
+        { relation: "public.pocket_sync_records", contype: "p", definition: "PRIMARY KEY (collection, record_key)" }, { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (length(record_key)>0)" }, { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (store_version>0 AND store_version<=9007199254740991)" }, { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations'))" }, { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" }, { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)" }, { relation: "public.pocket_sync_schema", contype: "p", definition: "PRIMARY KEY (schema_name)" },
+      ] };
+      if (sql.includes("SELECT schema_version FROM public")) return { rows: [{ schema_version: 1 }], rowCount: 1 };
+      return { rows: [], rowCount: null };
+    }
     async end() { ended += 1; }
   }
   Module._load = function patchedLoad(name, parent, isMain) {

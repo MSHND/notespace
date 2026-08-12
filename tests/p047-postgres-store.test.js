@@ -33,7 +33,7 @@ function nativeError(code, message = "native database detail") {
   return error;
 }
 
-function createControlledPool(seed = []) {
+function createControlledPool(seed = [], options = {}) {
   const rows = new Map();
   const queries = [];
   const clients = [];
@@ -80,7 +80,8 @@ function createControlledPool(seed = []) {
             ? { rows: [copy(current)], rowCount: 1 }
             : { rows: [], rowCount: 0 };
         }
-        if (sql.startsWith("INSERT INTO pocket_sync_records")) {
+        if (sql.startsWith("INSERT INTO public.pocket_sync_records")) {
+          if (typeof options.beforeInsert === "function") await options.beforeInsert();
           const key = mapKey(values[0], values[1]);
           if (rows.has(key)) throw nativeError("23505", "duplicate secret record");
           const after = { store_version: values[2], record: JSON.parse(values[3]) };
@@ -88,7 +89,7 @@ function createControlledPool(seed = []) {
           rows.set(key, after);
           return { rows: [], rowCount: 1 };
         }
-        if (sql.startsWith("UPDATE pocket_sync_records")) {
+        if (sql.startsWith("UPDATE public.pocket_sync_records")) {
           const key = mapKey(values[0], values[1]);
           const before = rows.get(key);
           if (!before || String(before.store_version) !== String(values[2])) return { rows: [], rowCount: 0 };
@@ -97,7 +98,7 @@ function createControlledPool(seed = []) {
           rows.set(key, after);
           return { rows: [], rowCount: 1 };
         }
-        if (sql.startsWith("DELETE FROM pocket_sync_records")) {
+        if (sql.startsWith("DELETE FROM public.pocket_sync_records")) {
           const key = mapKey(values[0], values[1]);
           const before = rows.get(key);
           if (!before || String(before.store_version) !== String(values[2])) return { rows: [], rowCount: 0 };
@@ -139,7 +140,7 @@ test("P047 exports a frozen narrow provider-neutral production surface", () => {
   ]);
   const production = source("sync-service/pocket-sync-postgres-store.js");
   const migration = source("sync-service/migrations/001-pocket-sync-store.sql");
-  assert.match(migration, /CREATE TABLE IF NOT EXISTS pocket_sync_records/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.pocket_sync_records/);
   assert.match(migration, /PRIMARY KEY \(collection, record_key\)/);
   assert.match(migration, /store_version > 0 AND store_version <= 9007199254740991/);
   assert.match(migration, /jsonb_typeof\(record\) = 'object'/);
@@ -192,6 +193,44 @@ test("P049a waits for an unawaited façade operation and rolls it back when it r
   }), /injected failure/);
   assert.equal(controlled.row("accounts", "account-unawaited"), null);
   assert.equal(controlled.queries.some((entry) => entry.sql === "ROLLBACK"), true);
+});
+
+test("P049b retains every unawaited façade operation through transaction finalisation", async (t) => {
+  await t.test("successful work delays COMMIT and the retained façade expires", async () => {
+    let releaseInsert;
+    const gate = new Promise((resolve) => { releaseInsert = resolve; });
+    const controlled = createControlledPool([], { beforeInsert() { return gate; } });
+    const store = createPostgresStore({ pool: controlled.pool });
+    let retained;
+    const transaction = store.transact("readwrite", async (tx) => {
+      retained = tx;
+      tx.insert("accounts", "delayed-success", record(1));
+      return "callback-success";
+    });
+    await Promise.resolve();
+    assert.equal(controlled.queries.some((entry) => entry.sql === "COMMIT"), false);
+    releaseInsert();
+    assert.equal(await transaction, "callback-success");
+    assert.equal(controlled.queries.filter((entry) => entry.sql === "COMMIT").length, 1);
+    await assert.rejects(retained.get("accounts", "after-completion"), code("store-transaction-expired"));
+  });
+
+  await t.test("a rejection after callback success rolls back instead of committing", async () => {
+    let rejectInsert;
+    const gate = new Promise((_resolve, reject) => { rejectInsert = reject; });
+    const controlled = createControlledPool([], { beforeInsert() { return gate; } });
+    const store = createPostgresStore({ pool: controlled.pool });
+    const transaction = store.transact("readwrite", async (tx) => {
+      tx.insert("accounts", "delayed-rejection", record(1));
+      await Promise.resolve();
+      return "callback-success";
+    });
+    await Promise.resolve();
+    rejectInsert(nativeError("23505", "late native detail"));
+    await assert.rejects(transaction, code("store-duplicate"));
+    assert.equal(controlled.queries.some((entry) => entry.sql === "COMMIT"), false);
+    assert.equal(controlled.queries.filter((entry) => entry.sql === "ROLLBACK").length, 1);
+  });
 });
 
 test("P047 keeps insert insert-only and binds hostile values as PostgreSQL parameters", async () => {
@@ -319,5 +358,5 @@ test("P047 real store façade is compatible with the unchanged service core", as
   assert.equal(result.status, 200);
   assert.ok(controlled.row("ceremonies", "register-operation"));
   assert.equal(controlled.queries.some((entry) => entry.sql.startsWith("SELECT store_version, record")), true);
-  assert.equal(controlled.queries.some((entry) => entry.sql.startsWith("INSERT INTO pocket_sync_records")), true);
+  assert.equal(controlled.queries.some((entry) => entry.sql.startsWith("INSERT INTO public.pocket_sync_records")), true);
 });
