@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. P046 adds the adjacent provider-neutral `sync-service/pocket-sync-http-adapter.js`, which maps exact same-origin HTTP requests and the browser-managed session cookie into this core. Neither module is loaded by `index.html`, `sw.js` or any browser module, and neither adds a listener, WebAuthn implementation, database driver, deployment configuration, provider, host, origin, UI, owner or Save integration.
+P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. P046 adds the adjacent provider-neutral `sync-service/pocket-sync-http-adapter.js`, which maps exact same-origin HTTP requests and the browser-managed session cookie into this core. P047 adds the equally dormant `sync-service/pocket-sync-postgres-store.js`, a provider-neutral durable store adapter that accepts an injected PostgreSQL-compatible pool. None of these modules is loaded by `index.html`, `sw.js` or any browser module, and none adds a listener, WebAuthn implementation, database driver construction, deployment configuration, provider, host, origin, UI, owner or Save integration.
 
 The core is the smallest deterministic state machine that can later sit behind P032's seven locked routes. It independently validates request context, relationships and opaque encrypted records before committing. It never accepts readable Pocket content or a content-unlock secret.
 
@@ -122,6 +122,10 @@ The outer transaction resolves only after commit. Insert is insert-only. Replace
 
 P034 provides no production database. `tests/helpers/p034-memory-service-store.js` is a deterministic test-only driver with serial transactions, snapshot inspection and narrow failure injection before reads, before staging, before commit and during commit.
 
+P047 supplies the production-shaped durable adapter without selecting or configuring a provider. `createPostgresStore({ pool })` accepts a caller-owned PostgreSQL-compatible pool and exposes only `{ transact }` to the core. It neither reads configuration nor imports a PostgreSQL driver, and it never auto-runs migrations. `sync-service/migrations/001-pocket-sync-store.sql` is a separately applied, generic one-table schema (`pocket_sync_records`) with the exact collection allowlist, JSON object/version checks and SQL-level compare-and-swap predicates. It stores only the already-opaque service records, so it introduces no readable Pocket content, keys, provider metadata or telemetry.
+
+The P047 adapter opens one connection and one transaction per call, uses `BEGIN READ ONLY` for readonly work, rejects readonly mutations before SQL, and expires the callback façade after completion. Insert is true insert-only; replace and remove use one conditional SQL mutation with the expected store version. Native database failures are reduced to safe store errors without logging. Deterministic protocol-fake tests exercise this adapter and a real service-core flow without a hosted provider. No local PostgreSQL server or container was configured for this task, so native PostgreSQL integration remains deferred to later composition/deployment work.
+
 ## 6. Persisted records
 
 The exact frozen collections are `accounts`, `credentials`, `sessions`, `ceremonies`, `pockets`, `operations`, `keySets`, `envelopes`, `recoveryLocators`, `recoveryCeremonies` and `keyOperations`. Every record is a strict plain object with `schemaVersion: 1`, a positive safe `storeVersion`, matching collection identity and no unknown fields.
@@ -213,7 +217,7 @@ Raw PRF output, master keys, recovery roots and device wrapping keys are rejecte
 P046 provides the strict in-process HTTP/session mapping for all fifteen locked routes, exact route dispatch, bounded fatal-UTF-8 JSON parsing, safe errors and cookie clearing. Later deployment work must still provide and review:
 
 - a standards-compliant WebAuthn verifier adapter;
-- a real durable transaction implementation matching the exact store surface;
+- composition that constructs an ordinary PostgreSQL pool, separately applies the P047 migration, and supplies the durable store adapter;
 - rate limits and operational rollback/backup policy; and
 - the unresolved no-locator account-discovery policy.
 

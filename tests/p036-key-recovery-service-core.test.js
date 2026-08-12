@@ -151,7 +151,7 @@ async function finishRecoveryFlow(harness, locator) {
   return { begin, finish, credential };
 }
 
-test("P036 core remains isolated from the P046 HTTP adapter and browser loading", () => {
+test("P036 core remains isolated from P046/P047 server adapters and browser loading", () => {
   assert.deepEqual(Object.keys(serviceModule), ["POLICY", "COLLECTIONS", "createServiceCore"]);
   assert.deepEqual(Object.values(serviceModule.COLLECTIONS), COLLECTIONS);
   assert.equal(Object.isFrozen(serviceModule.COLLECTIONS), true);
@@ -160,8 +160,12 @@ test("P036 core remains isolated from the P046 HTTP adapter and browser loading"
   assert.equal(Object.isFrozen(harness.core), true);
   assert.doesNotMatch(source("index.html"), /pocket-sync-service-core/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-service-core/);
+  assert.doesNotMatch(source("index.html"), /pocket-sync-postgres-store/);
+  assert.doesNotMatch(source("sw.js"), /pocket-sync-postgres-store/);
   assert.deepEqual(fs.readdirSync(path.join(ROOT, "sync-service")).sort(), [
+    "migrations",
     "pocket-sync-http-adapter.js",
+    "pocket-sync-postgres-store.js",
     "pocket-sync-service-core.js",
   ]);
 });
