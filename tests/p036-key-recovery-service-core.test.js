@@ -151,7 +151,7 @@ async function finishRecoveryFlow(harness, locator) {
   return { begin, finish, credential };
 }
 
-test("P036 core remains isolated from P046/P047 server adapters and browser loading", () => {
+test("P036 core remains isolated from P046-P048 server adapters and browser loading", () => {
   assert.deepEqual(Object.keys(serviceModule), ["POLICY", "COLLECTIONS", "createServiceCore"]);
   assert.deepEqual(Object.values(serviceModule.COLLECTIONS), COLLECTIONS);
   assert.equal(Object.isFrozen(serviceModule.COLLECTIONS), true);
@@ -162,11 +162,14 @@ test("P036 core remains isolated from P046/P047 server adapters and browser load
   assert.doesNotMatch(source("sw.js"), /pocket-sync-service-core/);
   assert.doesNotMatch(source("index.html"), /pocket-sync-postgres-store/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-postgres-store/);
+  assert.doesNotMatch(source("index.html"), /pocket-sync-webauthn-verifier/);
+  assert.doesNotMatch(source("sw.js"), /pocket-sync-webauthn-verifier/);
   assert.deepEqual(fs.readdirSync(path.join(ROOT, "sync-service")).sort(), [
     "migrations",
     "pocket-sync-http-adapter.js",
     "pocket-sync-postgres-store.js",
     "pocket-sync-service-core.js",
+    "pocket-sync-webauthn-verifier.js",
   ]);
 });
 
@@ -613,7 +616,7 @@ test("new service state and errors exclude readable content, raw keys, roots and
   }
 });
 
-test("production source remains provider-neutral, dependency-free and free of background/browser machinery", () => {
+test("production source remains provider-neutral and free of background/browser machinery", () => {
   const text = source("sync-service/pocket-sync-service-core.js");
   for (const forbidden of [/\bfetch\s*\(/, /\.listen\s*\(/, /\bexpress\b/i, /\bfastify\b/i,
     /process\.env/, /localStorage/, /sessionStorage/, /indexedDB/, /setTimeout/, /setInterval/,
@@ -621,7 +624,7 @@ test("production source remains provider-neutral, dependency-free and free of ba
     assert.doesNotMatch(text, forbidden);
   }
   const packageJson = JSON.parse(source("package.json"));
-  assert.equal(Object.hasOwn(packageJson, "dependencies"), false);
+  assert.deepEqual(packageJson.dependencies, { "@simplewebauthn/server": "13.3.2" });
   assert.equal(Object.hasOwn(packageJson, "devDependencies"), false);
   assert.equal(Object.keys(packageJson.scripts).some((name) => /p036|sync-service/i.test(name)), false);
 });

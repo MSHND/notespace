@@ -213,7 +213,7 @@ HTTP/body disagreement fails closed: a conflict body on 200 and a committed body
 
 ### P034 service-core enforcement
 
-`sync-service/pocket-sync-service-core.js` is the dormant CommonJS state machine behind these route shapes. `sync-service/pocket-sync-http-adapter.js` is the corresponding undeployed adapter for all fifteen locked paths. It has no listener, host, database driver, real WebAuthn verifier, recovery-proof verifier or selected deployment origin. A future provider wrapper must compose those remaining deployment responsibilities.
+`sync-service/pocket-sync-service-core.js` is the dormant CommonJS state machine behind these route shapes. `sync-service/pocket-sync-http-adapter.js` is the corresponding undeployed adapter for all fifteen locked paths. P048 supplies its real but uncomposed `sync-service/pocket-sync-webauthn-verifier.js` verifier. These modules have no listener, host, database driver, recovery-proof verifier or selected deployment origin. A future provider wrapper must compose those remaining deployment responsibilities.
 
 For version 1, P035 requires the configured WebAuthn RP ID to equal the trusted-origin hostname exactly. An explicit origin port is excluded from the RP ID. The service core does not accept parent-domain scope or attempt public-suffix classification; broader WebAuthn scope remains a later deployment-policy decision.
 

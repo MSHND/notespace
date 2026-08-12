@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. P046 adds the adjacent provider-neutral `sync-service/pocket-sync-http-adapter.js`, which maps exact same-origin HTTP requests and the browser-managed session cookie into this core. P047 adds the equally dormant `sync-service/pocket-sync-postgres-store.js`, a provider-neutral durable store adapter that accepts an injected PostgreSQL-compatible pool. None of these modules is loaded by `index.html`, `sw.js` or any browser module, and none adds a listener, WebAuthn implementation, database driver construction, deployment configuration, provider, host, origin, UI, owner or Save integration.
+P034 adds, and P036 extends, a dormant, undeployed server-side safety and persistence core at `sync-service/pocket-sync-service-core.js`. P046 adds the adjacent provider-neutral `sync-service/pocket-sync-http-adapter.js`, which maps exact same-origin HTTP requests and the browser-managed session cookie into this core. P047 adds the equally dormant `sync-service/pocket-sync-postgres-store.js`, a provider-neutral durable store adapter that accepts an injected PostgreSQL-compatible pool. P048 adds `sync-service/pocket-sync-webauthn-verifier.js`, an equally dormant server-only adapter around the reviewed `@simplewebauthn/server` 13.3.2 dependency. None of these modules is loaded by `index.html`, `sw.js` or any browser module, and none adds a listener, deployment configuration, provider, host, origin, UI, owner or Save integration.
 
 The core is the smallest deterministic state machine that can later sit behind P032's seven locked routes. It independently validates request context, relationships and opaque encrypted records before committing. It never accepts readable Pocket content or a content-unlock secret.
 
@@ -75,7 +75,7 @@ The injected verifier has exactly two Promise-returning methods:
 - `verifyRegistration(input)`; and
 - `verifyAuthentication(input)`.
 
-Verifier results remain untrusted until the core validates every field and relationship.
+Verifier results remain untrusted until the core validates every field and relationship. P048 implements this exact two-method boundary with `@simplewebauthn/server` 13.3.2. The core still supplies the trusted origin, exact RP ID and stored ceremony challenge for every invocation; P048 passes those values unchanged to the library and requires user verification. It derives the stored COSE public-key algorithm and credential material only from the verified result, reconstructs authentication credentials only from the stored core record, and returns the narrow result shapes the core validates.
 
 P036 adds an exact one-method `recoveryProofVerifier`. It receives only bound public ceremony context, the stored derived recovery-authorisation verifier and the submitted opaque proof. It receives no recovery envelope, Pocket ciphertext, root, master key or PRF output. P036 deliberately supplies no production proof algorithm.
 
@@ -164,7 +164,7 @@ Registration begin creates only a pending ceremony. A new account remains provis
 
 Authentication begin resolves the account from either a valid current session or an explicit opaque account locator. Missing and unknown locators use the same non-enumerating error. Options allow only the account's active credentials and stable PRF input. Discoverable sign-in without an account locator remains deferred.
 
-Finish reads and validates the ceremony, calls the injected verifier once outside a write transaction, validates the result, then re-reads every relevant record inside the commit transaction. Registration atomically creates the account when needed, credential, active session and completed ceremony. Authentication atomically advances permitted credential state, creates a replacement session, revokes the prior session where present and completes the ceremony.
+Finish reads and validates the ceremony, calls the injected verifier once outside a write transaction, validates the result, then re-reads every relevant record inside the commit transaction. Registration atomically creates the account when needed, credential, active session and completed ceremony. Authentication atomically advances permitted credential state, creates a replacement session, revokes the prior session where present and completes the ceremony. P048 applies the same registration verification boundary to ordinary and recovery credential registration; recovery receives no weaker verifier path.
 
 Non-zero signature counters must advance. An unsupported zero counter may remain zero. Backup eligibility cannot be changed after registration. Credential/account substitution and stale ceremony, account, credential or session versions fail without partial state.
 
@@ -210,13 +210,13 @@ Network ambiguity remains P032's responsibility: the client does not guess or re
 
 Stable errors contain only a code, safe HTTP status and narrowly applicable `retryable` or `clearSession` booleans. They contain no opaque IDs, challenges, credentials, keys, ciphertext, WebAuthn response, native error message or readable Pocket content. The core logs nothing.
 
-Raw PRF output, master keys, recovery roots and device wrapping keys are rejected by strict request/verifier schemas. Only a Pocket record contains ciphertext, and no accepted record contains readable Pocket fields.
+Raw PRF output, master keys, recovery roots and device wrapping keys are rejected by strict request/verifier schemas. P048 neither requests nor returns PRF output, so account authentication remains separate from local content unlock. Only a Pocket record contains ciphertext, and no accepted record contains readable Pocket fields.
 
 ## 12. Deferred deployment and P037 boundary
 
-P046 provides the strict in-process HTTP/session mapping for all fifteen locked routes, exact route dispatch, bounded fatal-UTF-8 JSON parsing, safe errors and cookie clearing. Later deployment work must still provide and review:
+P046 provides the strict in-process HTTP/session mapping for all fifteen locked routes, exact route dispatch, bounded fatal-UTF-8 JSON parsing, safe errors and cookie clearing. P048 provides the real but undeployed server verification adapter. Later deployment work must still provide and review:
 
-- a standards-compliant WebAuthn verifier adapter;
+- composition that supplies P048's verifier with the HTTP adapter and service core, plus physical browser/authenticator acceptance testing;
 - composition that constructs an ordinary PostgreSQL pool, separately applies the P047 migration, and supplies the durable store adapter;
 - rate limits and operational rollback/backup policy; and
 - the unresolved no-locator account-discovery policy.
@@ -225,4 +225,4 @@ P037 owns local envelope/recovery orchestration, recovery-package creation and f
 
 ## 13. Validation status
 
-The focused Node suite executes the actual production module and deterministic store, including strict context, exact schemas, P031/P032 response compatibility, replay, stale writer, concurrency and injected commit failures. No browser acceptance is required because the module is server-side, undeployed and not production-loaded.
+The focused Node suite exercises the production modules and deterministic store, including strict context, exact schemas, P031/P032 response compatibility, replay, stale writer, concurrency, injected commit failures and P048's real-library failure boundary. Physical browser/authenticator acceptance remains a later deployment/browser test gate because this adapter is server-side, undeployed and not production-loaded.

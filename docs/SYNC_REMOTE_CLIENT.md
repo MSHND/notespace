@@ -60,7 +60,7 @@ Small account/revision/key/recovery JSON is limited to 262,144 bytes. Encrypted 
 
 Future authentication is a browser-managed, same-origin secure session cookie. The client supplies `credentials: "same-origin"`; it does not create, inspect or persist session state. There is no bearer-token header, token storage, refresh manager or cross-origin API in v1.
 
-P046 now provides the undeployed provider-neutral mapping for that server boundary: it accepts only exact same-origin POST JSON routes, maps the core's session instructions to one `__Host-pocket-sync-session` cookie with Secure, HttpOnly, SameSite=Strict and Path=/, and clears only core-directed invalid sessions. It has no listener or selected host. A deployment wrapper must still bind it to real HTTPS, abuse/rate controls, a durable store and real verifier implementations. P032 cannot provide those server controls.
+P046 now provides the undeployed provider-neutral mapping for that server boundary: it accepts only exact same-origin POST JSON routes, maps the core's session instructions to one `__Host-pocket-sync-session` cookie with Secure, HttpOnly, SameSite=Strict and Path=/, and clears only core-directed invalid sessions. It has no listener or selected host. A deployment wrapper must still bind it to real HTTPS, abuse/rate controls, a durable store, P048's WebAuthn verifier and a recovery-proof verifier. P032 cannot provide those server controls.
 
 ## P031 account service
 

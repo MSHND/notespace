@@ -91,7 +91,7 @@ P031 adds no live owner, account session persistence, token store, device-store 
 
 Before production loading, later work must provide and review:
 
-1. a Pocket-owned server implementation that verifies complete WebAuthn ceremonies and enforces expiry, replay and account/credential/device relationships;
+1. deployment composition and physical browser/authenticator acceptance testing for P034-P048's complete WebAuthn ceremony, expiry, replay and account/credential/device enforcement;
 2. an account-session design with CSRF, XSS, logging, revocation, rate-limit and enumeration controls;
 3. explicit UI/copy and accessible cancellation/error behavior;
 4. credential-bound creation/use/revocation of `passkey-prf` envelopes without exposing PRF output;

@@ -62,7 +62,7 @@ P035 makes the version-1 WebAuthn RP policy deliberately narrower than WebAuthn'
 
 P036 enforces key-set compare-and-swap, active/ciphertext-free revoked envelope records, durable key-operation idempotency, opaque recovery locators, proof/passkey recovery ceremonies, single-use `rotation-required` state and atomic verifier/envelope/locator rotation. The service never receives the root, master key or PRF output. See [Synced Pocket key-envelope and recovery service core](SYNC_KEY_RECOVERY_SERVICE.md).
 
-The aligned client/core still do not implement a real WebAuthn verifier, recovery-proof algorithm, HTTP/header/cookie adapter, durable database, rate limiting, deployment, selected same-origin service origin, device transfer or deletion. P039 and P041 implement local cryptographic/package orchestration only behind dormant injected boundaries. No sync module is production-loaded and no synced owner exists.
+P048 implements the real but undeployed server WebAuthn verifier adapter. The aligned client/core still do not implement a recovery-proof algorithm, deployment composition, selected same-origin service origin, rate limiting, device transfer or deletion. P039 and P041 implement local cryptographic/package orchestration only behind dormant injected boundaries. No sync module is production-loaded and no synced owner exists.
 
 This follows WebAuthn Level 3's optional-extension processing and its explicit distinction between PRF `enabled` and actual `results`: [Web Authentication Level 3 — PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension). The Web Crypto model supports non-extractable keys and authenticated encryption: [Web Cryptography Level 2](https://www.w3.org/TR/webcrypto/).
 
@@ -215,7 +215,7 @@ The final P041 record remains non-authoritative at `ready-for-adoption`; it cont
 The architecture, concrete cryptographic format and dormant initial-activation ordering are locked; production integration is still absent. Before loading sync code, later work must supply and review:
 
 - live-owner integration of the versioned P030 device store, plus whole-account encryption-use enforcement and master-key rotation consistent with the P029 format and vectors;
-- the real WebAuthn verifier adapter for P034's ceremony state machine;
+- deployment composition and physical browser/authenticator acceptance testing for P048's verifier adapter and P034's ceremony state machine;
 - an actual same-origin HTTP/header/cookie adapter and durable database implementation around P034, plus abuse limits and operational recovery;
 - P042 synced-owner/Save integration for activation-ready and recovery-ready device records, then additional-device and recovery UI with abuse/rate controls;
 - conflict review and account deletion UI;
