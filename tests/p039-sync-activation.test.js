@@ -430,6 +430,63 @@ test("P044 bridges the key-free P039 owner descriptor into P042 and the live P04
   assert.equal(JSON.stringify(uploads[1].body).includes(READABLE), false);
 });
 
+test("P049e keeps an already-durable activation reservation spent after draft sealing fails", async (t) => {
+  await t.test("post-reservation seal failure resumes with fresh capacity", async () => {
+    const harness = createHarness();
+    let failSeal = true;
+    const crypto = Object.freeze({ ...harness.crypto, async sealContent(...input) {
+      if (failSeal && harness.sharedDeviceState.records.size > 0) {
+        failSeal = false;
+        throw new Error("synthetic activation draft seal failure");
+      }
+      return harness.crypto.sealContent(...input);
+    } });
+    const failing = harness.activation.createActivationOrchestrator({ ...harness.activationConfig, crypto });
+    const first = await failing.activate(harness.dependencies, {
+      syncedPocketId: "pocket-p049e-activation", deviceId: "device-p049e-activation",
+    });
+    assert.equal(first.reason, "account-registration-failed");
+    const spent = await harness.deviceStore.readActivation(first.activationId);
+    assert.equal(spent.record.storeRevision, 1);
+    assert.equal(spent.record.usage.deviceWrappingKeyEncryptions, 3);
+    assert.equal(spent.record.activationDraft.context.revision, 1);
+    await harness.crypto.openContent(
+      spent.record.activationDraft.record,
+      spent.record.deviceWrappingKey,
+      spent.record.activationDraft.context
+    );
+    const resumed = await harness.orchestrator.resume(harness.dependencies, {
+      activationId: first.activationId,
+    });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    assert.equal((await harness.deviceStore.readActivation(first.activationId))
+      .record.usage.deviceWrappingKeyEncryptions >= 4, true);
+  });
+
+  await t.test("reservation failure prevents draft sealing", async () => {
+    const harness = createHarness();
+    let sealAfterDurableRecord = 0;
+    const crypto = Object.freeze({ ...harness.crypto, async sealContent(...input) {
+      if (harness.sharedDeviceState.records.size > 0) sealAfterDurableRecord += 1;
+      return harness.crypto.sealContent(...input);
+    } });
+    const deviceStore = Object.freeze({ ...harness.deviceStore,
+      async reservePocketEncryptionUsage() {
+        if (harness.sharedDeviceState.records.size > 0) throw new Error("synthetic reservation failure");
+        throw new Error("unexpected initial reservation");
+      },
+    });
+    const failing = harness.activation.createActivationOrchestrator({
+      ...harness.activationConfig, crypto, deviceStore,
+    });
+    const result = await failing.activate(harness.dependencies, {
+      syncedPocketId: "pocket-p049e-reservation", deviceId: "device-p049e-reservation",
+    });
+    assert.equal(result.reason, "account-registration-failed");
+    assert.equal(sealAfterDurableRecord, 0);
+  });
+});
+
 test("P044 bridge failure preserves the local source and explicit resume adopts without repeated remote work", async () => {
   const harness = createHarness({ liveOwnerBridge: true, ownerInstallFails: true });
   const first = await harness.orchestrator.activate(harness.dependencies, {

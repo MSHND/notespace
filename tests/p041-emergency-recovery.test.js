@@ -383,12 +383,19 @@ function createMeasuredRecovery(harness, options = {}) {
   let downloaded = false;
   let deviceEnvelopeEncryptions = 0;
   let deviceDraftEncryptionsAfterDownload = 0;
+  let failOrdinaryDraftSeal = options.failOrdinaryDraftSealOnce === true;
+  let failDeviceEnvelope = options.failDeviceEnvelopeOnce === true;
+  let failPromotion = options.failPromotionOnce === true;
 
   async function capture(input) {
     const draft = await harness.crypto.openContent(
       input.recoveryDraft.record, input.deviceWrappingKey, input.recoveryDraft.context
     );
-    writes.push({ stage: draft.stage, usage: input.usage.deviceWrappingKeyEncryptions });
+    writes.push({
+      stage: draft.stage,
+      storeRevision: input.storeRevision,
+      usage: input.usage.deviceWrappingKeyEncryptions,
+    });
   }
 
   const deviceStore = Object.freeze({
@@ -415,6 +422,10 @@ function createMeasuredRecovery(harness, options = {}) {
     },
     async promoteRecoveryStaging(syncedPocketId, expectedRevision, input) {
       await capture(input);
+      if (failPromotion) {
+        failPromotion = false;
+        throw new Error("synthetic promotion failure");
+      }
       return harness.recoveryStore.promoteRecoveryStaging(syncedPocketId, expectedRevision, input);
     },
   });
@@ -424,6 +435,10 @@ function createMeasuredRecovery(harness, options = {}) {
     async sealContent(...input) {
       events.push("seal-draft");
       if (downloaded) deviceDraftEncryptionsAfterDownload += 1;
+      if (failOrdinaryDraftSeal && events.at(-2) === "reserve:1") {
+        failOrdinaryDraftSeal = false;
+        throw new Error("synthetic recovery draft seal failure");
+      }
       return harness.crypto.sealContent(...input);
     },
     async openMasterKeyBundle(record, wrappingKey, context, plans) {
@@ -431,6 +446,10 @@ function createMeasuredRecovery(harness, options = {}) {
           && plans[0]?.context?.envelopeKind === "device") {
         deviceEnvelopeEncryptions += 1;
         events.push("seal-device-envelope");
+        if (failDeviceEnvelope) {
+          failDeviceEnvelope = false;
+          throw new Error("synthetic device envelope failure");
+        }
       }
       return harness.crypto.openMasterKeyBundle(record, wrappingKey, context, plans);
     },
@@ -667,6 +686,64 @@ test("P049c reserves device-key capacity for the envelope plus recovery-draft tr
     assert.equal(measured.writes[contentReady].usage - measured.writes[contentReady - 1].usage, 2);
     assert.equal(measured.deviceEnvelopeEncryptions, 1);
     assert.equal(measured.deviceDraftEncryptionsAfterDownload, 1);
+  });
+});
+
+test("P049e leaves recovery reservations spent after ordinary, +2 and promotion failures", async (t) => {
+  await t.test("ordinary draft seal failure", async () => {
+    const harness = await createActivatedHarness();
+    const measured = createMeasuredRecovery(harness, { failOrdinaryDraftSealOnce: true });
+    const first = await measured.create().recover(harness.recoveryDependencies, {
+      deviceId: "device-p049e-ordinary",
+    });
+    assert.equal(first.reason, "recovery-state-invalid");
+    const spent = await harness.recoveryStore.readRecoveryAttempt(first.recoveryAttemptId);
+    assert.equal(spent.record.storeRevision, 1);
+    assert.equal(spent.record.usage.deviceWrappingKeyEncryptions, 2);
+    await harness.crypto.openContent(
+      spent.record.recoveryDraft.record, spent.record.deviceWrappingKey, spent.record.recoveryDraft.context
+    );
+    const resumed = await measured.create().resume(harness.recoveryDependencies, {
+      recoveryAttemptId: first.recoveryAttemptId,
+    });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    assert.equal((await harness.recoveryStore.readPocket(harness.originalPackage.syncedPocketId))
+      .usage.deviceWrappingKeyEncryptions >= 3, true);
+  });
+
+  await t.test("+2 device-envelope failure", async () => {
+    const harness = await createActivatedHarness();
+    const measured = createMeasuredRecovery(harness, { failDeviceEnvelopeOnce: true });
+    const first = await measured.create().recover(harness.recoveryDependencies, {
+      deviceId: "device-p049e-plus-two",
+    });
+    assert.equal(first.reason, "recovery-envelope-open-failed");
+    const before = measured.writes.at(-1);
+    const spent = await harness.recoveryStore.readRecoveryAttempt(first.recoveryAttemptId);
+    assert.equal(spent.record.storeRevision, before.storeRevision);
+    assert.equal(spent.record.usage.deviceWrappingKeyEncryptions, before.usage + 2);
+    const resumed = await measured.create().resume(harness.recoveryDependencies, {
+      recoveryAttemptId: first.recoveryAttemptId,
+    });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    assert.equal(measured.events.filter((event) => event === "reserve:2").length, 2);
+  });
+
+  await t.test("promotion failure", async () => {
+    const harness = await createActivatedHarness();
+    const measured = createMeasuredRecovery(harness, { failPromotionOnce: true });
+    const first = await measured.create().recover(harness.recoveryDependencies, {
+      deviceId: "device-p049e-promotion",
+    });
+    assert.equal(first.reason, "device-finalisation-failed");
+    const spent = await harness.recoveryStore.readRecoveryAttempt(first.recoveryAttemptId);
+    const usageBeforeResume = spent.record.usage.deviceWrappingKeyEncryptions;
+    const resumed = await measured.create().resume(harness.recoveryDependencies, {
+      recoveryAttemptId: first.recoveryAttemptId,
+    });
+    assert.equal(resumed.ok, true, JSON.stringify(resumed));
+    assert.equal((await harness.recoveryStore.readPocket(harness.originalPackage.syncedPocketId))
+      .usage.deviceWrappingKeyEncryptions > usageBeforeResume, true);
   });
 });
 

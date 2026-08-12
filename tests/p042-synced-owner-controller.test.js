@@ -212,7 +212,7 @@ async function createHarness(options = {}) {
     contentService,
     randomBytes(length) { randomSeed += 1; return bytes(length, randomSeed); },
   });
-  return { apis, state, driver, store, records, events, calls, controller };
+  return { apis, state, driver, store, records, events, calls, contentService, controller };
 }
 
 async function adopt(harness, id = "pocket-a") {
@@ -412,6 +412,147 @@ test("P049a retries one durable ambiguous Save only on the next explicit Save wi
   const confirmed = await harness.store.readPocket("pocket-a");
   assert.equal(confirmed.remote.pending, null);
   assert.equal(confirmed.remote.confirmedRevision, 1);
+});
+
+test("P049e refreshes a same-revision usage reservation before a later explicit Save", async () => {
+  const harness = await createHarness();
+  await adopt(harness);
+  const controllerB = harness.apis.controller.createSyncedOwnerController({
+    crypto: harness.apis.crypto,
+    deviceStore: Object.freeze({
+      readPocket: harness.store.readPocket.bind(harness.store),
+      readRecoveryAttempt: harness.store.readRecoveryAttempt.bind(harness.store),
+      reservePocketEncryptionUsage: harness.store.reservePocketEncryptionUsage.bind(harness.store),
+      replacePocket: harness.store.replacePocket.bind(harness.store),
+    }),
+    contentService: harness.contentService,
+    randomBytes(length) { return bytes(length, 93); },
+  });
+  assert.equal((await controllerB.adoptSyncedOwner({
+    syncedPocketId: "pocket-a", masterKey: harness.records.get("pocket-a").masterKey,
+  })).ok, true);
+  const initial = await harness.store.readPocket("pocket-a");
+  const reserved = await harness.store.reservePocketEncryptionUsage(
+    initial.syncedPocketId, initial.storeRevision, initial.usage,
+    { masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 0 }
+  );
+  assert.equal(reserved.storeRevision, initial.storeRevision);
+  const result = await controllerB.saveSyncedOwner({
+    freezePayload: async () => ({ sentinel: SENTINEL, change: "P049e refresh" }),
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const finalRecord = await harness.store.readPocket("pocket-a");
+  assert.equal(finalRecord.usage.masterKeyContentEncryptions,
+    initial.usage.masterKeyContentEncryptions + 2);
+  assert.equal(finalRecord.remote.confirmedRevision, 1);
+});
+
+test("P049e rejects unexpected same-revision mutations instead of treating them as a refresh", async (t) => {
+  const mutations = [
+    ["content", (record) => Object.assign({}, record, {
+      content: Object.assign({}, record.content, { record: Object.assign({}, record.content.record, {
+        ciphertext: record.content.record.ciphertext.replace(/^./, (value) => value === "A" ? "B" : "A"),
+      }) }),
+    })],
+    ["remote", (record) => Object.assign({}, record, {
+      remote: Object.assign({}, record.remote, { conflict: { actualRevision: 1, operationId: "changed" } }),
+    })],
+    ["draft", (record) => Object.assign({}, record, { activationDraft: {} })],
+    ["lower usage", (record) => Object.assign({}, record, { usage: Object.assign({}, record.usage, {
+      masterKeyContentEncryptions: record.usage.masterKeyContentEncryptions - 1,
+    }) })],
+    ["master generation", (record) => Object.assign({}, record, { usage: Object.assign({}, record.usage, {
+      masterKeyGeneration: record.usage.masterKeyGeneration + 1,
+    }) })],
+    ["device-key authority", async (record, apis) => Object.assign({}, record, {
+      deviceWrappingKey: await apis.crypto.generateDeviceWrappingKey(),
+    })],
+  ];
+  for (const [label, mutate] of mutations) await t.test(label, async () => {
+    const harness = await createHarness();
+    let tamper = false;
+    const controller = harness.apis.controller.createSyncedOwnerController({
+      crypto: harness.apis.crypto,
+      deviceStore: Object.freeze({
+        async readPocket(id) {
+          const record = await harness.store.readPocket(id);
+          return tamper ? await mutate(record, harness.apis) : record;
+        },
+        readRecoveryAttempt: harness.store.readRecoveryAttempt.bind(harness.store),
+        reservePocketEncryptionUsage: harness.store.reservePocketEncryptionUsage.bind(harness.store),
+        replacePocket: harness.store.replacePocket.bind(harness.store),
+      }),
+      contentService: harness.contentService,
+      randomBytes(length) { return bytes(length, 101); },
+    });
+    assert.equal((await controller.adoptSyncedOwner({
+      syncedPocketId: "pocket-a", masterKey: harness.records.get("pocket-a").masterKey,
+    })).ok, true);
+    tamper = true;
+    const result = await controller.saveSyncedOwner({ freezePayload: async () => ({ sentinel: SENTINEL }) });
+    assert.equal(result.reason, "owner-state-unavailable");
+    assert.equal(harness.calls.length, 0);
+  });
+});
+
+test("P049e keeps committed Save reservations spent after encryption and pending-persistence failures", async (t) => {
+  await t.test("encryption failure", async () => {
+    const harness = await createHarness();
+    let failEncryption = true;
+    const controller = harness.apis.controller.createSyncedOwnerController({
+      crypto: Object.freeze({ ...harness.apis.crypto, async sealContent(...input) {
+        if (failEncryption) { failEncryption = false; throw new Error("synthetic seal failure"); }
+        return harness.apis.crypto.sealContent(...input);
+      } }),
+      deviceStore: Object.freeze({
+        readPocket: harness.store.readPocket.bind(harness.store),
+        readRecoveryAttempt: harness.store.readRecoveryAttempt.bind(harness.store),
+        reservePocketEncryptionUsage: harness.store.reservePocketEncryptionUsage.bind(harness.store),
+        replacePocket: harness.store.replacePocket.bind(harness.store),
+      }),
+      contentService: harness.contentService,
+      randomBytes(length) { return bytes(length, 111); },
+    });
+    await controller.adoptSyncedOwner({ syncedPocketId: "pocket-a", masterKey: harness.records.get("pocket-a").masterKey });
+    assert.equal((await controller.saveSyncedOwner({ freezePayload: async () => ({ sentinel: SENTINEL }) })).reason,
+      "payload-encryption-failed");
+    const spent = await harness.store.readPocket("pocket-a");
+    assert.equal(spent.storeRevision, 1);
+    assert.equal(spent.usage.masterKeyContentEncryptions, 2);
+    assert.equal(spent.remote.pending, null);
+    assert.equal(harness.calls.length, 0);
+    assert.equal((await controller.saveSyncedOwner({ freezePayload: async () => ({ sentinel: SENTINEL }) })).ok, true);
+    assert.equal((await harness.store.readPocket("pocket-a")).usage.masterKeyContentEncryptions, 3);
+  });
+
+  await t.test("pending persistence failure", async () => {
+    const harness = await createHarness();
+    let failReplace = true;
+    const controller = harness.apis.controller.createSyncedOwnerController({
+      crypto: harness.apis.crypto,
+      deviceStore: Object.freeze({
+        readPocket: harness.store.readPocket.bind(harness.store),
+        readRecoveryAttempt: harness.store.readRecoveryAttempt.bind(harness.store),
+        reservePocketEncryptionUsage: harness.store.reservePocketEncryptionUsage.bind(harness.store),
+        async replacePocket(...input) {
+          if (failReplace) { failReplace = false; throw new Error("synthetic persistence failure"); }
+          return harness.store.replacePocket(...input);
+        },
+      }),
+      contentService: harness.contentService,
+      randomBytes(length) { return bytes(length, 121); },
+    });
+    await controller.adoptSyncedOwner({ syncedPocketId: "pocket-a", masterKey: harness.records.get("pocket-a").masterKey });
+    assert.equal((await controller.saveSyncedOwner({ freezePayload: async () => ({ sentinel: SENTINEL }) })).reason,
+      "pending-persistence-failed");
+    const spent = await harness.store.readPocket("pocket-a");
+    assert.equal(spent.storeRevision, 1);
+    assert.equal(spent.usage.masterKeyContentEncryptions, 2);
+    assert.equal(spent.remote.pending, null);
+    assert.equal(harness.calls.length, 0);
+    assert.equal((await controller.saveSyncedOwner({ freezePayload: async () => ({ sentinel: SENTINEL }) })).ok, true);
+    assert.equal((await harness.store.readPocket("pocket-a")).usage.masterKeyContentEncryptions, 3);
+  });
 });
 
 test("P042 records known remote success separately when local confirmation fails", async () => {

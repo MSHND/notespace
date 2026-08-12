@@ -202,6 +202,46 @@ device record for explicit, conditional Saves.
     return "remote-outcome-unknown";
   }
 
+  function sameStructuredValue(left, right) {
+    if (left === right) return true;
+    if (typeof left !== typeof right || left === null || right === null) return false;
+    if (Array.isArray(left) || Array.isArray(right)) {
+      return Array.isArray(left) && Array.isArray(right)
+        && left.length === right.length
+        && left.every((value, index) => sameStructuredValue(value, right[index]));
+    }
+    if (!isObject(left) || !isObject(right)) return false;
+    const leftFields = Object.keys(left);
+    const rightFields = Object.keys(right);
+    return leftFields.length === rightFields.length
+      && leftFields.every((field) => Object.prototype.hasOwnProperty.call(right, field)
+        && sameStructuredValue(left[field], right[field]));
+  }
+
+  function sameRevisionRefreshKind(current, stored) {
+    if (stored.kind !== current.kind
+        || stored.syncedPocketId !== current.syncedPocketId
+        || stored.schemaVersion !== current.schemaVersion
+        || stored.deviceId !== current.deviceId
+        || !sameStructuredValue(stored.content, current.content)
+        || !sameStructuredValue(stored.deviceEnvelope, current.deviceEnvelope)
+        || !sameStructuredValue(stored.remote, current.remote)
+        || !sameStructuredValue(stored.activationDraft, current.activationDraft)
+        || !sameStructuredValue(stored.recoveryDraft, current.recoveryDraft)
+        || stored.usage.masterKeyGeneration !== current.usage.masterKeyGeneration
+        || stored.usage.masterKeyContentEncryptions < current.usage.masterKeyContentEncryptions
+        || stored.usage.deviceWrappingKeyEncryptions
+          < current.usage.deviceWrappingKeyEncryptions) {
+      return null;
+    }
+    if (stored.usage.masterKeyContentEncryptions === current.usage.masterKeyContentEncryptions
+        && stored.usage.deviceWrappingKeyEncryptions
+          === current.usage.deviceWrappingKeyEncryptions) {
+      return "exact";
+    }
+    return "usage-reservation";
+  }
+
   function createSyncedOwnerController(configuration) {
     const config = validateFactory(configuration);
     let generation = 0;
@@ -252,7 +292,32 @@ device record for explicit, conditional Saves.
       catch (_error) { return false; }
       if (!isSyncedOwnerSaveSessionCurrent(session)) return false;
       if (!stored || stored.syncedPocketId !== capturedOwner.syncedPocketId) return false;
-      if (stored.storeRevision === capturedOwner.record.storeRevision) return true;
+      if (stored.storeRevision === capturedOwner.record.storeRevision) {
+        const refreshKind = sameRevisionRefreshKind(capturedOwner.record, stored);
+        if (!refreshKind) return false;
+        try {
+          await config.crypto.openContent(
+            stored.content.record,
+            capturedOwner.masterKey,
+            stored.content.context
+          );
+          const bundle = await config.crypto.openMasterKeyBundle(
+            stored.deviceEnvelope.record,
+            stored.deviceWrappingKey,
+            stored.deviceEnvelope.context,
+            []
+          );
+          config.crypto.validateNonExtractableAesKey(bundle?.masterKey);
+          await config.crypto.openContent(
+            stored.content.record,
+            bundle.masterKey,
+            stored.content.context
+          );
+        } catch (_error) { return false; }
+        if (!isSyncedOwnerSaveSessionCurrent(session)) return false;
+        if (refreshKind === "usage-reservation") owner.record = stored;
+        return true;
+      }
       if (stored.remote?.confirmedRevision !== capturedOwner.record.remote.confirmedRevision
           || stored.remote?.pending !== null || stored.remote?.conflict !== null
           || stored.content?.context?.revision !== capturedOwner.record.content.context.revision) {
