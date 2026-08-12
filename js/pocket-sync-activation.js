@@ -513,9 +513,8 @@ without adding UI, a live synced owner, background work, or deployment state.
       );
       const usage = current ? {
         masterKeyGeneration: current.usage.masterKeyGeneration,
-        contentEncryptionsOnDevice: current.usage.contentEncryptionsOnDevice + 1,
-        envelopeEncryptionsOnDevice: current.usage.envelopeEncryptionsOnDevice
-          + (changes?.envelopeIncrement || 0),
+        masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions,
+        deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions + 1,
       } : execution.initialUsage;
       let nextRecord;
       if (current) {
@@ -563,8 +562,8 @@ without adding UI, a live synced owner, background work, or deployment state.
       );
       const usage = {
         masterKeyGeneration: current.usage.masterKeyGeneration,
-        contentEncryptionsOnDevice: current.usage.contentEncryptionsOnDevice + 1,
-        envelopeEncryptionsOnDevice: current.usage.envelopeEncryptionsOnDevice,
+        masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions,
+        deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions + 1,
       };
       const nextRecord = cloneRecord(current, { usage });
       nextRecord.storeRevision = nextRevision;
@@ -627,7 +626,7 @@ without adding UI, a live synced owner, background work, or deployment state.
         prfEnvelope,
         prfStatus,
         pendingOperation: "account-registration-finish",
-      }), { envelopeIncrement: prfEnvelope ? 1 : 0 });
+      }));
     }
 
     function accountState(result) {
@@ -1185,8 +1184,8 @@ without adding UI, a live synced owner, background work, or deployment state.
           };
           execution.initialUsage = {
             masterKeyGeneration: 1,
-            contentEncryptionsOnDevice: 2,
-            envelopeEncryptionsOnDevice: 2,
+            masterKeyContentEncryptions: 1,
+            deviceWrappingKeyEncryptions: 2,
           };
           execution.initialRecord = {
             kind: deviceFormat.recordKind,

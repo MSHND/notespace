@@ -29,6 +29,15 @@ function runtimeError() {
   return error;
 }
 
+function validatePlatform() {
+  const major = Number.parseInt(process.versions?.node?.split(".")[0], 10);
+  if (!Number.isSafeInteger(major) || major < 24
+      || typeof Headers !== "function"
+      || typeof Headers.prototype?.getSetCookie !== "function") {
+    throw runtimeError();
+  }
+}
+
 function isObject(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -180,7 +189,22 @@ function listenOptions(value) {
   return value;
 }
 
+async function verifySchema(pool) {
+  let result;
+  try {
+    result = await pool.query(
+      "SELECT schema_version FROM pocket_sync_schema WHERE schema_name = $1",
+      ["pocket-sync-store"]
+    );
+  } catch (_error) { throw runtimeError(); }
+  if (!result || result.rowCount !== 1 || !Array.isArray(result.rows)
+      || result.rows.length !== 1 || result.rows[0]?.schema_version !== 1) {
+    throw runtimeError();
+  }
+}
+
 function createSyncServerRuntime(configuration) {
+  validatePlatform();
   const config = validateConfiguration(configuration);
   const pool = new Pool({ connectionString: config.postgres.connectionString });
   if (!pool || typeof pool.connect !== "function" || typeof pool.query !== "function" || typeof pool.end !== "function") {
@@ -216,27 +240,39 @@ function createSyncServerRuntime(configuration) {
   if (!server || typeof server.listen !== "function" || typeof server.close !== "function") throw runtimeError();
 
   let started = false;
+  let serverMayBeOpen = false;
   let shutdown = null;
 
   async function listen(value) {
     const options = listenOptions(value);
     if (started || shutdown) throw runtimeError();
-    try { await pool.query("SELECT 1"); } catch (_error) { throw runtimeError(); }
-    await new Promise((resolve, reject) => {
+    try {
+      await pool.query("SELECT 1");
+      await verifySchema(pool);
+    } catch (_error) {
+      await close();
+      throw runtimeError();
+    }
+    try { await new Promise((resolve, reject) => {
       const failed = () => { server.off("error", failed); reject(runtimeError()); };
       server.once("error", failed);
+      serverMayBeOpen = true;
       server.listen(options.port, options.host, () => {
         server.off("error", failed);
         resolve();
       });
-    });
+    }); } catch (error) {
+      await close();
+      throw error;
+    }
     started = true;
   }
 
   function closeServer() {
-    if (!started) return Promise.resolve();
+    if (!serverMayBeOpen) return Promise.resolve();
     return new Promise((resolve) => {
-      server.close(() => resolve());
+      try { server.close(() => resolve()); }
+      catch (_error) { resolve(); }
     });
   }
 
@@ -245,6 +281,7 @@ function createSyncServerRuntime(configuration) {
     shutdown = (async () => {
       await closeServer();
       started = false;
+      serverMayBeOpen = false;
       try { await pool.end(); } catch (_error) { throw runtimeError(); }
     })();
     return shutdown;

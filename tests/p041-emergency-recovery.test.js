@@ -488,7 +488,7 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
 
   const finalRecord = await harness.recoveryStore.readPocket(oldPackage.syncedPocketId);
   assert.equal(finalRecord.kind, "pocket.sync.device-state");
-  assert.equal(finalRecord.schemaVersion, 3);
+  assert.equal(finalRecord.schemaVersion, 4);
   assert.equal(finalRecord.remote.confirmedRevision, 1);
   assert.equal(finalRecord.remote.pending, null);
   assert.equal(finalRecord.remote.conflict, null);
@@ -840,7 +840,7 @@ test("P030 recovery staging is strict, encrypted, CAS protected and migrates old
     };
   })();
   const migrated = production.deviceStore.migrateRecord(legacy);
-  assert.equal(migrated.schemaVersion, 3);
+  assert.equal(migrated.schemaVersion, 4);
   assert.equal(migrated.recoveryDraft, null);
 });
 

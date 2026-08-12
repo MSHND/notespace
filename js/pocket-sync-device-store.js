@@ -16,7 +16,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
   });
   const FORMAT = Object.freeze({
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 3,
+    recordSchemaVersion: 4,
     recoveryStagingKind: "pocket.sync.recovery-staging",
     recoveryStagingSchemaVersion: 1,
     firstStoreRevision: 1,
@@ -27,6 +27,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     registeredRecordMigrations: Object.freeze([
       "1-to-2-encrypted-activation-draft",
       "2-to-3-encrypted-recovery-draft",
+      "3-to-4-per-long-lived-key-usage",
     ]),
     destructiveResetAllowed: false,
   });
@@ -76,8 +77,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
   const CONFLICT_FIELDS = Object.freeze(["actualRevision", "operationId"]);
   const USAGE_FIELDS = Object.freeze([
     "masterKeyGeneration",
-    "contentEncryptionsOnDevice",
-    "envelopeEncryptionsOnDevice",
+    "masterKeyContentEncryptions",
+    "deviceWrappingKeyEncryptions",
+  ]);
+  const VERSION_THREE_USAGE_FIELDS = Object.freeze([
+    "masterKeyGeneration", "contentEncryptionsOnDevice", "envelopeEncryptionsOnDevice",
   ]);
 
   function deviceStoreError(code) {
@@ -319,20 +323,20 @@ and a narrow atomic transaction boundary without activating a synced owner.
         usage.masterKeyGeneration,
         "device-usage-invalid"
       ),
-      contentEncryptionsOnDevice: nonNegativeInteger(
-        usage.contentEncryptionsOnDevice,
+      masterKeyContentEncryptions: nonNegativeInteger(
+        usage.masterKeyContentEncryptions,
         "device-usage-invalid"
       ),
-      envelopeEncryptionsOnDevice: nonNegativeInteger(
-        usage.envelopeEncryptionsOnDevice,
+      deviceWrappingKeyEncryptions: nonNegativeInteger(
+        usage.deviceWrappingKeyEncryptions,
         "device-usage-invalid"
       ),
     });
     const ceiling = cryptoContract().POLICY?.maximumEncryptionsPerKey;
     if (!Number.isSafeInteger(ceiling)
         || ceiling < 1
-        || value.contentEncryptionsOnDevice >= ceiling
-        || value.envelopeEncryptionsOnDevice >= ceiling) {
+        || value.masterKeyContentEncryptions >= ceiling
+        || value.deviceWrappingKeyEncryptions >= ceiling) {
       throw deviceStoreError("device-usage-limit-reached");
     }
     return value;
@@ -378,10 +382,22 @@ and a narrow atomic transaction boundary without activating a synced owner.
     }, deviceWrappingKey);
   }
 
+  function migrateLegacyUsage(input) {
+    const usage = exactObject(input, VERSION_THREE_USAGE_FIELDS, "device-usage-invalid");
+    // The old envelope aggregate combined key purposes.  It cannot be split
+    // retrospectively, so retain its full value against the device key.
+    return {
+      masterKeyGeneration: usage.masterKeyGeneration,
+      masterKeyContentEncryptions: usage.contentEncryptionsOnDevice,
+      deviceWrappingKeyEncryptions: usage.envelopeEncryptionsOnDevice,
+    };
+  }
+
   function migrateVersionOneRecord(input) {
     const legacy = exactObject(input, VERSION_ONE_TOP_LEVEL_FIELDS, "device-state-invalid");
     return validateCurrentRecord(Object.assign({}, legacy, {
       schemaVersion: FORMAT.recordSchemaVersion,
+      usage: migrateLegacyUsage(legacy.usage),
       activationDraft: null,
       recoveryDraft: null,
     }));
@@ -391,7 +407,16 @@ and a narrow atomic transaction boundary without activating a synced owner.
     const previous = exactObject(input, VERSION_TWO_TOP_LEVEL_FIELDS, "device-state-invalid");
     return validateCurrentRecord(Object.assign({}, previous, {
       schemaVersion: FORMAT.recordSchemaVersion,
+      usage: migrateLegacyUsage(previous.usage),
       recoveryDraft: null,
+    }));
+  }
+
+  function migrateVersionThreeRecord(input) {
+    const previous = exactObject(input, TOP_LEVEL_FIELDS, "device-state-invalid");
+    return validateCurrentRecord(Object.assign({}, previous, {
+      schemaVersion: FORMAT.recordSchemaVersion,
+      usage: migrateLegacyUsage(previous.usage),
     }));
   }
 
@@ -401,6 +426,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     }
     if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
     if (input.schemaVersion === 2) return migrateVersionTwoRecord(input);
+    if (input.schemaVersion === 3) return migrateVersionThreeRecord(input);
     return validateCurrentRecord(input);
   }
 
@@ -445,6 +471,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     if (input.schemaVersion === FORMAT.recordSchemaVersion) return validateCurrentRecord(input);
     if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
     if (input.schemaVersion === 2) return migrateVersionTwoRecord(input);
+    if (input.schemaVersion === 3) return migrateVersionThreeRecord(input);
     if (Number.isSafeInteger(input.schemaVersion)
         && input.schemaVersion >= 0
         && input.schemaVersion < FORMAT.recordSchemaVersion) {
@@ -471,10 +498,10 @@ and a narrow atomic transaction boundary without activating a synced owner.
       throw deviceStoreError("device-usage-rollback");
     }
     if (next.usage.masterKeyGeneration === current.usage.masterKeyGeneration
-        && (next.usage.contentEncryptionsOnDevice
-          < current.usage.contentEncryptionsOnDevice
-          || next.usage.envelopeEncryptionsOnDevice
-          < current.usage.envelopeEncryptionsOnDevice)) {
+        && (next.usage.masterKeyContentEncryptions
+          < current.usage.masterKeyContentEncryptions
+          || next.usage.deviceWrappingKeyEncryptions
+          < current.usage.deviceWrappingKeyEncryptions)) {
       throw deviceStoreError("device-usage-rollback");
     }
     return next;

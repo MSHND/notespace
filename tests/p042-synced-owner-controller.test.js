@@ -123,7 +123,7 @@ async function buildRecord(apis, syncedPocketId, options = {}) {
     masterKey: bundle.masterKey,
     record: {
       kind: "pocket.sync.device-state",
-      schemaVersion: 3,
+      schemaVersion: 4,
       storeRevision: 1,
       syncedPocketId,
       deviceId,
@@ -146,8 +146,8 @@ async function buildRecord(apis, syncedPocketId, options = {}) {
       remote: { confirmedRevision: revision, pending: null, conflict: null },
       usage: {
         masterKeyGeneration: 1,
-        contentEncryptionsOnDevice: 1,
-        envelopeEncryptionsOnDevice: 1,
+        masterKeyContentEncryptions: 1,
+        deviceWrappingKeyEncryptions: 1,
       },
       activationDraft: null,
       recoveryDraft,
@@ -377,6 +377,36 @@ test("P042 keeps pending work for ambiguous and definite remote failures without
     assert.equal(calls.length, 1, label);
     assert.notEqual((await harness.store.readPocket("pocket-a")).remote.pending, null, label);
   }
+});
+
+test("P049a retries one durable ambiguous Save only on the next explicit Save with exact identity and ciphertext", async () => {
+  const inputs = [];
+  const harness = await createHarness({ contentService: Object.freeze({
+    async conditionalUpload(input) {
+      inputs.push(input);
+      if (inputs.length === 1) throw Object.assign(new Error("lost response"), { outcome: "unknown" });
+      return { status: "committed", wrote: true, operationId: input.operationId,
+        revision: input.expectedRevision + 1 };
+    },
+  }) });
+  await adopt(harness);
+  assert.equal((await harness.controller.saveSyncedOwner({
+    freezePayload: async () => ({ sentinel: SENTINEL }),
+  })).reason, "remote-outcome-unknown");
+  const pending = await harness.store.readPocket("pocket-a");
+  const retried = await harness.controller.saveSyncedOwner({
+    freezePayload: async () => ({ sentinel: "newer-local-work-must-not-be-claimed-saved" }),
+  });
+  assert.equal(retried.reason, "pending-reconciled");
+  assert.equal(inputs.length, 2);
+  assert.equal(inputs[1].attemptKind, "idempotent-retry");
+  assert.equal(inputs[1].operationId, inputs[0].operationId);
+  assert.equal(inputs[1].logicalChangeId, inputs[0].logicalChangeId);
+  assert.deepEqual(plain(inputs[1].encryptedRecord), plain(inputs[0].encryptedRecord));
+  assert.deepEqual(plain(inputs[1].encryptedRecord), plain(pending.content.record));
+  const confirmed = await harness.store.readPocket("pocket-a");
+  assert.equal(confirmed.remote.pending, null);
+  assert.equal(confirmed.remote.confirmedRevision, 1);
 });
 
 test("P042 records known remote success separately when local confirmation fails", async () => {

@@ -407,7 +407,7 @@ device record for explicit, conditional Saves.
       };
     }
 
-    async function nextRecord(current, content, remote, contentEncryptionsOnDevice) {
+    async function nextRecord(current, content, remote, masterKeyContentEncryptions) {
       const storeRevision = increment(current.storeRevision, "device-store-revision-exhausted");
       return {
         kind: current.kind,
@@ -421,8 +421,10 @@ device record for explicit, conditional Saves.
         remote,
         usage: {
           masterKeyGeneration: current.usage.masterKeyGeneration,
-          contentEncryptionsOnDevice,
-          envelopeEncryptionsOnDevice: current.usage.envelopeEncryptionsOnDevice,
+          masterKeyContentEncryptions,
+          deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions
+            + (current.activationDraft === null ? 0 : 1)
+            + (current.recoveryDraft === null ? 0 : 1),
         },
         activationDraft: await nextActivationDraft(current, storeRevision),
         recoveryDraft: await nextRecoveryDraft(current, storeRevision),
@@ -463,37 +465,45 @@ device record for explicit, conditional Saves.
         return isSyncedOwnerSaveSessionCurrent(session)
           ? result("owner-state-unavailable") : result("stale-owner-session");
       }
-      if (capturedOwner.record.remote.pending !== null) return result("pending-save-exists");
-
-      let payload;
-      try { payload = await save.freezePayload(); }
-      catch (_error) { return result("payload-freeze-failed"); }
       let encryptedRecord;
       let content;
       let pending;
-      try {
-        const expectedRevision = capturedOwner.record.remote.confirmedRevision;
-        const contentContext = {
-          syncedPocketId: capturedOwner.syncedPocketId,
-          revision: increment(expectedRevision, "remote-revision-exhausted"),
-          contentType: config.crypto.FORMAT.contentType,
-        };
-        encryptedRecord = await config.crypto.sealContent(payload, capturedOwner.masterKey, contentContext);
-        content = { context: contentContext, record: encryptedRecord };
-        pending = {
-          expectedRevision,
-          operationId: freshId(),
-          logicalChangeId: freshId(),
-          attemptKind: "new-change",
-        };
-      } catch (_error) { return result("payload-encryption-failed"); }
+      const retryingPending = capturedOwner.record.remote.pending !== null;
+      if (retryingPending) {
+        if (capturedOwner.record.remote.conflict !== null) return result("revision-conflict", { conflict: true });
+        pending = Object.assign({}, capturedOwner.record.remote.pending, { attemptKind: "idempotent-retry" });
+        encryptedRecord = capturedOwner.record.content.record;
+        content = capturedOwner.record.content;
+      } else {
+        let payload;
+        try { payload = await save.freezePayload(); }
+        catch (_error) { return result("payload-freeze-failed"); }
+        try {
+          const expectedRevision = capturedOwner.record.remote.confirmedRevision;
+          const contentContext = {
+            syncedPocketId: capturedOwner.syncedPocketId,
+            revision: increment(expectedRevision, "remote-revision-exhausted"),
+            contentType: config.crypto.FORMAT.contentType,
+          };
+          encryptedRecord = await config.crypto.sealContent(payload, capturedOwner.masterKey, contentContext);
+          content = { context: contentContext, record: encryptedRecord };
+          pending = {
+            expectedRevision,
+            operationId: freshId(),
+            logicalChangeId: freshId(),
+            attemptKind: "new-change",
+          };
+        } catch (_error) { return result("payload-encryption-failed"); }
+      }
 
       let pendingRecord;
       try { pendingRecord = await nextRecord(
         capturedOwner.record,
         content,
         { confirmedRevision: pending.expectedRevision, pending, conflict: null },
-        increment(capturedOwner.record.usage.contentEncryptionsOnDevice, "content-encryption-limit-reached")
+        retryingPending
+          ? capturedOwner.record.usage.masterKeyContentEncryptions
+          : increment(capturedOwner.record.usage.masterKeyContentEncryptions, "content-encryption-limit-reached")
       ); } catch (_error) { return result("pending-persistence-failed"); }
       try { await replaceOwnerRecord(session, capturedOwner.record, pendingRecord); }
       catch (_error) {
@@ -530,7 +540,7 @@ device record for explicit, conditional Saves.
           confirmedRevision: owner.record.remote.confirmedRevision,
           pending: owner.record.remote.pending,
           conflict: { actualRevision: response.actualRevision, operationId: pending.operationId },
-        }, owner.record.usage.contentEncryptionsOnDevice); } catch (_error) {
+        }, owner.record.usage.masterKeyContentEncryptions); } catch (_error) {
           return result("revision-conflict", { conflict: true });
         }
         try { await replaceOwnerRecord(session, owner.record, conflictRecord); }
@@ -551,7 +561,7 @@ device record for explicit, conditional Saves.
         confirmedRevision: response.revision,
         pending: null,
         conflict: null,
-      }, owner.record.usage.contentEncryptionsOnDevice); } catch (_error) {
+      }, owner.record.usage.masterKeyContentEncryptions); } catch (_error) {
         return result("remote-success-local-confirmation-failed", { knownRemoteRevision: response.revision });
       }
       try { await replaceOwnerRecord(session, owner.record, confirmedRecord); }
@@ -561,7 +571,8 @@ device record for explicit, conditional Saves.
           : result("stale-owner-session");
       }
       if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
-      return freeze({ ok: true, reason: "saved", confirmedRemoteRevision: response.revision });
+      return freeze({ ok: true, reason: retryingPending ? "pending-reconciled" : "saved",
+        confirmedRemoteRevision: response.revision });
     }
 
     return Object.freeze({

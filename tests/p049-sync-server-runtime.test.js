@@ -65,6 +65,9 @@ function createPoolClass(state) {
 
     async query(sql) {
       state.preflight.push(sql);
+      if (sql === "SELECT schema_version FROM pocket_sync_schema WHERE schema_name = $1") {
+        return { rows: [{ schema_version: 1 }], rowCount: 1 };
+      }
       if (sql !== "SELECT 1") throw new Error("unexpected pool query");
       return { rows: [{ "?column?": 1 }], rowCount: 1 };
     }
@@ -234,7 +237,10 @@ test("P049 composes the real adapter, core, P047 store and P048 verifier through
     assert.equal(Object.isFrozen(runtime), true);
     await runtime.listen({ host: "127.0.0.1", port: 8443 });
     assert.deepEqual(state.options, [{ connectionString: "postgres://operator:secret@127.0.0.1/pocket" }]);
-    assert.deepEqual(state.preflight, ["SELECT 1"]);
+    assert.deepEqual(state.preflight, [
+      "SELECT 1",
+      "SELECT schema_version FROM pocket_sync_schema WHERE schema_name = $1",
+    ]);
     assert.deepEqual(state.listens, [{ host: "127.0.0.1", port: 8443 }]);
 
     const begin = await send(context.server, { request: request(`${SERVICE_ROOT}/account/passkeys/registration/begin`, {

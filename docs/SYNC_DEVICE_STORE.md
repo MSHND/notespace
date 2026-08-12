@@ -83,8 +83,8 @@ Record schema version 3 is the following strict whole-record shape. `deviceWrapp
   },
   "usage": {
     "masterKeyGeneration": 1,
-    "contentEncryptionsOnDevice": 1,
-    "envelopeEncryptionsOnDevice": 1
+    "masterKeyContentEncryptions": 1,
+    "deviceWrappingKeyEncryptions": 1
   },
   "activationDraft": null,
   "recoveryDraft": null
@@ -117,7 +117,7 @@ P041 recovery begins with the separate strict record kind `pocket.sync.recovery-
 
 With no pending write, content revision equals confirmed remote revision and conflict is null. With pending state, expected revision equals confirmed revision, content revision is exactly confirmed plus one, and pending metadata plus `content.record` must form a valid P028 conditional-write request. A conflict requires that pending operation and a newer actual remote revision.
 
-Per-device content and envelope encryption counters are durable, monotonic within a master-key generation and must remain below P029's operational ceiling. A higher generation may start new counters. These local counters cannot prove the global total across every device; a later remote/account rotation policy must enforce the whole-account ceiling.
+Per-long-lived-key encryption counters are durable and monotonic within a master-key generation: `masterKeyContentEncryptions` counts Pocket-content encryptions with that master key, while `deviceWrappingKeyEncryptions` counts direct device-envelope and encrypted activation/recovery-draft seals with that device key. Each must remain below P029's operational ceiling. Schema 4 explicitly migrates the old aggregates without reducing them; where the former split cannot prove a precise allocation, it retains the complete legacy envelope count against the device key. These local counters cannot prove the global total across every device; a later remote/account rotation policy must enforce the whole-account ceiling.
 
 ## 7. Versions and migrations
 
@@ -137,4 +137,4 @@ This record is the encrypted durable device representation of a future Synced Po
 
 The state machine uses a narrow injected transaction driver. A future desktop or native shell may replace the IndexedDB driver while preserving this exact record, validation, insert-only creation, transaction-completion and compare-and-swap contract. P030 does not add a shell.
 
-P039/P040 supply dormant activation/adoption staging and P041 supplies dormant emergency recovery through injected seams. Still unimplemented are the live synced owner and Save integration, UI, real HTTP/cookie/database adapters, transfer UI, whole-account usage enforcement/key rotation, conflict UX, synced-owner browser recovery, storage-persistence UX and all production loading.
+P039/P040 supply activation/adoption staging, P041 supplies emergency recovery through injected seams, and P045 loads their browser foundations inertly. Still unimplemented are visible Sync UI, transfer UI, whole-account usage enforcement/key rotation, conflict UX, synced-owner browser recovery, storage-persistence UX and all production loading. P049's local HTTPS composition does not change that boundary.

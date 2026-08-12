@@ -98,7 +98,7 @@ async function buildDeviceState(apis, options = {}) {
   return {
     record: {
       kind: "pocket.sync.device-state",
-      schemaVersion: 1,
+      schemaVersion: 4,
       storeRevision: options.storeRevision || 1,
       syncedPocketId,
       deviceId,
@@ -133,9 +133,11 @@ async function buildDeviceState(apis, options = {}) {
       },
       usage: {
         masterKeyGeneration: options.masterKeyGeneration || 1,
-        contentEncryptionsOnDevice: options.contentEncryptionsOnDevice ?? 1,
-        envelopeEncryptionsOnDevice: options.envelopeEncryptionsOnDevice ?? 1,
+        masterKeyContentEncryptions: options.masterKeyContentEncryptions ?? 1,
+        deviceWrappingKeyEncryptions: options.deviceWrappingKeyEncryptions ?? 1,
       },
+      activationDraft: null,
+      recoveryDraft: null,
     },
     masterKey: bundle.masterKey,
   };
@@ -290,17 +292,18 @@ test("database, object-store, key-path and record constants are exact", () => {
   });
   assert.deepEqual(plain(apis.deviceStore.FORMAT), {
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 3,
+    recordSchemaVersion: 4,
     recoveryStagingKind: "pocket.sync.recovery-staging",
     recoveryStagingSchemaVersion: 1,
     firstStoreRevision: 1,
   });
   assert.deepEqual(plain(apis.deviceStore.MIGRATION_POLICY), {
     currentDatabaseVersion: 1,
-    currentRecordSchemaVersion: 3,
+    currentRecordSchemaVersion: 4,
     registeredRecordMigrations: [
       "1-to-2-encrypted-activation-draft",
       "2-to-3-encrypted-recovery-draft",
+      "3-to-4-per-long-lived-key-usage",
     ],
     destructiveResetAllowed: false,
   });
@@ -430,14 +433,14 @@ test("stale compare-and-swap leaves the newer record untouched", async () => {
   await store.replacePocket(initial.record.syncedPocketId, 1, winner);
   const stale = clone(winner);
   stale.storeRevision = 2;
-  stale.usage.envelopeEncryptionsOnDevice = 2;
+  stale.usage.deviceWrappingKeyEncryptions = 2;
   await expectCode(
     store.replacePocket(initial.record.syncedPocketId, 1, stale),
     "device-store-revision-conflict"
   );
   const restored = await store.readPocket(initial.record.syncedPocketId);
   assert.equal(restored.storeRevision, 2);
-  assert.equal(restored.usage.envelopeEncryptionsOnDevice, 1);
+  assert.equal(restored.usage.deviceWrappingKeyEncryptions, 1);
 });
 
 test("two store instances share state and only one same-revision writer wins", async () => {
@@ -449,7 +452,7 @@ test("two store instances share state and only one same-revision writer wins", a
   assert.equal((await second.store.readPocket(initial.record.syncedPocketId)).storeRevision, 1);
   const firstNext = committedRecord(initial.record);
   const secondNext = committedRecord(initial.record, {
-    usage: { envelopeEncryptionsOnDevice: 2 },
+    usage: { deviceWrappingKeyEncryptions: 2 },
   });
   const results = await Promise.allSettled([
     first.store.replacePocket(initial.record.syncedPocketId, 1, firstNext),
@@ -460,7 +463,7 @@ test("two store instances share state and only one same-revision writer wins", a
   assert.equal(results[1].reason.code, "device-store-revision-conflict");
   const restored = await second.store.readPocket(initial.record.syncedPocketId);
   assert.equal(restored.storeRevision, 2);
-  assert.equal(restored.usage.envelopeEncryptionsOnDevice, 1);
+  assert.equal(restored.usage.deviceWrappingKeyEncryptions, 1);
 });
 
 test("all injected transaction failures roll back the whole prior pending record", async () => {
@@ -517,7 +520,7 @@ test("top-level kind, fields and schema versions fail closed", () => {
   wrongKind.kind = "other";
   expectValidationCode(() => apis.deviceStore.validateRecord(wrongKind), "device-state-kind-invalid");
   const higher = clone(initial.record);
-  higher.schemaVersion = 4;
+  higher.schemaVersion = 5;
   expectValidationCode(() => apis.deviceStore.migrateRecord(higher), "device-state-schema-unsupported");
   const lower = clone(initial.record);
   lower.schemaVersion = 0;
@@ -684,7 +687,7 @@ test("usage counters cannot roll back within one master-key generation", async (
   const { store } = await openMemoryStore(apis);
   await store.createPocket(initial.record);
   const rollback = committedRecord(initial.record, {
-    usage: { contentEncryptionsOnDevice: 0 },
+    usage: { masterKeyContentEncryptions: 0 },
   });
   await expectCode(
     store.replacePocket(initial.record.syncedPocketId, 1, rollback),
@@ -696,10 +699,10 @@ test("usage counters cannot roll back within one master-key generation", async (
 test("usage ceiling fails closed while a higher master-key generation may reset counters", async () => {
   const ceiling = apis.crypto.POLICY.maximumEncryptionsPerKey;
   const atCeiling = clone(initial.record);
-  atCeiling.usage.contentEncryptionsOnDevice = ceiling;
+  atCeiling.usage.masterKeyContentEncryptions = ceiling;
   expectValidationCode(() => apis.deviceStore.validateRecord(atCeiling), "device-usage-limit-reached");
   const envelopeCeiling = clone(initial.record);
-  envelopeCeiling.usage.envelopeEncryptionsOnDevice = ceiling;
+  envelopeCeiling.usage.deviceWrappingKeyEncryptions = ceiling;
   expectValidationCode(() => apis.deviceStore.validateRecord(envelopeCeiling), "device-usage-limit-reached");
 
   const { store } = await openMemoryStore(apis);
@@ -707,15 +710,15 @@ test("usage ceiling fails closed while a higher master-key generation may reset 
   const rotated = committedRecord(initial.record, {
     usage: {
       masterKeyGeneration: 2,
-      contentEncryptionsOnDevice: 0,
-      envelopeEncryptionsOnDevice: 0,
+      masterKeyContentEncryptions: 0,
+      deviceWrappingKeyEncryptions: 0,
     },
   });
   const result = await store.replacePocket(initial.record.syncedPocketId, 1, rotated);
   assert.deepEqual(plain(result.usage), {
     masterKeyGeneration: 2,
-    contentEncryptionsOnDevice: 0,
-    envelopeEncryptionsOnDevice: 0,
+    masterKeyContentEncryptions: 0,
+    deviceWrappingKeyEncryptions: 0,
   });
 });
 

@@ -20,3 +20,12 @@ CREATE TABLE IF NOT EXISTS pocket_sync_records (
     END
   )
 );
+
+CREATE TABLE IF NOT EXISTS pocket_sync_schema (
+  schema_name TEXT PRIMARY KEY,
+  schema_version INTEGER NOT NULL CHECK (schema_version = 1)
+);
+
+INSERT INTO pocket_sync_schema (schema_name, schema_version)
+VALUES ('pocket-sync-store', 1)
+ON CONFLICT (schema_name) DO NOTHING;

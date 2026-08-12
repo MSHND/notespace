@@ -36,14 +36,30 @@
       ? global.capturePocketFileSaveSession() : null;
     if (!captured || !["json", "vault"].includes(captured.ownerKind)
         || !Number.isSafeInteger(captured.id)) return null;
+    const fingerprint = global.PocketDeviceChanges?.fingerprintDocument;
+    if (typeof fingerprint !== "function" || typeof global.buildPocketPayload !== "function") return null;
+    let contentContinuityId;
+    try { contentContinuityId = fingerprint(global.buildPocketPayload(new Date(0).toISOString())); }
+    catch (_error) { return null; }
+    if (typeof contentContinuityId !== "string" || contentContinuityId.length < 1) return null;
     return frozen({
       ownerKind: captured.ownerKind,
       id: captured.id,
       vaultSessionId: typeof captured.vaultSessionId === "string" ? captured.vaultSessionId : "",
+      continuityId: `${captured.id}:${contentContinuityId}`,
     });
   }
 
   function sourceSessionCurrent(snapshot) {
+    const current = sourceSession();
+    return !!current && !!snapshot
+      && current.ownerKind === snapshot.ownerKind
+      && current.id === snapshot.id
+      && current.vaultSessionId === snapshot.vaultSessionId
+      && current.continuityId === snapshot.continuityId;
+  }
+
+  function sourceSessionIdentityCurrent(snapshot) {
     const current = sourceSession();
     return !!current && !!snapshot
       && current.ownerKind === snapshot.ownerKind
@@ -65,7 +81,7 @@
     if (global.hasUnsavedDetailsEditorChanges?.() === true) {
       if (typeof global.saveDetailsEditor !== "function") return "editor-draft-commit-failed";
       try { global.saveDetailsEditor(); } catch (_error) { return "editor-draft-commit-failed"; }
-      if (!sourceSessionCurrent(snapshot)) return "source-session-changed";
+      if (!sourceSessionIdentityCurrent(snapshot)) return "source-session-changed";
       if (global.hasUnsavedDetailsEditorChanges?.() === true) return "editor-draft-commit-failed";
     }
     if (global.hasUnsavedInlineTitleDraft?.() === true) {
@@ -78,12 +94,12 @@
       try {
         captured = global.captureActiveInlineEditForOwnerSwitch();
         committed = global.commitActiveInlineEditForOwnerSwitch(captured, {
-          isCurrent: () => sourceSessionCurrent(snapshot),
+          isCurrent: () => sourceSessionIdentityCurrent(snapshot),
         });
       } catch (_error) {
         return "editor-draft-commit-failed";
       }
-      if (!sourceSessionCurrent(snapshot)) return "source-session-changed";
+      if (!sourceSessionIdentityCurrent(snapshot)) return "source-session-changed";
       if (!captured?.ok || !committed?.ok || global.hasUnsavedInlineTitleDraft?.() === true) {
         return "editor-draft-commit-failed";
       }
@@ -271,10 +287,15 @@
       if (!snapshot) return safeFailure("unsupported-source-owner");
       const draftResult = prepareEditorDrafts(snapshot);
       if (draftResult) return safeFailure(draftResult);
+      const frozenSource = sourceSession();
+      if (!frozenSource || frozenSource.ownerKind !== snapshot.ownerKind
+          || frozenSource.id !== snapshot.id || frozenSource.vaultSessionId !== snapshot.vaultSessionId) {
+        return safeFailure("source-session-changed");
+      }
       const random = browserRandom(environment);
       const syncedPocketId = crypto.encodeBase64Url(random(32));
       const deviceId = crypto.encodeBase64Url(random(32));
-      return orchestrator.activate(dependenciesFor(snapshot), { syncedPocketId, deviceId });
+      return orchestrator.activate(dependenciesFor(frozenSource), { syncedPocketId, deviceId });
     }
 
     async function resume(input) {

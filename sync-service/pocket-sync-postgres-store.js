@@ -148,6 +148,7 @@ function createPostgresStore(options) {
     let committed = false;
     let completed = false;
     let primaryError = null;
+    const operations = new Set();
 
     function assertActive() {
       if (completed) throw storeError("store-transaction-expired");
@@ -168,39 +169,72 @@ function createPostgresStore(options) {
       }
     }
 
+    function track(operation) {
+      const pending = Promise.resolve(operation);
+      operations.add(pending);
+      pending.then(
+        () => { operations.delete(pending); },
+        () => { operations.delete(pending); }
+      );
+      return pending;
+    }
+
+    function start(factory) {
+      try { return track(factory()); }
+      catch (error) { return track(Promise.reject(error)); }
+    }
+
+    async function settleOperations() {
+      // A transaction callback may accidentally omit await.  Do not commit until
+      // every façade operation it started has settled successfully.
+      while (operations.size > 0) await Promise.all([...operations]);
+    }
+
     const transaction = Object.freeze({
-      async get(collection, key) {
-        assertActive();
-        const result = await query(SQL.get, [validateCollection(collection), validateKey(key)]);
-        if (result.rowCount === 0) return null;
-        if (result.rowCount !== 1 || result.rows.length !== 1) throw storeError("store-state-invalid");
-        return readStoredRecord(result.rows[0]);
+      get(collection, key) {
+        return start(() => {
+          assertActive();
+          return query(SQL.get, [validateCollection(collection), validateKey(key)]).then((result) => {
+          if (result.rowCount === 0) return null;
+          if (result.rowCount !== 1 || result.rows.length !== 1) throw storeError("store-state-invalid");
+          return readStoredRecord(result.rows[0]);
+          });
+        });
       },
-      async insert(collection, key, record) {
-        assertActive();
-        if (mode !== "readwrite") throw storeError("store-readonly-write");
-        const value = serialiseRecord(record);
-        const result = await query(SQL.insert, [validateCollection(collection), validateKey(key), value.record.storeVersion, value.json]);
-        if (result.rowCount !== 1) throw storeError("store-storage-failed");
+      insert(collection, key, record) {
+        return start(() => {
+          assertActive();
+          if (mode !== "readwrite") throw storeError("store-readonly-write");
+          const value = serialiseRecord(record);
+          return query(SQL.insert, [validateCollection(collection), validateKey(key), value.record.storeVersion, value.json]).then((result) => {
+          if (result.rowCount !== 1) throw storeError("store-storage-failed");
+          });
+        });
       },
-      async replace(collection, key, expectedStoreVersion, record) {
-        assertActive();
-        if (mode !== "readwrite") throw storeError("store-readonly-write");
-        const value = serialiseRecord(record);
-        const result = await query(SQL.replace, [
+      replace(collection, key, expectedStoreVersion, record) {
+        return start(() => {
+          assertActive();
+          if (mode !== "readwrite") throw storeError("store-readonly-write");
+          const value = serialiseRecord(record);
+          return query(SQL.replace, [
           validateCollection(collection), validateKey(key), validateStoreVersion(expectedStoreVersion), value.record.storeVersion, value.json,
-        ]);
-        if (result.rowCount === 0) throw storeError("store-version-conflict");
-        if (result.rowCount !== 1) throw storeError("store-storage-failed");
+          ]).then((result) => {
+          if (result.rowCount === 0) throw storeError("store-version-conflict");
+          if (result.rowCount !== 1) throw storeError("store-storage-failed");
+          });
+        });
       },
-      async remove(collection, key, expectedStoreVersion) {
-        assertActive();
-        if (mode !== "readwrite") throw storeError("store-readonly-write");
-        const result = await query(SQL.remove, [
+      remove(collection, key, expectedStoreVersion) {
+        return start(() => {
+          assertActive();
+          if (mode !== "readwrite") throw storeError("store-readonly-write");
+          return query(SQL.remove, [
           validateCollection(collection), validateKey(key), validateStoreVersion(expectedStoreVersion),
-        ]);
-        if (result.rowCount === 0) throw storeError("store-version-conflict");
-        if (result.rowCount !== 1) throw storeError("store-storage-failed");
+          ]).then((result) => {
+          if (result.rowCount === 0) throw storeError("store-version-conflict");
+          if (result.rowCount !== 1) throw storeError("store-storage-failed");
+          });
+        });
       },
     });
 
@@ -216,12 +250,14 @@ function createPostgresStore(options) {
       await query(mode === "readonly" ? SQL.beginReadOnly : SQL.beginReadWrite);
       began = true;
       const result = await callback(transaction);
+      await settleOperations();
       completed = true;
       await query(SQL.commit);
       committed = true;
       return result;
     } catch (error) {
       primaryError = error;
+      await Promise.allSettled([...operations]);
       completed = true;
       if (began && !committed) {
         try {

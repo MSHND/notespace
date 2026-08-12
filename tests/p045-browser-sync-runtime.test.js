@@ -106,6 +106,7 @@ function loadRuntime(context) {
   vm.createContext(context);
   for (const file of [
     "js/pocket-sync-security-contract.js",
+    "js/pocket-device-changes.js",
     "js/pocket-sync-crypto.js",
     "js/pocket-sync-device-store.js",
     "js/pocket-sync-account-client.js",
@@ -311,7 +312,7 @@ test("P045 explicitly composes browser activation, encrypted remote state and th
     remote: harness.remoteCalls.map((call) => call.route) }));
   assert.equal(harness.pickerCalls, 1);
   assert.equal(harness.saveCalls, 1);
-  assert.equal(harness.freezeCalls, 1);
+  assert.ok(harness.freezeCalls > 1);
   assert.equal(harness.passkeyCalls, 1);
   assert.equal(harness.idb.observations.opens, 1);
   assert.equal(harness.ownerKind, "synced");
@@ -364,9 +365,9 @@ test("P045a commits a live details draft before local Save and the one activatio
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(harness.detailsCommitCalls, 1);
   assert.equal(harness.saveCalls, 1);
-  assert.equal(harness.freezeCalls, 1);
+  assert.ok(harness.freezeCalls > 1);
   assert.equal(harness.savedPayloads[0].nodes[0].details, details);
-  assert.equal(harness.frozenPayloads[0].nodes[0].details, details);
+  assert.equal(harness.frozenPayloads.some((payload) => payload.nodes[0].details === details), true);
   assert.equal(harness.remoteCalls.some((call) => JSON.stringify(call.body).includes(details)), false);
   assert.equal(harness.ownerKind, "synced");
 });
@@ -378,9 +379,9 @@ test("P045a commits a live inline-title draft before local Save and the one acti
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(harness.inlineCommitCalls, 1);
   assert.equal(harness.saveCalls, 1);
-  assert.equal(harness.freezeCalls, 1);
+  assert.ok(harness.freezeCalls > 1);
   assert.equal(harness.savedPayloads[0].nodes[0].label, title);
-  assert.equal(harness.frozenPayloads[0].nodes[0].label, title);
+  assert.equal(harness.frozenPayloads.some((payload) => payload.nodes[0].label === title), true);
   assert.equal(harness.remoteCalls.some((call) => JSON.stringify(call.body).includes(title)), false);
   assert.equal(harness.ownerKind, "synced");
 });
@@ -462,6 +463,19 @@ test("P045a refuses explicit resume when later local work would not be part of t
   assert.equal(resumed.reason, "source-has-unsaved-changes");
   assert.equal(harness.ownerKind, "json");
   assert.equal(harness.remoteCalls.length, remoteCount);
+});
+
+test("P049a refuses stale activation after the same source session changes and is locally saved", async () => {
+  const harness = createHarness({ copyFails: true });
+  const first = await harness.runtime.activate();
+  assert.equal(first.reason, "recovery-copy-not-stored");
+  harness.context.state.nodes[0].label = "P049A-LATER-SAVED-SOURCE-EDIT";
+  harness.context.state.ops.push({ sequence: 1, type: "later-local-edit" });
+  assert.equal((await harness.context.exportTree()).ok, true);
+  harness.allowCopy();
+  const resumed = await harness.runtime.resume({ activationId: first.activationId });
+  assert.equal(resumed.reason, "source-session-changed");
+  assert.equal(harness.ownerKind, "json");
 });
 
 test("P045 clean Vault sources skip local Save and unsupported owners fail closed", async () => {

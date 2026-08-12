@@ -144,7 +144,7 @@ test("P047 exports a frozen narrow provider-neutral production surface", () => {
   assert.match(migration, /store_version > 0 AND store_version <= 9007199254740991/);
   assert.match(migration, /jsonb_typeof\(record\) = 'object'/);
   assert.match(production, /WHERE collection = \$1 AND record_key = \$2 AND store_version = \$3/);
-  assert.doesNotMatch(`${production}\n${migration}`, /\b(?:neon|supabase|aws|rds|digitalocean|amaze|macquarie|render|railway|fly|vercel)\b|process\.env|database_url|console\.|on conflict/i);
+  assert.doesNotMatch(`${production}\n${migration}`, /\b(?:neon|supabase|aws|rds|digitalocean|amaze|macquarie|render|railway|fly|vercel)\b|process\.env|database_url|console\./i);
   assert.doesNotMatch(source("index.html"), /pocket-sync-postgres-store\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-postgres-store\.js/);
   assert.throws(() => createPostgresStore({}), code("store-options-invalid"));
@@ -181,6 +181,17 @@ test("P047 rejects readonly writes before mutation SQL and expires retained faca
   const before = controlled.queries.length;
   await assert.rejects(retained.get("accounts", "one"), code("store-transaction-expired"));
   assert.equal(controlled.queries.length, before);
+});
+
+test("P049a waits for an unawaited façade operation and rolls it back when it rejects", async () => {
+  const controlled = createControlledPool();
+  const store = createPostgresStore({ pool: controlled.pool });
+  await assert.rejects(store.transact("readwrite", async (tx) => {
+    tx.insert("accounts", "account-unawaited", { storeVersion: 1, accountId: "one" });
+    throw Object.assign(new Error("injected failure"), { code: "23505" });
+  }), /injected failure/);
+  assert.equal(controlled.row("accounts", "account-unawaited"), null);
+  assert.equal(controlled.queries.some((entry) => entry.sql === "ROLLBACK"), true);
 });
 
 test("P047 keeps insert insert-only and binds hostile values as PostgreSQL parameters", async () => {

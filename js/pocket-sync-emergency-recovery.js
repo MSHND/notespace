@@ -1073,8 +1073,8 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           remote: { confirmedRevision: safeDraft.confirmedRemoteRevision, pending: null, conflict: null },
           usage: {
             masterKeyGeneration: 1,
-            contentEncryptionsOnDevice: 0,
-            envelopeEncryptionsOnDevice: 2,
+            masterKeyContentEncryptions: 0,
+            deviceWrappingKeyEncryptions: 2,
           },
           activationDraft: null,
           recoveryDraft: { context: draftContext, record: encryptedDraft },
