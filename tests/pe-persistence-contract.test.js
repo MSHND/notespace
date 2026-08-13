@@ -2521,6 +2521,66 @@ test("main-tree Enter remains owned only by handleTreeKeydown in the active scri
   assert.match(guard, /Enter capture disabled/);
 });
 
+test("P056 main-tree collapse and expand shortcuts respect keyboard ownership and preserve arrow shortcuts", () => {
+  class KeyboardElement {
+    constructor(tagName = "div") { this.tagName = String(tagName).toUpperCase(); this.isContentEditable = false; }
+  }
+  const search = new KeyboardElement("input");
+  const context = {
+    URL, Date, Math, JSON, Map, Set, Promise, Object, Array, String, Number, Boolean,
+    location: { href: "https://example.test/index.html" },
+    HTMLElement: KeyboardElement, HTMLInputElement: KeyboardElement, document: {
+      getElementById(id) { return id === "search" ? search : null; },
+    },
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  runScript(context, "js/pocket-state.js");
+  const calls = { collapse: 0, expand: 0, render: 0 };
+  context.isDetailsEditorOpen = () => false;
+  context.isControlsHelpOpen = () => false;
+  context.isCommandPaletteOpen = () => false;
+  context.isPocketVaultRecoveryFlowOpen = () => false;
+  context.isPocketDeviceChangesDecisionOpen = () => false;
+  context.collapseAllNodes = () => { calls.collapse += 1; };
+  context.unfoldAllNodes = () => { calls.expand += 1; };
+  context.refreshMeta = () => {};
+  context.renderTree = () => { calls.render += 1; };
+  context.refocusTreeNavigation = () => {};
+  context.softlyEnsureSelectionVisible = () => {};
+  context.persistPipSnapshot = () => {};
+  context.setStatus = () => {};
+  runScript(context, "js/pocket-tree-actions.js");
+  context.refocusTreeNavigation = () => {};
+  context.softlyEnsureSelectionVisible = () => {};
+  vm.runInContext("state.inlineEdit.id = ''; state.selectedId = 'selected';", context);
+  const dispatch = (key, extras = {}) => {
+    const event = { key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+      defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extras };
+    context.handleTreeKeydown(event);
+    return event;
+  };
+  assert.equal(dispatch(",", { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(calls.collapse, 1);
+  assert.equal(calls.expand, 0);
+  assert.equal(calls.render, 1);
+  assert.equal(dispatch(".", { metaKey: true }).defaultPrevented, true);
+  assert.equal(calls.expand, 1);
+  assert.equal(calls.render, 2);
+  const editable = new KeyboardElement("input");
+  assert.equal(dispatch(",", { ctrlKey: true, target: editable }).defaultPrevented, false);
+  assert.equal(calls.collapse, 1);
+  assert.equal(dispatch(",", { ctrlKey: true, target: search }).defaultPrevented, false);
+  assert.equal(calls.collapse, 1);
+  vm.runInContext("state.inlineEdit.id = 'renaming';", context);
+  assert.equal(dispatch(",", { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(calls.collapse, 1);
+  vm.runInContext("state.inlineEdit.id = '';", context);
+  assert.equal(dispatch("ArrowLeft", { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(calls.collapse, 2);
+});
+
 test("an unrelated edit preserves raw editor metadata while later export omits retired pe", () => {
   const context = createFullContractContext();
   const unknown = fixture("unknown-editor-schema.json").mainThoughtTree[0];
@@ -3637,6 +3697,49 @@ test("generated editable Outline runtime emits the exact v1 schema and both inde
   assert.equal(runtime.saveCalls[0].mode, "outline");
   assert.equal(runtime.saveCalls[0].body, "Parent\n  Child");
   assert.equal(runtime.saveCalls[0].outline.length, 2);
+});
+
+test("P056 PE Outline shortcuts collapse and expand branches once, while Text and editable contexts keep their keys", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p056_parent", text: "Parent", depth: 0, collapsed: false },
+      { id: "p056_child", text: "Child", depth: 1, collapsed: false },
+      { id: "p056_sibling", text: "Sibling", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  let event = runtime.document.dispatch("keydown", {
+    key: ",", ctrlKey: true, target: pane.children[0].children[0],
+  });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(pane.children.length, 2);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  event = runtime.document.dispatch("keydown", {
+    key: ",", ctrlKey: true, target: pane.children[0].children[0],
+  });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(pane.children.length, 2);
+  event = runtime.document.dispatch("keydown", {
+    key: ".", metaKey: true, target: pane.children[0].children[0],
+  });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(pane.children.length, 3);
+  runtime.controls.get("saveBtn").dispatch("click");
+  assert.deepEqual(runtime.saveCalls[0].outline.map((block) => block.collapsed), [false, false, false]);
+
+  const editable = pane.children[0].children[2];
+  editable.isContentEditable = true;
+  event = runtime.document.dispatch("keydown", { key: ",", ctrlKey: true, target: editable });
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(pane.children.length, 3);
+
+  const textRuntime = executeControlledRuntime(runtimeEditablePayload({ mode: "text", outline: null }));
+  event = textRuntime.document.dispatch("keydown", {
+    key: ",", ctrlKey: true, target: textRuntime.controls.get("bodyInput"),
+  });
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(textRuntime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
 });
 
 test("generated PE runtime accepts and forwards a synced source identity", () => {

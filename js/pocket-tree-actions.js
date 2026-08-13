@@ -804,6 +804,14 @@ function routeTreeEnterForSelectedNode() {
 function handleTreeKeydown(ev) {
   if (isDetailsEditorOpen()) return;
   if (state.inlineEdit.id) return;
+  const target = ev.target instanceof HTMLElement ? ev.target : null;
+  const targetTag = target ? String(target.tagName || "").toLowerCase() : "";
+  if (target?.isContentEditable || ["input", "textarea", "select"].includes(targetTag)
+      || target === el.search) return;
+  if ((typeof isControlsHelpOpen === "function" && isControlsHelpOpen())
+      || (typeof isCommandPaletteOpen === "function" && isCommandPaletteOpen())
+      || (typeof isPocketVaultRecoveryFlowOpen === "function" && isPocketVaultRecoveryFlowOpen())
+      || (typeof isPocketDeviceChangesDecisionOpen === "function" && isPocketDeviceChangesDecisionOpen())) return;
   const hasPendingImport = !!pendingPathImport;
   if (
     hasPendingImport
@@ -963,6 +971,23 @@ function handleTreeKeydown(ev) {
   ) {
     ev.preventDefault();
     jumpSelectionByTypedChar(ev.key);
+    return;
+  }
+  if (
+    (ev.metaKey || ev.ctrlKey)
+    && !ev.shiftKey
+    && !ev.altKey
+    && (ev.key === "," || ev.key === ".")
+  ) {
+    ev.preventDefault();
+    if (ev.key === ",") collapseAllNodes();
+    else unfoldAllNodes();
+    refreshMeta();
+    renderTree();
+    refocusTreeNavigation(state.selectedId);
+    softlyEnsureSelectionVisible();
+    persistPipSnapshot();
+    setStatus(ev.key === "," ? "Folded all." : "Unfolded all.", "ok");
     return;
   }
   if (

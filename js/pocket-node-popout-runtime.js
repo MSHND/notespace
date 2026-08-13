@@ -52,6 +52,39 @@
   function makeBlock(text, depth) { return { id: "b_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8), text: String(text || ""), depth: Math.max(0, Math.min(8, Number(depth) || 0)), collapsed: false }; }
   function ensureBlockId(block) { if (block && !block.id) block.id = makeBlock("", 0).id; return block && block.id ? block.id : ""; }
   function hasChildren(index) { var here = outline[index]; var next = outline[index + 1]; return !!here && !!next && (Number(next.depth) || 0) > (Number(here.depth) || 0); }
+  function focusOutlineBlock(blockId) {
+    if (!outlinePane || !blockId) return;
+    requestAnimationFrame(function () {
+      var rows = outlinePane.querySelectorAll(".outlineRow[data-block-id]");
+      for (var i = 0; i < rows.length; i += 1) {
+        if (rows[i].getAttribute("data-block-id") !== blockId) continue;
+        var target = rows[i].querySelector(".outlineSelect") || rows[i].querySelector(".outlineToggle") || rows[i].querySelector(".outlineText");
+        if (target && typeof target.focus === "function") target.focus({ preventScroll: true });
+        return;
+      }
+    });
+  }
+  function collapseOrExpandAllOutlineBranches(collapsed) {
+    if (readOnly || mode !== "outline" || !Array.isArray(outline)) return false;
+    syncOutlineFromDom();
+    var active = document.activeElement;
+    var activeRow = active && typeof active.closest === "function" ? active.closest(".outlineRow[data-block-id]") : null;
+    var preferredId = activeRow?.getAttribute("data-block-id") || "";
+    var changed = false;
+    outline.forEach(function (block, index) {
+      if (!hasChildren(index) || block.collapsed === collapsed) return;
+      block.collapsed = collapsed;
+      changed = true;
+    });
+    if (!changed) return false;
+    setDirty(true);
+    renderOutline();
+    var visible = visibleOutlineBlockIds();
+    if (visible.indexOf(preferredId) < 0) preferredId = visible[0] || "";
+    if (preferredId && !outlineSelectedIds.has(preferredId)) selectSingleOutlineBlock(preferredId);
+    focusOutlineBlock(preferredId);
+    return true;
+  }
   function isHidden(index) {
     var searchDepth = Number(outline[index] && outline[index].depth) || 0;
     if (searchDepth <= 0) return false;
@@ -806,6 +839,16 @@
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
   document.addEventListener("keydown", function (ev) {
+    var outlineShortcutTarget = !isEditablePeTarget(ev.target)
+      && mode === "outline"
+      && !outlineContextMenuIsOpen()
+      && unsavedDialog.hidden;
+    if (outlineShortcutTarget && (ev.key === "," || ev.key === ".")
+      && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey) {
+      ev.preventDefault();
+      collapseOrExpandAllOutlineBranches(ev.key === ",");
+      return;
+    }
     if ((ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; }
     if ((ev.key === "d" || ev.key === "D") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && duplicateOutlineSelection()) { ev.preventDefault(); return; }
     if ((ev.key === "Delete" || ev.key === "Backspace") && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && mode === "outline" && hasOutlineSelection() && !isEditablePeTarget(ev.target)) {
