@@ -100,12 +100,16 @@ async function createBrowserJourney(options = {}) {
   });
   let sessionId = null;
   const remoteCalls = [];
+  let serverDeviceInvalid = false;
   const transport = Object.freeze({ async request(route, body) {
     remoteCalls.push({ route, body: plain(body) });
     const response = await core[route]({ context: { method: "POST", origin, fetchSite: "same-origin",
       contentType: "application/json", sessionId }, body: plain(body) });
     if (response.session?.action === "set") sessionId = response.session.sessionId;
-    return { status: response.status, body: response.body };
+    const responseBody = serverDeviceInvalid && route === "listEnvelopes"
+      ? Object.assign({}, response.body, { envelopes: response.body.envelopes.filter((item) => item.envelopeKind !== "device") })
+      : response.body;
+    return { status: response.status, body: responseBody };
   } });
   const aRemote = a.PocketSyncRemoteClient;
   const aDeviceStore = a.PocketSyncDeviceStore.createStore(createMemoryDeviceStoreDriver(createSharedDeviceStoreState()));
@@ -136,23 +140,28 @@ async function createBrowserJourney(options = {}) {
   let continuity = 61;
   let visible = null;
   let commits = 0;
+  let targetChangesBeforeCommit = options.targetChangesBeforeCommit === true;
+  let commitFails = options.commitFails === true;
+  let installFails = options.installFails === true;
+  let ownerAdoptionFailsAfterCommit = options.ownerAdoptionFailsAfterCommit === true;
+  let prfUnavailable = false;
   b.capturePocketFileSaveSession = () => ({ id: continuity, ownerKind });
   b.isPocketFileSaveSessionCurrent = (session) => !!session && session.id === continuity && session.ownerKind === ownerKind;
   b.setPocketFileSession = () => {
-    if (options.installFails) throw new Error("synthetic boundary install failure");
+    if (installFails) throw new Error("synthetic boundary install failure");
     ownerKind = "synced"; continuity += 1;
   };
   b.isPocketPayloadShape = (payload) => payload?.schema === "portal.export.v1";
   b.normaliseInput = (payload) => payload;
   b.commitPreparedPocketDocument = (payload, _metadata, guard) => {
     commits += 1;
-    if (options.targetChangesBeforeCommit) continuity += 1;
-    if (options.ownerAdoptionFailsAfterCommit) {
+    if (targetChangesBeforeCommit) continuity += 1;
+    if (ownerAdoptionFailsAfterCommit) {
       idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
         content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
       }));
     }
-    if (options.commitFails || guard.canContinue() !== true) return { ok: false };
+    if (commitFails || guard.canContinue() !== true) return { ok: false };
     visible = plain(payload);
     return { ok: true };
   };
@@ -160,7 +169,13 @@ async function createBrowserJourney(options = {}) {
   const environment = {
     crypto: webcrypto, indexedDB: idb.indexedDB, now: () => now,
     navigator: { credentials: { async create() { throw new Error("not used"); },
-      async get() { return fixtures.nativeAuthenticationCredential(); } } },
+      async get() {
+        if (!prfUnavailable) return fixtures.nativeAuthenticationCredential();
+        const credential = fixtures.nativeAuthenticationCredential();
+        return { getClientExtensionResults() { return {}; }, toJSON() {
+          const json = credential.toJSON(); json.clientExtensionResults = {}; return json;
+        } };
+      } } },
   };
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
     accountService: bRemote.createAccountService({ transport, now: () => now }),
@@ -174,11 +189,14 @@ async function createBrowserJourney(options = {}) {
     }));
   }
   const opened = await runtime.openExisting();
-  return { b, core, idb, opened, remoteCalls, runtime, serviceDriver, get ownerKind() { return ownerKind; },
-    get visible() { return visible; }, get commits() { return commits; } };
+  return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
+    openExisting: () => runtime.openExisting(), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
+      installFails = false; ownerAdoptionFailsAfterCommit = false; idb.setBeforeRead(null); }, setPrfUnavailable(value) { prfUnavailable = value === true; },
+    setServerDeviceInvalid(value) { serverDeviceInvalid = value === true; },
+    get ownerKind() { return ownerKind; }, get visible() { return visible; }, get commits() { return commits; } };
 }
 
-test("P052 remains dormant until explicitly created and PRF absence requires recovery before discovery or device mutation", async () => {
+test("P052 remains dormant until explicitly created and a new device without PRF requires recovery before mutation", async () => {
   const calls = [];
   const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
   context.window = context; context.globalThis = context;
@@ -189,7 +207,7 @@ test("P052 remains dormant until explicitly created and PRF absence requires rec
     crypto: { FORMAT: { contentType: "portal.export.v1+json" }, generateDeviceWrappingKey() {}, deriveWrappingKey() {}, openMasterKeyBundle() {}, openContent() {}, sealContent() {}, encodeBase64Url() { return "opaque"; }, validateNonExtractableAesKey() {} },
     deviceStore: { open() {}, readPocket() {}, createPocket() {}, replacePocket() {} },
     accountClient: { async authenticatePasskey() { calls.push("authenticate"); return { ok: true, accountAuthenticated: true, contentUnlocked: false, accountId: "account", credentialId: "credential", prf: { status: "unavailable" } }; } },
-    discoveryService: { async readSyncedPocket() { calls.push("discovery"); } },
+    discoveryService: { async readSyncedPocket() { calls.push("discovery"); return { status: "ready", syncedPocketId: "pocket" }; } },
     contentService: { async readRevision() {}, async downloadEncryptedRecord() {} },
     envelopeService: { async listEnvelopes() {}, async downloadEnvelope() {}, async addEnvelope() { calls.push("add"); } },
     randomBytes() { return new Uint8Array(32); }, now: () => 0,
@@ -199,7 +217,7 @@ test("P052 remains dormant until explicitly created and PRF absence requires rec
     validatePayload: () => true, adoptOpenedPocket: async () => true,
   });
   assert.equal(result.reason, "recovery-required");
-  assert.deepEqual(calls, ["authenticate"]);
+  assert.deepEqual(calls, ["authenticate", "discovery"]);
 });
 
 test("P052a opens a real P029 content record with its authenticated content context and continues from device B's envelope", async () => {
@@ -250,10 +268,10 @@ test("P052a opens a real P029 content record with its authenticated content cont
       async downloadEncryptedRecord() { return { syncedPocketId, revision: 1, encryptedRecord }; } },
     envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{
       envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1,
-      credentialId, status: "active" }] }; },
+      deviceId: null, credentialId, kdf: "HKDF-SHA-256", kdfSalt: Buffer.from(salt).toString("base64url"), derivationVersion: 1, status: "active" }] }; },
       async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf-envelope",
-        envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId, kdf: "HKDF-SHA-256",
-        kdfSalt: Buffer.from(salt).toString("base64url"), encryptedEnvelope: original.envelopes[0].record } }; },
+        envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId, kdf: "HKDF-SHA-256",
+        kdfSalt: Buffer.from(salt).toString("base64url"), derivationVersion: 1, encryptedEnvelope: original.envelopes[0].record } }; },
       async addEnvelope(request) { added = request; return { status: "committed", keySetVersion: 2,
         masterKeyGeneration: 1, masterKeyContentEncryptionLimit: 2 ** 20 }; } },
     randomBytes(length) { const value = new Uint8Array(length); value.fill(randomCounter++); return value; },
@@ -314,11 +332,11 @@ test("P052a replays an ambiguous durable device-envelope mutation exactly once",
       async downloadEncryptedRecord() { return { syncedPocketId: "pocket", revision: 1,
         encryptedRecord: { value: { schema: "portal.export.v1" } } }; } },
     envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{
-      envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1,
-      credentialId: "credential", status: "active" }] }; },
+      envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null,
+      credentialId: "credential", kdf: "HKDF-SHA-256", kdfSalt: "salt", derivationVersion: 1, status: "active" }] }; },
       async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf",
-        envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId: "credential",
-        kdfSalt: "salt", encryptedEnvelope: { wrapped: "prf" } } }; },
+        envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId: "credential",
+        kdf: "HKDF-SHA-256", kdfSalt: "salt", derivationVersion: 1, encryptedEnvelope: { wrapped: "prf" } } }; },
       async addEnvelope(request) { calls.push(request); return { status: "committed", keySetVersion: 2,
         masterKeyGeneration: 1, masterKeyContentEncryptionLimit: 2 ** 20 }; } },
     randomBytes() { return new Uint8Array(32); }, now: () => 0,
@@ -357,11 +375,11 @@ test("P052b maps a wrong real P029 PRF unlock to recovery-required before device
     discoveryService: { async readSyncedPocket() { return { status: "ready", syncedPocketId }; } },
     contentService: { async readRevision() { throw new Error("must not read content"); }, async downloadEncryptedRecord() { throw new Error("must not download"); } },
     envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{
-      envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1,
-      credentialId: "credential-p052b-prf", status: "active" }] }; },
+      envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null,
+      credentialId: "credential-p052b-prf", kdf: "HKDF-SHA-256", kdfSalt: salt, derivationVersion: 1, status: "active" }] }; },
       async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf-envelope",
-        envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId: "credential-p052b-prf",
-        kdf: "HKDF-SHA-256", kdfSalt: salt, encryptedEnvelope: bundle.envelopes[0].record } }; },
+        envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId: "credential-p052b-prf",
+        kdf: "HKDF-SHA-256", kdfSalt: salt, derivationVersion: 1, encryptedEnvelope: bundle.envelopes[0].record } }; },
       async addEnvelope() { mutations += 1; } },
     randomBytes(length) { return new Uint8Array(length); }, now: () => 0,
   });
@@ -392,9 +410,9 @@ test("P052c keeps tampered PRF envelopes recoverable but local derivation failur
       discoveryService: { async readSyncedPocket() { return { status: "ready", syncedPocketId }; } },
       contentService: { async readRevision() { throw new Error("must not read content"); }, async downloadEncryptedRecord() { throw new Error("must not download"); } },
       envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{
-        envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId, status: "active" }] }; },
+        envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId, kdf: "HKDF-SHA-256", kdfSalt: salt, derivationVersion: 1, status: "active" }] }; },
         async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf-envelope",
-          envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId, kdf: "HKDF-SHA-256", kdfSalt: salt, encryptedEnvelope } }; },
+          envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId, kdf: "HKDF-SHA-256", kdfSalt: salt, derivationVersion: 1, encryptedEnvelope } }; },
         async addEnvelope() { mutations += 1; } },
       randomBytes(length) { return new Uint8Array(length); }, now: () => 0,
     });
@@ -437,8 +455,8 @@ test("P052b preserves a reviewed irreversible adoption partial state", async () 
     discoveryService: { async readSyncedPocket() { return { status: "ready", syncedPocketId: "pocket" }; } },
     contentService: { async readRevision() { return { recordPresent: true, revision: 1 }; },
       async downloadEncryptedRecord() { return { syncedPocketId: "pocket", revision: 1, encryptedRecord: { value: { schema: "portal.export.v1" } } }; } },
-    envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{ envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId: "credential", status: "active" }] }; },
-      async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId: "credential", kdfSalt: "salt", encryptedEnvelope: {} } }; },
+    envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{ envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId: "credential", kdf: "HKDF-SHA-256", kdfSalt: "salt", derivationVersion: 1, status: "active" }] }; },
+      async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1, deviceId: null, credentialId: "credential", kdf: "HKDF-SHA-256", kdfSalt: "salt", derivationVersion: 1, encryptedEnvelope: {} } }; },
       async addEnvelope() { return { status: "committed", keySetVersion: 2, masterKeyGeneration: 1, masterKeyContentEncryptionLimit: 2 ** 20 }; } },
     randomBytes() { return new Uint8Array(32); }, now: () => 0 });
   const result = await opener.openExisting({ captureTarget: () => ({ ownerKind: "detached", id: "partial" }),
@@ -607,4 +625,91 @@ test("P052c production browser adoption keeps visible truth and authority cohere
   });
   assert.notEqual(installFailed.visible, null);
   assert.equal(installFailed.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+});
+
+test("P052d resumes completed Device B enrolment after post-grant browser failures without another grant", async () => {
+  for (const [name, options] of Object.entries({
+    target: { targetChangesBeforeCommit: true }, commit: { commitFails: true },
+    adoption: { ownerAdoptionFailsAfterCommit: true }, install: { installFails: true },
+  })) {
+    const journey = await createBrowserJourney(options);
+    assert.equal(journey.opened.ok, false, name);
+    assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false, name);
+    const before = [...journey.idb.records.values()][0];
+    assert.equal(before.additionalDeviceDraft, null, name);
+    assert.equal(before.usage.masterKeyContentEncryptionLimit, 2 ** 20, name);
+    const metadata = plain(before.deviceEnvelope.metadata);
+    const grantCalls = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+    journey.clearFaults();
+    const retry = await journey.openExisting();
+    assert.deepEqual(plain(retry), { ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1 }, name);
+    const after = [...journey.idb.records.values()][0];
+    assert.deepEqual(plain(after.deviceEnvelope.metadata), metadata, name);
+    assert.equal(after.usage.masterKeyContentEncryptionLimit, 2 ** 20, name);
+    assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantCalls, name);
+    assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true, name);
+    const saved = await journey.b.PocketOwnerSaveBoundary.save({
+      expectedSession: journey.b.capturePocketFileSaveSession(),
+      async freezePayload() { return { schema: "portal.export.v1", notes: [`P052d ${name} retry Save`] }; },
+    });
+    assert.equal(saved.ok, true, name);
+    assert.equal(saved.confirmedRemoteRevision, 2, name);
+  }
+});
+
+test("P052d reopens an enrolled Device B without PRF output but keeps new devices recoverable", async () => {
+  const journey = await createBrowserJourney({ targetChangesBeforeCommit: true });
+  assert.equal(journey.opened.ok, false);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  journey.clearFaults();
+  journey.setPrfUnavailable(true);
+  const retry = await journey.openExisting();
+  assert.equal(retry.ok, true, JSON.stringify(retry));
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+});
+
+test("P052d refuses a completed Device B whose active server envelope disappeared", async () => {
+  const journey = await createBrowserJourney({ targetChangesBeforeCommit: true });
+  assert.equal(journey.opened.ok, false);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  journey.clearFaults();
+  journey.setServerDeviceInvalid(true);
+  const rejected = await journey.openExisting();
+  assert.equal(rejected.reason, "remote-device-state-invalid");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+  journey.setServerDeviceInvalid(false);
+  assert.equal((await journey.openExisting()).ok, true);
+});
+
+test("P052d rejects listed/downloaded PRF metadata drift before Device B mutation", async () => {
+  const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
+  context.window = context; context.globalThis = context; vm.createContext(context);
+  vm.runInContext(source("js/pocket-sync-additional-device.js"), context);
+  for (const changed of ["envelopeVersion", "kdfSalt", "derivationVersion"]) {
+    let mutations = 0;
+    const listed = { envelopeId: "prf", envelopeKind: "passkey-prf", envelopeVersion: 1,
+      deviceId: null, credentialId: "credential", kdf: "HKDF-SHA-256", kdfSalt: "salt-a", derivationVersion: 1, status: "active" };
+    const downloaded = Object.assign({}, listed, { kdfSalt: "salt-a", encryptedEnvelope: {} },
+      changed === "envelopeVersion" ? { envelopeVersion: 2 }
+        : (changed === "kdfSalt" ? { kdfSalt: "salt-b" } : { derivationVersion: 2 }));
+    const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
+      crypto: { FORMAT: { contentType: "portal.export.v1+json" }, encodeBase64Url: () => "id",
+        async generateDeviceWrappingKey() {}, async deriveWrappingKey() {}, async openMasterKeyBundle() {},
+        async openContent() {}, async sealContent() {}, validateNonExtractableAesKey() {} },
+      deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; } },
+      accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
+        contentUnlocked: false, accountId: "account", credentialId: "credential",
+        prf: { status: "available", outputBytes: new Uint8Array(32) } }; } },
+      discoveryService: { async readSyncedPocket() { return { status: "ready", syncedPocketId: "pocket" }; } },
+      contentService: { async readRevision() { throw new Error("must not read"); }, async downloadEncryptedRecord() {} },
+      envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [listed] }; },
+        async downloadEnvelope() { return { keySetVersion: 1, envelope: downloaded }; }, async addEnvelope() { mutations += 1; } },
+      randomBytes: () => new Uint8Array(32), now: () => 0,
+    });
+    const result = await opener.openExisting({ captureTarget: () => ({ ownerKind: "detached", id: changed }),
+      isTargetCurrent: () => true, validatePayload: () => true, adoptOpenedPocket: async () => true });
+    assert.equal(result.reason, "remote-key-state-invalid", changed);
+    assert.equal(mutations, 0, changed);
+  }
 });

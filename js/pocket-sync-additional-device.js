@@ -78,6 +78,76 @@
     return { content, revision: revision.revision, payload };
   }
 
+  function completedDeviceRecord(record, syncedPocketId) {
+    const metadata = record?.deviceEnvelope?.metadata;
+    const context = record?.deviceEnvelope?.context;
+    return !!record && record.kind === "pocket.sync.device-state" && record.schemaVersion === 5
+      && record.syncedPocketId === syncedPocketId && id(record.deviceId)
+      && Number.isSafeInteger(record.storeRevision) && record.storeRevision >= 1
+      && record.additionalDeviceDraft === null && record.activationDraft === null && record.recoveryDraft === null
+      && record.usage?.masterKeyGeneration === 1
+      && Number.isSafeInteger(record.usage?.masterKeyContentEncryptions)
+      && record.usage.masterKeyContentEncryptions >= 0
+      && record.usage.masterKeyContentEncryptions <= LIMIT
+      && record.usage.masterKeyContentEncryptionLimit === LIMIT
+      && record.remote?.pending === null && record.remote?.conflict === null
+      && Number.isSafeInteger(record.remote?.confirmedRevision) && record.remote.confirmedRevision >= 1
+      && record.content?.context?.syncedPocketId === syncedPocketId
+      && record.content.context.revision === record.remote.confirmedRevision
+      && record.content.context.contentType === "portal.export.v1+json"
+      && metadata?.syncedPocketId === syncedPocketId && metadata.deviceId === record.deviceId
+      && metadata.kind === "device" && metadata.version === 1 && metadata.kdf === "none"
+      && id(metadata.envelopeId) && context?.syncedPocketId === syncedPocketId
+      && context.envelopeId === metadata.envelopeId && context.envelopeKind === "device"
+      && context.envelopeVersion === 1;
+  }
+
+  function listedDeviceEnvelope(record, listed) {
+    const metadata = record.deviceEnvelope.metadata;
+    const matches = listed?.envelopes?.filter((item) => item.status === "active"
+      && item.envelopeKind === "device" && item.envelopeId === metadata.envelopeId) || [];
+    return matches.length === 1 && matches[0].envelopeVersion === metadata.version
+      && matches[0].deviceId === record.deviceId && matches[0].credentialId === null
+      && matches[0].kdf === metadata.kdf && matches[0].kdfSalt === null
+      && matches[0].derivationVersion === null;
+  }
+
+  async function adoptOpened(config, dependencies, captured, syncedPocketId, record, masterKey) {
+    const latest = await readCurrent(config, syncedPocketId, randomId(config), masterKey, dependencies);
+    if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
+    if (latest.revision !== record.remote.confirmedRevision) {
+      const stored = await config.deviceStore.readPocket(syncedPocketId);
+      if (!completedDeviceRecord(stored, syncedPocketId)) return fail("additional-device-state-invalid");
+      const refreshed = Object.assign({}, stored, { storeRevision: stored.storeRevision + 1,
+        content: latest.content, remote: { confirmedRevision: latest.revision, pending: null, conflict: null } });
+      record = await config.deviceStore.replacePocket(syncedPocketId, stored.storeRevision, refreshed);
+    }
+    if (dependencies.isTargetCurrent() !== true) return fail("additional-device-target-stale");
+    const adopted = await dependencies.adoptOpenedPocket({ syncedPocketId, masterKey, payload: latest.payload,
+      confirmedRemoteRevision: latest.revision, target: captured });
+    if (adopted === true || adopted?.ok === true) {
+      return freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision });
+    }
+    return adopted?.partialState === "visible-payload-committed-detached"
+      ? fail("owner-adoption-failed", { partialState: adopted.partialState })
+      : fail("owner-adoption-failed");
+  }
+
+  async function openCompletedDevice(config, dependencies, captured, syncedPocketId, record) {
+    if (!completedDeviceRecord(record, syncedPocketId)) return fail("additional-device-state-invalid");
+    const listed = await config.envelopeService.listEnvelopes({ apiVersion: 1,
+      operationId: randomId(config), syncedPocketId });
+    if (!Number.isSafeInteger(listed?.keySetVersion) || listed.keySetVersion < 1
+        || !listedDeviceEnvelope(record, listed)) return fail("remote-device-state-invalid");
+    let bundle;
+    try {
+      bundle = await config.crypto.openMasterKeyBundle(record.deviceEnvelope.record,
+        record.deviceWrappingKey, record.deviceEnvelope.context, []);
+      config.crypto.validateNonExtractableAesKey(bundle?.masterKey);
+    } catch (_error) { return fail("additional-device-open-failed"); }
+    return adoptOpened(config, dependencies, captured, syncedPocketId, record, bundle.masterKey);
+  }
+
   async function openExisting(dependenciesInput) {
     const config = validFactory(this);
     const dependencies = validDependencies(dependenciesInput);
@@ -89,12 +159,19 @@
     try {
       const authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
       if (!authentication || authentication.ok !== true || authentication.accountAuthenticated !== true
-          || authentication.contentUnlocked !== false || !id(authentication.accountId) || !id(authentication.credentialId)
-          || authentication.prf?.status !== "available" || !(authentication.prf.outputBytes instanceof Uint8Array)
-          || authentication.prf.outputBytes.byteLength !== 32) return fail("recovery-required");
-      prf = authentication.prf.outputBytes;
+          || authentication.contentUnlocked !== false || !id(authentication.accountId) || !id(authentication.credentialId)) {
+        return fail("additional-device-open-failed");
+      }
       const discovery = await config.discoveryService.readSyncedPocket({ apiVersion: 1, operationId: randomId(config) });
       if (!discovery || discovery.status !== "ready" || !id(discovery.syncedPocketId)) return fail("synced-pocket-not-configured");
+      await config.deviceStore.open();
+      let record = await config.deviceStore.readPocket(discovery.syncedPocketId);
+      if (record && record.additionalDeviceDraft === null) {
+        return openCompletedDevice(config, dependencies, captured, discovery.syncedPocketId, record);
+      }
+      if (authentication.prf?.status !== "available" || !(authentication.prf.outputBytes instanceof Uint8Array)
+          || authentication.prf.outputBytes.byteLength !== 32) return fail("recovery-required");
+      prf = authentication.prf.outputBytes;
       const listed = await config.envelopeService.listEnvelopes({ apiVersion: 1, operationId: randomId(config), syncedPocketId: discovery.syncedPocketId });
       const matches = listed?.envelopes?.filter((item) => item.status === "active" && item.envelopeKind === "passkey-prf" && item.credentialId === authentication.credentialId) || [];
       if (matches.length === 0) return fail("recovery-required");
@@ -102,7 +179,11 @@
       const selected = matches[0];
       const downloaded = await config.envelopeService.downloadEnvelope({ apiVersion: 1, operationId: randomId(config), syncedPocketId: discovery.syncedPocketId, envelopeId: selected.envelopeId });
       if (!downloaded || downloaded.keySetVersion !== listed.keySetVersion || downloaded.envelope?.envelopeId !== selected.envelopeId
-          || downloaded.envelope.envelopeKind !== "passkey-prf" || downloaded.envelope.credentialId !== authentication.credentialId) return fail("remote-key-state-invalid");
+          || downloaded.envelope.envelopeKind !== "passkey-prf" || downloaded.envelope.credentialId !== authentication.credentialId
+          || downloaded.envelope.envelopeVersion !== selected.envelopeVersion
+          || downloaded.envelope.deviceId !== selected.deviceId || downloaded.envelope.kdf !== selected.kdf
+          || downloaded.envelope.kdfSalt !== selected.kdfSalt
+          || downloaded.envelope.derivationVersion !== selected.derivationVersion) return fail("remote-key-state-invalid");
       const context = { syncedPocketId: discovery.syncedPocketId, envelopeId: selected.envelopeId, envelopeKind: "passkey-prf", envelopeVersion: selected.envelopeVersion };
       let opened;
       let wrappingKey;
@@ -121,12 +202,10 @@
       catch (_error) { return fail("additional-device-open-failed"); }
       const current = await readCurrent(config, discovery.syncedPocketId, randomId(config), opened.masterKey, dependencies);
       if (!current) return fail("remote-content-invalid");
-      await config.deviceStore.open();
-      let record = await config.deviceStore.readPocket(discovery.syncedPocketId);
       let draft;
       let envelope;
       let resuming = false;
-      if (record !== null) {
+      if (record) {
         resuming = true;
         if (record.additionalDeviceDraft === null || record.storeRevision !== 1) return fail("additional-device-state-invalid");
         draft = await config.crypto.openContent(record.additionalDeviceDraft.record,
