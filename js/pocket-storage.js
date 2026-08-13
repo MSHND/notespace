@@ -9,12 +9,32 @@ function isPocketVaultStoragePrivate() {
   }
 }
 
+function pocketBrowserStoragePrivacyMode() {
+  try {
+    const session = typeof window.capturePocketFileSaveSession === "function"
+      ? window.capturePocketFileSaveSession()
+      : null;
+    if (session?.ownerKind === "synced" || session?.storagePrivacy === "synced") return "synced";
+    if (isPocketVaultStoragePrivate()) return "vault";
+    return "";
+  } catch {
+    return "vault";
+  }
+}
+
+function isPocketBrowserStoragePrivate() {
+  return pocketBrowserStoragePrivacyMode() !== "";
+}
+
+window.pocketBrowserStoragePrivacyMode = pocketBrowserStoragePrivacyMode;
+window.isPocketBrowserStoragePrivate = isPocketBrowserStoragePrivate;
+
 function makeId(prefix = "pl") {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 function saveWorkspaceState() {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   try {
     const payload = {
       savedAt: nowIso(),
@@ -35,7 +55,7 @@ function saveWorkspaceState() {
 }
 
 function restoreWorkspaceState() {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   try {
     const raw = localStorage.getItem(WORKSPACE_STATE_KEY);
     if (!raw) return false;
@@ -230,7 +250,7 @@ function localSafetyEntryWithoutChangeMetadata(value, options = {}) {
 }
 
 function storeLocalSafetyEntry(entry) {
-  if (isPocketVaultStoragePrivate()) {
+  if (isPocketBrowserStoragePrivate()) {
     return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
   }
   const candidates = [];
@@ -282,9 +302,10 @@ function storeLocalSafetyEntry(entry) {
 }
 
 function saveLocalSafetySnapshot(reason = "change") {
-  if (isPocketVaultStoragePrivate()) {
+  if (pocketBrowserStoragePrivacyMode() === "vault") {
     return window.PocketVaultRecovery?.scheduleCapture?.(reason) === true;
   }
+  if (isPocketBrowserStoragePrivate()) return false;
   if (!Array.isArray(state.nodes)) return false;
   const capturedAt = nowIso();
   let entry;
@@ -297,7 +318,7 @@ function saveLocalSafetySnapshot(reason = "change") {
 }
 
 function saveDetachedPocketSafetySnapshot(documentInput, base, options = {}) {
-  if (isPocketVaultStoragePrivate()) return { ok: false, baseStored: false };
+  if (isPocketBrowserStoragePrivate()) return { ok: false, baseStored: false };
   const owner = pocketDeviceChangesOwner();
   if (!owner) return { ok: false, baseStored: false };
   const coerced = owner.coerceDocument(documentInput);
@@ -356,6 +377,7 @@ function hasPocketSafetyTree(payload) {
 }
 
 function readLocalSafetySnapshot() {
+  if (isPocketBrowserStoragePrivate()) return null;
   try {
     const raw = localStorage.getItem(LOCAL_SAFETY_KEY);
     if (!raw) return null;
@@ -384,6 +406,7 @@ function readLocalSafetySnapshot() {
 }
 
 function readLocalSafetyTrail() {
+  if (isPocketBrowserStoragePrivate()) return [];
   try {
     const raw = localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -417,7 +440,7 @@ function readLocalSafetyTrail() {
 }
 
 function writeLocalSafetyTrail(entries) {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   try {
     const arr = (Array.isArray(entries) ? entries : [])
       .map((entry) => entry && entry.parsed ? entry.parsed : entry)
@@ -431,6 +454,7 @@ function writeLocalSafetyTrail(entries) {
 }
 
 function readLastBackupMeta() {
+  if (isPocketBrowserStoragePrivate()) return null;
   try {
     const raw = localStorage.getItem(LAST_BACKUP_META_KEY);
     if (!raw) return null;
@@ -453,6 +477,7 @@ function readLastBackupMeta() {
 }
 
 function writeLastBackupMeta(payload) {
+  if (isPocketBrowserStoragePrivate()) return null;
   try {
     const exportedAt = cleanText(payload?.writtenAt || payload?.exportedAt, 40) || nowIso();
     const exportedMs = Number.isFinite(Date.parse(exportedAt)) ? Date.parse(exportedAt) : Date.now();
@@ -595,7 +620,7 @@ function startupConfidenceKind() {
 
 
 function appendLocalSafetyTrail(entry) {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   if (!entry || typeof entry !== "object") return false;
   const capturedAt = cleanText(entry.capturedAt, 40);
   const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
@@ -619,10 +644,11 @@ function appendLocalSafetyTrail(entry) {
 }
 
 function clearLocalSafetySnapshot(options = {}) {
-  if (isPocketVaultStoragePrivate() && options.coveredDetachedVaultAdoption !== true) {
+  if (pocketBrowserStoragePrivacyMode() === "vault" && options.coveredDetachedVaultAdoption !== true) {
     void window.PocketVaultRecovery?.clearActiveVaultRecoveryIfClean?.();
     return true;
   }
+  if (pocketBrowserStoragePrivacyMode() === "synced") return false;
   try {
     localStorage.removeItem(LOCAL_SAFETY_KEY);
     return true;
@@ -701,7 +727,7 @@ function prepareLocalSafetySnapshotForDetachedAdoption(snapshot) {
 }
 
 function restoreLocalSafetySnapshot(snapshot = readLocalSafetySnapshot(), options = {}) {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   if (!snapshot || !snapshot.norm) return false;
   const parsed = snapshot.parsed || {};
   if (typeof setDetachedPocketDocumentSession !== "function") return false;
@@ -794,7 +820,7 @@ function showPocketHealth() {
 }
 
 function restorePreviousLocalSafetyVersion() {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   const trail = readLocalSafetyTrail();
   const latest = readLocalSafetySnapshot();
   const latestMs = latest ? latest.capturedMs : 0;
@@ -815,7 +841,7 @@ function restorePreviousLocalSafetyVersion() {
 }
 
 function maybeOfferLocalSafetyRestore(sourceInfo = {}, options = {}) {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   if (options && options.skipLocalSafetyCheck) return false;
   const snapshot = readLocalSafetySnapshot();
   if (!snapshot) return false;
@@ -961,15 +987,17 @@ function resetPocketDocumentTransientsForAdoption() {
 }
 
 function finishLoadedStateAdoption(norm, sourceInfo = {}, options = {}) {
-  const vaultStoragePrivate = options.storagePrivate === "vault" || isPocketVaultStoragePrivate();
+  const storagePrivate = options.storagePrivate === "vault" || options.storagePrivate === "synced"
+    ? options.storagePrivate
+    : pocketBrowserStoragePrivacyMode();
   resetPocketDocumentTransientsForAdoption();
-  if (vaultStoragePrivate) {
+  if (storagePrivate) {
     if (typeof clearConflictGuard === "function") clearConflictGuard();
     else state.conflictGuard = { active: false, reason: "", loadedAt: "", newerAt: "" };
   } else {
     updateConflictGuardForLoadedSource(norm, state.source);
   }
-  const restoredWorkspace = vaultStoragePrivate ? false : restoreWorkspaceState();
+  const restoredWorkspace = storagePrivate ? false : restoreWorkspaceState();
   const baselinePayload = {
     ...(state.rootExtras || {}),
     schema: "portal.export.v1",
@@ -983,7 +1011,7 @@ function finishLoadedStateAdoption(norm, sourceInfo = {}, options = {}) {
       mainThoughtTreeTombstones: state.tombstones,
     },
   };
-  if (!vaultStoragePrivate) saveLastSaveSnapshot(baselinePayload);
+  if (!storagePrivate) saveLastSaveSnapshot(baselinePayload);
   refreshMeta();
   renderTree();
   if (restoredWorkspace && state.selectedId) {
@@ -992,7 +1020,7 @@ function finishLoadedStateAdoption(norm, sourceInfo = {}, options = {}) {
       softlyEnsureSelectionVisible();
     });
   }
-  if (!vaultStoragePrivate) {
+  if (!storagePrivate) {
     persistPipSnapshot();
     maybeOfferLocalSafetyRestore(state.source, options);
   }
@@ -1035,7 +1063,7 @@ function applyLoadedState(norm, sourceInfo = {}, options = {}) {
 }
 
 function saveAutoCache(norm, sourceInfo = {}) {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   try {
     const payload = {
       ...(state.rootExtras || {}),
@@ -1059,7 +1087,7 @@ function saveAutoCache(norm, sourceInfo = {}) {
 }
 
 function saveLastSaveSnapshot(payload) {
-  if (isPocketVaultStoragePrivate()) return false;
+  if (isPocketBrowserStoragePrivate()) return false;
   if (!payload || typeof payload !== "object") return false;
   const clone = safeJsonClone(payload, 5000000);
   if (!clone) return false;
@@ -1101,7 +1129,7 @@ function snapshotCurrentTreeForRestore() {
 }
 
 function restoreAutoCache() {
-  if (isPocketVaultStoragePrivate()) return null;
+  if (isPocketBrowserStoragePrivate()) return null;
   try {
     const raw = localStorage.getItem(AUTO_CACHE_KEY);
     if (!raw) return null;

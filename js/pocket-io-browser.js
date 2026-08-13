@@ -39,8 +39,8 @@ async function openPipWindow() {
     setStatus("Already in pop-out mode.", "warn");
     return;
   }
-  if (isPocketVaultOwnerActive()) {
-    setStatus("Document PiP is not available for encrypted Vaults yet because its transfer is not encrypted.", "warn", { durationMs: 6200 });
+  if (window.isPocketBrowserStoragePrivate?.() === true) {
+    setStatus("Document PiP is not available for encrypted Vaults or Synced Pockets because its transfer is not encrypted.", "warn", { durationMs: 6200 });
     return;
   }
   persistPipSnapshot();
@@ -127,6 +127,7 @@ function pocketFileState() {
       gateMode: "",
       pipSession: false,
       detachedDeviceChanges: false,
+      storagePrivacy: "",
     };
   }
   if (typeof state.pocketFile.detachedDeviceChanges !== "boolean") {
@@ -138,6 +139,7 @@ function pocketFileState() {
       : (truthFileHandle ? "json" : "none");
   }
   if (typeof state.pocketFile.vaultSessionId !== "string") state.pocketFile.vaultSessionId = "";
+  if (!["", "synced"].includes(state.pocketFile.storagePrivacy)) state.pocketFile.storagePrivacy = "";
   return state.pocketFile;
 }
 
@@ -332,7 +334,10 @@ function setPocketFileSession(handle, displayName, options = {}) {
   const requestedKind = cleanText(options.ownerKind, 24);
   const nextOwnerKind = requestedKind === "vault" || requestedKind === "synced"
     ? requestedKind
-    : (nextDetached ? "detached" : ((nextHandle || nextPip) ? "json" : "none"));
+      : (nextDetached ? "detached" : ((nextHandle || nextPip) ? "json" : "none"));
+  const nextStoragePrivacy = options.storagePrivate === "synced" || nextOwnerKind === "synced"
+    ? "synced"
+    : "";
   const vaultContract = window.PocketVault;
   if (nextOwnerKind === "vault") {
     if (!nextHandle || !vaultContract || typeof vaultContract.activateUnlockedSession !== "function") {
@@ -361,6 +366,7 @@ function setPocketFileSession(handle, displayName, options = {}) {
     || session.pipSession !== nextPip
     || session.detachedDeviceChanges !== nextDetached
     || session.ownerKind !== nextOwnerKind
+    || session.storagePrivacy !== nextStoragePrivacy
     || session.vaultSessionId !== nextVaultSessionId;
   const routineWriteToCurrentHandle = isPocketFilePermissionPromptOpen()
     && nextHandle === truthFileHandle
@@ -381,6 +387,7 @@ function setPocketFileSession(handle, displayName, options = {}) {
   session.pipSession = nextPip;
   session.detachedDeviceChanges = nextDetached;
   session.ownerKind = nextOwnerKind;
+  session.storagePrivacy = nextStoragePrivacy;
   session.vaultSessionId = nextVaultSessionId;
   if (targetChanged || options.forceNewSession === true) pocketFileSessionId += 1;
   if (nextOwnerKind !== "vault"
@@ -408,6 +415,7 @@ function clearPocketFileSession(options = {}) {
     || session.pipSession === true
     || session.detachedDeviceChanges === true
     || session.ownerKind !== "none"
+    || session.storagePrivacy !== ""
     || !!session.vaultSessionId;
   if (session.ownerKind === "synced") window.PocketOwnerSaveBoundary?.retireSyncedOwner?.();
   truthFileHandle = null;
@@ -418,6 +426,7 @@ function clearPocketFileSession(options = {}) {
   session.pipSession = false;
   session.detachedDeviceChanges = false;
   session.ownerKind = "none";
+  session.storagePrivacy = "";
   session.vaultSessionId = "";
   if (window.PocketVault && typeof window.PocketVault.clearActiveSession === "function") {
     window.PocketVault.clearActiveSession();
@@ -436,6 +445,7 @@ function capturePocketFileSaveSession() {
     id: pocketFileSessionId,
     handle: truthFileHandle,
     ownerKind: session.ownerKind,
+    storagePrivacy: session.storagePrivacy,
     vaultSessionId: cleanText(session.vaultSessionId, 120),
     displayName: cleanText(session.displayName, 120),
     writable: session.writable === true,
@@ -481,6 +491,7 @@ function isPocketFileSaveSessionCurrent(snapshot) {
     && snapshot.id === pocketFileSessionId
     && snapshot.handle === truthFileHandle
     && snapshot.ownerKind === session.ownerKind
+    && snapshot.storagePrivacy === session.storagePrivacy
     && cleanText(snapshot.vaultSessionId, 120) === cleanText(session.vaultSessionId, 120)
     && snapshot.pipSession === (session.pipSession === true)
     && snapshot.detachedDeviceChanges === (session.detachedDeviceChanges === true);
@@ -513,6 +524,7 @@ function renewPocketDocumentSession() {
   const session = pocketFileState();
   setPocketFileSession(truthFileHandle, session.displayName || state.source?.fileName, {
     ownerKind: session.ownerKind,
+    storagePrivate: session.storagePrivacy,
     vaultSession: session.ownerKind === "vault"
       && window.PocketVault
       && typeof window.PocketVault.getActiveSession === "function"
@@ -526,8 +538,8 @@ function renewPocketDocumentSession() {
 }
 
 function adoptPocketDocumentFromPip(snapshot) {
-  if (isPocketVaultOwnerActive()) {
-    setStatus("Document PiP is not available for encrypted Vaults yet because its transfer is not encrypted.", "warn", { durationMs: 6200 });
+  if (window.isPocketBrowserStoragePrivate?.() === true) {
+    setStatus("Document PiP is not available for encrypted Vaults or Synced Pockets because its transfer is not encrypted.", "warn", { durationMs: 6200 });
     return false;
   }
   if (window.PocketVaultBrowserIo
@@ -1348,6 +1360,7 @@ function commitPreparedPocketDocument(norm, sourceInfo = {}, options = {}) {
   const ownerRollback = capturePocketFileOwnerForAdoption();
   const loadedStateOptions = {
     ...(options.loadedStateOptions || {}),
+    storagePrivate: options.storagePrivate === "synced" ? "synced" : (options.loadedStateOptions?.storagePrivate || ""),
     deferEffects: true,
   };
   try {
@@ -1361,6 +1374,7 @@ function commitPreparedPocketDocument(norm, sourceInfo = {}, options = {}) {
       vaultSession: options.vaultSession || null,
       pipSession: options.pipSession === true,
       detachedDeviceChanges: options.detachedDeviceChanges === true,
+      storagePrivate: options.storagePrivate === "synced" ? "synced" : "",
       forceNewSession: options.forceNewSession !== false,
     });
   } catch (error) {

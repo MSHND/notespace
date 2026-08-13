@@ -3339,6 +3339,86 @@ test("P022 dirty Vault operations create only authenticated encrypted browser re
   );
 });
 
+test("P052h temporary detached Synced adoption and its bound owner never write readable browser storage", () => {
+  const sentinel = "P052H REMOTE SENTINEL - never in browser storage";
+  const existingJsonSafety = JSON.stringify({
+    schema: "pocket.localSafety.v2",
+    payload: pocketPayload({
+      nodes: [makeNode("ordinary_json_safety", { details: "ordinary JSON safety remains intact" })],
+    }),
+  });
+  const context = createVaultContext({
+    localStorageSeed: {
+      "pocketLite.localSafety.snapshot.v1": existingJsonSafety,
+      "pocketLite.localSafety.trail.v1": "ordinary JSON trail remains intact",
+      "pocketLite.pipSnapshot.v1": "ordinary JSON PiP snapshot remains intact",
+    },
+  });
+  const remotePayload = pocketPayload({
+    nodes: [makeNode("synced_remote_sentinel", { label: sentinel, details: sentinel })],
+    rootExtras: { syncedRemoteSentinel: sentinel },
+  });
+  const remoteNorm = context.normaliseInput(remotePayload);
+  context.__localStorage.calls.length = 0;
+
+  const adopted = context.commitPreparedPocketDocument(remoteNorm, {
+    schema: remoteNorm.schema,
+    fileName: "Synced Pocket",
+    writtenAt: remotePayload.writtenAt,
+  }, {
+    ownerKind: "detached",
+    displayName: "Synced Pocket",
+    forceNewSession: true,
+    detachedDeviceChanges: true,
+    storagePrivate: "synced",
+    canContinue: () => true,
+  });
+  assert.equal(adopted.ok, true);
+  assert.equal(context.capturePocketFileSaveSession().ownerKind, "detached");
+  assert.equal(context.capturePocketFileSaveSession().storagePrivacy, "synced");
+  assert.equal(lexicalState(context).nodes[0].label, sentinel);
+
+  context.setPocketFileSession(null, "Synced Pocket", {
+    ownerKind: "synced",
+    storagePrivate: "synced",
+    forceNewSession: true,
+  });
+  assert.equal(context.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(context.capturePocketFileSaveSession().storagePrivacy, "synced");
+  assert.equal(context.saveWorkspaceState(), false);
+  assert.equal(context.restoreWorkspaceState(), false);
+  assert.equal(context.saveLocalSafetySnapshot("synced-edit"), false);
+  assert.equal(context.readLocalSafetySnapshot(), null);
+  assert.deepEqual(plain(context.readLocalSafetyTrail()), []);
+  assert.deepEqual(
+    plain(context.saveDetachedPocketSafetySnapshot({ nodes: lexicalState(context).nodes }, null)),
+    { ok: false, baseStored: false },
+  );
+  assert.equal(context.saveAutoCache(remoteNorm, lexicalState(context).source), false);
+  assert.equal(context.saveLastSaveSnapshot(remotePayload), false);
+  assert.equal(context.readLastBackupMeta(), null);
+  assert.equal(context.restoreAutoCache(), null);
+  assert.equal(context.__productionPersistPipSnapshot(), false);
+  assert.equal(context.restoreFromPipSnapshot(), false);
+
+  assert.equal(
+    context.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"),
+    existingJsonSafety,
+    "Synced adoption must not purge pre-existing ordinary JSON recovery",
+  );
+  assert.equal(
+    context.__localStorage.values.get("pocketLite.localSafety.trail.v1"),
+    "ordinary JSON trail remains intact",
+  );
+  assert.equal(
+    context.__localStorage.values.get("pocketLite.pipSnapshot.v1"),
+    "ordinary JSON PiP snapshot remains intact",
+  );
+  const allBrowserWrites = JSON.stringify(context.__localStorage.calls);
+  assert.equal(allBrowserWrites.includes(sentinel), false);
+  assert.equal(JSON.stringify([...context.__localStorage.values.values()]).includes(sentinel), false);
+});
+
 test("opening a Vault suppresses but does not delete existing ordinary JSON recovery", async () => {
   const currentSafetyKey = "pocketLite.localSafety.snapshot.v1";
   const trailKey = "pocketLite.localSafety.trail.v1";

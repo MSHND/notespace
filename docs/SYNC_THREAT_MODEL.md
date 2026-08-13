@@ -63,6 +63,10 @@ The service is trusted to enforce account authorisation, conditional revisions, 
 
 Local JSON/Vault files, file handles, source sessions and browser safety copies remain under their current owners. They are not imported into remote metadata or silently deleted after activation.
 
+### Synced browser-storage privacy boundary
+
+A Synced Pocket is readable only in the authorised in-memory window that has opened its encrypted record. It must not copy the opened document, its workspace/source metadata or derived safety state into legacy readable browser storage. This covers local-safety current/trail records, auto-cache, last-save and PiP snapshots, workspace state, detached safety staging and full-document PiP transfer. The temporary detached session used while Device B finalises adoption is already marked `synced` for this boundary; if that privacy state cannot be established, adoption fails closed before loaded-document finalisation. A bound Synced owner keeps the same boundary, while ordinary JSON and detached work keep their existing readable safety behaviour. Vault remains separate: its encrypted browser-recovery machinery continues to operate and is not used by Synced Pocket.
+
 ## 4. Adversaries and required controls
 
 | Adversary/event | Risk | Required control | Residual limitation |

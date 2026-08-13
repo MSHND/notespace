@@ -301,6 +301,7 @@
         schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
+        detachedDeviceChanges: true, storagePrivate: "synced",
         canContinue: () => additionalTargetReplaceable(input.target) });
       if (!committed?.ok) {
         if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });

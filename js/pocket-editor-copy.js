@@ -155,8 +155,8 @@ window.__pocketLiteHasUnsavedChanges = hasUnsavedPocketLiteChanges;
 
 function isPocketVaultPipTransferBlocked() {
   try {
-    return typeof window.isPocketVaultOwnerActive === "function"
-      && window.isPocketVaultOwnerActive() === true;
+    return typeof window.isPocketBrowserStoragePrivate === "function"
+      && window.isPocketBrowserStoragePrivate() === true;
   } catch {
     return true;
   }
@@ -222,7 +222,7 @@ window.__pocketLiteExportSessionState = exportPocketLiteSessionState;
 
 async function saveThroughPipHost() {
   if (isPocketVaultPipTransferBlocked()) {
-    setStatus("Document PiP is not available for encrypted Vaults yet because its transfer is not encrypted.", "warn", { durationMs: 6200 });
+    setStatus("Document PiP is not available for encrypted Vaults or Synced Pockets because its transfer is not encrypted.", "warn", { durationMs: 6200 });
     return false;
   }
   let hostSave = null;

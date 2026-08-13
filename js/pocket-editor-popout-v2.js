@@ -10,6 +10,11 @@
   const OUTLINE_EDITOR_SCHEMA = "pocket.nodeEditor.v1";
   const DRAFT_KEY_PREFIX = "pocket.editorPopoutDraft.v2.";
 
+  function browserDraftStoragePrivate() {
+    try { return global.isPocketBrowserStoragePrivate?.() === true; }
+    catch (_error) { return true; }
+  }
+
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
@@ -71,6 +76,7 @@
   }
 
   function readDraft(id) {
+    if (browserDraftStoragePrivate()) return null;
     try {
       const parsed = JSON.parse(global.localStorage.getItem(draftKeyFor(id)) || "null");
       if (!parsed || typeof parsed !== "object") return null;
@@ -82,10 +88,12 @@
   }
 
   function clearDraft(id) {
+    if (browserDraftStoragePrivate()) return;
     try { global.localStorage.removeItem(draftKeyFor(id)); } catch (_error) {}
   }
 
   function editorHtml(payload) {
+    const storagePrivate = browserDraftStoragePrivate();
     const stored = readDraft(payload.id);
     const source = stored && stored.dirty ? { ...payload, ...stored } : payload;
     const initial = JSON.stringify({
@@ -143,6 +151,7 @@
 </main>
 <script>
 (function () {
+  const STORAGE_PRIVATE = ${JSON.stringify(storagePrivate)};
   const initial = ${initial};
   const title = document.getElementById("title");
   const body = document.getElementById("body");
@@ -161,8 +170,8 @@
   function setDirty(next) { dirty = !!next; document.body.classList.toggle("dirty", dirty); }
   function currentBody() { return body.value; }
   function draft() { return { id: initial.id, title: title.value, body: currentBody(), mode, outline, dirty, draftKey: initial.draftKey }; }
-  function storeDraft() { try { localStorage.setItem(initial.draftKey, JSON.stringify(draft())); } catch(e) {} }
-  function clearDraft() { try { localStorage.removeItem(initial.draftKey); } catch(e) {} }
+  function storeDraft() { if (STORAGE_PRIVATE) return; try { localStorage.setItem(initial.draftKey, JSON.stringify(draft())); } catch(e) {} }
+  function clearDraft() { if (STORAGE_PRIVATE) return; try { localStorage.removeItem(initial.draftKey); } catch(e) {} }
   function markDirty() { setDirty(true); setState(""); storeDraft(); }
   function updateMode() { document.body.classList.toggle("outlineMode", mode === "outline"); document.getElementById("textBtn").classList.toggle("on", mode === "text"); document.getElementById("outlineBtn").classList.toggle("on", mode === "outline"); }
   function renderOutline(focus) { if (!outline || !outline.length) outline = [makeBlock("", 0)]; outlineEl.innerHTML = ""; outline.forEach((block, index) => { const row = document.createElement("div"); row.className = "row"; row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px"; const dot = document.createElement("div"); dot.className = "dot"; dot.textContent = "•"; dot.draggable = true; dot.addEventListener("dragstart", ev => { dragging = index; ev.dataTransfer.setData("text/plain", String(index)); }); row.addEventListener("dragover", ev => { if (dragging == null) return; ev.preventDefault(); }); row.addEventListener("drop", ev => { if (dragging == null) return; ev.preventDefault(); const from = dragging; dragging = null; const end = subtreeEnd(from); const branch = outline.slice(from, end); outline.splice(from, branch.length); let to = index > from ? index - branch.length : index; outline.splice(Math.max(0, Math.min(outline.length, to)), 0, ...branch); markDirty(); renderOutline(to); }); const text = document.createElement("div"); text.className = "text"; text.contentEditable = "true"; text.textContent = block.text || ""; text.addEventListener("input", () => { block.text = text.textContent || ""; markDirty(); }); text.addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); outline.splice(index + 1, 0, makeBlock("", block.depth || 0)); markDirty(); renderOutline(index + 1); } else if (ev.key === "Tab") { ev.preventDefault(); const delta = ev.shiftKey ? -1 : 1; const end = subtreeEnd(index); for (let i = index; i < end; i++) outline[i].depth = Math.max(0, Math.min(8, (Number(outline[i].depth) || 0) + delta)); markDirty(); renderOutline(index); } }); row.appendChild(dot); row.appendChild(text); outlineEl.appendChild(row); }); if (Number.isFinite(focus)) requestAnimationFrame(() => { const t = outlineEl.children[focus]?.querySelector(".text"); if (t) t.focus(); }); }

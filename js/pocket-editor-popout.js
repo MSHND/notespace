@@ -7,6 +7,11 @@
   const DRAFT_KEY_PREFIX = "pocket.editorPopoutDraft.v1.";
   const OUTLINE_EDITOR_SCHEMA = "pocket.nodeEditor.v1";
 
+  function browserDraftStoragePrivate() {
+    try { return global.isPocketBrowserStoragePrivate?.() === true; }
+    catch (_error) { return true; }
+  }
+
   function draftKeyFor(nodeId) {
     return `${DRAFT_KEY_PREFIX}${cleanText(nodeId, 80) || "unknown"}`;
   }
@@ -53,6 +58,7 @@
   }
 
   function readStoredDraft(nodeId) {
+    if (browserDraftStoragePrivate()) return null;
     try {
       const raw = global.localStorage.getItem(draftKeyFor(nodeId));
       if (!raw) return null;
@@ -66,10 +72,12 @@
   }
 
   function clearStoredDraft(nodeId) {
+    if (browserDraftStoragePrivate()) return;
     try { global.localStorage.removeItem(draftKeyFor(nodeId)); } catch (_error) {}
   }
 
   function popoutHtml(payload) {
+    const storagePrivate = browserDraftStoragePrivate();
     const storedDraft = readStoredDraft(payload.id);
     const draftPayload = storedDraft && storedDraft.dirty ? { ...payload, ...storedDraft } : payload;
     const safeTitle = htmlEscape(draftPayload.title || "item");
@@ -146,6 +154,7 @@
   </main>
 <script>
 (function () {
+  const STORAGE_PRIVATE = ${JSON.stringify(storagePrivate)};
   const DRAFT_KEY = ${draftKey};
   const PAYLOAD_ID = ${payloadId};
   let draft = ${initialDraft};
@@ -168,8 +177,8 @@
   function setDirty(next) { dirty = !!next; draft.dirty = dirty; document.body.classList.toggle("isDirty", dirty); }
   function currentBody() { return bodyInput.value; }
   function buildDraft() { return { id: PAYLOAD_ID, title: titleInput.value, body: currentBody(), mode: mode, outline: outline, openedAt: draft.openedAt || new Date().toISOString(), updatedAt: new Date().toISOString(), dirty: dirty }; }
-  function storeDraft() { try { draft = buildDraft(); window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (_error) {} }
-  function clearDraft() { try { window.localStorage.removeItem(DRAFT_KEY); } catch (_error) {} }
+  function storeDraft() { if (STORAGE_PRIVATE) return; try { draft = buildDraft(); window.localStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch (_error) {} }
+  function clearDraft() { if (STORAGE_PRIVATE) return; try { window.localStorage.removeItem(DRAFT_KEY); } catch (_error) {} }
   function markDirty() { setDirty(true); setSaveState("", ""); storeDraft(); }
   function updateModeChrome() { document.body.classList.toggle("isTextMode", mode === "text"); document.body.classList.toggle("isOutlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
   function focusBlock(index) { requestAnimationFrame(function () { const row = outlinePane.querySelector('[data-index="' + index + '"] .outlineText'); if (!row) return; row.focus({ preventScroll: true }); const range = document.createRange(); range.selectNodeContents(row); range.collapse(false); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); }); }

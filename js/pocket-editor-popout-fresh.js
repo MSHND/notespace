@@ -6,6 +6,11 @@
 
   const DRAFT_KEY_PREFIX = "pocket.editorPopoutDraft.v1.";
 
+  function browserDraftStoragePrivate() {
+    try { return global.isPocketBrowserStoragePrivate?.() === true; }
+    catch (_error) { return true; }
+  }
+
   function safeClean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
@@ -19,6 +24,7 @@
   }
 
   function readDraft(nodeId) {
+    if (browserDraftStoragePrivate()) return null;
     try {
       const raw = global.localStorage.getItem(draftKeyFor(nodeId));
       if (!raw) return null;
@@ -32,6 +38,7 @@
   }
 
   function clearDraft(nodeId) {
+    if (browserDraftStoragePrivate()) return;
     try {
       global.localStorage.removeItem(draftKeyFor(nodeId));
     } catch (_error) {}

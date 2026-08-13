@@ -90,8 +90,8 @@ async function autoLoadAtStartup() {
 
 function isPocketVaultPipPrivate() {
   try {
-    return typeof window.isPocketVaultOwnerActive === "function"
-      && window.isPocketVaultOwnerActive() === true;
+    return typeof window.isPocketBrowserStoragePrivate === "function"
+      && window.isPocketBrowserStoragePrivate() === true;
   } catch {
     return true;
   }
