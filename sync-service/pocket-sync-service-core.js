@@ -2877,7 +2877,8 @@ function createServiceCore(input) {
         keySetVersion: state.keySet ? state.keySet.keySetVersion : 0,
         recoveryStatus: state.keySet ? state.keySet.recoveryStatus : "unconfigured",
         recoveryVersion: state.keySet ? state.keySet.recoveryVersion : 0,
-        envelopes: state.envelopes.slice().sort((a, b) => a.envelopeId.localeCompare(b.envelopeId))
+        envelopes: state.envelopes.slice().sort((a, b) => (a.envelopeId < b.envelopeId ? -1
+          : (a.envelopeId > b.envelopeId ? 1 : 0)))
           .map(envelopeMetadata),
       }, session: null });
     });

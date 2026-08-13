@@ -267,9 +267,10 @@
       return frozen({ ownerKind: session.ownerKind, continuityId: String(session.id) });
     }
 
-    function additionalTargetCurrent() {
+    function additionalTargetCurrent(expected = null) {
       const target = additionalTarget();
-      return !!target;
+      return !!target && (expected === null || (target.ownerKind === expected.ownerKind
+        && `${target.ownerKind}:${target.continuityId}` === expected.continuityId));
     }
 
     async function adoptAdditionalDevice(input) {
@@ -289,7 +290,7 @@
         schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
-        canContinue: () => additionalTargetCurrent() });
+        canContinue: () => additionalTargetCurrent(input.target) });
       if (!committed?.ok) return frozen({ ok: false });
       const adopted = await syncedOwnerController.adoptSyncedOwner({
         syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,

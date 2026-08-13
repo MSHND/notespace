@@ -5,7 +5,7 @@
   const LIMIT = 2 ** 20;
   const FACTORY = ["crypto", "deviceStore", "accountClient", "discoveryService", "contentService", "envelopeService", "randomBytes", "now"];
   const DEPENDENCIES = ["captureTarget", "isTargetCurrent", "validatePayload", "adoptOpenedPocket"];
-  const fail = (reason) => Object.freeze({ ok: false, reason, adopted: false });
+  const fail = (reason, extra = {}) => Object.freeze(Object.assign({ ok: false, reason, adopted: false }, extra));
   const object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
   const id = (value) => typeof value === "string" && value.length > 0 && value.length <= 160 && value === value.trim();
   const freeze = (value) => Object.freeze(value);
@@ -104,10 +104,15 @@
       if (!downloaded || downloaded.keySetVersion !== listed.keySetVersion || downloaded.envelope?.envelopeId !== selected.envelopeId
           || downloaded.envelope.envelopeKind !== "passkey-prf" || downloaded.envelope.credentialId !== authentication.credentialId) return fail("remote-key-state-invalid");
       const context = { syncedPocketId: discovery.syncedPocketId, envelopeId: selected.envelopeId, envelopeKind: "passkey-prf", envelopeVersion: selected.envelopeVersion };
-      const wrappingKey = await config.crypto.deriveWrappingKey(prf, downloaded.envelope.kdfSalt, context);
-      prf.fill(0); prf = null;
-      const opened = await config.crypto.openMasterKeyBundle(downloaded.envelope.encryptedEnvelope, wrappingKey, context, []);
-      config.crypto.validateNonExtractableAesKey(opened?.masterKey);
+      let opened;
+      let wrappingKey;
+      try {
+        wrappingKey = await config.crypto.deriveWrappingKey(prf, downloaded.envelope.kdfSalt, context);
+        prf.fill(0); prf = null;
+        opened = await config.crypto.openMasterKeyBundle(downloaded.envelope.encryptedEnvelope,
+          wrappingKey, context, []);
+        config.crypto.validateNonExtractableAesKey(opened?.masterKey);
+      } catch (_error) { return fail("recovery-required"); }
       const current = await readCurrent(config, discovery.syncedPocketId, randomId(config), opened.masterKey, dependencies);
       if (!current) return fail("remote-content-invalid");
       await config.deviceStore.open();
@@ -190,7 +195,12 @@
       const adopted = await dependencies.adoptOpenedPocket({ syncedPocketId: discovery.syncedPocketId,
         masterKey: durableBundle.masterKey, payload: latest.payload,
         confirmedRemoteRevision: latest.revision, target: captured });
-      return adopted === true || adopted?.ok === true ? freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision }) : fail("owner-adoption-failed");
+      if (adopted === true || adopted?.ok === true) {
+        return freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision });
+      }
+      return adopted?.partialState === "visible-payload-committed-detached"
+        ? fail("owner-adoption-failed", { partialState: adopted.partialState })
+        : fail("owner-adoption-failed");
     } catch (_error) { return fail("additional-device-open-failed"); }
     finally { if (prf instanceof Uint8Array) prf.fill(0); }
   }
