@@ -46,10 +46,10 @@ P039 uses P029 directly:
 - one exact revision-1 encrypted content record;
 - one device master-key envelope;
 - one purpose-separated recovery master-key envelope;
-- one purpose-separated recovery-authorisation verifier;
+- one fresh Ed25519 recovery-authorisation keypair, retaining only the PKCS8 private key locally and sending only the SPKI public verifier to the service;
 - one optional passkey-PRF envelope when the actual registration ceremony supplies valid PRF output.
 
-The recovery wrapping key uses `pocket.sync.recovery.master-key-wrapping.v1`. The verifier uses `pocket.sync.recovery.account-authorisation.v1` through P029's focused verifier derivation. The verifier and envelope use independent salts.
+The recovery wrapping key uses `pocket.sync.recovery.master-key-wrapping.v1`. Recovery authority uses a separate standard Ed25519 keypair: the server stores its public verification key and the version-2 recovery copy retains the private signing key. The public key cannot decrypt content or envelopes and cannot create recovery signatures.
 
 P039 never exports the master key, uploads PRF output, or uploads the recovery root. Temporary byte arrays are cleared on a best-effort basis without claiming perfect JavaScript zeroisation.
 
@@ -69,7 +69,7 @@ The encrypted draft retains only what explicit resume needs:
 - safe account and credential identities;
 - a P031-safe registration continuation after credential creation;
 - recovery locator after initialisation;
-- recovery root and local package only until copy storage is confirmed;
+- recovery root, signing private material and local package only until copy storage is confirmed;
 - stage, pending operation and diagnostic timestamps.
 
 It does not contain a source handle/path/filename, readable Pocket payload, raw master key, raw PRF output, cookie, bearer token, Vault password, current owner token or browser-safety data. Raw device-store inspection sees ciphertext, not the root or package.
@@ -124,7 +124,7 @@ Recovery initialisation installs version-1 verifier/envelope state and returns a
 
 The exact validated package is encrypted into the draft before the writer is called. A cancelled or failed write leaves `recovery-copy-pending`, retains the same encrypted root/package/locator/envelopes/IDs and returns a safe explicit-resume result. Resume requests a fresh destination capability but writes the exact same package and performs no confirmed remote mutation again.
 
-After confirmed copy storage, P039 replaces the draft with `ready-for-adoption` and removes the recovery root, complete package and registration continuation. The final decrypted state retains only safe identities, encrypted records and confirmed versions.
+After confirmed copy storage, P039 replaces the draft with `ready-for-adoption` and removes the recovery root, signing private material, complete package and registration continuation. The final decrypted state retains only safe identities, encrypted records and confirmed versions.
 
 ## Owner adoption last
 

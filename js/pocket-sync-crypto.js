@@ -31,7 +31,13 @@ operations without activating sync, storage, account, or transport behaviour.
     "device-transfer": "pocket.sync.device-transfer.master-key-wrapping.v1",
     recovery: "pocket.sync.recovery.master-key-wrapping.v1",
   });
-  const RECOVERY_AUTHORISATION_LABEL = "pocket.sync.recovery.account-authorisation.v1";
+  const RECOVERY_AUTHORISATION = Object.freeze({
+    version: 1,
+    algorithm: "Ed25519",
+    privateKeyFormat: "pkcs8",
+    publicKeyFormat: "spki",
+    transcriptDomain: "pocket.sync.recovery-authorisation.v1",
+  });
   const ENVELOPE_KINDS = Object.freeze([
     "device",
     "passkey-prf",
@@ -345,58 +351,110 @@ operations without activating sync, storage, account, or transport behaviour.
     }
   }
 
-  async function deriveRecoveryAuthorisationVerifier(secretBytes, saltText) {
-    const salt = decodeBase64Url(saltText, "derivation-salt-invalid");
-    if (salt.byteLength !== FORMAT.hkdfSaltBytes) throw cryptoError("derivation-salt-invalid");
-    const secret = copySecretBytes(secretBytes);
-    const info = textEncoder.encode(JSON.stringify([RECOVERY_AUTHORISATION_LABEL]));
+  function recoveryTranscript(input) {
+    const fields = ["recoveryCeremonyId", "operationId", "challenge", "syncedPocketId", "deviceId",
+      "recoveryVersion", "keySetVersion", "expiresAt", "credentialDigest"];
+    const value = requireObject(input, fields, "recovery-proof-invalid");
+    if (Object.keys(value).length !== fields.length
+        || fields.some((field) => !Object.prototype.hasOwnProperty.call(value, field))
+        || fields.slice(0, 5).some((field) => requireIdentifier(value[field], "recovery-proof-invalid") !== value[field])
+        || !Number.isSafeInteger(value.recoveryVersion) || value.recoveryVersion < 1
+        || !Number.isSafeInteger(value.keySetVersion) || value.keySetVersion < 1
+        || typeof value.expiresAt !== "string" || !Number.isFinite(Date.parse(value.expiresAt))
+        || !(value.credentialDigest instanceof Uint8Array) || value.credentialDigest.byteLength !== 32) {
+      throw cryptoError("recovery-proof-invalid");
+    }
+    return textEncoder.encode(JSON.stringify([
+      RECOVERY_AUTHORISATION.transcriptDomain, RECOVERY_AUTHORISATION.version,
+      value.recoveryCeremonyId, value.operationId, value.challenge, value.syncedPocketId,
+      value.deviceId, value.recoveryVersion, value.keySetVersion, value.expiresAt,
+      encodeBase64Url(value.credentialDigest),
+    ]));
+  }
+
+  function canonicalJson(value) {
+    if (value === null || typeof value === "string" || typeof value === "boolean") {
+      return JSON.stringify(value);
+    }
+    if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return `{${Object.keys(value).sort().map((field) => (
+        `${JSON.stringify(field)}:${canonicalJson(value[field])}`
+      )).join(",")}}`;
+    }
+    throw cryptoError("recovery-proof-invalid");
+  }
+
+  async function digestRecoveryCredential(credential) {
+    let text;
     try {
-      const baseKey = await getCrypto().subtle.importKey(
-        "raw",
-        secret,
-        FORMAT.webCryptoKdf,
-        false,
-        ["deriveBits"]
-      );
-      const bits = await getCrypto().subtle.deriveBits(
-        { name: FORMAT.webCryptoKdf, hash: FORMAT.hash, salt, info },
-        baseKey,
-        FORMAT.keyBits
-      );
-      const verifierBytes = new Uint8Array(bits);
+      text = canonicalJson(["pocket.sync.recovery-credential.v1", credential]);
+    } catch (_error) { throw cryptoError("recovery-proof-invalid"); }
+    try {
+      return new Uint8Array(await getCrypto().subtle.digest("SHA-256", textEncoder.encode(text)));
+    } catch (_error) { throw cryptoError("recovery-signature-unsupported"); }
+  }
+
+  async function createRecoveryAuthorisationKeyPair() {
+    let pair;
+    try {
+      pair = await getCrypto().subtle.generateKey({ name: RECOVERY_AUTHORISATION.algorithm }, true,
+        ["sign", "verify"]);
+      const privateBytes = new Uint8Array(await getCrypto().subtle.exportKey("pkcs8", pair.privateKey));
+      const publicBytes = new Uint8Array(await getCrypto().subtle.exportKey("spki", pair.publicKey));
       try {
-        return encodeBase64Url(verifierBytes);
-      } finally {
-        verifierBytes.fill(0);
-      }
+        if (privateBytes.byteLength < 32 || privateBytes.byteLength > 4096
+            || publicBytes.byteLength < 32 || publicBytes.byteLength > 4096) {
+          throw cryptoError("recovery-signature-unsupported");
+        }
+        return Object.freeze({
+          recoveryAuthorisation: Object.freeze({ version: RECOVERY_AUTHORISATION.version,
+            algorithm: RECOVERY_AUTHORISATION.algorithm,
+            privateKeyFormat: RECOVERY_AUTHORISATION.privateKeyFormat,
+            privateKey: encodeBase64Url(privateBytes) }),
+          recoveryVerifier: Object.freeze({ version: RECOVERY_AUTHORISATION.version,
+            algorithm: RECOVERY_AUTHORISATION.algorithm,
+            publicKeyFormat: RECOVERY_AUTHORISATION.publicKeyFormat,
+            publicKey: encodeBase64Url(publicBytes) }),
+        });
+      } finally { privateBytes.fill(0); publicBytes.fill(0); }
     } catch (error) {
-      if (error && typeof error.code === "string") throw error;
-      throw cryptoError("recovery-verifier-derivation-failed");
-    } finally {
-      secret.fill(0);
-      salt.fill(0);
-      info.fill(0);
+      if (error?.code) throw error;
+      throw cryptoError("recovery-signature-unsupported");
     }
   }
 
-  async function createRecoveryAuthorisationVerifier(secretBytes, version = 1) {
-    if (!Number.isSafeInteger(version) || version < 1) {
-      throw cryptoError("recovery-verifier-version-invalid");
+  async function signRecoveryAuthorisation(authorisation, input) {
+    if (!authorisation || typeof authorisation !== "object"
+        || Object.keys(authorisation).length !== 4
+        || authorisation.version !== RECOVERY_AUTHORISATION.version
+        || authorisation.algorithm !== RECOVERY_AUTHORISATION.algorithm
+        || authorisation.privateKeyFormat !== RECOVERY_AUTHORISATION.privateKeyFormat) {
+      throw cryptoError("recovery-proof-invalid");
     }
-    const salt = randomBytes(FORMAT.hkdfSaltBytes);
-    const kdfSalt = encodeBase64Url(salt);
+    const privateBytes = decodeBase64Url(authorisation.privateKey, "recovery-proof-invalid");
+    const transcript = recoveryTranscript(input);
     try {
-      const verifier = await deriveRecoveryAuthorisationVerifier(secretBytes, kdfSalt);
-      return Object.freeze({
-        format: "pocket.sync.recovery-authorisation-verifier.opaque",
-        version,
-        kdf: FORMAT.kdf,
-        kdfSalt,
-        derivationVersion: FORMAT.derivationVersion,
-        verifier,
-      });
+      if (privateBytes.byteLength < 32 || privateBytes.byteLength > 4096) throw cryptoError("recovery-proof-invalid");
+      const key = await getCrypto().subtle.importKey("pkcs8", privateBytes,
+        { name: RECOVERY_AUTHORISATION.algorithm }, false, ["sign"]);
+      const signature = new Uint8Array(await getCrypto().subtle.sign(
+        RECOVERY_AUTHORISATION.algorithm, key, transcript
+      ));
+      try {
+        if (signature.byteLength < 32 || signature.byteLength > 1024) {
+          throw cryptoError("recovery-proof-invalid");
+        }
+        return Object.freeze({ version: RECOVERY_AUTHORISATION.version,
+          algorithm: RECOVERY_AUTHORISATION.algorithm, signature: encodeBase64Url(signature) });
+      } finally { signature.fill(0); }
+    } catch (error) {
+      if (error?.code) throw error;
+      throw cryptoError("recovery-proof-failed");
     } finally {
-      salt.fill(0);
+      privateBytes.fill(0);
+      transcript.fill(0);
     }
   }
 
@@ -627,6 +685,7 @@ operations without activating sync, storage, account, or transport behaviour.
   global.PocketSyncCrypto = Object.freeze({
     FORMAT,
     POLICY,
+    RECOVERY_AUTHORISATION,
     DERIVATION_LABELS,
     ENVELOPE_KINDS,
     encodeBase64Url,
@@ -641,8 +700,9 @@ operations without activating sync, storage, account, or transport behaviour.
     buildHkdfInfo,
     generateDeviceWrappingKey,
     createDerivedWrappingKey,
-    deriveRecoveryAuthorisationVerifier,
-    createRecoveryAuthorisationVerifier,
+    createRecoveryAuthorisationKeyPair,
+    digestRecoveryCredential,
+    signRecoveryAuthorisation,
     deriveWrappingKey,
     createMasterKeyBundle,
     openMasterKeyBundle,

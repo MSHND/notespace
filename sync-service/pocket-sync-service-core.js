@@ -364,27 +364,22 @@ function validateMasterKeyEnvelope(input, code = "service-envelope-invalid") {
 }
 
 function validateRecoveryVerifier(input, code = "service-request-invalid") {
-  const value = exactObject(input, [
-    "format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier",
-  ], ["format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier"], code);
-  if (value.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
-      || !Number.isSafeInteger(value.version) || value.version < 1
-      || value.kdf !== "HKDF-SHA-256"
-      || canonicalBase64urlByteLength(value.kdfSalt) !== POLICY.hkdfSaltByteLength
-      || value.derivationVersion !== 1
-      || canonicalBase64urlByteLength(value.verifier) !== 32) {
+  const value = exactObject(input, ["version", "algorithm", "publicKeyFormat", "publicKey"],
+    ["version", "algorithm", "publicKeyFormat", "publicKey"], code);
+  if (value.version !== 1 || value.algorithm !== "Ed25519" || value.publicKeyFormat !== "spki"
+      || canonicalBase64urlByteLength(value.publicKey) < 32
+      || canonicalBase64urlByteLength(value.publicKey) > POLICY.maximumPublicKeyBytes) {
     throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
   }
   return frozen(value);
 }
 
 function validateRecoveryProof(input) {
-  const value = exactObject(input, ["format", "version", "proof"], [
-    "format", "version", "proof",
+  const value = exactObject(input, ["version", "algorithm", "signature"], [
+    "version", "algorithm", "signature",
   ]);
-  const size = canonicalBase64urlByteLength(value.proof);
-  if (value.format !== "pocket.sync.recovery-authorisation-proof.opaque"
-      || value.version !== 1
+  const size = canonicalBase64urlByteLength(value.signature);
+  if (value.version !== 1 || value.algorithm !== "Ed25519"
       || size < POLICY.recoveryProofMinimumBytes
       || size > POLICY.recoveryProofMaximumBytes) {
     throw serviceError("service-request-invalid");
@@ -941,10 +936,7 @@ function validateStoredRecord(collection, input, key) {
         if (!input.envelopeIds.includes(input.recoveryEnvelopeId)) {
           throw serviceError("service-state-invalid", 500);
         }
-        const verifier = validateRecoveryVerifier(input.recoveryVerifier, "service-state-invalid");
-        if (verifier.version !== input.recoveryVersion) {
-          throw serviceError("service-state-invalid", 500);
-        }
+        validateRecoveryVerifier(input.recoveryVerifier, "service-state-invalid");
         if (input.recoveryStatus === "ready") {
           if (input.recoveryOperationId !== null || input.recoveryCredentialId !== null) {
             throw serviceError("service-state-invalid", 500);
@@ -1701,6 +1693,12 @@ function createServiceCore(input) {
   function recoveryFinishDigest(request) {
     return sha256([1, "recovery", "finish", request.operationId,
       request.recoveryCeremonyId, request.deviceId, request.proof, request.credential]);
+  }
+
+  function recoveryCredentialDigest(credential) {
+    return createHash("sha256").update(canonicalJson([
+      "pocket.sync.recovery-credential.v1", credential,
+    ]), "utf8").digest("base64url");
   }
 
   function envelopeRecord(accountId, syncedPocketId, envelope, at) {
@@ -3031,15 +3029,12 @@ function createServiceCore(input) {
     });
   }
 
-  function recoveryBeginBody(ceremony, verifier) {
+  function recoveryBeginBody(ceremony) {
     return frozen({
       apiVersion: 1, ok: true, operationId: ceremony.operationId,
       recoveryCeremonyId: ceremony.recoveryCeremonyId, expiresAt: ceremony.expiresAt,
       recoveryVersion: ceremony.recoveryVersion, challenge: ceremony.challenge,
-      recoveryAuthorisation: {
-        format: verifier.format, version: verifier.version, kdf: verifier.kdf,
-        kdfSalt: verifier.kdfSalt, derivationVersion: verifier.derivationVersion,
-      },
+      keySetVersion: ceremony.keySetVersion,
       prfEvaluationInput: ceremony.prfEvaluationInput,
       publicKeyCreationOptions: ceremony.publicKeyCreationOptions,
     });
@@ -3067,7 +3062,7 @@ function createServiceCore(input) {
           throw serviceError("service-recovery-unavailable", 404);
         }
         return frozen({ status: 200,
-          body: recoveryBeginBody(existing, state.keySet.recoveryVerifier), session: null });
+          body: recoveryBeginBody(existing), session: null });
       }
       const locator = await readRecord(transaction, COLLECTIONS.recoveryLocators,
         request.accountLocator);
@@ -3105,7 +3100,7 @@ function createServiceCore(input) {
       await insertRecord(transaction, COLLECTIONS.recoveryCeremonies,
         request.operationId, ceremony);
       return frozen({ status: 200,
-        body: recoveryBeginBody(ceremony, state.keySet.recoveryVerifier), session: null });
+        body: recoveryBeginBody(ceremony), session: null });
     });
   }
 
@@ -3172,11 +3167,12 @@ function createServiceCore(input) {
       return frozen({ ceremony, account, keySet: state.keySet, replay: null });
     });
     if (prepared.replay) return prepared.replay;
-    await callRecoveryProofVerifier({ trustedOrigin, accountId: prepared.account.accountId,
-      syncedPocketId: prepared.ceremony.syncedPocketId, operationId: request.operationId,
+    await callRecoveryProofVerifier({ syncedPocketId: prepared.ceremony.syncedPocketId,
+      deviceId: request.deviceId, operationId: request.operationId,
       recoveryCeremonyId: request.recoveryCeremonyId,
       challenge: prepared.ceremony.challenge, recoveryVersion: prepared.ceremony.recoveryVersion,
-      expiresAt: prepared.ceremony.expiresAt,
+      keySetVersion: prepared.ceremony.keySetVersion, expiresAt: prepared.ceremony.expiresAt,
+      credentialDigest: recoveryCredentialDigest(request.credential),
       storedVerifier: prepared.keySet.recoveryVerifier, proof: request.proof });
     const rawVerified = await callVerifier("verifyRegistration", { trustedOrigin, rpId,
       challenge: prepared.ceremony.challenge,
@@ -3249,7 +3245,7 @@ function createServiceCore(input) {
   async function rotateRecovery(value) {
     const { context, body } = invocation(value);
     const request = validateRotateRecoveryRequest(body);
-    if (request.recoveryVerifier.version !== request.expectedRecoveryVersion + 1
+    if (request.recoveryVerifier.version !== 1
         || request.recoveryEnvelope.envelopeVersion !== request.expectedRecoveryVersion + 1) {
       throw serviceError("service-request-invalid");
     }
@@ -3293,7 +3289,7 @@ function createServiceCore(input) {
       const newLocator = frozen({ kind: "pocket.sync.service-recovery-locator",
         schemaVersion: 1, storeVersion: 1, accountLocator: newLocatorId,
         accountId: account.accountId, syncedPocketId: request.syncedPocketId,
-        recoveryVersion: request.recoveryVerifier.version, status: "active",
+        recoveryVersion: request.recoveryEnvelope.envelopeVersion, status: "active",
         createdAt: timestamp(at), revokedAt: null });
       await insertRecord(transaction, COLLECTIONS.envelopes,
         newEnvelope.envelopeId, newEnvelope);
@@ -3311,13 +3307,13 @@ function createServiceCore(input) {
       const keySet = frozen({ ...state.keySet, storeVersion: state.keySet.storeVersion + 1,
         keySetVersion: nextVersion,
         envelopeIds: [...state.keySet.envelopeIds, newEnvelope.envelopeId],
-        recoveryStatus: "ready", recoveryVersion: request.recoveryVerifier.version,
+        recoveryStatus: "ready", recoveryVersion: request.recoveryEnvelope.envelopeVersion,
         recoveryEnvelopeId: newEnvelope.envelopeId,
         recoveryVerifier: request.recoveryVerifier, accountLocator: newLocatorId,
         recoveryOperationId: null, recoveryCredentialId: null, updatedAt: timestamp(at) });
       await replaceRecord(transaction, COLLECTIONS.keySets, request.syncedPocketId,
         state.keySet, keySet);
-      const details = frozen({ recoveryVersion: request.recoveryVerifier.version,
+      const details = frozen({ recoveryVersion: request.recoveryEnvelope.envelopeVersion,
         accountLocator: newLocatorId, previousRecoveryInvalidated: true,
         replacementCopyRequired: true });
       const result = frozen({ status: "committed", keySetVersion: nextVersion, details });

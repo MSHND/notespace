@@ -45,23 +45,21 @@ An exact explicit idempotent retry returns the stored outcome. A first-seen idem
 
 ## 5. Initial recovery setup
 
-`initialiseRecovery` requires an authenticated account session, the owned Pocket, an unconfigured recovery state, matching key-set version, an exact version-1 derived verifier and an exact version-1 recovery envelope. The service creates one fresh 32-byte opaque account locator.
+`initialiseRecovery` requires an authenticated account session, the owned Pocket, an unconfigured recovery state, matching key-set version, an exact Ed25519 SPKI public verifier and an exact version-1 recovery envelope. The service creates one fresh 32-byte opaque account locator.
 
 One transaction inserts the envelope and locator, installs the verifier, moves the key set to `ready`, advances its version and stores the immutable operation result. Exact replay returns the same locator. A failed transaction leaves recovery wholly unconfigured.
 
-The client remains responsible for deriving both the account-authorisation verifier and recovery wrapping key under distinct P028 labels and for creating/saving the local recovery package.
+The client creates a fresh Ed25519 keypair and recovery wrapping key locally. It sends only the public verifier; its version-2 recovery package keeps the PKCS8 private signing material with the recovery root.
 
 ## 6. Recovery proof boundary
 
-The factory requires an exact one-method `recoveryProofVerifier`. Its `verifyRecoveryProof()` receives the trusted origin, bound account/Pocket/operation/ceremony identities, challenge, recovery version/expiry, stored derived verifier and submitted opaque proof. It receives no envelope, Pocket ciphertext, master key, PRF output or recovery root.
-
-P036 deliberately chooses no production proof algorithm. False, malformed or thrown adapter results become the stable non-secret `service-recovery-proof-failed`. The verifier is called once outside the write transaction. Every relevant record and version is re-read before commit.
+The factory requires an exact one-method `recoveryProofVerifier`. Its production Ed25519 verifier receives the stored public verifier, bound Pocket/device/operation/ceremony identities, challenge, recovery/key-set versions, expiry, exact credential digest and submitted signature. It imports the SPKI key for `verify` only and receives no envelope, Pocket ciphertext, master key, PRF output, recovery root or private key. False, malformed or thrown adapter results become the stable non-secret `service-recovery-proof-failed`. The verifier is called once outside the write transaction. Every relevant record and version is re-read before commit.
 
 ## 7. Begin and finish recovery
 
 `beginRecovery` is unauthenticated and requires an active opaque locator. Unknown and revoked locators use the same display-safe unavailable error. The core loads and cross-checks account, Pocket, key set, locator, active recovery envelope and verifier, then stores one pending ceremony with a fresh challenge and P031-compatible replacement-passkey registration options.
 
-The response exposes the public derivation metadata but not the stored verifier value or recovery envelope. Exact pending replay returns the same challenge/options. No credential or session is created by begin.
+The response exposes the recovery and key-set versions but not the stored verifier value or recovery envelope. Exact pending replay returns the same challenge/options. No credential or session is created by begin.
 
 `finishRecovery` requires the bound ceremony/device/version, verifies the recovery proof, then verifies a new passkey registration. One transaction creates the credential, appends it to the account, creates a normal account session, advances the key set to `rotation-required` and completes the ceremony. The response returns the still-active recovery envelope so the client can unwrap locally. It makes no content-unlocked claim.
 
@@ -73,7 +71,7 @@ Recovery is not complete when the new credential/session is created. The key set
 
 After rotation, the ready key set deliberately clears its consumed recovery-operation and recovery-credential fields. The completed recovery ceremony remains the durable authority binding the recovery operation, account, Pocket and recovered credential. `rotateRecovery` checks that ceremony and credential before it inspects a stored key-operation result, so another credential on the same account cannot receive the replacement locator.
 
-`rotateRecovery` requires matching operation, key-set and recovery versions, a next-version verifier, next-version recovery envelope and fresh envelope ID. One transaction:
+`rotateRecovery` requires matching operation, key-set and recovery versions, a fresh Ed25519 public verifier, next-version recovery envelope and fresh envelope ID. One transaction:
 
 - inserts the new active envelope and locator;
 - replaces the old envelope with a ciphertext-free tombstone;
@@ -89,7 +87,7 @@ P041 adds the recovered device envelope before rotation and supplies the post-ad
 
 ## 9. Recovery package boundary
 
-The recovery package stays local-only. It may later contain a package version, opaque locator and Pocket ID, raw recovery-root material, entropy declaration, checksum and human instructions. It is never an accepted service request and contains no Pocket Notes, account session or passkey private material.
+The version-2 recovery package stays local-only. It contains opaque locator and Pocket ID, recovery-root material, PKCS8 recovery-signing private material, entropy declaration, checksum and human instructions. It is never an accepted service request and contains no Pocket Notes, account session or passkey private material.
 
 P036 selects no file extension, QR encoding, word list, printing layout or storage recommendation.
 
@@ -103,4 +101,4 @@ Malformed stored records or relationships fail closed without repair, deletion o
 
 P038 supplies the unloaded exact browser communication boundary and P041 supplies dormant local envelope opening, recovery-package replacement and encrypted recovery staging through the existing service methods. P041 stops at `ready-for-adoption` and keeps roots, master keys and PRF output local.
 
-P049 now composes the real HTTP/cookie, WebAuthn and durable-database adapters into a local loopback HTTPS executable, but injects an explicit unavailable recovery-proof verifier. Still required are P042's one synced-owner/Save controller, a reviewed production recovery-proof algorithm/adapter, public deployment, abuse controls and operational rollback policy. The service remains undeployed.
+P050 composes the real native-WebCrypto Ed25519 recovery-proof verifier into the local server configuration. The service remains undeployed; P042's one synced-owner/Save controller, public deployment, abuse controls and operational rollback policy remain separate work.

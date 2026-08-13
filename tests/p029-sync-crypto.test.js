@@ -510,6 +510,37 @@ test("readable plaintext cannot enter remote metadata, opaque top levels or erro
   await assert.rejects(api.openContent(record, key, contentContext({ revision: 9 })), (error) => !error.message.includes(SENTINEL));
 });
 
+test("P050 signs one exact Ed25519 recovery-authorisation transcript with portable PKCS8 material", async () => {
+  const { api } = createModule();
+  const first = await api.createRecoveryAuthorisationKeyPair();
+  const second = await api.createRecoveryAuthorisationKeyPair();
+  const credential = { id: "credential-p050", rawId: "credential-p050", type: "public-key" };
+  const credentialDigest = await api.digestRecoveryCredential(credential);
+  const input = {
+    recoveryCeremonyId: "ceremony-p050", operationId: "operation-p050", challenge: "challenge-p050",
+    syncedPocketId: "pocket-p050", deviceId: "device-p050", recoveryVersion: 2,
+    keySetVersion: 7, expiresAt: "2042-01-01T00:05:00.000Z", credentialDigest,
+  };
+  const proof = await api.signRecoveryAuthorisation(first.recoveryAuthorisation, input);
+  const transcript = Buffer.from(JSON.stringify([
+    "pocket.sync.recovery-authorisation.v1", 1, input.recoveryCeremonyId, input.operationId,
+    input.challenge, input.syncedPocketId, input.deviceId, input.recoveryVersion,
+    input.keySetVersion, input.expiresAt, base64url(credentialDigest),
+  ]));
+  const publicKey = await webcrypto.subtle.importKey("spki",
+    Buffer.from(first.recoveryVerifier.publicKey, "base64url"), { name: "Ed25519" }, false, ["verify"]);
+  assert.equal(await webcrypto.subtle.verify("Ed25519", publicKey,
+    Buffer.from(proof.signature, "base64url"), transcript), true);
+  const tampered = Buffer.from(transcript);
+  tampered[tampered.length - 2] ^= 1;
+  assert.equal(await webcrypto.subtle.verify("Ed25519", publicKey,
+    Buffer.from(proof.signature, "base64url"), tampered), false);
+  const wrongProof = await api.signRecoveryAuthorisation(second.recoveryAuthorisation, input);
+  assert.equal(await webcrypto.subtle.verify("Ed25519", publicKey,
+    Buffer.from(wrongProof.signature, "base64url"), transcript), false);
+  credentialDigest.fill(0);
+});
+
 test("sync crypto has no forbidden derivation, storage, network, DOM, timer, provider or third-party code", () => {
   const moduleSource = source(MODULE_PATH).toLowerCase();
   for (const forbidden of [

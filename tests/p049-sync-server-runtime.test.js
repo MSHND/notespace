@@ -353,7 +353,7 @@ test("P049 local configuration fails closed and the recovery proof verifier cann
   const readFile = (file) => new Uint8Array(file === "cert.pem" ? [1] : [2]);
   const config = createLocalServerConfig({ environment: base, readFile });
   assert.deepEqual(config.listen, { host: "127.0.0.1", port: 8443 });
-  await assert.rejects(config.runtime.recoveryProofVerifier.verifyRecoveryProof({}), (error) => error && error.code === "recovery-proof-unavailable");
+  await assert.rejects(config.runtime.recoveryProofVerifier.verifyRecoveryProof({}), (error) => error && error.code === "service-recovery-proof-failed");
   for (const environment of [
     { ...base, POCKET_SYNC_DATABASE_URL: "" },
     { ...base, POCKET_SYNC_TRUSTED_ORIGIN: "http://sync.pocket.example" },

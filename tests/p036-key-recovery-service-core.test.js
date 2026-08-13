@@ -64,14 +64,12 @@ function recoveryEnvelope(version = 1, id = `recovery-envelope-${version}`, seed
     deviceId: null, credentialId: null, kdf: "HKDF-SHA-256", kdfSalt: b64(32, 91 + version),
     derivationVersion: 1, encryptedEnvelope: encryptedEnvelope(seed + version) };
 }
-function recoveryVerifier(version = 1, seed = 110) {
-  return { format: "pocket.sync.recovery-authorisation-verifier.opaque", version,
-    kdf: "HKDF-SHA-256", kdfSalt: b64(32, seed), derivationVersion: 1,
-    verifier: b64(32, seed + 40) };
+function recoveryVerifier(_version = 1, seed = 110) {
+  return { version: 1, algorithm: "Ed25519", publicKeyFormat: "spki",
+    publicKey: b64(32, seed + 40) };
 }
 function proof(seed = 170) {
-  return { format: "pocket.sync.recovery-authorisation-proof.opaque", version: 1,
-    proof: b64(32, seed) };
+  return { version: 1, algorithm: "Ed25519", signature: b64(64, seed) };
 }
 function mutation(operationId, expectedKeySetVersion, extra = {}) {
   return { apiVersion: 1, operationId, logicalChangeId: `${operationId}-change`,
@@ -170,7 +168,9 @@ test("P036 core remains isolated from P046-P049 server adapters and browser load
     "migrations",
     "pocket-sync-db-migrate.js",
     "pocket-sync-http-adapter.js",
+    "pocket-sync-postgres-schema.js",
     "pocket-sync-postgres-store.js",
+    "pocket-sync-recovery-proof-verifier.js",
     "pocket-sync-server-config.js",
     "pocket-sync-server-runtime.js",
     "pocket-sync-server.js",
@@ -343,7 +343,7 @@ test("begin recovery is unauthenticated, replays exactly, omits secrets and buil
   assert.equal(begin.body.publicKeyCreationOptions.attestation, "none");
   assert.deepEqual(begin.body.publicKeyCreationOptions.excludeCredentials.map((item) => item.id),
     [registered.credentialId]);
-  assert.equal(Object.hasOwn(begin.body.recoveryAuthorisation, "verifier"), false);
+  assert.equal(Object.hasOwn(begin.body, "recoveryAuthorisation"), false);
   assert.equal(JSON.stringify(begin).includes("ciphertext"), false);
   const snapshot = harness.driver.snapshot();
   assert.equal(Object.keys(snapshot.credentials).length, 1);
@@ -513,7 +513,7 @@ test("rotation requires the recovered credential and atomically invalidates old 
   assert.notEqual(rotated.body.accountLocator, initial.body.accountLocator);
   const after = harness.driver.snapshot();
   assert.equal(after.keySets["pocket-one"].recoveryStatus, "ready");
-  assert.equal(after.keySets["pocket-one"].recoveryVerifier.version, 2);
+  assert.equal(after.keySets["pocket-one"].recoveryVerifier.version, 1);
   assert.equal(after.keySets["pocket-one"].recoveryOperationId, null);
   assert.equal(after.recoveryLocators[initial.body.accountLocator].status, "revoked");
   assert.equal(after.envelopes["recovery-envelope-1"].status, "revoked");

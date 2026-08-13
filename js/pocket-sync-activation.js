@@ -40,7 +40,7 @@ without adding UI, a live synced owner, background work, or deployment state.
     "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
     "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
     "deviceEnvelope", "prfEnvelope", "prfStatus", "recoveryEnvelope",
-    "recoveryVerifier", "recoveryRoot", "recoveryPackage",
+    "recoveryVerifier", "recoveryAuthorisation", "recoveryRoot", "recoveryPackage",
     "registrationContinuation", "account", "confirmedRemoteRevision",
     "keySetVersion", "recoveryVersion", "accountLocator", "pendingOperation",
     "sourceSaved", "recoveryCopyStored", "adopted", "createdAt", "updatedAt",
@@ -178,7 +178,7 @@ without adding UI, a live synced owner, background work, or deployment state.
     ], "activation-security-contract-invalid");
     requireMethods(config.crypto, [
       "encodeBase64Url", "generateDeviceWrappingKey", "createDerivedWrappingKey",
-      "createRecoveryAuthorisationVerifier", "createMasterKeyBundle",
+      "createRecoveryAuthorisationKeyPair", "createMasterKeyBundle",
       "openMasterKeyBundle", "sealContent", "openContent", "validateContentRecord",
       "validateMasterKeyEnvelope",
     ], "activation-crypto-invalid");
@@ -287,13 +287,22 @@ without adding UI, a live synced owner, background work, or deployment state.
   }
 
   function validateRecoveryVerifier(input) {
-    const value = exactObject(input, [
-      "format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier",
-    ], "activation-state-invalid");
-    if (value.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
-        || value.version !== 1 || value.kdf !== "HKDF-SHA-256"
-        || byteLength(value.kdfSalt) !== 32 || value.derivationVersion !== 1
-        || byteLength(value.verifier) !== 32) throw activationError("activation-state-invalid");
+    const value = exactObject(input, ["version", "algorithm", "publicKeyFormat", "publicKey"],
+      "activation-state-invalid");
+    if (value.version !== 1 || value.algorithm !== "Ed25519" || value.publicKeyFormat !== "spki"
+        || byteLength(value.publicKey) < 32 || byteLength(value.publicKey) > 4096) {
+      throw activationError("activation-state-invalid");
+    }
+    return value;
+  }
+
+  function validateRecoveryAuthorisation(input) {
+    const value = exactObject(input, ["version", "algorithm", "privateKeyFormat", "privateKey"],
+      "activation-state-invalid");
+    if (value.version !== 1 || value.algorithm !== "Ed25519" || value.privateKeyFormat !== "pkcs8"
+        || byteLength(value.privateKey) < 32 || byteLength(value.privateKey) > 4096) {
+      throw activationError("activation-state-invalid");
+    }
     return value;
   }
 
@@ -301,7 +310,7 @@ without adding UI, a live synced owner, background work, or deployment state.
     if (input === null) return null;
     const value = exactObject(input, [
       "kind", "localOnly", "remoteUploadAllowed", "packageVersion", "accountLocator",
-      "syncedPocketId", "rootMaterial", "rootBits", "checksum", "instructions",
+      "syncedPocketId", "rootMaterial", "rootBits", "recoveryAuthorisation", "checksum", "instructions",
     ], "activation-state-invalid");
     const checked = config.securityContract.buildRecoveryPackage({
       packageVersion: value.packageVersion,
@@ -309,6 +318,7 @@ without adding UI, a live synced owner, background work, or deployment state.
       syncedPocketId: value.syncedPocketId,
       rootMaterial: value.rootMaterial,
       rootBits: value.rootBits,
+      recoveryAuthorisation: value.recoveryAuthorisation,
       checksum: value.checksum,
       instructions: value.instructions,
     });
@@ -352,6 +362,7 @@ without adding UI, a live synced owner, background work, or deployment state.
     validateEnvelope(draft.deviceEnvelope, "device", config);
     validateEnvelope(draft.recoveryEnvelope, "recovery", config);
     validateRecoveryVerifier(draft.recoveryVerifier);
+    if (draft.recoveryAuthorisation !== null) validateRecoveryAuthorisation(draft.recoveryAuthorisation);
     if (!Number.isSafeInteger(draft.confirmedRemoteRevision)
         || ![0, 1].includes(draft.confirmedRemoteRevision)
         || !Number.isSafeInteger(draft.keySetVersion) || draft.keySetVersion < 0
@@ -371,6 +382,8 @@ without adding UI, a live synced owner, background work, or deployment state.
     if (draft.recoveryRoot !== null && byteLength(draft.recoveryRoot) !== 32) {
       throw activationError("activation-state-invalid");
     }
+    if (stageAtLeast(draft, "ready-for-adoption") !== true
+        && draft.recoveryAuthorisation === null) throw activationError("activation-state-invalid");
     const recoveryPackage = validateStoredPackage(draft.recoveryPackage, config);
     if (draft.registrationContinuation !== null) {
       const continuation = exactObject(draft.registrationContinuation, [
@@ -876,11 +889,12 @@ without adding UI, a live synced owner, background work, or deployment state.
       let built;
       try {
         built = await checked(execution, execution.dependencies.buildRecoveryPackage({
-          packageVersion: 1,
+          packageVersion: 2,
           accountLocator: execution.draft.accountLocator,
           syncedPocketId: execution.draft.syncedPocketId,
           rootMaterial,
           rootBits: 256,
+          recoveryAuthorisation: execution.draft.recoveryAuthorisation,
           instructions: [config.securityContract.RECOVERY_COPY.body],
         }));
       } catch (error) {
@@ -946,6 +960,7 @@ without adding UI, a live synced owner, background work, or deployment state.
         stage: "ready-for-adoption",
         recoveryCopyStored: true,
         recoveryRoot: null,
+        recoveryAuthorisation: null,
         recoveryPackage: null,
         registrationContinuation: null,
         pendingOperation: null,
@@ -1130,10 +1145,10 @@ without adding UI, a live synced owner, background work, or deployment state.
             execution,
             config.crypto.createDerivedWrappingKey(recoveryRootBytes, recoveryContext)
           );
-          verifier = await checked(
-            execution,
-            config.crypto.createRecoveryAuthorisationVerifier(recoveryRootBytes)
-          );
+          const authorisation = await checked(execution,
+            config.crypto.createRecoveryAuthorisationKeyPair());
+          verifier = authorisation.recoveryVerifier;
+          execution.recoveryAuthorisation = authorisation.recoveryAuthorisation;
           const deviceContext = {
             syncedPocketId: options.syncedPocketId,
             envelopeId: ids.deviceEnvelopeId,
@@ -1177,6 +1192,7 @@ without adding UI, a live synced owner, background work, or deployment state.
             prfStatus: "pending",
             recoveryEnvelope,
             recoveryVerifier: verifier,
+            recoveryAuthorisation: execution.recoveryAuthorisation,
             recoveryRoot: config.crypto.encodeBase64Url(recoveryRootBytes),
             recoveryPackage: null,
             registrationContinuation: null,

@@ -13,7 +13,7 @@ The created orchestrator exposes exactly asynchronous `recover(dependencies, opt
 
 ## 2. Recovery authority and target
 
-The human supplies the existing P028 local-only recovery package. P041 validates the exact package through `PocketSyncSecurityContract`, including version 1, local-only flags, the opaque account locator and Pocket ID, the 256-bit canonical recovery root, checksum and approved instructions. The complete package is never sent to any remote service or returned in a result.
+The human supplies the version-2 P028 local-only recovery package. P041 validates its opaque account locator and Pocket ID, 256-bit recovery root, Ed25519 PKCS8 recovery-signing private material, checksum and approved instructions. The complete package is never sent to any remote service or returned in a result. A version-1 package has no asymmetric recovery authority and fails closed rather than falling back to the retired symmetric proof.
 
 Recovery may start only while the captured target owner kind is `none` or `detached`. JSON, Vault and synced owners are rejected before package reading, key generation, storage, WebAuthn or remote access. The orchestrator preserves an opaque target-continuity value and rechecks the exact captured target after asynchronous boundaries. A changed target stops work and leaves any encrypted staged state available only for explicit resume against the restored original continuity.
 
@@ -25,15 +25,15 @@ P041 extends the existing P030 database and object store with a strict `pocket.s
 
 The first staged draft is committed before `beginRecovery`. Stable recovery, read, download, envelope and rotation identifiers are generated exactly once and encrypted before first use. Pending remote dispatch is persisted before the one network call. Confirmed results are persisted before the next step. There is no automatic retry.
 
-The encrypted draft may temporarily contain the old package/root, exact proof and server-safe credential continuation, encrypted content, device envelope, replacement root/verifier/envelope, locator and replacement package. It never contains a readable Pocket payload, authenticator-native object, raw PRF output, session cookie, source handle or destination capability.
+The encrypted draft may temporarily contain the old package/root/signing private material, exact proof and server-safe credential continuation, encrypted content, device envelope, replacement root/public verifier/signing private material/envelope, locator and replacement package. It never contains a readable Pocket payload, authenticator-native object, raw PRF output, session cookie, source handle or destination capability.
 
 P030 record schema 3 adds nullable encrypted `recoveryDraft` to an ordinary device record. Schema-1 and schema-2 records migrate non-destructively to schema 3 with that field null. Recovery staging and activation drafts coexist in the same store without pretending an incomplete recovery is an ordinary valid device state.
 
 ## 4. Begin, proof and passkey
 
-P041 sends the exact P038 `beginRecovery` request using the stored operation ID, package locator and new device ID. The validated response supplies a short-lived challenge, public recovery-authorisation metadata, the account's stable PRF evaluation input and P031-valid passkey registration options. It contains no stored verifier or recovery envelope.
+P041 sends the exact P038 `beginRecovery` request using the stored operation ID, package locator and new device ID. The validated response supplies a short-lived challenge, recovery and key-set versions, the account's stable PRF evaluation input and P031-valid passkey registration options. It contains no stored verifier or recovery envelope.
 
-The recovery proof is derived only by the injected exact one-method `recoveryProofDeriver`. P041 selects no proof construction. The adapter receives root bytes and the minimum bound public ceremony values and returns only the exact opaque P036/P038 proof shape.
+P041 creates and serialises the new passkey first, hashes that exact credential representation, then imports the package's PKCS8 key non-extractably for `sign` only. It signs the one fixed Ed25519 transcript binding ceremony, operation, challenge, Pocket, device, recovery version, key-set version, expiry and credential digest. Only `{ version, algorithm: "Ed25519", signature }` is sent to the service. The service uses its stored SPKI public verifier for `verify` only; it never receives the root, private key, claimant public key or arbitrary transcript bytes.
 
 The new passkey is created through an injected adapter backed by P031's browser WebAuthn boundary and serialised through P031's production registration serialiser. Only the server-safe credential enters the encrypted continuation. Any PRF output is transiently inspected by P031, cleared on a best-effort basis and neither persisted nor uploaded. P041 deliberately creates no passkey-PRF envelope.
 
@@ -51,18 +51,13 @@ If the revision changes, encrypted content is malformed, authentication fails or
 
 The device wrapping key was generated before initial staging. Once the master key is open, P029 wraps it once for a new version-1 `device` envelope with the new device ID, `kdf: none` and no credential target. The encrypted draft is committed before P038 `addEnvelope`. Ambiguous addition is replayed only after explicit resume with the same operation, logical-change ID and envelope and `attemptKind: idempotent-retry`. A key-set conflict stops before recovery rotation.
 
-P041 then creates one fresh, distinct 256-bit replacement recovery root. P029 independently creates:
-
-- the next-version recovery-authorisation verifier; and
-- the next-version recovery master-key envelope.
-
-They use independent salts and the existing distinct account-authorisation and master-key-wrapping domains. P029's verifier helper now accepts an explicit positive version while retaining version 1 as its default for P039.
+P041 then creates one fresh, distinct 256-bit replacement recovery root and one fresh Ed25519 keypair. It sends only the new SPKI public verifier with the next-version recovery master-key envelope. The matching PKCS8 private key stays only in the encrypted continuation until the replacement recovery package has been written. The signing key is never reused across recovery generations.
 
 P038 `rotateRecovery` uses the credential-bound completed recovery operation, the key-set version after device-envelope addition, the old recovery version and stable rotation identities. Exact explicit replay reuses all material. A committed rotation installs a new locator/verifier/envelope and atomically revokes the old locator and erases the old recovery-envelope ciphertext. A conflict does not claim readiness or build a replacement package.
 
 ## 7. Replacement recovery copy
 
-Only after rotation commits does P041 build the new P028 package from the returned locator and encrypted replacement root. It calls the prepared local destination boundary and requires explicit write success.
+Only after rotation commits does P041 build the new version-2 P028 package from the returned locator, encrypted replacement root and encrypted replacement signing private material. It calls the prepared local destination boundary and requires explicit write success.
 
 If writing fails, recovery remains not ready. The exact new package/root/locator stay only inside the encrypted draft and `resume` asks for a fresh in-memory destination capability. It performs no remote calls and writes the same package. The old package is already invalid after successful rotation, so this pause is deliberately visible to the caller.
 

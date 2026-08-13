@@ -79,14 +79,12 @@ function encryptedEnvelope(version) {
   };
 }
 
-function recoveryVerifier(version) {
+function recoveryVerifier(_version) {
   return {
-    format: "pocket.sync.recovery-authorisation-verifier.opaque",
-    version,
-    kdf: "HKDF-SHA-256",
-    kdfSalt: b64(32, 91 + version),
-    derivationVersion: 1,
-    verifier: b64(32, 121 + version),
+    version: 1,
+    algorithm: "Ed25519",
+    publicKeyFormat: "spki",
+    publicKey: b64(32, 121),
   };
 }
 
@@ -106,9 +104,9 @@ function recoveryEnvelope(version) {
 
 function recoveryProof() {
   return {
-    format: "pocket.sync.recovery-authorisation-proof.opaque",
     version: 1,
-    proof: b64(32, 181),
+    algorithm: "Ed25519",
+    signature: b64(64, 181),
   };
 }
 

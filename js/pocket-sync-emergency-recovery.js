@@ -23,8 +23,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
   });
   const FACTORY_FIELDS = Object.freeze([
     "securityContract", "crypto", "deviceStore", "accountContract", "contentService",
-    "envelopeService", "recoveryService", "webAuthn", "recoveryProofDeriver",
-    "randomBytes", "now",
+    "envelopeService", "recoveryService", "webAuthn", "randomBytes", "now",
   ]);
   const DEPENDENCY_FIELDS = Object.freeze([
     "captureRecoveryTarget", "isRecoveryTargetCurrent", "readRecoveryPackage",
@@ -41,7 +40,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     "targetContinuityId", "syncedPocketId", "deviceId", "ids", "oldRecoveryPackage",
     "beginRequest", "beginResponse", "finishRequest", "finishResponse",
     "confirmedRemoteRevision", "content", "deviceEnvelope", "replacementRecoveryRoot",
-    "replacementRecoveryVerifier", "replacementRecoveryEnvelope", "replacementAccountLocator",
+    "replacementRecoveryVerifier", "replacementRecoveryAuthorisation", "replacementRecoveryEnvelope", "replacementAccountLocator",
     "replacementRecoveryPackage", "account", "keySetVersion", "recoveryVersion",
     "pendingOperation", "replacementRecoveryCopyStored", "createdAt", "updatedAt",
   ]);
@@ -162,7 +161,8 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     ], "recovery-security-contract-invalid");
     requireMethods(config.crypto, [
       "encodeBase64Url", "generateDeviceWrappingKey", "deriveWrappingKey",
-      "createDerivedWrappingKey", "createRecoveryAuthorisationVerifier",
+      "createDerivedWrappingKey", "createRecoveryAuthorisationKeyPair", "digestRecoveryCredential",
+      "signRecoveryAuthorisation",
       "openMasterKeyBundle", "openContent", "sealContent", "validateContentRecord",
       "validateContentContext", "validateMasterKeyEnvelope", "validateEnvelopeContext",
     ], "recovery-crypto-invalid");
@@ -181,8 +181,6 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     requireMethods(config.recoveryService, ["beginRecovery", "finishRecovery", "rotateRecovery"],
       "recovery-remote-service-invalid");
     requireMethods(config.webAuthn, ["createCredential"], "recovery-webauthn-invalid", true);
-    requireMethods(config.recoveryProofDeriver, ["deriveRecoveryProof"],
-      "recovery-proof-deriver-invalid", true);
     if (typeof config.randomBytes !== "function" || typeof config.now !== "function") {
       throw recoveryError("recovery-factory-invalid");
     }
@@ -249,7 +247,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
   function validatePackage(input, config, code = "recovery-package-invalid") {
     const value = exactObject(input, [
       "kind", "localOnly", "remoteUploadAllowed", "packageVersion", "accountLocator",
-      "syncedPocketId", "rootMaterial", "rootBits", "checksum", "instructions",
+      "syncedPocketId", "rootMaterial", "rootBits", "recoveryAuthorisation", "checksum", "instructions",
     ], code);
     const built = config.securityContract.buildRecoveryPackage({
       packageVersion: value.packageVersion,
@@ -257,21 +255,21 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       syncedPocketId: value.syncedPocketId,
       rootMaterial: value.rootMaterial,
       rootBits: value.rootBits,
+      recoveryAuthorisation: value.recoveryAuthorisation,
       checksum: value.checksum,
       instructions: value.instructions,
     });
     if (!built || built.ok !== true || value.kind !== "pocket-recovery-package"
         || value.localOnly !== true || value.remoteUploadAllowed !== false
-        || value.packageVersion !== 1 || value.rootBits !== 256
+        || value.packageVersion !== 2 || value.rootBits !== 256
         || byteLength(value.rootMaterial) !== 32) throw recoveryError(code);
     return deepFreeze(jsonClone(built.value));
   }
 
   function validateProof(input) {
-    const value = exactObject(input, ["format", "version", "proof"], "recovery-proof-failed");
-    const size = byteLength(value.proof);
-    if (value.format !== "pocket.sync.recovery-authorisation-proof.opaque"
-        || value.version !== 1 || size < 32 || size > 1024) {
+    const value = exactObject(input, ["version", "algorithm", "signature"], "recovery-proof-failed");
+    const size = byteLength(value.signature);
+    if (value.version !== 1 || value.algorithm !== "Ed25519" || size < 32 || size > 1024) {
       throw recoveryError("recovery-proof-failed");
     }
     return deepFreeze(jsonClone(value));
@@ -312,15 +310,23 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     return value;
   }
 
-  function validateRecoveryVerifier(input, expectedVersion) {
+  function validateRecoveryVerifier(input) {
     if (input === null) return null;
-    const value = exactObject(input, [
-      "format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier",
-    ], "recovery-state-invalid");
-    if (value.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
-        || value.version !== expectedVersion || value.kdf !== "HKDF-SHA-256"
-        || byteLength(value.kdfSalt) !== 32 || value.derivationVersion !== 1
-        || byteLength(value.verifier) !== 32) throw recoveryError("recovery-state-invalid");
+    const value = exactObject(input, ["version", "algorithm", "publicKeyFormat", "publicKey"],
+      "recovery-state-invalid");
+    if (value.version !== 1 || value.algorithm !== "Ed25519"
+        || value.publicKeyFormat !== "spki" || byteLength(value.publicKey) < 32
+        || byteLength(value.publicKey) > 4096) throw recoveryError("recovery-state-invalid");
+    return value;
+  }
+
+  function validateRecoveryAuthorisation(input) {
+    const value = exactObject(input, ["version", "algorithm", "privateKeyFormat", "privateKey"],
+      "recovery-state-invalid");
+    if (value.version !== 1 || value.algorithm !== "Ed25519" || value.privateKeyFormat !== "pkcs8"
+        || byteLength(value.privateKey) < 32 || byteLength(value.privateKey) > 4096) {
+      throw recoveryError("recovery-state-invalid");
+    }
     return value;
   }
 
@@ -419,13 +425,15 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     if (!final && STAGES[draft.stage] >= STAGES["rotation-pending"]
         && (draft.replacementRecoveryRoot === null
           || draft.replacementRecoveryVerifier === null
+          || draft.replacementRecoveryAuthorisation === null
           || draft.replacementRecoveryEnvelope === null)) {
       throw recoveryError("recovery-state-invalid");
     }
     if (draft.replacementRecoveryVerifier !== null) {
-      validateRecoveryVerifier(draft.replacementRecoveryVerifier,
-        STAGES[draft.stage] >= STAGES["recovery-rotated"]
-          ? draft.recoveryVersion : draft.recoveryVersion + 1);
+      validateRecoveryVerifier(draft.replacementRecoveryVerifier);
+    }
+    if (draft.replacementRecoveryAuthorisation !== null) {
+      validateRecoveryAuthorisation(draft.replacementRecoveryAuthorisation);
     }
     if (!final && STAGES[draft.stage] >= STAGES["recovery-rotated"]
         && draft.replacementAccountLocator === null) throw recoveryError("recovery-state-invalid");
@@ -437,6 +445,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           || draft.beginResponse !== null || draft.finishRequest !== null
           || draft.finishResponse !== null || draft.content !== null || draft.deviceEnvelope !== null
           || draft.replacementRecoveryRoot !== null || draft.replacementRecoveryVerifier !== null
+          || draft.replacementRecoveryAuthorisation !== null
           || draft.replacementRecoveryEnvelope !== null
           || draft.replacementAccountLocator !== null || draft.replacementRecoveryPackage !== null
           || draft.pendingOperation !== null) throw recoveryError("recovery-state-invalid");
@@ -572,7 +581,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       }
       if (response.operationId !== request.operationId
           || response.recoveryVersion < 1
-          || response.recoveryAuthorisation?.verifier !== undefined) {
+          || !Number.isSafeInteger(response.keySetVersion) || response.keySetVersion < 1) {
         return remoteFailure("recovery-begin-failed", execution, { resumable: false });
       }
       await persistDraft(execution, changedDraft(execution.draft, {
@@ -587,21 +596,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       if (Date.parse(execution.draft.beginResponse.expiresAt) <= config.now()) {
         return remoteFailure("recovery-ceremony-expired", execution, { resumable: false });
       }
-      const root = decodeBase64Url(execution.draft.oldRecoveryPackage.rootMaterial, 32);
       let proof;
       let serialised;
       try {
-        proof = validateProof(await checked(execution,
-          config.recoveryProofDeriver.deriveRecoveryProof({
-            recoveryRoot: root,
-            challenge: execution.draft.beginResponse.challenge,
-            recoveryAuthorisation: execution.draft.beginResponse.recoveryAuthorisation,
-            recoveryVersion: execution.draft.recoveryVersion,
-            accountLocator: execution.draft.oldRecoveryPackage.accountLocator,
-            syncedPocketId: execution.draft.syncedPocketId,
-            operationId: execution.draft.ids.recoveryOperationId,
-            recoveryCeremonyId: execution.draft.beginResponse.recoveryCeremonyId,
-          })));
         let credential;
         try {
           credential = await checked(execution, config.webAuthn.createCredential(
@@ -616,6 +613,24 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           credential,
           execution.draft.beginResponse.prfEvaluationInput
         );
+        const credentialDigest = await checked(execution,
+          config.crypto.digestRecoveryCredential(serialised.credential));
+        try {
+          proof = validateProof(await checked(execution, config.crypto.signRecoveryAuthorisation(
+            execution.draft.oldRecoveryPackage.recoveryAuthorisation,
+            {
+              recoveryCeremonyId: execution.draft.beginResponse.recoveryCeremonyId,
+              operationId: execution.draft.ids.recoveryOperationId,
+              challenge: execution.draft.beginResponse.challenge,
+              syncedPocketId: execution.draft.syncedPocketId,
+              deviceId: execution.draft.deviceId,
+              recoveryVersion: execution.draft.recoveryVersion,
+              keySetVersion: execution.draft.beginResponse.keySetVersion,
+              expiresAt: execution.draft.beginResponse.expiresAt,
+              credentialDigest,
+            }
+          )));
+        } finally { credentialDigest.fill(0); }
         const request = {
           apiVersion: 1,
           operationId: execution.draft.ids.recoveryOperationId,
@@ -632,7 +647,6 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         return remoteFailure(error?.code === "recovery-proof-failed"
           ? "recovery-proof-failed" : "recovery-credential-failed", execution);
       } finally {
-        root.fill(0);
         if (serialised?.prf?.outputBytes) serialised.prf.outputBytes.fill(0);
       }
       return null;
@@ -874,8 +888,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         const derived = await checked(execution, config.crypto.createDerivedWrappingKey(
           nextRoot, context
         ));
-        const verifier = await checked(execution,
-          config.crypto.createRecoveryAuthorisationVerifier(nextRoot, nextVersion));
+        const authorisation = await checked(execution,
+          config.crypto.createRecoveryAuthorisationKeyPair());
+        const verifier = authorisation.recoveryVerifier;
         const currentContext = {
           syncedPocketId: execution.draft.syncedPocketId,
           envelopeId: execution.draft.deviceEnvelope.envelopeId,
@@ -902,6 +917,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         await persistDraft(execution, changedDraft(execution.draft, {
           replacementRecoveryRoot: config.crypto.encodeBase64Url(nextRoot),
           replacementRecoveryVerifier: verifier,
+          replacementRecoveryAuthorisation: authorisation.recoveryAuthorisation,
           replacementRecoveryEnvelope: envelope,
         }));
       } finally { oldRoot.fill(0); nextRoot.fill(0); }
@@ -969,11 +985,12 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       let built;
       try {
         built = await checked(execution, execution.dependencies.buildRecoveryPackage({
-          packageVersion: 1,
+          packageVersion: 2,
           accountLocator: execution.draft.replacementAccountLocator,
           syncedPocketId: execution.draft.syncedPocketId,
           rootMaterial: execution.draft.replacementRecoveryRoot,
           rootBits: 256,
+          recoveryAuthorisation: execution.draft.replacementRecoveryAuthorisation,
           instructions: [config.securityContract.RECOVERY_COPY.body],
         }));
       } catch (error) {
@@ -1047,6 +1064,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         deviceEnvelope: null,
         replacementRecoveryRoot: null,
         replacementRecoveryVerifier: null,
+        replacementRecoveryAuthorisation: null,
         replacementRecoveryEnvelope: null,
         replacementAccountLocator: null,
         replacementRecoveryPackage: null,
@@ -1193,6 +1211,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           deviceEnvelope: null,
           replacementRecoveryRoot: null,
           replacementRecoveryVerifier: null,
+          replacementRecoveryAuthorisation: null,
           replacementRecoveryEnvelope: null,
           replacementAccountLocator: null,
           replacementRecoveryPackage: null,

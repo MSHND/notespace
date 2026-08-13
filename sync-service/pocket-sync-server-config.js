@@ -1,5 +1,7 @@
 "use strict";
 
+const { createRecoveryProofVerifier } = require("./pocket-sync-recovery-proof-verifier.js");
+
 const CONFIG_FIELDS = Object.freeze(["environment", "readFile"]);
 
 function configError() {
@@ -88,7 +90,7 @@ function createLocalServerConfig(input) {
     credentialAlgorithms: Object.freeze([-7, -257]),
     ceremonyLifetimeMs: 300000,
     sessionLifetimeMs: 2592000000,
-    recoveryProofVerifier: createUnavailableRecoveryProofVerifier(),
+    recoveryProofVerifier: createRecoveryProofVerifier(),
     tls: Object.freeze({ cert: new Uint8Array(cert), key: new Uint8Array(key) }),
   });
   return Object.freeze({

@@ -115,9 +115,11 @@ Local JSON/Vault files, file handles, source sessions and browser safety copies 
 
 ## 5. Recovery-specific analysis
 
-The recovery root has at least 256 bits of local randomness and is not a password. The package carries the root, version, opaque account locator, opaque Pocket ID, checksum and instructions. It contains no notes. A checksum detects transcription/file damage; it is not an authentication secret.
+The recovery root has at least 256 bits of local randomness and is not a password. The version-2 package carries that root, a portable Ed25519 PKCS8 recovery-signing private key, opaque account locator and Pocket ID, checksum and instructions. It contains no notes. A checksum detects transcription/file damage; it is not an authentication secret.
 
-Two domain-separated derivations ensure that a recovery account-authorisation proof is not a master-key wrapping key and vice versa. P029 further derives the recovery wrapping key with HKDF-SHA-256 label `pocket.sync.recovery.master-key-wrapping.v1` and envelope-specific info. The service stores only the account-authorisation verifier/version, public 32-byte salt and encrypted recovery envelope. It must not request or log the root.
+Your recovery copy contains the secret needed to authorise recovery. Pocket's server stores only an Ed25519 SPKI public verification key. The server can verify a recovery signature, but cannot create one. The recovery root decrypts the recovery envelope; the separate signing private key authorises the recovery ceremony. Neither is uploaded, logged or retained in ordinary readable browser state.
+
+The server verifies one canonical, domain-separated transcript binding the ceremony, operation, challenge, Pocket, device, recovery and key-set versions, expiry and digest of the exact new WebAuthn credential. It stores no symmetric recovery secret, recovery root or signing private key. Each successful recovery rotation atomically installs a fresh public verifier with the new envelope and recovery version, and the replacement copy contains the matching new private key. Database compromise alone therefore does not provide recovery-signing authority, although a compromised service can still deny service and hostile delivered client code remains a separate threat.
 
 ## 6. Concrete crypto failure and memory boundary
 

@@ -81,7 +81,7 @@ The concrete cryptographic algorithm/parameter selection is locked and tested by
 
 ## 6. Emergency recovery is mandatory
 
-P039 implements the dormant activation half of the locked recovery architecture. Activation creates a local random recovery root of at least 256 bits, a separately derived account-recovery verifier, a separately derived master-key wrapping envelope and a local-only recovery package. The raw root and package are never uploaded. P041 implements the dormant new-device recovery half through an injected proof adapter, rotates the recovery authority and confirms the replacement local copy, but stops before owner adoption.
+P050 implements the dormant recovery-authorisation half. Activation creates a local random recovery root of at least 256 bits, a fresh Ed25519 keypair, a recovery envelope and a version-2 local-only package. The server receives only the SPKI public verifier; the raw root and PKCS8 signing private material are never uploaded. P041 signs the credential-bound recovery transcript locally, rotates to a fresh keypair and confirms the replacement local copy, but stops before owner adoption.
 
 The human must save the recovery copy. Choosing **I’ll do this later** pauses activation and preserves the current JSON/Vault owner. It cannot show **Sync is ready**. Successful emergency recovery rotates the root, verifier and envelope, invalidates the old recovery authorisation and requires a replacement recovery copy.
 

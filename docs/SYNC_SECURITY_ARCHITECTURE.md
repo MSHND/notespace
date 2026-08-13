@@ -119,7 +119,7 @@ The remote service may receive:
 - public passkey registration/authentication material required by WebAuthn;
 - opaque encrypted content records and authenticated envelope ciphertext;
 - expected/current revisions, content sizes, schema versions and operation identifiers;
-- recovery authorisation verifier/version material derived for that one purpose; and
+- an Ed25519 recovery-authorisation public verifier for that one purpose; and
 - operational timestamps, revocation state and deletion state.
 
 It must never receive readable node labels, Notes, Outline, attachments, historical filenames, local filesystem paths/handles, Vault handles, source-owner tokens, raw master keys, raw device wrapping keys, raw PRF output, raw recovery roots, complete recovery packages or browser-safety recovery payloads.
@@ -128,12 +128,9 @@ Strict allowlists apply per request/record. Unknown fields fail validation. An o
 
 ## 9. Mandatory recovery
 
-Activation creates a random recovery root with at least 256 bits of entropy locally. The root is never uploaded. Two stable, distinct derivation labels prevent cross-use:
+Activation creates a random recovery root with at least 256 bits of entropy locally and a fresh Ed25519 signing keypair. The root is never uploaded. The root derives only `pocket.sync.recovery.master-key-wrapping.v1`; the separate signing private key authorises recovery only.
 
-- recovery account authorisation: `pocket.sync.recovery.account-authorisation.v1`;
-- master-key wrapping: `pocket.sync.recovery.master-key-wrapping.v1`.
-
-The service may store a versioned verifier derived for account recovery and an encrypted recovery envelope. The verifier cannot be used to derive the master-key wrapping value, and neither record reveals the raw recovery root. The recovery package is generated locally and contains its format version, opaque account locator, opaque synced Pocket ID, root material, human-checkable checksum and instructions. It contains no Pocket notes and is never an uploadable remote request.
+The service stores only the Ed25519 SPKI public verifier and encrypted recovery envelope. It cannot sign, decrypt content or derive the wrapping key. The version-2 recovery package is generated locally and contains the root, PKCS8 signing private material, opaque account locator and synced Pocket ID, checksum and instructions. It contains no Pocket notes and is never an uploadable remote request.
 
 The locked recovery step is:
 
@@ -149,7 +146,7 @@ The locked recovery step is:
 
 The eventual package may be saved as a small Pocket recovery file and rendered locally as a printable QR code or grouped fallback code. The visual encoding and word list are deferred. The experience must use ordinary recovery language, not cryptocurrency-wallet aesthetics or vocabulary.
 
-After successful emergency recovery, Pocket can register a new passkey, unwrap the master key locally, create a new recovery root/version, replace the recovery authorisation verifier and master-key envelope, invalidate the old recovery authorisation and require the human to save a new recovery copy. Partial rotation is not reported as complete.
+After successful emergency recovery, Pocket can register a new passkey, unwrap the master key locally, create a new recovery root and Ed25519 keypair, replace the public verifier and master-key envelope, invalidate the old recovery authorisation and require the human to save a new recovery copy. Partial rotation is not reported as complete.
 
 ## 10. Activation readiness
 

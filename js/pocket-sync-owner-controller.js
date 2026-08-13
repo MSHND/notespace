@@ -17,7 +17,7 @@ device record for explicit, conditional Saves.
     "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
     "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
     "deviceEnvelope", "prfEnvelope", "prfStatus", "recoveryEnvelope",
-    "recoveryVerifier", "recoveryRoot", "recoveryPackage",
+    "recoveryVerifier", "recoveryAuthorisation", "recoveryRoot", "recoveryPackage",
     "registrationContinuation", "account", "confirmedRemoteRevision",
     "keySetVersion", "recoveryVersion", "accountLocator", "pendingOperation",
     "sourceSaved", "recoveryCopyStored", "adopted", "createdAt", "updatedAt",

@@ -412,11 +412,12 @@
       "syncedPocketId",
       "rootMaterial",
       "rootBits",
+      "recoveryAuthorisation",
       "checksum",
       "instructions",
     ];
     if (!hasOnlyFields(input, fields)
-        || !positiveVersion(input.packageVersion)
+        || input.packageVersion !== 2
         || !nonEmptyString(input.accountLocator)
         || !nonEmptyString(input.syncedPocketId)
         || !Number.isSafeInteger(input.rootBits)
@@ -426,6 +427,15 @@
         || !Array.isArray(input.instructions)
         || input.instructions.length === 0
         || input.instructions.some((instruction) => !nonEmptyString(instruction))) {
+      return fail("invalid-recovery-package");
+    }
+    if (!isObject(input.recoveryAuthorisation)
+        || Object.keys(input.recoveryAuthorisation).length !== 4
+        || input.recoveryAuthorisation.version !== 1
+        || input.recoveryAuthorisation.algorithm !== "Ed25519"
+        || input.recoveryAuthorisation.privateKeyFormat !== "pkcs8"
+        || canonicalBase64urlByteLength(input.recoveryAuthorisation.privateKey) < 32
+        || canonicalBase64urlByteLength(input.recoveryAuthorisation.privateKey) > 4096) {
       return fail("invalid-recovery-package");
     }
     return pass(frozen(Object.assign({

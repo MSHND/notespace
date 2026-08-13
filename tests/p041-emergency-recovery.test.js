@@ -8,6 +8,7 @@ const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
 
 const { createServiceCore } = require("../sync-service/pocket-sync-service-core.js");
+const { createRecoveryProofVerifier } = require("../sync-service/pocket-sync-recovery-proof-verifier.js");
 const { createMemoryServiceStore } = require("./helpers/p034-memory-service-store.js");
 const {
   createSharedDeviceStoreState,
@@ -131,8 +132,7 @@ async function createActivatedHarness(options = {}) {
     recoveryProofVerifier: Object.freeze({
       async verifyRecoveryProof(input) {
         verifierCalls.recovery += 1;
-        assert.equal(input.proof.proof, b64(32, 177));
-        return { verified: true };
+        return createRecoveryProofVerifier().verifyRecoveryProof(input);
       },
     }),
     randomBytes(length) {
@@ -280,17 +280,6 @@ async function createActivatedHarness(options = {}) {
       return nativeBrowserAdapter.createCredential(optionsInput);
     },
   });
-  let proofDerivations = 0;
-  const recoveryProofDeriver = Object.freeze({
-    async deriveRecoveryProof() {
-      proofDerivations += 1;
-      return {
-        format: "pocket.sync.recovery-authorisation-proof.opaque",
-        version: 1,
-        proof: b64(32, 177),
-      };
-    },
-  });
   let recoveryRandom = 0;
   const recoveryConfig = {
     securityContract: production.security,
@@ -301,7 +290,6 @@ async function createActivatedHarness(options = {}) {
     envelopeService,
     recoveryService,
     webAuthn,
-    recoveryProofDeriver,
     randomBytes(length) {
       recoveryRandom += 1;
       return bytes(length, recoveryRandom * 19);
@@ -365,7 +353,6 @@ async function createActivatedHarness(options = {}) {
     replacementPackages,
     recoveryEvents,
     get webAuthnCreates() { return webAuthnCreates; },
-    get proofDerivations() { return proofDerivations; },
     get beginObservedStaging() { return beginObservedStaging; },
     setSession(value) { sessionId = value; },
     makeAmbiguous(route) { ambiguousRoute = route; },
@@ -549,7 +536,7 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
   assert.equal(result.readyForAdoption, true);
   assert.equal(result.replacementRecoveryCopyStored, true);
   assert.equal(harness.webAuthnCreates, 1);
-  assert.equal(harness.proofDerivations, 1);
+  assert.equal(harness.verifierCalls.recovery, 1);
   assert.equal(harness.beginObservedStaging, true);
   assert.deepEqual(harness.remoteCalls.slice(callsBeforeRecovery).map((call) => call.route), [
     "beginRecovery", "finishRecovery", "readRevision", "downloadEncryptedRecord",
@@ -639,7 +626,7 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
   assert.equal(harness.remoteCalls.length, remoteCount);
   assert.equal(harness.recoveryEvents.length, eventCount);
   assert.equal(harness.webAuthnCreates, 1);
-  assert.equal(harness.proofDerivations, 1);
+  assert.equal(harness.verifierCalls.recovery, 1);
 });
 
 test("P049c counts every device-key encryption in recovery staging and promotion", async () => {
@@ -756,7 +743,7 @@ test("ambiguous finish resumes the exact continuation without another proof or c
   assert.equal(first.reason, "recovery-finish-unavailable");
   assert.equal(first.resumable, true);
   assert.equal(harness.webAuthnCreates, 1);
-  assert.equal(harness.proofDerivations, 1);
+  assert.equal(harness.verifierCalls.recovery, 1);
   const found = await harness.recoveryStore.readRecoveryAttempt(first.recoveryAttemptId);
   assert.equal(found.draft.stage, "finish-pending");
   const finishRequest = JSON.stringify(found.draft.finishRequest);
@@ -766,7 +753,7 @@ test("ambiguous finish resumes the exact continuation without another proof or c
   });
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
   assert.equal(harness.webAuthnCreates, 1);
-  assert.equal(harness.proofDerivations, 1);
+  assert.equal(harness.verifierCalls.recovery, 1);
   const finishes = harness.remoteCalls.filter((call) => call.route === "finishRecovery");
   assert.equal(finishes.length, 2);
   assert.equal(JSON.stringify(finishes[0].body), finishRequest);
@@ -795,9 +782,9 @@ test("device-envelope and rotation ambiguity use exact explicit idempotent retry
     assert.equal(calls[0].body.operationId, calls[1].body.operationId);
     if (route === "rotateRecovery") {
       assert.equal(calls[0].body.recoveryEnvelope.envelopeVersion, 2);
-      assert.equal(calls[0].body.recoveryVerifier.version, 2);
-      assert.notEqual(calls[0].body.recoveryEnvelope.kdfSalt,
-        calls[0].body.recoveryVerifier.kdfSalt);
+      assert.equal(calls[0].body.recoveryVerifier.version, 1);
+      assert.equal(calls[0].body.recoveryVerifier.algorithm, "Ed25519");
+      assert.equal(calls[0].body.recoveryVerifier.publicKeyFormat, "spki");
     }
   });
 });
@@ -1070,18 +1057,12 @@ test("P030 recovery staging is strict, encrypted, CAS protected and migrates old
   assert.equal(migrated.recoveryDraft, null);
 });
 
-test("versioned recovery verifier is backward compatible and domains remain distinct", async () => {
+test("asymmetric recovery proof replaces the retired symmetric verifier", async () => {
   const production = loadProduction();
-  const root = bytes(32, 8);
-  const first = await production.crypto.createRecoveryAuthorisationVerifier(root);
-  const second = await production.crypto.createRecoveryAuthorisationVerifier(root, 2);
-  assert.equal(first.version, 1);
-  assert.equal(second.version, 2);
-  assert.notEqual(first.kdfSalt, second.kdfSalt);
-  await assert.rejects(
-    production.crypto.createRecoveryAuthorisationVerifier(root, Number.MAX_SAFE_INTEGER + 1),
-    (error) => error.code === "recovery-verifier-version-invalid"
-  );
+  const keys = await production.crypto.createRecoveryAuthorisationKeyPair();
+  assert.equal(keys.recoveryAuthorisation.algorithm, "Ed25519");
+  assert.equal(keys.recoveryVerifier.publicKeyFormat, "spki");
+  assert.equal(typeof production.crypto.createRecoveryAuthorisationVerifier, "undefined");
   assert.doesNotMatch(source(MODULE), /deriveBits|subtle\.|RECOVERY_AUTHORISATION_LABEL/);
 });
 

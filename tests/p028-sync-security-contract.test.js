@@ -380,11 +380,13 @@ test("envelope metadata binds device and passkey envelopes to separate identifie
 test("recovery package is local-only and cannot pass the remote metadata validator", () => {
   const contract = loadContract();
   const result = contract.buildRecoveryPackage({
-    packageVersion: 1,
+    packageVersion: 2,
     accountLocator: "account-opaque-1",
     syncedPocketId: "pocket-opaque-1",
     rootMaterial: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     rootBits: 256,
+    recoveryAuthorisation: { version: 1, algorithm: "Ed25519", privateKeyFormat: "pkcs8",
+      privateKey: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
     checksum: "checksum-display-value",
     instructions: ["Keep this copy offline.", "Use it only in Pocket recovery."],
   });

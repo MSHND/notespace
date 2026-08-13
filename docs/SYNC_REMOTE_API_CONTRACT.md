@@ -260,11 +260,11 @@ P036 enforces same-origin suffixes `/account/recovery/initialise`, `/account/rec
 
 ### Initialise recovery
 
-An authenticated exact request supplies operation identity, expected key-set version, an exact derived recovery-authorisation verifier and exact version-1 recovery envelope. One transaction installs them with a fresh server-generated opaque account locator and returns `recoveryCopyRequired: true`. The raw root and complete recovery package are rejected.
+An authenticated exact request supplies operation identity, expected key-set version, an exact Ed25519 SPKI public recovery verifier and exact version-1 recovery envelope. One transaction installs them with a fresh server-generated opaque account locator and returns `recoveryCopyRequired: true`. The raw root, PKCS8 private key and complete recovery package are rejected.
 
 ### Begin recovery
 
-Unauthenticated request contains exactly `apiVersion`, `operationId`, the opaque account locator and target device ID. Response supplies a short-lived recovery ceremony, recovery-authorisation public derivation metadata, random challenge, stable PRF input and P031-compatible replacement-passkey registration options. It never returns the stored verifier value, envelope, raw root or full package.
+Unauthenticated request contains exactly `apiVersion`, `operationId`, the opaque account locator and target device ID. Response supplies a short-lived recovery ceremony, recovery/key-set versions, random challenge, stable PRF input and P031-compatible replacement-passkey registration options. It never returns the stored verifier value, envelope, raw root, private signing key or full package.
 
 ### Finish recovery
 
@@ -272,7 +272,7 @@ Request contains exact operation/ceremony/device identity, an opaque challenge-b
 
 Recovery is not complete until the new credential's session sends a rotation request that atomically installs:
 
-- a new recovery-authorisation verifier and version;
+- a fresh Ed25519 public recovery-authorisation verifier and next recovery version;
 - a new recovery master-key envelope/version; and
 - a fresh server-generated locator;
 - invalidation of the preceding locator and verifier; and

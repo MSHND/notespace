@@ -78,15 +78,13 @@ function envelope(kind = "device", version = 1, id = `${kind}-envelope`) {
   };
 }
 
-function verifier(version) {
-  return { format: "pocket.sync.recovery-authorisation-verifier.opaque", version,
-    kdf: "HKDF-SHA-256", kdfSalt: b64(32, 90 + version), derivationVersion: 1,
-    verifier: b64(32, 120 + version) };
+function verifier(_version) {
+  return { version: 1, algorithm: "Ed25519", publicKeyFormat: "spki",
+    publicKey: b64(32, 120) };
 }
 
 function proof() {
-  return { format: "pocket.sync.recovery-authorisation-proof.opaque", version: 1,
-    proof: b64(32, 150) };
+  return { version: 1, algorithm: "Ed25519", signature: b64(64, 150) };
 }
 
 function mutation(overrides = {}) {
@@ -272,15 +270,12 @@ test("recovery validators reject secret/package fields and bind versions, proof 
   const begin = fixtures.beginRegistration({ operationId: "recover-one",
     ceremonyId: "recovery-ceremony" });
   const beginResponse = { ...begin, recoveryCeremonyId: begin.ceremonyId,
-    recoveryVersion: 1, challenge: begin.publicKeyCreationOptions.challenge,
-    recoveryAuthorisation: { format: "pocket.sync.recovery-authorisation-verifier.opaque",
-      version: 1, kdf: "HKDF-SHA-256", kdfSalt: b64(32, 77), derivationVersion: 1 } };
+    recoveryVersion: 1, keySetVersion: 3, challenge: begin.publicKeyCreationOptions.challenge };
   delete beginResponse.ceremonyId;
   assert.equal(api.validateBeginRecoveryResponse(beginResponse, beginRequest,
     () => fixtures.NOW).recoveryVersion, 1);
-  assert.throws(() => api.validateBeginRecoveryResponse({ ...beginResponse,
-    recoveryAuthorisation: { ...beginResponse.recoveryAuthorisation, verifier: b64(32, 2) } },
-  beginRequest, () => fixtures.NOW), errorCode("remote-response-invalid"));
+  assert.throws(() => api.validateBeginRecoveryResponse({ ...beginResponse, keySetVersion: 0 },
+    beginRequest, () => fixtures.NOW), errorCode("remote-response-invalid"));
   const credential = account.serializeRegistrationCredential(
     fixtures.nativeRegistrationCredential(), fixtures.PRF_INPUT).credential;
   const finishRequest = { apiVersion: 1, operationId: "recover-one",
@@ -290,7 +285,7 @@ test("recovery validators reject secret/package fields and bind versions, proof 
   assert.equal(Object.hasOwn(validated.credential.clientExtensionResults.prf, "results"), false);
   assert.doesNotMatch(JSON.stringify(validated), new RegExp(fixtures.PRF_OUTPUT_TEXT));
   assert.throws(() => api.validateFinishRecoveryRequest({ ...finishRequest,
-    proof: { ...proof(), proof: "AA" } }), errorCode("remote-request-invalid"));
+    proof: { ...proof(), signature: "AA" } }), errorCode("remote-request-invalid"));
 });
 
 test("finish and rotate responses enforce identity, envelope and two-version conflict correlation", () => {
@@ -309,7 +304,7 @@ test("finish and rotate responses enforce identity, envelope and two-version con
   assert.throws(() => api.validateFinishRecoveryResponse({ ...finishResponse,
     contentUnlocked: true }, finishRequest), errorCode("remote-response-invalid"));
   const rotate = { ...mutation({ expectedKeySetVersion: 4 }), recoveryOperationId: "recover-one",
-    expectedRecoveryVersion: 1, recoveryVerifier: verifier(2),
+    expectedRecoveryVersion: 1, recoveryVerifier: verifier(1),
     recoveryEnvelope: envelope("recovery", 2, "recovery-two") };
   const rotated = api.validateRotateRecoveryResponse(200,
     committed(rotate, { recoveryVersion: 2, accountLocator: "locator-two",

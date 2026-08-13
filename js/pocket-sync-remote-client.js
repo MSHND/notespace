@@ -802,25 +802,21 @@ persisting session state, retrying work, or changing a Pocket owner.
   }
 
   function validateRecoveryVerifier(input, code = "remote-request-invalid") {
-    const value = exactObject(input, [
-      "format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier",
-    ], ["format", "version", "kdf", "kdfSalt", "derivationVersion", "verifier"], code);
-    if (value.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
-        || value.kdf !== "HKDF-SHA-256" || value.derivationVersion !== 1) {
+    const value = exactObject(input, ["version", "algorithm", "publicKeyFormat", "publicKey"],
+      ["version", "algorithm", "publicKeyFormat", "publicKey"], code);
+    if (value.version !== 1 || value.algorithm !== "Ed25519" || value.publicKeyFormat !== "spki") {
       throw remoteError(code);
     }
-    revision(value.version, 1, code);
-    canonicalBase64url(value.kdfSalt, 32, code);
-    canonicalBase64url(value.verifier, 32, code);
+    const size = canonicalBase64urlByteLength(value.publicKey);
+    if (size < 32 || size > 4096) throw remoteError(code);
     return frozen(value);
   }
 
   function validateRecoveryProof(input) {
-    const value = exactObject(input, ["format", "version", "proof"],
-      ["format", "version", "proof"], "remote-request-invalid");
-    const size = canonicalBase64urlByteLength(value.proof);
-    if (value.format !== "pocket.sync.recovery-authorisation-proof.opaque"
-        || value.version !== 1 || size < 32 || size > 1024) {
+    const value = exactObject(input, ["version", "algorithm", "signature"],
+      ["version", "algorithm", "signature"], "remote-request-invalid");
+    const size = canonicalBase64urlByteLength(value.signature);
+    if (value.version !== 1 || value.algorithm !== "Ed25519" || size < 32 || size > 1024) {
       throw remoteError("remote-request-invalid");
     }
     return frozen(value);
@@ -1014,22 +1010,16 @@ persisting session state, retrying work, or changing a Pocket owner.
     const request = validateBeginRecoveryRequest(requestInput);
     const contract = contractInput || accountContract();
     const response = exactObject(input, ["apiVersion", "ok", "operationId", "recoveryCeremonyId",
-      "expiresAt", "recoveryVersion", "challenge", "recoveryAuthorisation",
+      "expiresAt", "recoveryVersion", "keySetVersion", "challenge",
       "prfEvaluationInput", "publicKeyCreationOptions"], ["apiVersion", "ok", "operationId",
-      "recoveryCeremonyId", "expiresAt", "recoveryVersion", "challenge", "recoveryAuthorisation",
+      "recoveryCeremonyId", "expiresAt", "recoveryVersion", "keySetVersion", "challenge",
       "prfEvaluationInput", "publicKeyCreationOptions"]);
     if (response.apiVersion !== 1 || response.ok !== true
         || response.operationId !== request.operationId) throw remoteError("remote-response-invalid");
     identifier(response.recoveryCeremonyId, "remote-response-invalid");
     const recoveryVersion = revision(response.recoveryVersion, 1, "remote-response-invalid");
     canonicalBase64url(response.challenge, 32, "remote-response-invalid");
-    const publicMetadata = exactObject(response.recoveryAuthorisation,
-      ["format", "version", "kdf", "kdfSalt", "derivationVersion"],
-      ["format", "version", "kdf", "kdfSalt", "derivationVersion"]);
-    if (publicMetadata.format !== "pocket.sync.recovery-authorisation-verifier.opaque"
-        || publicMetadata.version !== recoveryVersion || publicMetadata.kdf !== "HKDF-SHA-256"
-        || publicMetadata.derivationVersion !== 1) throw remoteError("remote-response-invalid");
-    canonicalBase64url(publicMetadata.kdfSalt, 32, "remote-response-invalid");
+    revision(response.keySetVersion, 1, "remote-response-invalid");
     try {
       contract.validateBeginRegistrationResponse({ apiVersion: 1, ok: true,
         operationId: response.operationId, ceremonyId: response.recoveryCeremonyId,
@@ -1113,7 +1103,7 @@ persisting session state, retrying work, or changing a Pocket owner.
     }
     const verifier = validateRecoveryVerifier(request.recoveryVerifier);
     const envelope = validateActiveEnvelope(request.recoveryEnvelope, true, contract);
-    if (verifier.version !== request.expectedRecoveryVersion + 1
+    if (verifier.version !== 1
         || envelope.envelopeKind !== "recovery"
         || envelope.envelopeVersion !== request.expectedRecoveryVersion + 1) {
       throw remoteError("remote-request-invalid");
