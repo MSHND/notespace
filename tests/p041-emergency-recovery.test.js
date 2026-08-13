@@ -640,6 +640,7 @@ test("P054 explicitly composes P041 recovery into the existing document, owner a
   let ownerKind = "none";
   let continuityId = 41;
   let committedPayload = null;
+  const sessionTransitions = [];
   const originalStoreApi = context.PocketSyncDeviceStore;
   context.PocketSyncDeviceStore = Object.freeze({
     ...originalStoreApi,
@@ -655,11 +656,16 @@ test("P054 explicitly composes P041 recovery into the existing document, owner a
   context.commitPreparedPocketDocument = (value, _metadata, guard) => {
     if (guard.canContinue() !== true) return { ok: false };
     committedPayload = plain(value);
+    context.setPocketFileSession(null, "Synced Pocket", {
+      ownerKind: "detached", detachedDeviceChanges: true, storagePrivate: "synced",
+      forceNewSession: true,
+    });
     return { ok: true };
   };
   context.setPocketFileSession = (_handle, _name, options = {}) => {
     ownerKind = options.ownerKind || "json";
     continuityId += 1;
+    sessionTransitions.push({ ownerKind, continuityId });
   };
   context.buildPocketPayload = () => plain(PAYLOAD);
   context.PocketDeviceChanges = { fingerprintDocument(value) { return JSON.stringify(value); } };
@@ -693,6 +699,8 @@ test("P054 explicitly composes P041 recovery into the existing document, owner a
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(committedPayload, plain(PAYLOAD));
   assert.equal(ownerKind, "synced");
+  assert.deepEqual(sessionTransitions.map((value) => value.ownerKind), ["detached", "synced"]);
+  assert.equal(sessionTransitions[0].continuityId, 42);
   assert.equal(recoveryWrites.length, 1);
   const saved = await context.PocketOwnerSaveBoundary.save({
     expectedSession: context.capturePocketFileSaveSession(),

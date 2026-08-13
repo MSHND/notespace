@@ -361,19 +361,24 @@
         return safeFailure("recovered-content-invalid");
       }
       const norm = global.normaliseInput(payload);
-      const committed = global.commitPreparedPocketDocument(norm, {
-        schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
-        writtenAt: norm.writtenAt || "",
-      }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
-        detachedDeviceChanges: true, storagePrivate: "synced",
-        canContinue: () => additionalTargetReplaceable(target) });
-      if (!committed?.ok) return safeFailure("recovery-target-stale");
+      // The controller makes the final old-target check before the document
+      // commit gives that document a new detached session identity.
       const adopted = await syncedOwnerController.adoptReadyRecovery(result, frozen({
         captureRecoveryTarget: additionalTarget,
         isRecoveryTargetCurrent: (expected) => additionalTargetCurrent(expected)
           && additionalTargetReplaceable(expected),
       }));
       if (!adopted?.ok) return safeFailure(adopted?.reason || "recovery-adoption-failed");
+      const committed = global.commitPreparedPocketDocument(norm, {
+        schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
+        writtenAt: norm.writtenAt || "",
+      }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
+        detachedDeviceChanges: true, storagePrivate: "synced",
+        canContinue: () => additionalTargetReplaceable(target) });
+      if (!committed?.ok) {
+        try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
+        return safeFailure("recovery-target-stale");
+      }
       if (boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
         try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
         return frozen({ ok: false, partialState: "visible-payload-committed-detached" });

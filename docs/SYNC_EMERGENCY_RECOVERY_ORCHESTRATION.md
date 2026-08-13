@@ -92,7 +92,7 @@ Success means locally durable and remotely rotated, not live ownership:
 }
 ```
 
-The result includes safe revisions and the opaque recovery-attempt ID, but no root, package, locator, proof, credential response, key or ciphertext. P054's browser runtime is the explicit caller: it rechecks the clean `none`/`detached` target, commits the validated recovered content through the existing document-commit path, then calls P042 `adoptReadyRecovery` and installs the existing owner-aware Save boundary. P041 itself adds no timer, polling, worker, retry loop, storage fallback, cookie handling or logging.
+The result includes safe revisions and the opaque recovery-attempt ID, but no root, package, locator, proof, credential response, key or ciphertext. P054's browser runtime is the explicit caller: P042 `adoptReadyRecovery` makes the final clean `none`/`detached` target check before the document commit changes that file-session identity. It then commits the validated recovered content and installs the existing owner-aware Save boundary, without consulting the retired target again. P041 itself adds no timer, polling, worker, retry loop, storage fallback, cookie handling or logging.
 
 ## 10. P042 boundary
 
