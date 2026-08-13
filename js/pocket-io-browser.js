@@ -395,6 +395,9 @@ function setPocketFileSession(handle, displayName, options = {}) {
       && typeof vaultContract.clearActiveSession === "function") {
     vaultContract.clearActiveSession();
   }
+  if (targetChanged || options.forceNewSession === true) {
+    try { window.dispatchEvent(new Event("pocket-owner-state-changed")); } catch (_error) {}
+  }
   return session;
 }
 
@@ -433,6 +436,9 @@ function clearPocketFileSession(options = {}) {
   }
   if (options.keepRecent !== true) session.recentName = "";
   if (targetChanged) pocketFileSessionId += 1;
+  if (targetChanged) {
+    try { window.dispatchEvent(new Event("pocket-owner-state-changed")); } catch (_error) {}
+  }
 }
 
 function hasWritablePocketFile() {

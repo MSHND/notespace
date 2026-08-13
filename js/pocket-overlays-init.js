@@ -221,6 +221,7 @@ function isCommandPaletteOpen() {
 }
 
 function refreshCommandPaletteState() {
+  window.PocketSyncUi?.refresh?.();
   const hasSelection = !!cleanText(state.selectedId, 80) && !!nodeMap().get(cleanText(state.selectedId, 80));
   const setDisabled = (button, disabled) => {
     if (button instanceof HTMLButtonElement) button.disabled = !!disabled;

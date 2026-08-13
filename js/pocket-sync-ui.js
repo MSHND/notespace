@@ -1,6 +1,7 @@
 /* Minimal, injected Sync doorway. It owns no Sync state or transport. */
 (function initialisePocketSyncUi(global) {
   "use strict";
+  let refreshInstalled = () => {};
 
   function owner() {
     try { return global.capturePocketFileSaveSession?.() || null; } catch (_error) { return null; }
@@ -21,7 +22,8 @@
     if (!global.document || global.PocketSyncUiInstalled) return false;
     const document = global.document;
     const button = document.getElementById("cmdSync");
-    if (!(button instanceof global.HTMLButtonElement)) return false;
+    const topbarButton = document.getElementById("btnOpenSynced");
+    if (!(button instanceof global.HTMLButtonElement) || !(topbarButton instanceof global.HTMLButtonElement)) return false;
     global.PocketSyncUiInstalled = true;
     let busy = false;
     let continuation = null;
@@ -51,10 +53,16 @@
     function refresh() {
       const session = owner();
       const synced = session?.ownerKind === "synced";
-      button.hidden = !(eligibleActivation(session) || eligibleOpen(session)) || synced;
+      const canOpen = eligibleOpen(session);
+      const canActivate = eligibleActivation(session);
+      button.hidden = !(canActivate || canOpen) || synced;
       button.disabled = button.hidden || busy;
+      topbarButton.hidden = !canOpen || synced;
+      topbarButton.disabled = topbarButton.hidden || busy;
+      const label = button.querySelector("span");
+      if (label) label.textContent = canOpen ? "Open synced Pocket…" : "Turn on Sync…";
       const hint = button.querySelector(".commandHint");
-      if (hint) hint.textContent = eligibleOpen(session) ? "open another device" : "encrypted copy";
+      if (hint) hint.textContent = canOpen ? "open another device" : "encrypted copy";
       const source = document.getElementById("activeDocumentSource");
       if (synced && source instanceof global.HTMLElement) {
         source.textContent = "Synced Pocket";
@@ -69,6 +77,11 @@
       return true;
     }
     function show(mode) {
+      if (global.isPocketVaultRecoveryFlowOpen?.() === true
+          || global.isPocketFilePermissionPromptOpen?.() === true
+          || global.isPocketDeviceChangesDecisionOpen?.() === true
+          || global.PocketVaultBrowserIo?.isDialogOpen?.() === true) return false;
+      global.closeCommandPalette?.({ restoreFocus: false });
       returnFocus = document.activeElement;
       overlay.hidden = false;
       status.textContent = "";
@@ -88,6 +101,7 @@
       primary.dataset.mode = mode;
       cancel.hidden = false;
       global.requestAnimationFrame?.(() => primary.focus({ preventScroll: true }));
+      return true;
     }
     async function run(mode) {
       if (busy) return;
@@ -118,20 +132,23 @@
       status.textContent = message(result?.reason);
       refresh();
     }
-    button.addEventListener("click", () => {
+    function begin() {
       const session = owner();
       if (eligibleOpen(session)) show("open");
       else if (eligibleActivation(session)) show(continuation ? "continue" : "activate");
-    });
+    }
+    button.addEventListener("click", begin);
+    topbarButton.addEventListener("click", begin);
     primary.addEventListener("click", () => void run(primary.dataset.mode));
     cancel.addEventListener("click", close);
     document.addEventListener("keydown", (event) => {
       if (!overlay.hidden && event.key === "Escape" && !busy) { event.preventDefault(); close(); }
     }, true);
-    global.setInterval?.(refresh, 500);
+    global.addEventListener?.("pocket-owner-state-changed", refresh);
+    refreshInstalled = refresh;
     refresh();
     return true;
   }
 
-  global.PocketSyncUi = Object.freeze({ install });
+  global.PocketSyncUi = Object.freeze({ install, refresh: () => refreshInstalled() });
 })(typeof window !== "undefined" ? window : globalThis);
