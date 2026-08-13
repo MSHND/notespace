@@ -8,7 +8,8 @@ const { createSyncServerApplication } = require("./pocket-sync-server-runtime.js
 
 const BROWSER_ROOT = path.resolve(__dirname, "..");
 const LOCAL_MODULE_PATH = "/js/pocket-sync-local-integration.js";
-const LOCAL_MODULE_TAG = `<script src="${LOCAL_MODULE_PATH}" data-service-root="%SERVICE_ROOT%"></script>`;
+const ADDITIONAL_MODULE_PATH = "/js/pocket-sync-additional-device.js";
+const LOCAL_MODULE_TAG = `<script src="${ADDITIONAL_MODULE_PATH}"></script>\n  <script src="${LOCAL_MODULE_PATH}" data-service-root="%SERVICE_ROOT%"></script>`;
 
 function localError() {
   const error = new Error("Pocket Sync local integration failed.");
@@ -42,7 +43,7 @@ function referencedBrowserAssets(browserRoot) {
   } catch (_error) {
     throw localError();
   }
-  const assets = new Set(["/index.html", "/sw.js", LOCAL_MODULE_PATH]);
+  const assets = new Set(["/index.html", "/sw.js", LOCAL_MODULE_PATH, ADDITIONAL_MODULE_PATH]);
   const add = (candidate) => {
     if (typeof candidate !== "string" || candidate.includes("://") || candidate.startsWith("//")) return;
     const item = browserPath(`/${candidate.replace(/^\.\//, "").replace(/^\//, "")}`);

@@ -230,11 +230,15 @@ device record for explicit, conditional Saves.
         || !sameStructuredValue(stored.recoveryDraft, current.recoveryDraft)
         || stored.usage.masterKeyGeneration !== current.usage.masterKeyGeneration
         || stored.usage.masterKeyContentEncryptions < current.usage.masterKeyContentEncryptions
+        || stored.usage.masterKeyContentEncryptionLimit
+          < current.usage.masterKeyContentEncryptionLimit
         || stored.usage.deviceWrappingKeyEncryptions
           < current.usage.deviceWrappingKeyEncryptions) {
       return null;
     }
     if (stored.usage.masterKeyContentEncryptions === current.usage.masterKeyContentEncryptions
+        && stored.usage.masterKeyContentEncryptionLimit
+          === current.usage.masterKeyContentEncryptionLimit
         && stored.usage.deviceWrappingKeyEncryptions
           === current.usage.deviceWrappingKeyEncryptions) {
       return "exact";
@@ -475,7 +479,8 @@ device record for explicit, conditional Saves.
 
     function draftResealCount(current) {
       return (current.activationDraft === null ? 0 : 1)
-        + (current.recoveryDraft === null ? 0 : 1);
+        + (current.recoveryDraft === null ? 0 : 1)
+        + (current.additionalDeviceDraft === null ? 0 : 1);
     }
 
     async function reserveOwnerUsage(session, current, masterIncrement, deviceIncrement) {
@@ -508,10 +513,12 @@ device record for explicit, conditional Saves.
         usage: {
           masterKeyGeneration: current.usage.masterKeyGeneration,
           masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions,
+          masterKeyContentEncryptionLimit: current.usage.masterKeyContentEncryptionLimit,
           deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions,
         },
         activationDraft: await nextActivationDraft(current, storeRevision),
         recoveryDraft: await nextRecoveryDraft(current, storeRevision),
+        additionalDeviceDraft: current.additionalDeviceDraft,
       };
     }
 

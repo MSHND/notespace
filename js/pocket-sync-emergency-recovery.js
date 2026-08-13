@@ -863,6 +863,11 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       if (response.keySetVersion !== execution.draft.keySetVersion + 1) {
         return remoteFailure("device-envelope-failed", execution, { resumable: false });
       }
+      if ((response.masterKeyGeneration !== undefined && response.masterKeyGeneration !== 1)
+          || (response.masterKeyContentEncryptionLimit !== undefined
+            && response.masterKeyContentEncryptionLimit !== 2 ** 20)) {
+        return remoteFailure("device-envelope-failed", execution, { resumable: false });
+      }
       await persistDraft(execution, changedDraft(execution.draft, {
         stage: "device-envelope-committed", keySetVersion: response.keySetVersion,
         pendingOperation: null,
@@ -1117,10 +1122,12 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           usage: {
             masterKeyGeneration: 1,
             masterKeyContentEncryptions: 0,
+            masterKeyContentEncryptionLimit: 2 ** 20,
             deviceWrappingKeyEncryptions,
           },
           activationDraft: null,
           recoveryDraft: { context: draftContext, record: encryptedDraft },
+          additionalDeviceDraft: null,
         };
         const stored = await checked(execution, config.deviceStore.promoteRecoveryStaging(
           safeDraft.syncedPocketId, reserved.storeRevision, finalRecord

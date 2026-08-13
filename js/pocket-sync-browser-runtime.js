@@ -203,7 +203,7 @@
 
   function createRuntime(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)
-        || Object.keys(input).some((field) => ![...SERVICE_FIELDS, "environment"].includes(field))
+        || Object.keys(input).some((field) => ![...SERVICE_FIELDS, "discoveryService", "environment"].includes(field))
         || SERVICE_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(input, field))) {
       throw new Error("Pocket Sync browser runtime configuration-invalid.");
     }
@@ -218,6 +218,7 @@
     const storeApi = global.PocketSyncDeviceStore;
     const accountApi = global.PocketSyncAccountClient;
     const activationApi = global.PocketSyncActivation;
+    const additionalApi = global.PocketSyncAdditionalDevice;
     const ownerApi = global.PocketSyncOwnerController;
     const bridgeApi = global.PocketSyncActivationOwnerBridge;
     const boundary = global.PocketOwnerSaveBoundary;
@@ -258,6 +259,40 @@
       randomBytes: browserRandom(environment),
       now,
     });
+
+    function additionalTarget() {
+      const session = typeof global.capturePocketFileSaveSession === "function"
+        ? global.capturePocketFileSaveSession() : null;
+      if (!session || !["none", "detached"].includes(session.ownerKind)) return null;
+      return frozen({ ownerKind: session.ownerKind, continuityId: String(session.id) });
+    }
+
+    function additionalTargetCurrent() {
+      const target = additionalTarget();
+      return !!target;
+    }
+
+    async function adoptAdditionalDevice(input) {
+      const captured = additionalTarget();
+      if (!captured || typeof global.normaliseInput !== "function"
+          || typeof global.commitPreparedPocketDocument !== "function"
+          || global.isPocketPayloadShape?.(input.payload) !== true) return frozen({ ok: false });
+      const norm = global.normaliseInput(input.payload);
+      const committed = global.commitPreparedPocketDocument(norm, {
+        schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
+        writtenAt: norm.writtenAt || "",
+      }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
+        canContinue: () => additionalTargetCurrent() });
+      if (!committed?.ok) return frozen({ ok: false });
+      const adopted = await syncedOwnerController.adoptSyncedOwner({
+        syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,
+      });
+      if (!adopted?.ok || boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
+        try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
+        return frozen({ ok: false });
+      }
+      return frozen({ ok: true });
+    }
 
     function dependenciesFor(snapshot) {
       return frozen({
@@ -313,7 +348,28 @@
       return orchestrator.resume(dependenciesFor(snapshot), { activationId: input.activationId });
     }
 
-    return frozen({ activate, resume });
+    async function openExisting() {
+      if (!additionalApi || typeof additionalApi.createAdditionalDeviceOpener !== "function") {
+        return safeFailure("additional-device-unavailable");
+      }
+      try { requireMethods(config.discoveryService, ["readSyncedPocket"], "discovery-service-invalid"); }
+      catch (_error) { return safeFailure("additional-device-unavailable"); }
+      const additionalDevice = additionalApi.createAdditionalDeviceOpener({
+        crypto, deviceStore, accountClient,
+        discoveryService: config.discoveryService,
+        contentService: config.contentService,
+        envelopeService: config.envelopeService,
+        randomBytes: browserRandom(environment), now,
+      });
+      return additionalDevice.openExisting({
+        captureTarget: additionalTarget,
+        isTargetCurrent: additionalTargetCurrent,
+        validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
+        adoptOpenedPocket: adoptAdditionalDevice,
+      });
+    }
+
+    return frozen({ activate, resume, openExisting });
   }
 
   global.PocketSyncBrowserRuntime = frozen({ createRuntime });

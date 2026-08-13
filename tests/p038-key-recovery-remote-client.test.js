@@ -119,12 +119,12 @@ test("P038 keeps one dormant client with exact frozen route, export and service 
   assert.doesNotMatch(source("sw.js"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncRemoteClient/);
   assert.deepEqual(Object.keys(api.ROUTES), ["beginRegistration", "finishRegistration",
-    "beginAuthentication", "finishAuthentication", "readRevision", "downloadEncryptedRecord",
+    "beginAuthentication", "finishAuthentication", "readSyncedPocket", "readRevision", "downloadEncryptedRecord",
     "conditionalUpload", "listEnvelopes", "downloadEnvelope", "addEnvelope",
     "revokeEnvelope", "initialiseRecovery", "beginRecovery", "finishRecovery",
     "rotateRecovery"]);
   assert.deepEqual(Object.keys(api), ["POLICY", "ROUTES", "validateReadRevisionRequest",
-    "validateReadRevisionResponse", "validateDownloadRequest", "validateDownloadResponse",
+    "validateReadRevisionResponse", "validateReadSyncedPocketRequest", "validateReadSyncedPocketResponse", "validateDownloadRequest", "validateDownloadResponse",
     "validateConditionalUploadRequest", "validateConditionalUploadResponse",
     "validateListEnvelopesRequest", "validateListEnvelopesResponse",
     "validateDownloadEnvelopeRequest", "validateDownloadEnvelopeResponse",
@@ -135,7 +135,7 @@ test("P038 keeps one dormant client with exact frozen route, export and service 
     "validateFinishRecoveryRequest", "validateFinishRecoveryResponse",
     "validateRotateRecoveryRequest", "validateRotateRecoveryResponse",
     "createBrowserJsonTransport", "createAccountService", "createContentService",
-    "createEnvelopeService", "createRecoveryService"]);
+    "createPocketDiscoveryService", "createEnvelopeService", "createRecoveryService"]);
   const transport = validTransport(() => ({ status: 200, body: {} }));
   assert.deepEqual(Object.keys(api.createEnvelopeService({ transport })),
     ["listEnvelopes", "downloadEnvelope", "addEnvelope", "revokeEnvelope"]);
@@ -159,7 +159,7 @@ test("module load is inert and every new route uses the bounded same-origin tran
   const transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
     async fetch(url, options) { calls.push({ url, options }); return fixtures.textResponse({ ok: true }); } });
   for (const route of Object.keys(api.ROUTES).slice(7)) await transport.request(route, {});
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 9);
   for (const call of calls) {
     assert.match(call.url, /^\/sync\/v1\//);
     assert.doesNotMatch(call.url, /[?#]/);
@@ -238,7 +238,8 @@ test("generic envelope mutations validate kinds, versions, status agreement and 
     expectedKeySetVersion: Number.MAX_SAFE_INTEGER, envelope: envelope("device") }),
   errorCode("remote-request-invalid"));
   const request = { ...mutation(), envelope: envelope("device") };
-  assert.equal(api.validateAddEnvelopeResponse(200, committed(request), request).wrote, true);
+  assert.equal(api.validateAddEnvelopeResponse(200, committed(request, {
+    masterKeyGeneration: 1, masterKeyContentEncryptionLimit: 2 ** 20 }), request).wrote, true);
   assert.equal(api.validateAddEnvelopeResponse(409, conflict(request), request).conflict, true);
   assert.throws(() => api.validateAddEnvelopeResponse(200, conflict(request), request),
     errorCode("remote-response-invalid"));
@@ -248,7 +249,8 @@ test("generic envelope mutations validate kinds, versions, status agreement and 
     committed(request, { replayed: true }), request), errorCode("remote-response-invalid"));
   const retry = { ...request, attemptKind: "idempotent-retry" };
   assert.equal(api.validateAddEnvelopeResponse(200,
-    committed(retry, { replayed: true }), retry).replayed, true);
+    committed(retry, { replayed: true, masterKeyGeneration: 1,
+      masterKeyContentEncryptionLimit: 2 ** 20 }), retry).replayed, true);
   assert.doesNotThrow(() => api.validateRevokeEnvelopeRequest({ ...mutation(), envelopeId: "device-envelope" }));
 });
 
@@ -413,7 +415,8 @@ test("services validate before transport, freeze responses, preserve inputs and 
   const before = JSON.stringify(request);
   const service = api.createEnvelopeService({ transport: validTransport(() => {
     calls += 1;
-    return { status: 200, body: committed(request) };
+    return { status: 200, body: committed(request, { masterKeyGeneration: 1,
+      masterKeyContentEncryptionLimit: 2 ** 20 }) };
   }) });
   const result = await service.addEnvelope(request);
   assert.equal(Object.isFrozen(result), true);

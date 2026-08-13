@@ -30,6 +30,7 @@ persisting session state, retrying work, or changing a Pocket owner.
     finishRegistration: "/account/passkeys/registration/finish",
     beginAuthentication: "/account/passkeys/authentication/begin",
     finishAuthentication: "/account/passkeys/authentication/finish",
+    readSyncedPocket: "/account/synced-pocket/read",
     readRevision: "/pockets/revision/read",
     downloadEncryptedRecord: "/pockets/content/download",
     conditionalUpload: "/pockets/content/conditional-upload",
@@ -495,6 +496,27 @@ persisting session state, retrying work, or changing a Pocket owner.
       operationId: identifier(request.operationId),
       syncedPocketId: identifier(request.syncedPocketId),
     });
+  }
+
+  function validateReadSyncedPocketRequest(input) {
+    const value = exactObject(input, ["apiVersion", "operationId"],
+      ["apiVersion", "operationId"], "remote-request-invalid");
+    if (value.apiVersion !== POLICY.apiVersion) throw remoteError("remote-request-invalid");
+    return frozen({ apiVersion: 1, operationId: identifier(value.operationId) });
+  }
+
+  function validateReadSyncedPocketResponse(input, requestInput) {
+    const request = validateReadSyncedPocketRequest(requestInput);
+    const response = exactObject(input, ["apiVersion", "ok", "operationId", "status", "syncedPocketId"],
+      ["apiVersion", "ok", "operationId", "status", "syncedPocketId"]);
+    if (response.apiVersion !== 1 || response.ok !== true || response.operationId !== request.operationId
+        || !["ready", "not-configured"].includes(response.status)
+        || (response.status === "ready" && typeof response.syncedPocketId !== "string")
+        || (response.status === "not-configured" && response.syncedPocketId !== null)) {
+      throw remoteError("remote-response-invalid");
+    }
+    if (response.syncedPocketId !== null) identifier(response.syncedPocketId, "remote-response-invalid");
+    return frozen(response);
   }
 
   function validateReadRevisionResponse(input, requestInput) {
@@ -970,7 +992,23 @@ persisting session state, retrying work, or changing a Pocket owner.
 
   function validateAddEnvelopeResponse(status, input, requestInput, contractInput) {
     const request = validateAddEnvelopeRequest(requestInput, contractInput);
-    return frozen(validateKeyMutationResponse(status, input, request));
+    if (status === 409 && request.envelope.envelopeKind === "device"
+        && input?.status === "master-key-rotation-required") {
+      const rotation = exactObject(input, ["apiVersion", "ok", "status", "wrote", "operationId"],
+        ["apiVersion", "ok", "status", "wrote", "operationId"]);
+      if (rotation.apiVersion === 1 && rotation.ok === false
+          && rotation.status === "master-key-rotation-required" && rotation.wrote === false
+          && rotation.operationId === request.operationId) return frozen(rotation);
+    }
+    const response = validateKeyMutationResponse(status, input, request, request.envelope.envelopeKind === "device"
+      ? { committedFields: ["masterKeyGeneration", "masterKeyContentEncryptionLimit"] } : {});
+    if (status === 200 && request.envelope.envelopeKind === "device") {
+      if (response.masterKeyGeneration !== 1
+          || response.masterKeyContentEncryptionLimit !== 2 ** 20) {
+        throw remoteError("remote-response-invalid");
+      }
+    }
+    return frozen(response);
   }
 
   function validateRevokeEnvelopeResponse(status, input, requestInput) {
@@ -1226,11 +1264,24 @@ persisting session state, retrying work, or changing a Pocket owner.
     return Object.freeze({ readRevision, downloadEncryptedRecord, conditionalUpload });
   }
 
+  function createPocketDiscoveryService({ transport } = {}) {
+    const remote = validateTransport(transport);
+    return Object.freeze({
+      async readSyncedPocket(input) {
+        const request = validateReadSyncedPocketRequest(input);
+        const result = validateTransportResult(await callTransport(remote, "readSyncedPocket", request), [200]);
+        return validateReadSyncedPocketResponse(result.body, request);
+      },
+    });
+  }
+
   global.PocketSyncRemoteClient = Object.freeze({
     POLICY,
     ROUTES,
     validateReadRevisionRequest,
     validateReadRevisionResponse,
+    validateReadSyncedPocketRequest,
+    validateReadSyncedPocketResponse,
     validateDownloadRequest,
     validateDownloadResponse,
     validateConditionalUploadRequest,
@@ -1254,6 +1305,7 @@ persisting session state, retrying work, or changing a Pocket owner.
     createBrowserJsonTransport,
     createAccountService,
     createContentService,
+    createPocketDiscoveryService,
     createEnvelopeService,
     createRecoveryService,
   });

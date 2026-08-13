@@ -483,6 +483,7 @@ without adding UI, a live synced owner, background work, or deployment state.
       usage: changes?.usage || record.usage,
       activationDraft: record.activationDraft,
       recoveryDraft: record.recoveryDraft,
+      additionalDeviceDraft: record.additionalDeviceDraft,
     };
   }
 
@@ -540,7 +541,13 @@ without adding UI, a live synced owner, background work, or deployment state.
         execution,
         config.crypto.sealContent(nextDraft, deviceKey, draftContext)
       );
-      const usage = reserved ? reserved.usage : execution.initialUsage;
+      const usage = changes?.usage
+        ? Object.assign({}, reserved ? reserved.usage : execution.initialUsage, {
+          masterKeyGeneration: changes.usage.masterKeyGeneration,
+          masterKeyContentEncryptions: changes.usage.masterKeyContentEncryptions,
+          masterKeyContentEncryptionLimit: changes.usage.masterKeyContentEncryptionLimit,
+        })
+        : (reserved ? reserved.usage : execution.initialUsage);
       let nextRecord;
       if (current) {
         nextRecord = cloneRecord(reserved, { remote: changes?.remote, usage });
@@ -580,8 +587,11 @@ without adding UI, a live synced owner, background work, or deployment state.
         revision: nextRevision,
         contentType: config.crypto.FORMAT.contentType,
       };
-      await reserveDeviceWrappingKeyUsage(execution, 1);
-      const reserved = execution.record;
+      const reserved = await config.deviceStore.reservePocketEncryptionUsage(
+        current.syncedPocketId, current.storeRevision, current.usage,
+        { masterKeyContentEncryptions: 0, deviceWrappingKeyEncryptions: 1 }
+      );
+      execution.record = reserved;
       const encryptedDraft = await config.crypto.sealContent(
         nextDraft,
         reserved.deviceWrappingKey,
@@ -820,7 +830,10 @@ without adding UI, a live synced owner, background work, or deployment state.
         stage: committedStage,
         keySetVersion: response.keySetVersion,
         pendingOperation: null,
-      }));
+      }), isDevice ? { usage: Object.assign({}, execution.record.usage, {
+        masterKeyGeneration: response.masterKeyGeneration ?? 1,
+        masterKeyContentEncryptionLimit: response.masterKeyContentEncryptionLimit ?? 2 ** 20,
+      }) } : undefined);
       return null;
     }
 
@@ -1211,6 +1224,7 @@ without adding UI, a live synced owner, background work, or deployment state.
           execution.initialUsage = {
             masterKeyGeneration: 1,
             masterKeyContentEncryptions: 1,
+            masterKeyContentEncryptionLimit: 1,
             deviceWrappingKeyEncryptions: 2,
           };
           execution.initialRecord = {
@@ -1248,6 +1262,7 @@ without adding UI, a live synced owner, background work, or deployment state.
             usage: execution.initialUsage,
             activationDraft: null,
             recoveryDraft: null,
+            additionalDeviceDraft: null,
           };
           await checked(execution, config.deviceStore.open());
           if (await checked(execution, config.deviceStore.readPocket(options.syncedPocketId)) !== null) {

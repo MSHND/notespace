@@ -140,7 +140,7 @@ async function createOwnedRecord(context, store, syncedPocketId) {
   const bundle = await crypto.createMasterKeyBundle([{ context: envelopeContext, wrappingKey: deviceWrappingKey }]);
   const contentContext = { syncedPocketId, revision: 0, contentType: crypto.FORMAT.contentType };
   const record = {
-    kind: "pocket.sync.device-state", schemaVersion: 4, storeRevision: 1, syncedPocketId, deviceId: "local-device",
+    kind: "pocket.sync.device-state", schemaVersion: 5, storeRevision: 1, syncedPocketId, deviceId: "local-device",
     deviceWrappingKey,
     deviceEnvelope: { context: envelopeContext, metadata: {
       contractVersion: 1, syncedPocketId, envelopeId: "device-envelope", kind: "device", version: 1,
@@ -148,8 +148,8 @@ async function createOwnedRecord(context, store, syncedPocketId) {
     }, record: bundle.envelopes[0].record },
     content: { context: contentContext, record: await crypto.sealContent({ initial: true }, bundle.masterKey, contentContext) },
     remote: { confirmedRevision: 0, pending: null, conflict: null },
-    usage: { masterKeyGeneration: 1, masterKeyContentEncryptions: 1, deviceWrappingKeyEncryptions: 1 },
-    activationDraft: null, recoveryDraft: null,
+    usage: { masterKeyGeneration: 1, masterKeyContentEncryptions: 1, masterKeyContentEncryptionLimit: 2 ** 20, deviceWrappingKeyEncryptions: 1 },
+    activationDraft: null, recoveryDraft: null, additionalDeviceDraft: null,
   };
   await store.createPocket(record);
   return bundle.masterKey;

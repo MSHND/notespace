@@ -123,7 +123,7 @@ async function buildRecord(apis, syncedPocketId, options = {}) {
     masterKey: bundle.masterKey,
     record: {
       kind: "pocket.sync.device-state",
-      schemaVersion: 4,
+      schemaVersion: 5,
       storeRevision: 1,
       syncedPocketId,
       deviceId,
@@ -147,10 +147,12 @@ async function buildRecord(apis, syncedPocketId, options = {}) {
       usage: {
         masterKeyGeneration: 1,
         masterKeyContentEncryptions: 1,
+        masterKeyContentEncryptionLimit: 2 ** 20,
         deviceWrappingKeyEncryptions: 1,
       },
       activationDraft: null,
       recoveryDraft,
+      additionalDeviceDraft: null,
     },
   };
 }

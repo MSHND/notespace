@@ -10,7 +10,7 @@ const ORIGIN = "https://sync.pocket.example";
 const NOW = Date.parse("2034-01-01T00:00:00.000Z");
 const METHODS = Object.freeze([
   "beginRegistration", "finishRegistration", "beginAuthentication", "finishAuthentication",
-  "readRevision", "downloadEncryptedRecord", "conditionalUpload", "listEnvelopes",
+  "readSyncedPocket", "readRevision", "downloadEncryptedRecord", "conditionalUpload", "listEnvelopes",
   "downloadEnvelope", "addEnvelope", "revokeEnvelope", "initialiseRecovery",
   "beginRecovery", "finishRecovery", "rotateRecovery",
 ]);

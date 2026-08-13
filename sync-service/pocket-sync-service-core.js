@@ -25,6 +25,8 @@ const POLICY = Object.freeze({
   maximumPublicKeyBytes: 4096,
   maximumCeremonyLifetimeMs: 10 * 60 * 1000,
   maximumSessionLifetimeMs: 90 * 24 * 60 * 60 * 1000,
+  maximumContentEncryptionsPerMasterKey: 2 ** 31,
+  deviceContentEncryptionAllowance: 2 ** 20,
   automaticRetry: false,
   backgroundWork: false,
 });
@@ -161,7 +163,8 @@ const RECORD_FIELDS = Object.freeze({
     "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
     "keySetVersion", "envelopeIds", "recoveryStatus", "recoveryVersion",
     "recoveryEnvelopeId", "recoveryVerifier", "accountLocator",
-    "recoveryOperationId", "recoveryCredentialId", "createdAt", "updatedAt",
+    "recoveryOperationId", "recoveryCredentialId", "masterKeyGeneration",
+    "masterKeyContentEncryptionsReserved", "createdAt", "updatedAt",
   ]),
   envelopes: Object.freeze([
     "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
@@ -919,6 +922,15 @@ function validateStoredRecord(collection, input, key) {
       identifier(input.accountId, "service-state-invalid");
       identifier(input.syncedPocketId, "service-state-invalid");
       positiveInteger(input.keySetVersion, "service-state-invalid");
+      positiveInteger(input.masterKeyGeneration, "service-state-invalid");
+      const reserved = nonNegativeInteger(
+        input.masterKeyContentEncryptionsReserved,
+        "service-state-invalid"
+      );
+      if (reserved > POLICY.maximumContentEncryptionsPerMasterKey
+          || reserved % POLICY.deviceContentEncryptionAllowance !== 0) {
+        throw serviceError("service-state-invalid", 500);
+      }
       input.envelopeIds.forEach((value) => identifier(value, "service-state-invalid"));
       nonNegativeInteger(input.recoveryVersion, "service-state-invalid");
       isoTimestamp(input.createdAt);
@@ -1042,7 +1054,14 @@ function validateStoredRecord(collection, input, key) {
         if (input.result.keySetVersion !== input.expectedKeySetVersion + 1
             || !isObject(input.result.details)) throw serviceError("service-state-invalid", 500);
         if (["add-envelope", "revoke-envelope"].includes(input.operationKind)) {
-          if (!sameKeys(input.result.details, [])) throw serviceError("service-state-invalid", 500);
+          const allowanceDetails = sameKeys(input.result.details, [
+            "masterKeyGeneration", "masterKeyContentEncryptionLimit",
+          ]) && input.result.details.masterKeyGeneration === 1
+            && input.result.details.masterKeyContentEncryptionLimit
+              === POLICY.deviceContentEncryptionAllowance;
+          if (!sameKeys(input.result.details, []) && !allowanceDetails) {
+            throw serviceError("service-state-invalid", 500);
+          }
         } else if (input.operationKind === "initialise-recovery") {
           if (!sameKeys(input.result.details, [
             "recoveryVersion", "accountLocator", "recoveryCopyRequired",
@@ -1326,6 +1345,12 @@ function validateReadRevisionRequest(input) {
     operationId: identifier(value.operationId),
     syncedPocketId: identifier(value.syncedPocketId),
   });
+}
+
+function validateReadSyncedPocketRequest(input) {
+  const value = exactObject(input, ["apiVersion", "operationId"], ["apiVersion", "operationId"]);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId) });
 }
 
 function validateDownloadRequest(input) {
@@ -2606,6 +2631,20 @@ function createServiceCore(input) {
     });
   }
 
+  async function readSyncedPocket(value) {
+    const { context, body } = invocation(value);
+    const request = validateReadSyncedPocketRequest(body);
+    const at = clockMilliseconds();
+    return transact("readonly", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      return frozen({ status: 200, body: {
+        apiVersion: 1, ok: true, operationId: request.operationId,
+        status: account.syncedPocketId === null ? "not-configured" : "ready",
+        syncedPocketId: account.syncedPocketId,
+      }, session: null });
+    });
+  }
+
   async function downloadEncryptedRecord(value) {
     const { context, body } = invocation(value);
     const request = validateDownloadRequest(body);
@@ -2899,24 +2938,43 @@ function createServiceCore(input) {
           throw serviceError("service-authorisation-failed", 403);
         }
       }
+      const allocatingDeviceGrant = request.envelope.envelopeKind === "device";
+      const currentReserved = state.keySet
+        ? state.keySet.masterKeyContentEncryptionsReserved : 0;
+      if (allocatingDeviceGrant
+          && currentReserved + POLICY.deviceContentEncryptionAllowance
+            > POLICY.maximumContentEncryptionsPerMasterKey) {
+        return frozen({ status: 409, body: {
+          apiVersion: 1, ok: false, status: "master-key-rotation-required", wrote: false,
+          operationId: request.operationId,
+        }, session: null });
+      }
       const record = envelopeRecord(account.accountId, request.syncedPocketId, request.envelope, at);
       await insertRecord(transaction, COLLECTIONS.envelopes, record.envelopeId, record);
       const nextVersion = request.expectedKeySetVersion + 1;
       const keySet = state.keySet ? frozen({ ...state.keySet,
         storeVersion: state.keySet.storeVersion + 1, keySetVersion: nextVersion,
-        envelopeIds: [...state.keySet.envelopeIds, record.envelopeId], updatedAt: timestamp(at),
+        envelopeIds: [...state.keySet.envelopeIds, record.envelopeId],
+        masterKeyContentEncryptionsReserved: allocatingDeviceGrant
+          ? currentReserved + POLICY.deviceContentEncryptionAllowance : currentReserved,
+        updatedAt: timestamp(at),
       }) : frozen({
         kind: "pocket.sync.service-key-set", schemaVersion: 1, storeVersion: 1,
         accountId: account.accountId, syncedPocketId: request.syncedPocketId,
         keySetVersion: nextVersion, envelopeIds: [record.envelopeId],
         recoveryStatus: "unconfigured", recoveryVersion: 0, recoveryEnvelopeId: null,
         recoveryVerifier: null, accountLocator: null, recoveryOperationId: null,
-        recoveryCredentialId: null, createdAt: timestamp(at), updatedAt: timestamp(at),
+        recoveryCredentialId: null, masterKeyGeneration: 1,
+        masterKeyContentEncryptionsReserved: allocatingDeviceGrant
+          ? POLICY.deviceContentEncryptionAllowance : 0,
+        createdAt: timestamp(at), updatedAt: timestamp(at),
       });
       if (state.keySet) await replaceRecord(transaction, COLLECTIONS.keySets,
         request.syncedPocketId, state.keySet, keySet);
       else await insertRecord(transaction, COLLECTIONS.keySets, request.syncedPocketId, keySet);
-      const result = frozen({ status: "committed", keySetVersion: nextVersion, details: {} });
+      const result = frozen({ status: "committed", keySetVersion: nextVersion, details:
+        allocatingDeviceGrant ? { masterKeyGeneration: keySet.masterKeyGeneration,
+          masterKeyContentEncryptionLimit: POLICY.deviceContentEncryptionAllowance } : {} });
       const operation = await recordKeyOperation(transaction, account, request,
         "add-envelope", digest, result);
       return keyOperationWrapper(operation, false);
@@ -3017,6 +3075,7 @@ function createServiceCore(input) {
         recoveryStatus: "ready", recoveryVersion: 1, recoveryEnvelopeId: envelope.envelopeId,
         recoveryVerifier: request.recoveryVerifier, accountLocator,
         recoveryOperationId: null, recoveryCredentialId: null,
+        masterKeyGeneration: 1, masterKeyContentEncryptionsReserved: 0,
         createdAt: timestamp(at), updatedAt: timestamp(at) });
       if (state.keySet) await replaceRecord(transaction, COLLECTIONS.keySets,
         request.syncedPocketId, state.keySet, keySet);
@@ -3328,6 +3387,7 @@ function createServiceCore(input) {
     finishRegistration,
     beginAuthentication,
     finishAuthentication,
+    readSyncedPocket,
     readRevision,
     downloadEncryptedRecord,
     conditionalUpload,

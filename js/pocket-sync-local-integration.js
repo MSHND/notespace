@@ -48,7 +48,7 @@
     const browser = global.PocketSyncBrowserRuntime;
     if (!serviceRoot || !remote || !browser
         || typeof remote.createBrowserJsonTransport !== "function"
-        || typeof remote.createAccountService !== "function"
+      || typeof remote.createAccountService !== "function"
         || typeof remote.createContentService !== "function"
         || typeof remote.createEnvelopeService !== "function"
         || typeof remote.createRecoveryService !== "function"
@@ -59,6 +59,8 @@
     const contentService = remote.createContentService({ transport });
     const runtime = browser.createRuntime({
       accountService: remote.createAccountService({ transport }),
+      ...(typeof remote.createPocketDiscoveryService === "function"
+        ? { discoveryService: remote.createPocketDiscoveryService({ transport }) } : {}),
       contentService,
       envelopeService: remote.createEnvelopeService({ transport }),
       recoveryService: remote.createRecoveryService({ transport }),
@@ -81,6 +83,11 @@
     async function resume(input) {
       try { return remember(await runtime.resume(input)); }
       catch (_error) { return safeFailure("activation-unavailable"); }
+    }
+
+    async function openExisting() {
+      try { return remember(await runtime.openExisting()); }
+      catch (_error) { return safeFailure("additional-device-unavailable"); }
     }
 
     async function verifyRoundTrip() {
@@ -135,7 +142,7 @@
       }
     }
 
-    return frozen({ activate, resume, verifyRoundTrip });
+    return frozen({ activate, resume, openExisting, verifyRoundTrip });
   }
 
   global.PocketSyncLocalIntegration = frozen({ create });

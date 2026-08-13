@@ -13,7 +13,7 @@ const ORIGIN = "https://sync.pocket.example";
 const NOW = Date.parse("2033-01-01T00:00:00.000Z");
 const METHODS = Object.freeze([
   "beginRegistration", "finishRegistration", "beginAuthentication", "finishAuthentication",
-  "readRevision", "downloadEncryptedRecord", "conditionalUpload", "listEnvelopes",
+  "readSyncedPocket", "readRevision", "downloadEncryptedRecord", "conditionalUpload", "listEnvelopes",
   "downloadEnvelope", "addEnvelope", "revokeEnvelope", "initialiseRecovery",
   "beginRecovery", "finishRecovery", "rotateRecovery",
 ]);
@@ -219,7 +219,8 @@ test("add validates envelope kinds, credential ownership, exact ciphertext and d
   const request = mutation("add-device", 0, { envelope: deviceEnvelope() });
   const committed = await harness.core.addEnvelope(call(request, registered.sessionId));
   assert.deepEqual(committed.body, { apiVersion: 1, ok: true, status: "committed",
-    wrote: true, operationId: "add-device", replayed: false, keySetVersion: 1 });
+    wrote: true, operationId: "add-device", replayed: false, keySetVersion: 1,
+    masterKeyGeneration: 1, masterKeyContentEncryptionLimit: 2 ** 20 });
   const replay = await harness.core.addEnvelope(call({ ...request,
     attemptKind: "idempotent-retry" }, registered.sessionId));
   assert.equal(replay.body.replayed, true);

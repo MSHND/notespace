@@ -16,7 +16,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
   });
   const FORMAT = Object.freeze({
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 4,
+    recordSchemaVersion: 5,
     recoveryStagingKind: "pocket.sync.recovery-staging",
     recoveryStagingSchemaVersion: 2,
     firstStoreRevision: 1,
@@ -28,6 +28,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       "1-to-2-encrypted-activation-draft",
       "2-to-3-encrypted-recovery-draft",
       "3-to-4-per-long-lived-key-usage",
+      "4-to-5-master-key-device-allowance",
     ]),
     destructiveResetAllowed: false,
   });
@@ -44,12 +45,16 @@ and a narrow atomic transaction boundary without activating a synced owner.
     "usage",
     "activationDraft",
     "recoveryDraft",
+    "additionalDeviceDraft",
   ]);
   const VERSION_ONE_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
-    (field) => !["activationDraft", "recoveryDraft"].includes(field)
+    (field) => !["activationDraft", "recoveryDraft", "additionalDeviceDraft"].includes(field)
   ));
   const VERSION_TWO_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
-    (field) => field !== "recoveryDraft"
+    (field) => !["recoveryDraft", "additionalDeviceDraft"].includes(field)
+  ));
+  const VERSION_THREE_TOP_LEVEL_FIELDS = Object.freeze(TOP_LEVEL_FIELDS.filter(
+    (field) => field !== "additionalDeviceDraft"
   ));
   const DEVICE_ENVELOPE_FIELDS = Object.freeze(["context", "metadata", "record"]);
   const DEVICE_METADATA_FIELDS = Object.freeze([
@@ -79,6 +84,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
   const USAGE_FIELDS = Object.freeze([
     "masterKeyGeneration",
     "masterKeyContentEncryptions",
+    "masterKeyContentEncryptionLimit",
     "deviceWrappingKeyEncryptions",
   ]);
   const USAGE_INCREMENT_FIELDS = Object.freeze([
@@ -331,6 +337,10 @@ and a narrow atomic transaction boundary without activating a synced owner.
         usage.masterKeyContentEncryptions,
         "device-usage-invalid"
       ),
+      masterKeyContentEncryptionLimit: nonNegativeInteger(
+        usage.masterKeyContentEncryptionLimit,
+        "device-usage-invalid"
+      ),
       deviceWrappingKeyEncryptions: nonNegativeInteger(
         usage.deviceWrappingKeyEncryptions,
         "device-usage-invalid"
@@ -339,7 +349,8 @@ and a narrow atomic transaction boundary without activating a synced owner.
     const ceiling = cryptoContract().POLICY?.maximumEncryptionsPerKey;
     if (!Number.isSafeInteger(ceiling)
         || ceiling < 1
-        || value.masterKeyContentEncryptions >= ceiling
+        || value.masterKeyContentEncryptions > value.masterKeyContentEncryptionLimit
+        || value.masterKeyContentEncryptionLimit > ceiling
         || value.deviceWrappingKeyEncryptions >= ceiling) {
       throw deviceStoreError("device-usage-limit-reached");
     }
@@ -379,6 +390,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       masterKeyGeneration: current.usage.masterKeyGeneration,
       masterKeyContentEncryptions: current.usage.masterKeyContentEncryptions
         + increments.masterKeyContentEncryptions,
+      masterKeyContentEncryptionLimit: current.usage.masterKeyContentEncryptionLimit,
       deviceWrappingKeyEncryptions: current.usage.deviceWrappingKeyEncryptions
         + increments.deviceWrappingKeyEncryptions,
     });
@@ -409,6 +421,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
       syncedPocketId,
       storeRevision
     );
+    const additionalDeviceDraft = validateActivationDraft(
+      record.additionalDeviceDraft,
+      syncedPocketId,
+      storeRevision
+    );
     return freezeValue({
       kind: FORMAT.recordKind,
       schemaVersion: FORMAT.recordSchemaVersion,
@@ -422,6 +439,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       usage,
       activationDraft,
       recoveryDraft,
+      additionalDeviceDraft,
     }, deviceWrappingKey);
   }
 
@@ -432,6 +450,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     return {
       masterKeyGeneration: usage.masterKeyGeneration,
       masterKeyContentEncryptions: usage.contentEncryptionsOnDevice,
+      masterKeyContentEncryptionLimit: usage.contentEncryptionsOnDevice,
       deviceWrappingKeyEncryptions: (() => {
         const total = usage.contentEncryptionsOnDevice + usage.envelopeEncryptionsOnDevice;
         if (!Number.isSafeInteger(total)) throw deviceStoreError("device-usage-limit-reached");
@@ -447,6 +466,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       usage: migrateLegacyUsage(legacy.usage),
       activationDraft: null,
       recoveryDraft: null,
+      additionalDeviceDraft: null,
     }));
   }
 
@@ -456,14 +476,27 @@ and a narrow atomic transaction boundary without activating a synced owner.
       schemaVersion: FORMAT.recordSchemaVersion,
       usage: migrateLegacyUsage(previous.usage),
       recoveryDraft: null,
+      additionalDeviceDraft: null,
     }));
   }
 
   function migrateVersionThreeRecord(input) {
-    const previous = exactObject(input, TOP_LEVEL_FIELDS, "device-state-invalid");
+    const previous = exactObject(input, VERSION_THREE_TOP_LEVEL_FIELDS, "device-state-invalid");
     return validateCurrentRecord(Object.assign({}, previous, {
       schemaVersion: FORMAT.recordSchemaVersion,
       usage: migrateLegacyUsage(previous.usage),
+      additionalDeviceDraft: null,
+    }));
+  }
+
+  function migrateVersionFourRecord(input) {
+    const previous = exactObject(input, VERSION_THREE_TOP_LEVEL_FIELDS, "device-state-invalid");
+    return validateCurrentRecord(Object.assign({}, previous, {
+      schemaVersion: FORMAT.recordSchemaVersion,
+      usage: Object.assign({}, previous.usage, {
+        masterKeyContentEncryptionLimit: previous.usage.masterKeyContentEncryptions,
+      }),
+      additionalDeviceDraft: null,
     }));
   }
 
@@ -474,6 +507,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
     if (input.schemaVersion === 2) return migrateVersionTwoRecord(input);
     if (input.schemaVersion === 3) return migrateVersionThreeRecord(input);
+    if (input.schemaVersion === 4) return migrateVersionFourRecord(input);
     return validateCurrentRecord(input);
   }
 
@@ -536,6 +570,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     if (input.schemaVersion === 1) return migrateVersionOneRecord(input);
     if (input.schemaVersion === 2) return migrateVersionTwoRecord(input);
     if (input.schemaVersion === 3) return migrateVersionThreeRecord(input);
+    if (input.schemaVersion === 4) return migrateVersionFourRecord(input);
     if (Number.isSafeInteger(input.schemaVersion)
         && input.schemaVersion >= 0
         && input.schemaVersion < FORMAT.recordSchemaVersion) {
@@ -566,6 +601,11 @@ and a narrow atomic transaction boundary without activating a synced owner.
             < current.usage.masterKeyContentEncryptions)
         || next.usage.deviceWrappingKeyEncryptions
           < current.usage.deviceWrappingKeyEncryptions) {
+      throw deviceStoreError("device-usage-rollback");
+    }
+    if (next.usage.masterKeyGeneration === current.usage.masterKeyGeneration
+        && next.usage.masterKeyContentEncryptionLimit
+          < current.usage.masterKeyContentEncryptionLimit) {
       throw deviceStoreError("device-usage-rollback");
     }
     return next;
@@ -685,6 +725,28 @@ and a narrow atomic transaction boundary without activating a synced owner.
         }
         if (draft && draft.recoveryAttemptId === recoveryAttemptId) {
           if (match !== null) throw deviceStoreError("recovery-attempt-identity-conflict");
+          match = Object.freeze({ record, draft: freezeValue(draft, record.deviceWrappingKey) });
+        }
+      }
+      return match;
+    }
+
+    async function readAdditionalDeviceAttempt(attemptIdInput) {
+      requireOpen();
+      const attemptId = identifier(attemptIdInput, "additional-device-attempt-invalid");
+      const records = await driver.transaction("readonly", async (transaction) => {
+        if (typeof transaction.getAll !== "function") throw deviceStoreError("device-store-driver-invalid");
+        return (await transaction.getAll()).map((record) => migrateRecord(record));
+      });
+      let match = null;
+      for (const record of records) {
+        if (record.additionalDeviceDraft === null) continue;
+        let draft;
+        try { draft = await cryptoContract().openContent(record.additionalDeviceDraft.record,
+          record.deviceWrappingKey, record.additionalDeviceDraft.context); }
+        catch (_error) { throw deviceStoreError("additional-device-draft-invalid"); }
+        if (draft?.attemptId === attemptId) {
+          if (match !== null) throw deviceStoreError("additional-device-attempt-identity-conflict");
           match = Object.freeze({ record, draft: freezeValue(draft, record.deviceWrappingKey) });
         }
       }
@@ -892,6 +954,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       readActivation,
       readStoredRecord,
       readRecoveryAttempt,
+      readAdditionalDeviceAttempt,
       createPocket,
       replacePocket,
       reservePocketEncryptionUsage,
@@ -1120,6 +1183,8 @@ and a narrow atomic transaction boundary without activating a synced owner.
     readStoredRecord: (syncedPocketId) => getDefaultStore().readStoredRecord(syncedPocketId),
     readRecoveryAttempt: (recoveryAttemptId) => getDefaultStore()
       .readRecoveryAttempt(recoveryAttemptId),
+    readAdditionalDeviceAttempt: (attemptId) => getDefaultStore()
+      .readAdditionalDeviceAttempt(attemptId),
     createPocket: (record) => getDefaultStore().createPocket(record),
     replacePocket: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .replacePocket(syncedPocketId, expectedStoreRevision, record),

@@ -7,6 +7,7 @@ const CLIENT_ROUTES = Object.freeze({
   finishRegistration: "/account/passkeys/registration/finish",
   beginAuthentication: "/account/passkeys/authentication/begin",
   finishAuthentication: "/account/passkeys/authentication/finish",
+  readSyncedPocket: "/account/synced-pocket/read",
   readRevision: "/pockets/revision/read",
   downloadEncryptedRecord: "/pockets/content/download",
   conditionalUpload: "/pockets/content/conditional-upload",

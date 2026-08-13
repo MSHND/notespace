@@ -13,6 +13,7 @@ const METHOD_NAMES = Object.freeze([
   "finishRegistration",
   "beginAuthentication",
   "finishAuthentication",
+  "readSyncedPocket",
   "readRevision",
   "downloadEncryptedRecord",
   "conditionalUpload",

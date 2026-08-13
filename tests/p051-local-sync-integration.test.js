@@ -100,7 +100,7 @@ test("P051 local integration is inert until create and returns only safe accepta
   assert.deepEqual(Object.keys(context.PocketSyncLocalIntegration), ["create"]);
   assert.equal(Object.isFrozen(context.PocketSyncLocalIntegration), true);
   const integration = context.PocketSyncLocalIntegration.create();
-  assert.deepEqual(Object.keys(integration), ["activate", "resume", "verifyRoundTrip"]);
+  assert.deepEqual(Object.keys(integration), ["activate", "resume", "openExisting", "verifyRoundTrip"]);
   assert.equal(Object.isFrozen(integration), true);
   assert.deepEqual(JSON.parse(JSON.stringify(await integration.verifyRoundTrip())), { ok: false, reason: "sync-not-activated" });
   assert.equal((await integration.activate()).ok, true);

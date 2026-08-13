@@ -331,6 +331,7 @@ test("factory configuration, store boundary, origin and lifetimes are exact", ()
     "finishRegistration",
     "beginAuthentication",
     "finishAuthentication",
+    "readSyncedPocket",
     "readRevision",
     "downloadEncryptedRecord",
     "conditionalUpload",

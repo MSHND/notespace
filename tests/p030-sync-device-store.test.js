@@ -98,7 +98,7 @@ async function buildDeviceState(apis, options = {}) {
   return {
     record: {
       kind: "pocket.sync.device-state",
-      schemaVersion: 4,
+      schemaVersion: 5,
       storeRevision: options.storeRevision || 1,
       syncedPocketId,
       deviceId,
@@ -134,10 +134,12 @@ async function buildDeviceState(apis, options = {}) {
       usage: {
         masterKeyGeneration: options.masterKeyGeneration || 1,
         masterKeyContentEncryptions: options.masterKeyContentEncryptions ?? 1,
+        masterKeyContentEncryptionLimit: options.masterKeyContentEncryptionLimit ?? 2 ** 20,
         deviceWrappingKeyEncryptions: options.deviceWrappingKeyEncryptions ?? 1,
       },
       activationDraft: null,
       recoveryDraft: null,
+      additionalDeviceDraft: null,
     },
     masterKey: bundle.masterKey,
   };
@@ -292,18 +294,19 @@ test("database, object-store, key-path and record constants are exact", () => {
   });
   assert.deepEqual(plain(apis.deviceStore.FORMAT), {
     recordKind: "pocket.sync.device-state",
-    recordSchemaVersion: 4,
+    recordSchemaVersion: 5,
     recoveryStagingKind: "pocket.sync.recovery-staging",
     recoveryStagingSchemaVersion: 2,
     firstStoreRevision: 1,
   });
   assert.deepEqual(plain(apis.deviceStore.MIGRATION_POLICY), {
     currentDatabaseVersion: 1,
-    currentRecordSchemaVersion: 4,
+    currentRecordSchemaVersion: 5,
     registeredRecordMigrations: [
       "1-to-2-encrypted-activation-draft",
       "2-to-3-encrypted-recovery-draft",
       "3-to-4-per-long-lived-key-usage",
+      "4-to-5-master-key-device-allowance",
     ],
     destructiveResetAllowed: false,
   });
@@ -520,7 +523,7 @@ test("top-level kind, fields and schema versions fail closed", () => {
   wrongKind.kind = "other";
   expectValidationCode(() => apis.deviceStore.validateRecord(wrongKind), "device-state-kind-invalid");
   const higher = clone(initial.record);
-  higher.schemaVersion = 5;
+  higher.schemaVersion = 6;
   expectValidationCode(() => apis.deviceStore.migrateRecord(higher), "device-state-schema-unsupported");
   const lower = clone(initial.record);
   lower.schemaVersion = 0;
@@ -700,7 +703,8 @@ test("usage ceiling fails closed while master-key rotation preserves device-key 
   const ceiling = apis.crypto.POLICY.maximumEncryptionsPerKey;
   const atCeiling = clone(initial.record);
   atCeiling.usage.masterKeyContentEncryptions = ceiling;
-  expectValidationCode(() => apis.deviceStore.validateRecord(atCeiling), "device-usage-limit-reached");
+  atCeiling.usage.masterKeyContentEncryptionLimit = ceiling;
+  assert.doesNotThrow(() => apis.deviceStore.validateRecord(atCeiling));
   const envelopeCeiling = clone(initial.record);
   envelopeCeiling.usage.deviceWrappingKeyEncryptions = ceiling;
   expectValidationCode(() => apis.deviceStore.validateRecord(envelopeCeiling), "device-usage-limit-reached");
@@ -711,6 +715,7 @@ test("usage ceiling fails closed while master-key rotation preserves device-key 
     usage: {
       masterKeyGeneration: 2,
       masterKeyContentEncryptions: 0,
+      masterKeyContentEncryptionLimit: 2 ** 20,
       deviceWrappingKeyEncryptions: initial.record.usage.deviceWrappingKeyEncryptions,
     },
   });
@@ -718,12 +723,14 @@ test("usage ceiling fails closed while master-key rotation preserves device-key 
   assert.deepEqual(plain(result.usage), {
     masterKeyGeneration: 2,
     masterKeyContentEncryptions: 0,
+    masterKeyContentEncryptionLimit: 2 ** 20,
     deviceWrappingKeyEncryptions: initial.record.usage.deviceWrappingKeyEncryptions,
   });
   const loweredDeviceUsage = committedRecord(result, {
     usage: {
       masterKeyGeneration: 3,
       masterKeyContentEncryptions: 0,
+      masterKeyContentEncryptionLimit: 2 ** 20,
       deviceWrappingKeyEncryptions: result.usage.deviceWrappingKeyEncryptions - 1,
     },
   });
@@ -735,6 +742,7 @@ test("usage ceiling fails closed while master-key rotation preserves device-key 
     usage: {
       masterKeyGeneration: 3,
       masterKeyContentEncryptions: 0,
+      masterKeyContentEncryptionLimit: 2 ** 20,
       deviceWrappingKeyEncryptions: result.usage.deviceWrappingKeyEncryptions + 1,
     },
   });
@@ -783,7 +791,8 @@ test("P049d reserves durable encryption usage without changing logical record st
   );
   const ceiling = apis.crypto.POLICY.maximumEncryptionsPerKey;
   const atLimit = Object.assign({}, reserved.usage, {
-    masterKeyContentEncryptions: ceiling - 1,
+    masterKeyContentEncryptions: ceiling,
+    masterKeyContentEncryptionLimit: ceiling,
   });
   const current = await store.readPocket(before.syncedPocketId);
   const nearLimit = clone(current);
