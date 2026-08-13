@@ -67,6 +67,14 @@ function loadProduction(options = {}) {
     context.repairVisibleSelectionAfterRender = () => {};
     context.setStatus = () => {};
     context.flashSaveChip = () => {};
+    if (options.captureSessionTransitions === true) {
+      const productionSetSession = context.setPocketFileSession;
+      context.__sessionTransitions = [];
+      context.setPocketFileSession = (...input) => {
+        context.__sessionTransitions.push(plain(input[2] || {}));
+        return productionSetSession(...input);
+      };
+    }
   }
   return context;
 }
@@ -117,6 +125,7 @@ async function createBrowserJourney(options = {}) {
   const a = loadProduction();
   const b = loadProduction({
     browserPersistence: options.browserPersistence === true,
+    captureSessionTransitions: options.captureSessionTransitions === true,
     localStorageSeed: options.localStorageSeed,
   });
   const serviceDriver = createMemoryServiceStore();
@@ -249,6 +258,9 @@ async function createBrowserJourney(options = {}) {
   });
   const opened = await runtime.openExisting();
   return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
+    readRemoteRevision: () => bRemote.createContentService({ transport }).readRevision({
+      apiVersion: 1, operationId: "p052h2-read-revision", syncedPocketId: "pocket-p052c-browser",
+    }),
     openExisting: () => runtime.openExisting(), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
       installFails = false; ownerAdoptionFailsAfterCommit = false; idb.setBeforeRead(null); }, setPrfUnavailable(value) { prfUnavailable = value === true; },
     setDetachedDirty(value) { detachedDirty = value === true; }, setDirtyBeforeCommit(value) { dirtyBeforeCommit = value === true; },
@@ -660,11 +672,32 @@ test("P052h1 public Device B adoption uses production browser storage privacy th
   const legacySentinel = "P052H1 LEGACY JSON SAFETY";
   const remoteSentinel = "P052H1 REMOTE SENTINEL";
   const editedSentinel = "P052H1 EDITED SENTINEL";
+  const legacySafetyRaw = JSON.stringify({
+    schema: "pocket.localSafety.v1",
+    capturedAt: "2040-01-01T00:00:00.000Z",
+    reason: "ordinary-json-change",
+    source: { schema: "portal.export.v1", fileName: "ordinary.json", writtenAt: "2040-01-01T00:00:00.000Z" },
+    selectedId: "legacy-node",
+    focusRootId: "",
+    collapsedIds: [],
+    ops: [],
+    operationHighWater: 0,
+    payload: {
+      schema: "portal.export.v1",
+      mainThoughtTree: [{ id: "legacy-node", label: legacySentinel, details: legacySentinel, children: [] }],
+      mainThoughtTreeTombstones: [],
+      data: { mainThoughtTree: [{ id: "legacy-node", label: legacySentinel, details: legacySentinel, children: [] }], mainThoughtTreeTombstones: [] },
+    },
+  });
+  const legacyProbe = loadProduction({ browserPersistence: true,
+    localStorageSeed: { "pocketLite.localSafety.snapshot.v1": legacySafetyRaw } });
+  assert.equal(legacyProbe.readLocalSafetySnapshot().norm.nodes[0].label, legacySentinel);
   const journey = await createBrowserJourney({
     browserPersistence: true,
+    captureSessionTransitions: true,
     remoteSentinel,
     localStorageSeed: {
-      "pocketLite.localSafety.snapshot.v1": legacySentinel,
+      "pocketLite.localSafety.snapshot.v1": legacySafetyRaw,
       "pocketLite.localSafety.trail.v1": legacySentinel,
       "pocketLite.pipSnapshot.v1": legacySentinel,
       "pocketLite.autoCache.v1": legacySentinel,
@@ -672,21 +705,34 @@ test("P052h1 public Device B adoption uses production browser storage privacy th
   });
   assert.equal(journey.opened.ok, true, JSON.stringify(journey.opened));
   assert.equal(journey.ownerKind, "synced");
+  assert.deepEqual(plain(journey.b.capturePocketFileSaveSession()).storagePrivacy, "synced");
   assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
-  assert.equal(journey.visible.length > 0, true);
-  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), legacySentinel);
+  assert.equal(journey.b.__sessionTransitions.filter((entry) => entry.ownerKind === "synced").length, 1);
+  assert.equal(journey.visible.some((node) => node.label === remoteSentinel), true);
+  assert.equal(JSON.stringify(journey.visible).includes(legacySentinel), false);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), legacySafetyRaw);
   assert.equal(journey.b.clearLocalSafetySnapshot(), false);
+  assert.equal(journey.b.__pocketLiteExportSessionState(), null);
+  let popupCalls = 0;
+  journey.b.open = () => { popupCalls += 1; return null; };
+  await journey.b.openPipWindow();
+  assert.equal(popupCalls, 0);
+  const grantsBeforeSave = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
   const state = vm.runInContext("state", journey.b);
   state.nodes.push({ id: "p052h1-edit", label: editedSentinel, children: [] });
   journey.b.recordOp({ type: "p052h1-edit", id: "p052h1-edit", changed: editedSentinel });
   const saved = await journey.b.exportTree({ returnDetails: true, downloadFallback: false });
   assert.equal(saved.ok, true, JSON.stringify(saved));
   assert.equal(saved.reason, "synced-save");
+  const remoteRevision = await journey.readRemoteRevision();
+  assert.equal(remoteRevision.recordPresent, true);
+  assert.equal(remoteRevision.revision, 2);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeSave);
   const writes = JSON.stringify(journey.b.__localStorage.calls);
   assert.equal(writes.includes(remoteSentinel), false);
   assert.equal(writes.includes(editedSentinel), false);
   assert.doesNotMatch(writes, /masterKey|deviceWrappingKey|prf|recovery/i);
-  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), legacySentinel);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), legacySafetyRaw);
   assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.trail.v1"), legacySentinel);
   assert.equal(journey.b.__localStorage.values.get("pocketLite.pipSnapshot.v1"), legacySentinel);
   assert.equal(journey.b.__localStorage.values.get("pocketLite.autoCache.v1"), legacySentinel);
