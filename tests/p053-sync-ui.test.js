@@ -34,7 +34,7 @@ test("P053 exposes only an injectable installer and does no work while no integr
   assert.equal(context.PocketSyncUi.install(null), false);
 });
 
-function createUiHarness(ownerKind = "json") {
+function createUiHarness(ownerKind = "json", options = {}) {
   class Element {
     constructor(id = "") { this.id = id; this.hidden = false; this.disabled = false; this.dataset = {}; this.textContent = ""; this.listeners = new Map(); this.children = new Map(); }
     addEventListener(type, listener) { this.listeners.set(type, listener); }
@@ -54,32 +54,38 @@ function createUiHarness(ownerKind = "json") {
   command.children.set("span", new Element());
   command.children.set(".commandHint", new Element());
   const topbar = new Button("btnOpenSynced");
+  const more = new Button("btnMore");
   const source = new Element("activeDocumentSource");
   const events = new Map();
   const document = {
     activeElement: new Button("initiator"), body: { children: [], appendChild(value) { this.children.push(value); } },
-    getElementById(id) { return ({ cmdSync: command, btnOpenSynced: topbar, activeDocumentSource: source })[id] || null; },
+    getElementById(id) { return ({ cmdSync: command, btnOpenSynced: topbar, btnMore: more, activeDocumentSource: source })[id] || null; },
     createElement() { return new Element(); }, addEventListener(type, listener) { events.set(type, listener); },
   };
   let session = { ownerKind, id: 1 };
-  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let resolveActivate;
+  let dirty = options.dirty === true;
+  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let resolveActivate; let resolveOpen;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
-    capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return false; },
+    capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
     requestAnimationFrame(callback) { callback(); }, addEventListener(type, listener) { events.set(type, listener); },
-    closeCommandPalette() { context.paletteClosed = true; },
+    closeCommandPalette() { context.paletteClosed = true; return options.paletteOpen === true; },
+    isPocketVaultRecoveryFlowOpen() { return options.blocker === "recovery"; },
+    isPocketFilePermissionPromptOpen() { return options.blocker === "permission"; },
+    isPocketDeviceChangesDecisionOpen() { return options.blocker === "device"; },
+    PocketVaultBrowserIo: { isDialogOpen() { return options.blocker === "vault"; } },
   };
   context.window = context; context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(UI_PATH, "utf8"), context, { filename: "pocket-sync-ui.js" });
   const integration = {
     activate() { activateCalls += 1; return new Promise((resolve) => { resolveActivate = resolve; }); },
-    openExisting() { openCalls += 1; return Promise.resolve({ ok: true }); },
+    openExisting() { openCalls += 1; return options.holdOpen ? new Promise((resolve) => { resolveOpen = resolve; }) : Promise.resolve({ ok: true }); },
     resume() { resumeCalls += 1; return Promise.resolve({ ok: false }); },
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get resolveActivate() { return resolveActivate; } };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -113,6 +119,53 @@ test("P053a exposes fresh-device open directly and updates after an owner transi
   harness.setSession({ ownerKind: "synced", id: 2 });
   harness.context.PocketSyncUi.refresh();
   assert.equal(harness.command.hidden, true);
+  assert.equal(harness.topbar.hidden, true);
+  assert.equal(harness.source.textContent, "Synced Pocket");
+});
+
+test("P053b keeps dirty detached work out of Sync open and single-flights a fresh open", async () => {
+  const dirty = createUiHarness("detached", { dirty: true });
+  assert.equal(dirty.command.hidden, true);
+  assert.equal(dirty.topbar.hidden, true);
+  dirty.command.fire("click");
+  assert.equal(dirty.openCalls, 0);
+
+  const clean = createUiHarness("detached", { holdOpen: true });
+  assert.equal(clean.topbar.hidden, false);
+  clean.topbar.fire("click");
+  const primary = clean.overlay.querySelector(".vaultDialogPrimary");
+  primary.fire("click"); primary.fire("click");
+  assert.equal(clean.openCalls, 1);
+  clean.resolveOpen({ ok: true });
+  await Promise.resolve(); await Promise.resolve();
+});
+
+test("P053b cancel and idle Escape return focus visibly while busy Escape keeps Sync truthful", async () => {
+  const idle = createUiHarness("json", { paletteOpen: true });
+  idle.command.fire("click");
+  idle.overlay.querySelector(".vaultDialogSecondary").fire("click");
+  assert.equal(idle.more.focused, true);
+  idle.command.fire("click");
+  const primary = idle.overlay.querySelector(".vaultDialogPrimary");
+  primary.fire("click");
+  idle.event("keydown", { key: "Escape" });
+  assert.equal(idle.overlay.querySelector(".vaultDialogSecondary").disabled, true);
+  assert.equal(idle.overlay.hidden, false);
+  idle.resolveActivate({ ok: false });
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(idle.overlay.hidden, false);
+});
+
+test("P053b blocking overlays prevent Sync stacking and owner events refresh immediately", () => {
+  for (const blocker of ["recovery", "permission", "device", "vault"]) {
+    const harness = createUiHarness("json", { blocker });
+    harness.command.fire("click");
+    assert.equal(harness.overlay.hidden, true, blocker);
+    assert.equal(harness.activateCalls, 0, blocker);
+  }
+  const harness = createUiHarness("none");
+  harness.setSession({ ownerKind: "synced", id: 2 });
+  harness.event("pocket-owner-state-changed");
   assert.equal(harness.topbar.hidden, true);
   assert.equal(harness.source.textContent, "Synced Pocket");
 });

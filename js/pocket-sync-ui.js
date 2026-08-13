@@ -81,8 +81,8 @@
           || global.isPocketFilePermissionPromptOpen?.() === true
           || global.isPocketDeviceChangesDecisionOpen?.() === true
           || global.PocketVaultBrowserIo?.isDialogOpen?.() === true) return false;
-      global.closeCommandPalette?.({ restoreFocus: false });
-      returnFocus = document.activeElement;
+      const paletteClosed = global.closeCommandPalette?.({ restoreFocus: false }) === true;
+      returnFocus = paletteClosed ? (document.getElementById("btnMore") || topbarButton) : document.activeElement;
       overlay.hidden = false;
       status.textContent = "";
       if (mode === "open") {
