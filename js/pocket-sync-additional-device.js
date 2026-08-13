@@ -128,6 +128,9 @@
     if (adopted === true || adopted?.ok === true) {
       return freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision });
     }
+    if (["additional-device-target-stale", "additional-device-target-dirty"].includes(adopted?.reason)) {
+      return fail(adopted.reason);
+    }
     return adopted?.partialState === "visible-payload-committed-detached"
       ? fail("owner-adoption-failed", { partialState: adopted.partialState })
       : fail("owner-adoption-failed");
@@ -284,6 +287,9 @@
         confirmedRemoteRevision: latest.revision, target: captured });
       if (adopted === true || adopted?.ok === true) {
         return freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision });
+      }
+      if (["additional-device-target-stale", "additional-device-target-dirty"].includes(adopted?.reason)) {
+        return fail(adopted.reason);
       }
       return adopted?.partialState === "visible-payload-committed-detached"
         ? fail("owner-adoption-failed", { partialState: adopted.partialState })

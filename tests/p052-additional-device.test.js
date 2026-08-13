@@ -138,7 +138,7 @@ async function createBrowserJourney(options = {}) {
   assert.equal(created.ok, true, JSON.stringify(created));
 
   const idb = createIndexedDb();
-  let ownerKind = "detached";
+  let ownerKind = options.ownerKind || "detached";
   let continuity = 61;
   let visible = null;
   let commits = 0;
@@ -149,9 +149,15 @@ async function createBrowserJourney(options = {}) {
   let installFails = options.installFails === true;
   let ownerAdoptionFailsAfterCommit = options.ownerAdoptionFailsAfterCommit === true;
   let prfUnavailable = false;
+  let dirtySignalThrows = options.dirtySignalThrows === true;
   b.capturePocketFileSaveSession = () => ({ id: continuity, ownerKind });
   b.isPocketFileSaveSessionCurrent = (session) => !!session && session.id === continuity && session.ownerKind === ownerKind;
-  b.hasPocketUnsavedChanges = () => detachedDirty;
+  if (options.dirtySignalMissing !== true) {
+    b.hasPocketUnsavedChanges = () => {
+      if (dirtySignalThrows) throw new Error("synthetic dirty signal failure");
+      return detachedDirty;
+    };
+  }
   b.setPocketFileSession = () => {
     if (installFails) throw new Error("synthetic boundary install failure");
     ownerKind = "synced"; continuity += 1;
@@ -189,16 +195,12 @@ async function createBrowserJourney(options = {}) {
     recoveryService: bRemote.createRecoveryService({ transport, now: () => now }),
     discoveryService: bRemote.createPocketDiscoveryService({ transport }), environment,
   });
-  if (options.ownerEligibilityFails) {
-    idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
-      content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
-    }));
-  }
   const opened = await runtime.openExisting();
   return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
     openExisting: () => runtime.openExisting(), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
       installFails = false; ownerAdoptionFailsAfterCommit = false; idb.setBeforeRead(null); }, setPrfUnavailable(value) { prfUnavailable = value === true; },
     setDetachedDirty(value) { detachedDirty = value === true; }, setDirtyBeforeCommit(value) { dirtyBeforeCommit = value === true; },
+    setDirtySignalThrows(value) { dirtySignalThrows = value === true; },
     setReadRevisionFailure(value) { failReadRevision = value === true; },
     setServerDeviceInvalid(value) { serverDeviceInvalid = value === true; },
     get ownerKind() { return ownerKind; }, get visible() { return visible; }, get commits() { return commits; } };
@@ -607,12 +609,6 @@ test("P052c production browser adoption keeps visible truth and authority cohere
   assert.equal(targetChanged.ownerKind, "detached");
   assert.equal(targetChanged.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
 
-  const ineligible = await createBrowserJourney({ ownerEligibilityFails: true });
-  assert.equal(ineligible.opened.ok, false);
-  assert.equal(ineligible.commits, 0);
-  assert.equal(ineligible.visible, null);
-  assert.equal(ineligible.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
-
   const commitFailed = await createBrowserJourney({ commitFails: true });
   assert.equal(commitFailed.opened.ok, false);
   assert.equal(commitFailed.visible, null);
@@ -665,20 +661,43 @@ test("P052d resumes completed Device B enrolment after post-grant browser failur
   }
 });
 
-test("P052e retries an owner-eligibility failure before visible commit without another Device B grant", async () => {
-  const journey = await createBrowserJourney({ ownerEligibilityFails: true });
+test("P052f retries a completed Device B owner-eligibility failure without another grant", async () => {
+  const journey = await createBrowserJourney({ commitFails: true });
   assert.equal(journey.opened.ok, false);
   assert.equal(journey.visible, null);
   assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
-  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope");
+  const [before] = [...journey.idb.records.values()];
+  assert.equal(before.additionalDeviceDraft, null);
+  assert.equal(before.usage.masterKeyContentEncryptionLimit, 2 ** 20);
+  const deviceId = before.deviceId;
+  const metadata = plain(before.deviceEnvelope.metadata);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
   journey.clearFaults();
+  let completedReadSeen = false;
+  journey.idb.setBeforeRead(({ value }) => {
+    if (!completedReadSeen) { completedReadSeen = true; return value; }
+    return value && Object.assign({}, value, {
+      content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
+    });
+  });
+  const rejected = await journey.openExisting();
+  assert.equal(rejected.reason, "owner-adoption-failed");
+  assert.equal(journey.visible, null);
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+  journey.idb.setBeforeRead(null);
   assert.equal((await journey.openExisting()).ok, true);
-  const retriedGrants = journey.remoteCalls.filter((call) => call.route === "addEnvelope");
-  assert.equal(retriedGrants.length, grants.length + 1);
-  assert.equal(retriedGrants.at(-1).body.attemptKind, "idempotent-retry");
-  assert.equal(retriedGrants.at(-1).body.operationId, grants.at(-1).body.operationId);
-  assert.equal(retriedGrants.at(-1).body.logicalChangeId, grants.at(-1).body.logicalChangeId);
-  assert.deepEqual(retriedGrants.at(-1).body.envelope, grants.at(-1).body.envelope);
+  const after = [...journey.idb.records.values()][0];
+  assert.equal(after.deviceId, deviceId);
+  assert.deepEqual(plain(after.deviceEnvelope.metadata), metadata);
+  assert.equal(after.usage.masterKeyContentEncryptionLimit, 2 ** 20);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+  const saved = await journey.b.PocketOwnerSaveBoundary.save({
+    expectedSession: journey.b.capturePocketFileSaveSession(),
+    async freezePayload() { return { schema: "portal.export.v1", notes: ["P052f completed retry Save"] }; },
+  });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.confirmedRemoteRevision, 2);
 });
 
 test("P052e refuses a dirty detached target before any Device B mutation", async () => {
@@ -690,12 +709,42 @@ test("P052e refuses a dirty detached target before any Device B mutation", async
   assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
 });
 
-test("P052e rechecks detached truth at the visible commit boundary", async () => {
+test("P052f reports detached truth becoming dirty at the visible commit boundary", async () => {
   const journey = await createBrowserJourney({ dirtyBeforeCommit: true });
-  assert.equal(journey.opened.ok, false);
+  assert.equal(journey.opened.reason, "additional-device-target-dirty");
   assert.equal(journey.visible, null);
   assert.equal(journey.ownerKind, "detached");
   assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+});
+
+test("P052f reports a changing detached session as stale rather than dirty", async () => {
+  const journey = await createBrowserJourney({ targetChangesBeforeCommit: true });
+  assert.equal(journey.opened.reason, "additional-device-target-stale");
+  assert.equal(journey.visible, null);
+  assert.equal(journey.ownerKind, "detached");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+});
+
+test("P052f fails closed when the detached dirty-state signal is unavailable", async () => {
+  for (const options of [{ dirtySignalMissing: true }, { dirtySignalThrows: true }]) {
+    const journey = await createBrowserJourney(options);
+    assert.equal(journey.opened.reason, "additional-device-target-dirty");
+    assert.equal(journey.visible, null);
+    assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+    assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
+  }
+});
+
+test("P052f keeps a none target on the public adoption and boundary Save path", async () => {
+  const journey = await createBrowserJourney({ ownerKind: "none" });
+  assert.equal(journey.opened.ok, true, JSON.stringify(journey.opened));
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  const saved = await journey.b.PocketOwnerSaveBoundary.save({
+    expectedSession: journey.b.capturePocketFileSaveSession(),
+    async freezePayload() { return { schema: "portal.export.v1", notes: ["P052f none target Save"] }; },
+  });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.confirmedRemoteRevision, 2);
 });
 
 test("P052e preserves a dirty detached partial retry without another Device B grant", async () => {

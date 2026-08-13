@@ -302,7 +302,11 @@
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
         canContinue: () => additionalTargetReplaceable(input.target) });
-      if (!committed?.ok) return frozen({ ok: false });
+      if (!committed?.ok) {
+        if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });
+        if (!additionalTargetReplaceable(input.target)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
+        return frozen({ ok: false });
+      }
       const adopted = await syncedOwnerController.adoptSyncedOwner({
         syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,
       });
