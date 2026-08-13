@@ -3742,6 +3742,100 @@ test("P056 PE Outline shortcuts collapse and expand branches once, while Text an
   assert.equal(textRuntime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
 });
 
+test("P057 PE Outline is selection-first while retaining editing, hierarchy, context insertion, shortcuts, and save", async () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p057_parent", text: "Parent", depth: 0, collapsed: false },
+      { id: "p057_child", text: "Child", depth: 1, collapsed: false },
+      { id: "p057_grandchild", text: "Grandchild", depth: 2, collapsed: false },
+      { id: "p057_sibling", text: "Sibling", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const text = (id) => row(id).children[2];
+  const select = (id) => row(id).children[0];
+
+  assert.ok(rows().every((candidate) => candidate.children[2].contentEditable === "false"));
+  row("p057_child").dispatch("click", { target: row("p057_child") });
+  assert.equal(row("p057_child").getAttribute("aria-selected"), "true");
+
+  let event = runtime.document.dispatch("keydown", { key: "ArrowUp", target: select("p057_child") });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(row("p057_parent").getAttribute("aria-selected"), "true");
+  event = runtime.document.dispatch("keydown", { key: "ArrowRight", target: select("p057_parent") });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(row("p057_child").getAttribute("aria-selected"), "true");
+  event = runtime.document.dispatch("keydown", { key: "ArrowLeft", target: select("p057_child") });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(row("p057_child").getAttribute("aria-selected"), "true");
+  event = runtime.document.dispatch("keydown", { key: "ArrowLeft", target: select("p057_child") });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(row("p057_parent").getAttribute("aria-selected"), "true");
+  runtime.document.dispatch("keydown", { key: "ArrowLeft", target: select("p057_parent") });
+  assert.deepEqual(rows().map((candidate) => candidate.children[2].textContent), ["Parent", "Sibling"]);
+  runtime.document.dispatch("keydown", { key: "ArrowRight", target: select("p057_parent") });
+  assert.equal(rows().length, 3);
+  runtime.document.dispatch("keydown", { key: "ArrowRight", target: select("p057_child") });
+  runtime.document.dispatch("keydown", { key: "ArrowRight", target: select("p057_child") });
+  assert.equal(rows().length, 4);
+  row("p057_parent").dispatch("click", { target: row("p057_parent") });
+
+  runtime.document.dispatch("keydown", { key: "Enter", target: select("p057_parent") });
+  assert.equal(text("p057_parent").contentEditable, "true");
+  assert.equal(text("p057_parent").dispatch("keydown", { key: "ArrowLeft" }).defaultPrevented, false);
+  text("p057_parent").textContent = "Parent revised";
+  text("p057_parent").dispatch("input");
+  assert.equal(text("p057_parent").dispatch("keydown", { key: "Escape" }).defaultPrevented, true);
+  assert.equal(text("p057_parent").contentEditable, "false");
+  assert.equal(text("p057_parent").textContent, "Parent revised");
+  assert.strictEqual(runtime.document.activeElement, select("p057_parent"));
+
+  text("p057_child").dispatch("dblclick", { target: text("p057_child") });
+  assert.equal(text("p057_child").contentEditable, "true");
+  text("p057_child").dispatch("keydown", { key: "Enter" });
+  const insertedByEnter = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  insertedByEnter.children[2].textContent = "Inserted";
+  insertedByEnter.children[2].dispatch("input");
+  insertedByEnter.children[2].dispatch("keydown", { key: "Escape" });
+
+  row("p057_parent").dispatch("click", { target: row("p057_parent") });
+  row("p057_child").dispatch("click", { target: row("p057_child"), shiftKey: true });
+  assert.deepEqual([row("p057_parent"), row("p057_child")].map((candidate) => candidate.getAttribute("aria-selected")), ["true", "true"]);
+  event = runtime.document.dispatch("keydown", { key: ",", ctrlKey: true, target: select("p057_child") });
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(rows().map((candidate) => candidate.children[2].textContent), ["Parent revised", "Sibling"]);
+  event = runtime.document.dispatch("keydown", { key: ".", metaKey: true, target: select("p057_parent") });
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(rows().length, 5);
+
+  const insertAbove = runtime.document.createElement("button");
+  insertAbove.setAttribute("data-outline-action", "insert-above");
+  runtime.controls.get("outlineContextMenu").appendChild(insertAbove);
+  pane.dispatch("contextmenu", { target: text("p057_sibling"), clientX: 20, clientY: 20 });
+  runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertAbove });
+  const insertedByContext = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  insertedByContext.children[2].textContent = "Context";
+  insertedByContext.children[2].dispatch("input");
+  insertedByContext.children[2].dispatch("keydown", { key: "Escape" });
+  text(insertedByContext.getAttribute("data-block-id")).dispatch("dblclick", { target: text(insertedByContext.getAttribute("data-block-id")) });
+  text(insertedByContext.getAttribute("data-block-id")).textContent = "";
+  text(insertedByContext.getAttribute("data-block-id")).dispatch("input");
+  text(insertedByContext.getAttribute("data-block-id")).dispatch("keydown", { key: "Backspace" });
+  assert.equal(rows().some((candidate) => candidate.children[2].textContent === "Context"), false);
+  const continuedEditing = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  assert.equal(continuedEditing.children[2].textContent, "Inserted");
+  continuedEditing.children[2].dispatch("keydown", { key: "Escape" });
+
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.text, block.depth, block.collapsed]), [
+    ["Parent revised", 0, false], ["Child", 1, false], ["Grandchild", 2, false], ["Inserted", 1, false], ["Sibling", 0, false],
+  ]);
+});
+
 test("generated PE runtime accepts and forwards a synced source identity", () => {
   const runtime = executeControlledRuntime(runtimeEditablePayload({
     sourceOwnerKind: "synced",
@@ -4174,6 +4268,7 @@ test("generated Outline runtime routes Enter through below-sibling subtree inser
   const pane = runtime.controls.get("outlinePane");
   assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "C"]);
 
+  pane.children[1].children[2].dispatch("dblclick", { target: pane.children[1].children[2] });
   const enter = pane.children[1].children[2].dispatch("keydown", { key: "Enter" });
   assert.equal(enter.defaultPrevented, true);
   assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "", "C"]);
@@ -4223,12 +4318,14 @@ test("generated runtime preserves P007 Escape ordering for menu, dialog, row edi
   assert.equal(runtime.controls.get("unsavedDialog").hidden, true);
   assert.equal(runtime.closeCalls(), 0);
 
-  runtime.document.activeElement = text;
-  runtime.document.dispatch("keydown", { key: "Escape", target: text });
-  assert.strictEqual(runtime.document.activeElement, row.children[0]);
+  text.dispatch("dblclick", { target: text });
+  const editingText = pane.children[0].children[2];
+  runtime.document.activeElement = editingText;
+  runtime.document.dispatch("keydown", { key: "Escape", target: editingText });
+  assert.strictEqual(runtime.document.activeElement, pane.children[0].children[0]);
   assert.equal(runtime.closeCalls(), 0);
 
-  runtime.document.dispatch("keydown", { key: "Escape", target: row.children[0] });
+  runtime.document.dispatch("keydown", { key: "Escape", target: pane.children[0].children[0] });
   assert.equal(runtime.controls.get("unsavedDialog").hidden, false);
   assert.equal(runtime.closeCalls(), 0);
 
