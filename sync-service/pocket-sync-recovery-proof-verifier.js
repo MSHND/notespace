@@ -4,6 +4,12 @@ const { webcrypto } = require("node:crypto");
 
 const DOMAIN = "pocket.sync.recovery-authorisation.v1";
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
+// RFC 8032 Ed25519 test vector 1: empty message, public verification material only.
+const CAPABILITY_PUBLIC_KEY = Buffer.from("302a300506032b6570032100d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", "hex");
+const CAPABILITY_SIGNATURE = Buffer.from(
+  "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+    + "5fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b", "hex"
+);
 
 function proofError() {
   const error = new Error("Pocket Sync recovery proof failed.");
@@ -66,7 +72,7 @@ function transcript(input) {
 function createRecoveryProofVerifier() {
   if (!webcrypto?.subtle || typeof webcrypto.subtle.importKey !== "function"
       || typeof webcrypto.subtle.verify !== "function") throw proofError();
-  return Object.freeze({
+  const result = {
     async verifyRecoveryProof(input) {
       let publicBytes;
       let signature;
@@ -96,7 +102,29 @@ function createRecoveryProofVerifier() {
         if (signature) signature.fill(0);
       }
     },
+  };
+  Object.defineProperty(result, "assertSupported", {
+    enumerable: false,
+    value: async function assertSupported() {
+      let publicKey;
+      try {
+        publicKey = await webcrypto.subtle.importKey(
+          "spki", CAPABILITY_PUBLIC_KEY, { name: "Ed25519" }, false, ["verify"]
+        );
+        if (publicKey.type !== "public" || publicKey.extractable !== false
+            || publicKey.algorithm?.name !== "Ed25519" || publicKey.usages.length !== 1
+            || publicKey.usages[0] !== "verify"
+            || await webcrypto.subtle.verify("Ed25519", publicKey, CAPABILITY_SIGNATURE, new Uint8Array()) !== true) {
+          throw proofError();
+        }
+        return Object.freeze({ supported: true });
+      } catch (error) {
+        if (error?.code === "service-recovery-proof-failed") throw error;
+        throw proofError();
+      }
+    },
   });
+  return Object.freeze(result);
 }
 
 module.exports = Object.freeze({ createRecoveryProofVerifier });

@@ -629,6 +629,37 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
   assert.equal(harness.verifierCalls.recovery, 1);
 });
 
+test("P050a real service recovery rejects a different valid private authority without committing finish state", async () => {
+  const harness = await createActivatedHarness();
+  const replacement = await harness.crypto.createRecoveryAuthorisationKeyPair();
+  const dependencies = Object.freeze({
+    ...harness.recoveryDependencies,
+    async readRecoveryPackage() {
+      return {
+        ...plain(harness.originalPackage),
+        recoveryAuthorisation: plain(replacement.recoveryAuthorisation),
+      };
+    },
+  });
+  const before = plain(harness.serviceDriver.snapshot());
+  const callsBefore = harness.remoteCalls.length;
+  const result = await harness.recoveryOrchestrator.recover(dependencies, {
+    deviceId: "device-p050a-wrong-private-authority",
+  });
+  assert.equal(result.reason, "recovery-finish-unavailable");
+  assert.equal(harness.webAuthnCreates, 1);
+  assert.equal(harness.verifierCalls.recovery, 1);
+  const after = harness.serviceDriver.snapshot();
+  assert.equal(Object.keys(after.credentials).length, Object.keys(before.credentials).length);
+  assert.equal(Object.keys(after.sessions).length, Object.keys(before.sessions).length);
+  assert.deepEqual(after.keySets, before.keySets);
+  const calls = harness.remoteCalls.slice(callsBefore);
+  assert.deepEqual(calls.map((call) => call.route), ["beginRecovery", "finishRecovery"]);
+  assert.match(JSON.stringify(calls.at(-1).body), /"signature"/);
+  assert.doesNotMatch(JSON.stringify(calls), /privateKey|rootMaterial|recoveryAuthorisation/);
+  assert.doesNotMatch(JSON.stringify(after), /privateKey|rootMaterial|pocket-recovery-package/);
+});
+
 test("P049c counts every device-key encryption in recovery staging and promotion", async () => {
   const harness = await createActivatedHarness();
   const measured = createMeasuredRecovery(harness);
@@ -917,6 +948,30 @@ test("malformed packages and existing local Pocket identities fail before remote
     });
     assert.equal(result.reason, "recovery-package-invalid");
     assert.equal(harness.recoveryState.records.size, 0);
+    assert.equal(harness.remoteCalls.length, callCount);
+  });
+
+  await t.test("malformed canonical PKCS8 fails before device staging, remote recovery or WebAuthn", async () => {
+    const harness = await createActivatedHarness();
+    const dependencies = Object.freeze({
+      ...harness.recoveryDependencies,
+      async readRecoveryPackage() {
+        return {
+          ...plain(harness.originalPackage),
+          recoveryAuthorisation: {
+            ...plain(harness.originalPackage.recoveryAuthorisation),
+            privateKey: Buffer.alloc(64, 7).toString("base64url"),
+          },
+        };
+      },
+    });
+    const callCount = harness.remoteCalls.length;
+    const result = await harness.recoveryOrchestrator.recover(dependencies, {
+      deviceId: "device-p050a-malformed-pkcs8",
+    });
+    assert.equal(result.reason, "recovery-package-invalid");
+    assert.equal(harness.recoveryState.records.size, 0);
+    assert.equal(harness.webAuthnCreates, 0);
     assert.equal(harness.remoteCalls.length, callCount);
   });
 

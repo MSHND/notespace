@@ -162,7 +162,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     requireMethods(config.crypto, [
       "encodeBase64Url", "generateDeviceWrappingKey", "deriveWrappingKey",
       "createDerivedWrappingKey", "createRecoveryAuthorisationKeyPair", "digestRecoveryCredential",
-      "signRecoveryAuthorisation",
+      "signRecoveryAuthorisation", "validateRecoveryAuthorisation",
       "openMasterKeyBundle", "openContent", "sealContent", "validateContentRecord",
       "validateContentContext", "validateMasterKeyEnvelope", "validateEnvelopeContext",
     ], "recovery-crypto-invalid");
@@ -1170,6 +1170,11 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         let recoveryPackage;
         try { recoveryPackage = validatePackage(packageInput, config); }
         catch (_error) { return safeFailure("recovery-package-invalid"); }
+        try {
+          await checked(execution, config.crypto.validateRecoveryAuthorisation(
+            recoveryPackage.recoveryAuthorisation
+          ));
+        } catch (_error) { return safeFailure("recovery-package-invalid"); }
         await checked(execution, config.deviceStore.open());
         if (await checked(execution,
           config.deviceStore.readStoredRecord(recoveryPackage.syncedPocketId)) !== null) {

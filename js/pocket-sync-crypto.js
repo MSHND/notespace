@@ -425,6 +425,37 @@ operations without activating sync, storage, account, or transport behaviour.
     }
   }
 
+  async function validateRecoveryAuthorisation(authorisation) {
+    if (!authorisation || typeof authorisation !== "object"
+        || Object.keys(authorisation).length !== 4
+        || authorisation.version !== RECOVERY_AUTHORISATION.version
+        || authorisation.algorithm !== RECOVERY_AUTHORISATION.algorithm
+        || authorisation.privateKeyFormat !== RECOVERY_AUTHORISATION.privateKeyFormat) {
+      throw cryptoError("recovery-proof-invalid");
+    }
+    const privateBytes = decodeBase64Url(authorisation.privateKey, "recovery-proof-invalid");
+    try {
+      if (privateBytes.byteLength < 32 || privateBytes.byteLength > 4096
+          || typeof getCrypto().subtle.importKey !== "function") {
+        throw cryptoError("recovery-proof-invalid");
+      }
+      const key = await getCrypto().subtle.importKey("pkcs8", privateBytes,
+        { name: RECOVERY_AUTHORISATION.algorithm }, false, ["sign"]);
+      if (!key || key.type !== "private" || key.extractable !== false
+          || key.algorithm?.name !== RECOVERY_AUTHORISATION.algorithm
+          || key.usages.length !== 1 || key.usages[0] !== "sign") {
+        throw cryptoError("recovery-proof-invalid");
+      }
+      return Object.freeze({ valid: true });
+    } catch (error) {
+      if (error?.code) throw error;
+      if (error?.name === "DataError") throw cryptoError("recovery-proof-invalid");
+      throw cryptoError("recovery-signature-unsupported");
+    } finally {
+      privateBytes.fill(0);
+    }
+  }
+
   async function signRecoveryAuthorisation(authorisation, input) {
     if (!authorisation || typeof authorisation !== "object"
         || Object.keys(authorisation).length !== 4
@@ -701,6 +732,7 @@ operations without activating sync, storage, account, or transport behaviour.
     generateDeviceWrappingKey,
     createDerivedWrappingKey,
     createRecoveryAuthorisationKeyPair,
+    validateRecoveryAuthorisation,
     digestRecoveryCredential,
     signRecoveryAuthorisation,
     deriveWrappingKey,

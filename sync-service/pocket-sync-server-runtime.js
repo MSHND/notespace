@@ -79,7 +79,8 @@ function validateTls(value) {
 function validateRecoveryProofVerifier(value) {
   if (!isObject(value)
       || Object.keys(value).length !== 1
-      || typeof value.verifyRecoveryProof !== "function") {
+      || typeof value.verifyRecoveryProof !== "function"
+      || typeof value.assertSupported !== "function") {
     throw runtimeError();
   }
   return value;
@@ -234,6 +235,7 @@ function createSyncServerRuntime(configuration) {
     const options = listenOptions(value);
     if (started || shutdown) throw runtimeError();
     try {
+      await config.recoveryProofVerifier.assertSupported();
       await pool.query("SELECT 1");
       await verifyPocketSyncSchema(pool);
     } catch (_error) {

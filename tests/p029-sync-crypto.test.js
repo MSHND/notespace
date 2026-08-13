@@ -541,6 +541,52 @@ test("P050 signs one exact Ed25519 recovery-authorisation transcript with portab
   credentialDigest.fill(0);
 });
 
+test("P050a cryptographically validates only canonical Ed25519 PKCS8 recovery authority", async () => {
+  const { api } = createModule();
+  const keys = await api.createRecoveryAuthorisationKeyPair();
+  assert.equal((await api.validateRecoveryAuthorisation(keys.recoveryAuthorisation)).valid, true);
+  const malformed = { ...keys.recoveryAuthorisation, privateKey: Buffer.alloc(64, 7).toString("base64url") };
+  await assert.rejects(api.validateRecoveryAuthorisation(malformed), { code: "recovery-proof-invalid" });
+  await assert.rejects(api.validateRecoveryAuthorisation({ ...keys.recoveryAuthorisation, extra: true }),
+    { code: "recovery-proof-invalid" });
+});
+
+test("P050a reports unsupported native Ed25519 separately from malformed recovery authority", async () => {
+  const supported = createModule();
+  const keys = await supported.api.createRecoveryAuthorisationKeyPair();
+  const context = {
+    crypto: {
+      subtle: {
+        async importKey() {
+          const error = new Error("native detail");
+          error.name = "NotSupportedError";
+          throw error;
+        },
+      },
+      getRandomValues(target) { return target; },
+    },
+    TextEncoder,
+    TextDecoder,
+    Uint8Array,
+    ArrayBuffer,
+    Object,
+    Array,
+    Number,
+    String,
+    Boolean,
+    JSON,
+    Error,
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(source(MODULE_PATH), context, { filename: MODULE_PATH });
+  await assert.rejects(context.PocketSyncCrypto.validateRecoveryAuthorisation(keys.recoveryAuthorisation),
+    { code: "recovery-signature-unsupported" });
+});
+
 test("sync crypto has no forbidden derivation, storage, network, DOM, timer, provider or third-party code", () => {
   const moduleSource = source(MODULE_PATH).toLowerCase();
   for (const forbidden of [

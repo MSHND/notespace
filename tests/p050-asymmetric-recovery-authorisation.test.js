@@ -48,6 +48,8 @@ test("P050 production verifier is Ed25519 verify-only and rejects every bound tr
     keySetVersion: 7, expiresAt: "2042-01-01T00:05:00.000Z", credentialDigest,
   };
   const verifier = createRecoveryProofVerifier();
+  assert.deepEqual(await verifier.assertSupported(), { supported: true });
+  assert.deepEqual(Object.keys(verifier), ["verifyRecoveryProof"]);
   const valid = { ...input, storedVerifier: first.publicVerifier, proof: await proof(first.privateKey, input) };
   assert.deepEqual(await verifier.verifyRecoveryProof(valid), { verified: true });
   const wrongKey = { ...valid, proof: await proof(other.privateKey, input) };

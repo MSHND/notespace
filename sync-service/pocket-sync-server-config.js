@@ -52,13 +52,18 @@ function trustedOriginAndRpId(origin, rpId) {
 }
 
 function createUnavailableRecoveryProofVerifier() {
-  return Object.freeze({
+  const verifier = {
     async verifyRecoveryProof() {
       const error = new Error("Pocket Sync recovery proof is unavailable.");
       error.code = "recovery-proof-unavailable";
       throw error;
     },
+  };
+  Object.defineProperty(verifier, "assertSupported", {
+    enumerable: false,
+    value: async function assertSupported() { return Object.freeze({ supported: true }); },
   });
+  return Object.freeze(verifier);
 }
 
 function createLocalServerConfig(input) {

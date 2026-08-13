@@ -366,6 +366,23 @@ test("P049 local configuration fails closed and the recovery proof verifier cann
   }
 });
 
+test("P050a refuses to listen when the recovery verifier cannot prove native Ed25519 support", async () => {
+  await withRuntime(async ({ createSyncServerRuntime, state }) => {
+    const verifier = { async verifyRecoveryProof() { return { verified: true }; } };
+    Object.defineProperty(verifier, "assertSupported", {
+      enumerable: false,
+      value: async () => { throw new Error("native detail"); },
+    });
+    const runtime = createSyncServerRuntime(runtimeConfig(Object.freeze(verifier)));
+    await assert.rejects(runtime.listen({ host: "127.0.0.1", port: 8443 }),
+      (error) => error?.code === "sync-server-runtime-failed" && !error.message.includes("native"));
+    assert.deepEqual(state.preflight, []);
+    assert.deepEqual(state.listens, []);
+    assert.equal(state.closes, 0);
+    assert.equal(state.ends, 1);
+  });
+});
+
 test("P049b rejects metadata-only PostgreSQL schemas with an unsafe collection allowlist", async () => {
   const pool = {
     async query(sql) {
