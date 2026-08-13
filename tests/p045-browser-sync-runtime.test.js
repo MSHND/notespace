@@ -112,6 +112,7 @@ function loadRuntime(context) {
     "js/pocket-sync-account-client.js",
     "js/pocket-sync-remote-client.js",
     "js/pocket-sync-activation.js",
+    "js/pocket-sync-emergency-recovery.js",
     "js/pocket-sync-owner-controller.js",
     "js/pocket-owner-save-boundary.js",
     "js/pocket-sync-activation-owner-bridge.js",
@@ -302,6 +303,22 @@ test("P045 loading and runtime construction are inert", () => {
   assert.equal(Object.isFrozen(context.PocketSyncBrowserRuntime), true);
   assert.match(source("index.html"), /js\/pocket-sync-browser-runtime\.js/);
   assert.match(source("index.html"), /id="cmdSync"[^>]*hidden disabled/);
+});
+
+test("P054 keeps recovery explicit, rejects dirty detached work and leaves static Pocket unchanged", async () => {
+  const dirty = createHarness({ ownerKind: "detached" });
+  const refused = await dirty.runtime.recoverExisting();
+  assert.equal(refused.reason, "recovery-target-dirty");
+  assert.equal(dirty.pickerCalls, 0);
+  assert.equal(dirty.idb.observations.opens, 0);
+  assert.equal(dirty.remoteCalls.length, 0);
+
+  const empty = createHarness({ ownerKind: "none" });
+  const cancelled = await empty.runtime.recoverExisting();
+  assert.equal(cancelled.reason, "recovery-package-invalid");
+  assert.equal(empty.idb.observations.opens, 0);
+  assert.equal(empty.remoteCalls.length, 0);
+  assert.doesNotMatch(source("index.html"), /pocket-sync-emergency-recovery\.js/);
 });
 
 test("P045 explicitly composes browser activation, encrypted remote state and the live synced owner", async () => {

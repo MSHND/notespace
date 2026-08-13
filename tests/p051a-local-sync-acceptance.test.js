@@ -122,7 +122,7 @@ function loadBrowserContext(adapter, observations) {
   for (const file of [
     "js/pocket-sync-security-contract.js", "js/pocket-device-changes.js", "js/pocket-sync-crypto.js",
     "js/pocket-sync-device-store.js", "js/pocket-sync-account-client.js", "js/pocket-sync-remote-client.js",
-    "js/pocket-sync-activation.js", "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation.js", "js/pocket-sync-emergency-recovery.js", "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
     "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
   ]) vm.runInContext(source(file), context, { filename: file });
   return context;

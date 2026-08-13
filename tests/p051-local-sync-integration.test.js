@@ -35,6 +35,7 @@ test("P051 local host serves only reviewed browser assets, injects its local mod
   const index = await serve(handler, "GET", "/");
   assert.equal(index.statusCode, 200);
   assert.match(index.body.toString("utf8"), /pocket-sync-local-integration\.js/);
+  assert.match(index.body.toString("utf8"), /pocket-sync-emergency-recovery\.js/);
   assert.doesNotMatch(fs.readFileSync(path.join(ROOT, "index.html"), "utf8"), /pocket-sync-local-integration\.js/);
   const head = await serve(handler, "HEAD", "/");
   assert.equal(head.statusCode, 200);
@@ -48,7 +49,7 @@ test("P051 local host serves only reviewed browser assets, injects its local mod
   assert.match(fs.readFileSync(path.join(ROOT, "sw.js"), "utf8"), /if \(request\.method !== "GET"\) return;/);
 });
 
-test("P051 local integration is inert until create and returns only safe acceptance operations", async () => {
+test("P054 local integration is inert until create and returns only explicit provider-neutral recovery operations", async () => {
   const calls = [];
   const payload = { mainThoughtTree: [{ id: "root", label: "saved" }] };
   const context = {
@@ -88,6 +89,8 @@ test("P051 local integration is inert until create and returns only safe accepta
         return {
           async activate() { return { ok: true, owner: { ownerKind: "synced", syncedPocketId: "opaque-pocket" } }; },
           async resume() { return { ok: false }; },
+          async recoverExisting() { return { ok: false, reason: "recovery-package-invalid" }; },
+          async resumeRecovery(input) { return { ok: false, recoveryAttemptId: input.recoveryAttemptId }; },
         };
       },
     },
@@ -100,10 +103,12 @@ test("P051 local integration is inert until create and returns only safe accepta
   assert.deepEqual(Object.keys(context.PocketSyncLocalIntegration), ["create"]);
   assert.equal(Object.isFrozen(context.PocketSyncLocalIntegration), true);
   const integration = context.PocketSyncLocalIntegration.create();
-  assert.deepEqual(Object.keys(integration), ["activate", "resume", "openExisting", "verifyRoundTrip"]);
+  assert.deepEqual(Object.keys(integration), ["activate", "resume", "openExisting", "recoverExisting", "resumeRecovery", "verifyRoundTrip"]);
   assert.equal(Object.isFrozen(integration), true);
   assert.deepEqual(JSON.parse(JSON.stringify(await integration.verifyRoundTrip())), { ok: false, reason: "sync-not-activated" });
   assert.equal((await integration.activate()).ok, true);
+  assert.equal((await integration.recoverExisting()).reason, "recovery-package-invalid");
+  assert.deepEqual(JSON.parse(JSON.stringify(await integration.resumeRecovery({ recoveryAttemptId: "existing-recovery" }))), { ok: false, recoveryAttemptId: "existing-recovery" });
   assert.deepEqual(JSON.parse(JSON.stringify(await integration.verifyRoundTrip())), { ok: true, revision: 2, matchesCurrentSavedPocket: true });
   assert.equal(JSON.stringify(await integration.verifyRoundTrip()).includes("saved"), false);
   assert.equal(calls.includes("transport:/pocket-sync/v1"), true);

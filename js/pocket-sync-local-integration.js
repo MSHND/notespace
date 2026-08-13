@@ -90,6 +90,16 @@
       catch (_error) { return safeFailure("additional-device-unavailable"); }
     }
 
+    async function recoverExisting() {
+      try { return remember(await runtime.recoverExisting()); }
+      catch (_error) { return safeFailure("recovery-unavailable"); }
+    }
+
+    async function resumeRecovery(input) {
+      try { return remember(await runtime.resumeRecovery(input)); }
+      catch (_error) { return safeFailure("recovery-unavailable"); }
+    }
+
     async function verifyRoundTrip() {
       if (!syncedPocketId) return safeFailure("sync-not-activated");
       try {
@@ -142,7 +152,9 @@
       }
     }
 
-    const integration = frozen({ activate, resume, openExisting, verifyRoundTrip });
+    const integration = frozen({
+      activate, resume, openExisting, recoverExisting, resumeRecovery, verifyRoundTrip,
+    });
     try { global.PocketSyncUi?.install?.(integration); } catch (_error) {}
     return integration;
   }

@@ -138,6 +138,29 @@
     };
   }
 
+  function recoveryPackagePicker(environment) {
+    return async () => {
+      const select = environment.showOpenFilePicker || global.showOpenFilePicker;
+      if (typeof select !== "function") return null;
+      try {
+        const handles = await select.call(environment, {
+          multiple: false,
+          types: [{
+            description: "Pocket recovery copy",
+            accept: { "application/json": [".json"] },
+          }],
+        });
+        if (!Array.isArray(handles) || handles.length !== 1
+            || !handles[0] || typeof handles[0].getFile !== "function") return null;
+        const file = await handles[0].getFile();
+        if (!file || typeof file.text !== "function") return null;
+        return JSON.parse(await file.text());
+      } catch (_error) {
+        return null;
+      }
+    };
+  }
+
   async function writeRecoveryCopy(input) {
     if (!input || !input.destination || !input.recoveryPackage
         || typeof input.destination.createWritable !== "function") return frozen({ ok: false });
@@ -219,14 +242,16 @@
     const accountApi = global.PocketSyncAccountClient;
     const activationApi = global.PocketSyncActivation;
     const additionalApi = global.PocketSyncAdditionalDevice;
+    const recoveryApi = global.PocketSyncEmergencyRecovery;
     const ownerApi = global.PocketSyncOwnerController;
     const bridgeApi = global.PocketSyncActivationOwnerBridge;
     const boundary = global.PocketOwnerSaveBoundary;
     requireMethods(security, ["buildRecoveryPackage"], "foundation-unavailable");
-    requireMethods(crypto, ["encodeBase64Url"], "foundation-unavailable");
+    requireMethods(crypto, ["encodeBase64Url", "openMasterKeyBundle", "openContent"], "foundation-unavailable");
     requireMethods(storeApi, ["createIndexedDbDriver", "createStore"], "foundation-unavailable");
     requireMethods(accountApi, ["createClient", "createBrowserWebAuthnAdapter"], "foundation-unavailable");
     requireMethods(activationApi, ["createActivationOrchestrator"], "foundation-unavailable");
+    requireMethods(recoveryApi, ["createRecoveryOrchestrator"], "foundation-unavailable");
     requireMethods(ownerApi, ["createSyncedOwnerController"], "foundation-unavailable");
     requireMethods(bridgeApi, ["createActivationOwnerBridge"], "foundation-unavailable");
     requireMethods(boundary, ["installSyncedOwnerForSave"], "foundation-unavailable");
@@ -259,6 +284,19 @@
       randomBytes: browserRandom(environment),
       now,
     });
+    const recoveryWebAuthn = accountApi.createBrowserWebAuthnAdapter(environment);
+    const recoveryOrchestrator = recoveryApi.createRecoveryOrchestrator({
+      securityContract: security,
+      crypto,
+      deviceStore,
+      accountContract: accountApi,
+      contentService: config.contentService,
+      envelopeService: config.envelopeService,
+      recoveryService: config.recoveryService,
+      webAuthn: Object.freeze({ createCredential: recoveryWebAuthn.createCredential }),
+      randomBytes: browserRandom(environment),
+      now,
+    });
 
     function additionalTarget() {
       const session = typeof global.capturePocketFileSaveSession === "function"
@@ -270,18 +308,77 @@
     function additionalTargetCurrent(expected = null) {
       const target = additionalTarget();
       return !!target && (expected === null || (target.ownerKind === expected.ownerKind
-        && `${target.ownerKind}:${target.continuityId}` === expected.continuityId));
+        && [target.continuityId, `${target.ownerKind}:${target.continuityId}`]
+          .includes(expected.continuityId)));
     }
 
     function additionalTargetReplaceable(expected = null) {
       const target = additionalTarget();
       if (!target || (expected !== null && (target.ownerKind !== expected.ownerKind
-          || `${target.ownerKind}:${target.continuityId}` !== expected.continuityId))) return false;
+          || ![target.continuityId, `${target.ownerKind}:${target.continuityId}`]
+            .includes(expected.continuityId)))) return false;
       if (target.ownerKind === "none") return true;
       try {
         return typeof global.hasPocketUnsavedChanges === "function"
           && global.hasPocketUnsavedChanges() === false;
       } catch (_error) { return false; }
+    }
+
+    function recoveryDependencies() {
+      return frozen({
+        captureRecoveryTarget: additionalTarget,
+        isRecoveryTargetCurrent: (expected) => additionalTargetCurrent(expected)
+          && additionalTargetReplaceable(expected),
+        readRecoveryPackage: recoveryPackagePicker(environment),
+        prepareReplacementRecoveryCopyDestination: recoveryPicker(environment),
+        buildRecoveryPackage: (input) => buildRecoveryPackage(security, crypto, environment, input),
+        writeReplacementRecoveryCopy: writeRecoveryCopy,
+        validateRecoveredPayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
+      });
+    }
+
+    async function adoptRecoveredPocket(result) {
+      const found = await deviceStore.readRecoveryAttempt(result.recoveryAttemptId);
+      const target = additionalTarget();
+      if (!found?.record || !found?.draft || !target
+          || found.draft.targetOwnerKind !== target.ownerKind
+          || found.draft.targetContinuityId !== `${target.ownerKind}:${target.continuityId}`
+          || !additionalTargetReplaceable(target)) return safeFailure("recovery-target-stale");
+      const bundle = await crypto.openMasterKeyBundle(
+        found.record.deviceEnvelope.record,
+        found.record.deviceWrappingKey,
+        found.record.deviceEnvelope.context,
+        []
+      );
+      const payload = await crypto.openContent(
+        found.record.content.record,
+        bundle.masterKey,
+        found.record.content.context
+      );
+      if (global.isPocketPayloadShape?.(payload) !== true
+          || typeof global.normaliseInput !== "function"
+          || typeof global.commitPreparedPocketDocument !== "function") {
+        return safeFailure("recovered-content-invalid");
+      }
+      const norm = global.normaliseInput(payload);
+      const committed = global.commitPreparedPocketDocument(norm, {
+        schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
+        writtenAt: norm.writtenAt || "",
+      }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
+        detachedDeviceChanges: true, storagePrivate: "synced",
+        canContinue: () => additionalTargetReplaceable(target) });
+      if (!committed?.ok) return safeFailure("recovery-target-stale");
+      const adopted = await syncedOwnerController.adoptReadyRecovery(result, frozen({
+        captureRecoveryTarget: additionalTarget,
+        isRecoveryTargetCurrent: (expected) => additionalTargetCurrent(expected)
+          && additionalTargetReplaceable(expected),
+      }));
+      if (!adopted?.ok) return safeFailure(adopted?.reason || "recovery-adoption-failed");
+      if (boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
+        try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
+        return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
+      }
+      return frozen({ ok: true });
     }
 
     async function adoptAdditionalDevice(input) {
@@ -394,7 +491,30 @@
       });
     }
 
-    return frozen({ activate, resume, openExisting });
+    async function recoverExisting() {
+      if (!additionalTargetReplaceable()) return safeFailure("recovery-target-dirty");
+      const deviceId = crypto.encodeBase64Url(browserRandom(environment)(32));
+      const recovered = await recoveryOrchestrator.recover(recoveryDependencies(), { deviceId });
+      if (!recovered?.ok || recovered.readyForAdoption !== true) return recovered;
+      try { return adoptRecoveredPocket(recovered); }
+      catch (_error) { return safeFailure("recovery-adoption-failed"); }
+    }
+
+    async function resumeRecovery(input) {
+      if (!input || typeof input !== "object" || Array.isArray(input)
+          || Object.keys(input).length !== 1 || typeof input.recoveryAttemptId !== "string") {
+        return safeFailure("invalid-recovery-input");
+      }
+      if (!additionalTargetReplaceable()) return safeFailure("recovery-target-dirty");
+      const recovered = await recoveryOrchestrator.resume(recoveryDependencies(), {
+        recoveryAttemptId: input.recoveryAttemptId,
+      });
+      if (!recovered?.ok || recovered.readyForAdoption !== true) return recovered;
+      try { return adoptRecoveredPocket(recovered); }
+      catch (_error) { return safeFailure("recovery-adoption-failed"); }
+    }
+
+    return frozen({ activate, resume, openExisting, recoverExisting, resumeRecovery });
   }
 
   global.PocketSyncBrowserRuntime = frozen({ createRuntime });

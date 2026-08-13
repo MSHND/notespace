@@ -634,6 +634,74 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
   assert.equal(harness.verifierCalls.recovery, 1);
 });
 
+test("P054 explicitly composes P041 recovery into the existing document, owner and Save boundaries", async () => {
+  const harness = await createActivatedHarness();
+  const context = harness.context;
+  let ownerKind = "none";
+  let continuityId = 41;
+  let committedPayload = null;
+  const originalStoreApi = context.PocketSyncDeviceStore;
+  context.PocketSyncDeviceStore = Object.freeze({
+    ...originalStoreApi,
+    createIndexedDbDriver() { return Object.freeze({}); },
+    createStore() { return harness.recoveryStore; },
+  });
+  context.capturePocketFileSaveSession = () => ({ id: continuityId, ownerKind });
+  context.isPocketFileSaveSessionCurrent = (value) => !!value
+    && value.id === continuityId && value.ownerKind === ownerKind;
+  context.hasPocketUnsavedChanges = () => false;
+  context.isPocketPayloadShape = (value) => value?.schema === "portal.export.v1";
+  context.normaliseInput = (value) => value;
+  context.commitPreparedPocketDocument = (value, _metadata, guard) => {
+    if (guard.canContinue() !== true) return { ok: false };
+    committedPayload = plain(value);
+    return { ok: true };
+  };
+  context.setPocketFileSession = (_handle, _name, options = {}) => {
+    ownerKind = options.ownerKind || "json";
+    continuityId += 1;
+  };
+  context.buildPocketPayload = () => plain(PAYLOAD);
+  context.PocketDeviceChanges = { fingerprintDocument(value) { return JSON.stringify(value); } };
+  const recoveryWrites = [];
+  const environment = {
+    crypto: webcrypto,
+    now: () => NOW,
+    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+    navigator: { credentials: { async create() { return registrationCredential(123); } } },
+    async showOpenFilePicker() {
+      return [{ async getFile() { return { async text() { return JSON.stringify(harness.originalPackage); } }; } }];
+    },
+    async showSaveFilePicker() {
+      return { async createWritable() {
+        return { async write(value) { recoveryWrites.push(value); }, async close() {}, async abort() {} };
+      } };
+    },
+  };
+  for (const file of [
+    "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
+  ]) vm.runInContext(source(file), context, { filename: file });
+  const runtime = context.PocketSyncBrowserRuntime.createRuntime({
+    accountService: context.PocketSyncRemoteClient.createAccountService({ transport: harness.transport, now: () => NOW }),
+    contentService: harness.contentService,
+    envelopeService: harness.envelopeService,
+    recoveryService: harness.recoveryService,
+    environment,
+  });
+  const result = await runtime.recoverExisting();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(committedPayload, plain(PAYLOAD));
+  assert.equal(ownerKind, "synced");
+  assert.equal(recoveryWrites.length, 1);
+  const saved = await context.PocketOwnerSaveBoundary.save({
+    expectedSession: context.capturePocketFileSaveSession(),
+    freezePayload: async () => plain(PAYLOAD),
+  });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.confirmedRemoteRevision, 2);
+});
+
 test("P052a refuses missing device-grant metadata before emergency recovery is ready", async () => {
   const harness = await createActivatedHarness({ omitRecoveryDeviceGrant: true });
   const result = await harness.recoveryOrchestrator.recover(harness.recoveryDependencies, {

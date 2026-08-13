@@ -2,7 +2,7 @@
 
 ## 1. Status and boundary
 
-P041 adds one dormant browser orchestrator, `window.PocketSyncEmergencyRecovery`, for recovering an existing Synced Pocket onto an empty or detached device. It joins the reviewed P028-P040 contracts and stops at a durable `ready-for-adoption` device record. It is absent from `index.html`, `sw.js` and current production loaders. It does not add UI, adopt an owner, change Main Save or PE Save, or implement a recovery-proof algorithm.
+P041 adds one browser orchestrator, `window.PocketSyncEmergencyRecovery`, for recovering an existing Synced Pocket onto an empty or detached device. P054 loads it only through the injected local Sync integration, never through `index.html`, `sw.js` or static Pocket. The browser runtime explicitly invokes it, validates and visibly commits the recovered Pocket, then uses P042's existing recovery-adoption and Save boundary. It does not add a recovery UI or implement a recovery-proof algorithm.
 
 The frozen public surface is exactly:
 
@@ -75,7 +75,7 @@ The safe final draft retains only opaque attempt/Pocket/device/account/credentia
 
 `resume` of that final attempt returns the same deeply frozen safe result without target capture, remote work, proof derivation, WebAuthn, copy writing, cryptographic mutation or device-store writing.
 
-## 9. No adoption and no background behaviour
+## 9. Explicit adoption and no background behaviour
 
 Success means locally durable and remotely rotated, not live ownership:
 
@@ -92,8 +92,8 @@ Success means locally durable and remotely rotated, not live ownership:
 }
 ```
 
-The result includes safe revisions and the opaque recovery-attempt ID, but no root, package, locator, proof, credential response, key or ciphertext. P041 adds no timer, polling, worker, retry loop, storage fallback, cookie handling, logging or owner adapter.
+The result includes safe revisions and the opaque recovery-attempt ID, but no root, package, locator, proof, credential response, key or ciphertext. P054's browser runtime is the explicit caller: it rechecks the clean `none`/`detached` target, commits the validated recovered content through the existing document-commit path, then calls P042 `adoptReadyRecovery` and installs the existing owner-aware Save boundary. P041 itself adds no timer, polling, worker, retry loop, storage fallback, cookie handling or logging.
 
 ## 10. P042 boundary
 
-P042 should build one dormant synced-owner and explicit Save controller able to adopt either a P039/P040 activation-ready record or a P041 recovery-ready record. It should preserve one owner/session authority and one device-first explicit Save path. UI, production loading, HTTP/database deployment and the reviewed recovery-proof adapter remain separate gates.
+P042 supplies the single synced-owner and explicit Save controller for either a P039/P040 activation-ready record or a P041 recovery-ready record. P054 uses that controller through the injected browser runtime. Recovery UI, production-provider selection and deployment remain separate gates.
