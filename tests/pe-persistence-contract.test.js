@@ -2577,8 +2577,52 @@ test("P056 main-tree collapse and expand shortcuts respect keyboard ownership an
   assert.equal(dispatch(",", { ctrlKey: true }).defaultPrevented, false);
   assert.equal(calls.collapse, 1);
   vm.runInContext("state.inlineEdit.id = '';", context);
-  assert.equal(dispatch("ArrowLeft", { ctrlKey: true }).defaultPrevented, true);
-  assert.equal(calls.collapse, 2);
+});
+
+test("P058 main-tree Ctrl/Cmd arrows move whole branches while plain arrows stay navigational", () => {
+  const context = createFullContractContext();
+  context.renderTree = () => {};
+  context.refreshMeta = () => {};
+  context.refocusTreeNavigation = () => {};
+  context.softlyEnsureSelectionVisible = () => {};
+  context.persistPipSnapshot = () => {};
+  context.setStatus = () => {};
+  context.requestAnimationFrame = (callback) => callback();
+  context.maxSiblingOrder = (parentId) => Math.max(1000, ...lexicalState(context).nodes
+    .filter((node) => (node.parentId || "root") === (parentId || "root"))
+    .map((node) => Number(node.order) || 0));
+  const state = resetState(context, [
+    syntheticNode("p058_a", { label: "A", parentId: "root", order: 1001 }),
+    syntheticNode("p058_a_child", { label: "A child", parentId: "p058_a", order: 1001 }),
+    syntheticNode("p058_b", { label: "B", parentId: "root", order: 1002 }),
+    syntheticNode("p058_b_child", { label: "B child", parentId: "p058_b", order: 1001 }),
+  ]);
+  runScript(context, "js/pocket-tree-actions.js");
+  state.inlineEdit.id = "";
+  state.detailsEdit.id = "";
+  let visibleDelta = 0;
+  context.moveSelectionByVisibleDelta = (delta) => { visibleDelta += delta; };
+  const dispatch = (key, extras = {}) => {
+    const event = { key, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, target: null,
+      preventDefault() { this.defaultPrevented = true; }, ...extras };
+    context.handleTreeKeydown(event);
+    return event;
+  };
+  state.selectedId = "p058_b";
+  context.moveNodeWithinSiblings(state.selectedId, -1);
+  assert.deepEqual(state.nodes.filter((node) => node.parentId === "root").sort((a, b) => a.order - b.order).map((node) => node.id), ["p058_b", "p058_a"]);
+  assert.equal(state.nodes.find((node) => node.id === "p058_b_child").parentId, "p058_b");
+  context.moveNodeWithinSiblings(state.selectedId, 1);
+  assert.deepEqual(state.nodes.filter((node) => node.parentId === "root").sort((a, b) => a.order - b.order).map((node) => node.id), ["p058_a", "p058_b"]);
+  context.outdentNodeById(state.selectedId);
+  assert.equal(state.nodes.find((node) => node.id === "p058_b").parentId, "root");
+  context.indentNodeById(state.selectedId);
+  assert.equal(state.nodes.find((node) => node.id === "p058_b").parentId, "p058_a");
+  assert.equal(state.nodes.find((node) => node.id === "p058_b_child").parentId, "p058_b");
+  const actions = source("js/pocket-tree-actions.js");
+  assert.match(actions, /ev\.key === "ArrowUp"\) moveNodeWithinSiblings\(state\.selectedId, -1\)/);
+  assert.match(actions, /ev\.key === "ArrowLeft"\) outdentNodeById\(state\.selectedId\)/);
+  assert.equal(actions.includes('ev.key === "ArrowLeft"\n  ) {\n    ev.preventDefault();\n    collapseAllNodes()'), false);
 });
 
 test("an unrelated edit preserves raw editor metadata while later export omits retired pe", () => {
@@ -3788,18 +3832,18 @@ test("P057 PE Outline is selection-first while retaining editing, hierarchy, con
   assert.equal(text("p057_parent").dispatch("keydown", { key: "ArrowLeft" }).defaultPrevented, false);
   text("p057_parent").textContent = "Parent revised";
   text("p057_parent").dispatch("input");
-  assert.equal(text("p057_parent").dispatch("keydown", { key: "Escape" }).defaultPrevented, true);
+  assert.equal(text("p057_parent").dispatch("keydown", { key: "Enter" }).defaultPrevented, true);
   assert.equal(text("p057_parent").contentEditable, "false");
   assert.equal(text("p057_parent").textContent, "Parent revised");
   assert.strictEqual(runtime.document.activeElement, select("p057_parent"));
 
   text("p057_child").dispatch("dblclick", { target: text("p057_child") });
   assert.equal(text("p057_child").contentEditable, "true");
-  text("p057_child").dispatch("keydown", { key: "Enter" });
+  text("p057_child").dispatch("keydown", { key: "Enter", ctrlKey: true });
   const insertedByEnter = rows().find((candidate) => candidate.children[2].contentEditable === "true");
   insertedByEnter.children[2].textContent = "Inserted";
   insertedByEnter.children[2].dispatch("input");
-  insertedByEnter.children[2].dispatch("keydown", { key: "Escape" });
+  insertedByEnter.children[2].dispatch("keydown", { key: "Enter" });
 
   row("p057_parent").dispatch("click", { target: row("p057_parent") });
   row("p057_child").dispatch("click", { target: row("p057_child"), shiftKey: true });
@@ -3833,6 +3877,88 @@ test("P057 PE Outline is selection-first while retaining editing, hierarchy, con
   await settleRuntime();
   assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.text, block.depth, block.collapsed]), [
     ["Parent revised", 0, false], ["Child", 1, false], ["Grandchild", 2, false], ["Inserted", 1, false], ["Sibling", 0, false],
+  ]);
+});
+
+test("P058 PE Outline separates navigation edits from branch movement and preserves active-save text", async () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p058_parent", text: "Parent", depth: 0, collapsed: false },
+      { id: "p058_child", text: "Child", depth: 1, collapsed: false },
+      { id: "p058_next", text: "Next", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const text = (id) => row(id).children[2];
+  const select = (id) => row(id).children[0];
+  const key = (keyName, extras = {}) => runtime.document.dispatch("keydown", { key: keyName, target: runtime.document.activeElement || select("p058_parent"), ...extras });
+
+  row("p058_parent").dispatch("click", { target: row("p058_parent") });
+  key("Enter", { target: select("p058_parent") });
+  text("p058_parent").textContent = "Cancelled";
+  text("p058_parent").dispatch("input");
+  assert.equal(text("p058_parent").dispatch("keydown", { key: "Escape" }).defaultPrevented, true);
+  assert.equal(text("p058_parent").textContent, "Parent");
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  key("Enter", { target: select("p058_parent") });
+  text("p058_parent").textContent = "Committed";
+  text("p058_parent").dispatch("input");
+  text("p058_parent").dispatch("keydown", { key: "Enter" });
+  assert.equal(text("p058_parent").textContent, "Committed");
+  assert.equal(text("p058_parent").contentEditable, "false");
+
+  key("Enter", { target: select("p058_parent") });
+  text("p058_parent").dispatch("keydown", { key: "Tab" });
+  assert.equal(text("p058_child").contentEditable, "true");
+  text("p058_child").dispatch("keydown", { key: "Tab", shiftKey: true });
+  assert.equal(text("p058_parent").contentEditable, "true");
+  assert.equal(text("p058_parent").dispatch("keydown", { key: "Enter", altKey: true }).defaultPrevented, false);
+  text("p058_parent").dispatch("keydown", { key: "Enter", ctrlKey: true });
+  const created = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  assert.equal(Number(created.style.paddingLeft.replace("px", "")), 4);
+  created.children[2].textContent = "Created";
+  created.children[2].dispatch("input");
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.equal(runtime.saveCalls[0].outline.some((block) => block.text === "Created"), true);
+  created.children[2].dispatch("keydown", { key: "Enter" });
+  row("p058_next").dispatch("click", { target: row("p058_next") });
+  runtime.document.dispatch("keydown", { key: "+", shiftKey: true, target: select("p058_next") });
+  const createdByPlus = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  assert.ok(createdByPlus);
+  assert.equal(runtime.document.dispatch("keydown", { key: "ArrowLeft", ctrlKey: true, target: createdByPlus.children[2] }).defaultPrevented, false);
+  createdByPlus.children[2].dispatch("keydown", { key: "Enter" });
+  const beforeDelete = rows().length;
+  runtime.document.dispatch("keydown", { key: "Delete", target: runtime.document.activeElement });
+  assert.equal(rows().length, beforeDelete - 1);
+
+  const structural = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p058_a", text: "A", depth: 0, collapsed: false },
+      { id: "p058_a_child", text: "A child", depth: 1, collapsed: true },
+      { id: "p058_b", text: "B", depth: 0, collapsed: false },
+      { id: "p058_b_child", text: "B child", depth: 1, collapsed: false },
+    ],
+  }));
+  const structuralPane = structural.controls.get("outlinePane");
+  const structuralRows = () => structuralPane.querySelectorAll(".outlineRow[data-block-id]");
+  const structuralRow = (id) => structuralRows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  structuralRow("p058_b").dispatch("click", { target: structuralRow("p058_b") });
+  structural.document.dispatch("keydown", { key: "ArrowUp", ctrlKey: true, target: structuralRow("p058_b").children[0] });
+  assert.deepEqual(structuralRows().map((candidate) => candidate.children[2].textContent), ["B", "B child", "A", "A child"]);
+  structural.document.dispatch("keydown", { key: "ArrowRight", ctrlKey: true, target: structuralRow("p058_b").children[0] });
+  assert.deepEqual(structuralRows().map((candidate) => candidate.children[2].textContent), ["B", "B child", "A", "A child"]);
+  structuralRow("p058_a").dispatch("click", { target: structuralRow("p058_a") });
+  structural.document.dispatch("keydown", { key: "ArrowRight", ctrlKey: true, target: structuralRow("p058_a").children[0] });
+  structural.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.deepEqual(structural.saveCalls[0].outline.map((block) => [block.id, block.depth, block.collapsed]), [
+    ["p058_b", 0, false], ["p058_b_child", 1, false], ["p058_a", 1, false], ["p058_a_child", 2, true],
   ]);
 });
 
@@ -4249,7 +4375,7 @@ test("generated Outline runtime inserts above a parent without splitting its bra
   ]);
 });
 
-test("generated Outline runtime routes Enter through below-sibling subtree insertion", async () => {
+test("generated Outline runtime routes Ctrl/Cmd+Enter through below-sibling subtree insertion", async () => {
   const payload = runtimeEditablePayload({
     id: "runtime_outline_enter_sibling",
     title: "Outline Enter sibling",
@@ -4269,7 +4395,7 @@ test("generated Outline runtime routes Enter through below-sibling subtree inser
   assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "C"]);
 
   pane.children[1].children[2].dispatch("dblclick", { target: pane.children[1].children[2] });
-  const enter = pane.children[1].children[2].dispatch("keydown", { key: "Enter" });
+  const enter = pane.children[1].children[2].dispatch("keydown", { key: "Enter", ctrlKey: true });
   assert.equal(enter.defaultPrevented, true);
   assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "", "C"]);
   assert.strictEqual(runtime.document.activeElement, pane.children[2].children[2]);

@@ -931,23 +931,11 @@ function handleTreeKeydown(ev) {
     !ev.metaKey
     && !ev.ctrlKey
     && !ev.altKey
-    && ev.shiftKey
-    && (ev.key === "+" || ev.key === "=" || ev.key === "Add")
+    && (ev.key === "=" || ev.key === "+" || ev.key === "Add")
   ) {
     ev.preventDefault();
     if (state.selectedId) insertSiblingBelow(state.selectedId);
     else addItemsFromPrimaryAction();
-    return;
-  }
-  if (
-    !ev.metaKey
-    && !ev.ctrlKey
-    && !ev.altKey
-    && !ev.shiftKey
-    && (ev.key === "=" || ev.key === "+" || ev.key === "Add")
-  ) {
-    ev.preventDefault();
-    addItemsFromPrimaryAction();
     return;
   }
   if (
@@ -994,48 +982,13 @@ function handleTreeKeydown(ev) {
     (ev.metaKey || ev.ctrlKey)
     && !ev.shiftKey
     && !ev.altKey
-    && ev.key === "ArrowLeft"
+    && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(ev.key)
   ) {
     ev.preventDefault();
-    collapseAllNodes();
-    refreshMeta();
-    renderTree();
-    refocusTreeNavigation(state.selectedId);
-    softlyEnsureSelectionVisible();
-    persistPipSnapshot();
-    setStatus("Folded all.", "ok");
-    return;
-  }
-  if (
-    (ev.metaKey || ev.ctrlKey)
-    && !ev.shiftKey
-    && !ev.altKey
-    && ev.key === "ArrowRight"
-  ) {
-    ev.preventDefault();
-    unfoldAllNodes();
-    refreshMeta();
-    renderTree();
-    refocusTreeNavigation(state.selectedId);
-    softlyEnsureSelectionVisible();
-    persistPipSnapshot();
-    setStatus("Unfolded all.", "ok");
-    return;
-  }
-  if (
-    (ev.metaKey || ev.ctrlKey)
-    && !ev.shiftKey
-    && !ev.altKey
-    && (ev.key === "ArrowUp" || ev.key === "ArrowDown")
-  ) {
-    ev.preventDefault();
-    const moved = moveSelectionToVisibleEdge(ev.key === "ArrowUp" ? "start" : "end");
-    if (!moved) {
-      setStatus(
-        ev.key === "ArrowUp" ? "Already at the top visible item." : "Already at the bottom visible item.",
-        "warn"
-      );
-    }
+    if (ev.key === "ArrowUp") moveNodeWithinSiblings(state.selectedId, -1);
+    else if (ev.key === "ArrowDown") moveNodeWithinSiblings(state.selectedId, 1);
+    else if (ev.key === "ArrowLeft") outdentNodeById(state.selectedId);
+    else indentNodeById(state.selectedId);
     return;
   }
   if (
