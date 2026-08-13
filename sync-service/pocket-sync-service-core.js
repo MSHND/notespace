@@ -1969,7 +1969,10 @@ function createServiceCore(input) {
     if (ceremony.finishDigest !== digest) {
       throw serviceError("service-operation-reuse", 409);
     }
-    const result = validateResultWrapper(ceremony.completedResult, ceremony.ceremonyType);
+    const result = validateResultWrapper(
+      ceremony.completedResult,
+      ceremony.mode === "discoverable" ? "authentication-bootstrap" : ceremony.ceremonyType
+    );
     const authorised = await authoriseSession(
       transaction,
       result.session.sessionId,
@@ -1983,6 +1986,13 @@ function createServiceCore(input) {
       throw serviceError("service-state-invalid", 500);
     }
     return result;
+  }
+
+  function discoverableAuthenticationFailure(ceremony) {
+    if (ceremony.mode === "discoverable") {
+      return serviceError("service-authentication-failed", 400);
+    }
+    return null;
   }
 
   function ensurePendingCeremony(ceremony, type, request, context, digest, atMilliseconds) {
@@ -2525,10 +2535,10 @@ function createServiceCore(input) {
         priorSession = authorised.session;
       } else if (ceremony.mode === "discoverable") {
         const credential = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
-        if (credential === null) throw serviceError("service-authorisation-failed", 403);
+        if (credential === null) throw discoverableAuthenticationFailure(ceremony);
         account = await readRecord(transaction, COLLECTIONS.accounts, credential.accountId);
         if (account === null || !account.credentialIds.includes(credential.credentialId)) {
-          throw serviceError("service-authorisation-failed", 403);
+          throw discoverableAuthenticationFailure(ceremony);
         }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
@@ -2536,7 +2546,8 @@ function createServiceCore(input) {
       }
       if ((ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
           || !account.credentialIds.includes(request.credential.id)) {
-        throw serviceError("service-authorisation-failed", 403);
+        throw discoverableAuthenticationFailure(ceremony)
+          || serviceError("service-authorisation-failed", 403);
       }
       const credential = await readRecord(
         transaction,
@@ -2544,26 +2555,37 @@ function createServiceCore(input) {
         request.credential.id
       );
       if (credential === null || credential.accountId !== account.accountId) {
-        throw serviceError("service-authorisation-failed", 403);
+        throw discoverableAuthenticationFailure(ceremony)
+          || serviceError("service-authorisation-failed", 403);
       }
       return frozen({ ceremony, account, priorSession, credential, replay: null });
     });
     if (prepared.replay) return prepared.replay;
 
-    const rawVerified = await callVerifier("verifyAuthentication", {
-      trustedOrigin,
-      rpId,
-      challenge: prepared.ceremony.challenge,
-      publicKeyRequestOptions: prepared.ceremony.beginBody.publicKeyRequestOptions,
-      credential: request.credential,
-      storedCredential: prepared.credential,
-    });
-    const verified = validateAuthenticationVerifierResult(rawVerified);
+    let verified;
+    try {
+      const rawVerified = await callVerifier("verifyAuthentication", {
+        trustedOrigin,
+        rpId,
+        challenge: prepared.ceremony.challenge,
+        publicKeyRequestOptions: prepared.ceremony.beginBody.publicKeyRequestOptions,
+        credential: request.credential,
+        storedCredential: prepared.credential,
+      });
+      verified = validateAuthenticationVerifierResult(rawVerified);
+    } catch (error) {
+      if (prepared.ceremony.mode === "discoverable"
+          && error?.code === "service-webauthn-failed") {
+        throw serviceError("service-authentication-failed", 400);
+      }
+      throw error;
+    }
     if (verified.credentialId !== request.credential.id
         || verified.credentialId !== prepared.credential.credentialId
         || (prepared.credential.signCount > 0
           && verified.signCount <= prepared.credential.signCount)) {
-      throw serviceError("service-webauthn-failed", 400);
+      throw discoverableAuthenticationFailure(prepared.ceremony)
+        || serviceError("service-webauthn-failed", 400);
     }
     const commitAt = clockMilliseconds();
 
@@ -2590,10 +2612,10 @@ function createServiceCore(input) {
         priorSession = authorised.session;
       } else if (ceremony.mode === "discoverable") {
         const selected = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
-        if (selected === null) throw serviceError("service-authorisation-failed", 403);
+        if (selected === null) throw discoverableAuthenticationFailure(ceremony);
         account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
         if (account === null || !account.credentialIds.includes(selected.credentialId)) {
-          throw serviceError("service-authorisation-failed", 403);
+          throw discoverableAuthenticationFailure(ceremony);
         }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
@@ -2606,8 +2628,11 @@ function createServiceCore(input) {
       );
       if (credential === null
           || (ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
-          || credential.accountId !== account.accountId
-          || account.storeVersion !== prepared.account.storeVersion
+          || credential.accountId !== account.accountId) {
+        throw discoverableAuthenticationFailure(ceremony)
+          || serviceError("service-transaction-conflict", 409, { retryable: true });
+      }
+      if (account.storeVersion !== prepared.account.storeVersion
           || credential.storeVersion !== prepared.credential.storeVersion
           || (prepared.priorSession !== null
             && (!priorSession
@@ -2615,7 +2640,8 @@ function createServiceCore(input) {
         throw serviceError("service-transaction-conflict", 409, { retryable: true });
       }
       if (credential.signCount > 0 && verified.signCount <= credential.signCount) {
-        throw serviceError("service-webauthn-failed", 400);
+        throw discoverableAuthenticationFailure(ceremony)
+          || serviceError("service-webauthn-failed", 400);
       }
       let currentCredential = credential;
       if (verified.signCount !== credential.signCount || verified.backedUp !== credential.backedUp) {

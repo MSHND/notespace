@@ -152,7 +152,7 @@ async function createBrowserJourney(options = {}) {
   let serverDeviceInvalid = false;
   let failReadRevision = false;
   function transportFor(readSession, writeSession) { return Object.freeze({ async request(route, body) {
-    remoteCalls.push({ route, body: plain(body) });
+    remoteCalls.push({ route, body: plain(body), sessionId: readSession() });
     if (failReadRevision && route === "readRevision") throw new Error("synthetic revision read failure");
     const response = await core[route]({ context: { method: "POST", origin, fetchSite: "same-origin",
       contentType: "application/json", sessionId: readSession() }, body: plain(body) });
@@ -259,6 +259,7 @@ async function createBrowserJourney(options = {}) {
     recoveryService: bRemote.createRecoveryService({ transport: bTransport, now: () => now }),
     discoveryService: bRemote.createPocketDiscoveryService({ transport: bTransport }), environment,
   });
+  const bSessionBeforeOpen = bSessionId;
   const opened = await runtime.openExisting();
   return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
     readRemoteRevision: () => bRemote.createContentService({ transport: bTransport }).readRevision({
@@ -272,7 +273,10 @@ async function createBrowserJourney(options = {}) {
     setServerDeviceInvalid(value) { serverDeviceInvalid = value === true; },
     get ownerKind() { return options.browserPersistence === true ? b.capturePocketFileSaveSession().ownerKind : ownerKind; },
     get visible() { return options.browserPersistence === true ? plain(vm.runInContext("state.nodes", b)) : visible; },
-    get commits() { return commits; } };
+    get commits() { return commits; },
+    get aSessionId() { return aSessionId; },
+    get bSessionId() { return bSessionId; },
+    get bSessionBeforeOpen() { return bSessionBeforeOpen; } };
 }
 
 test("P052 remains dormant until explicitly created and a new device without PRF requires recovery before mutation", async () => {
@@ -297,6 +301,35 @@ test("P052 remains dormant until explicitly created and a new device without PRF
   });
   assert.equal(result.reason, "recovery-required");
   assert.deepEqual(calls, ["authenticate", "discovery"]);
+});
+
+test("P052i1 rejects a bootstrap account mismatch before discovery or local mutation", async () => {
+  const calls = [];
+  const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
+  context.window = context; context.globalThis = context; vm.createContext(context);
+  vm.runInContext(source("js/pocket-sync-additional-device.js"), context);
+  const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
+    crypto: { FORMAT: { contentType: "portal.export.v1+json" }, generateDeviceWrappingKey() {}, deriveWrappingKey() {},
+      openMasterKeyBundle() {}, openContent() {}, sealContent() {}, encodeBase64Url() { return "opaque"; },
+      validateNonExtractableAesKey() {} },
+    deviceStore: { open() { calls.push("open"); }, readPocket() {}, createPocket() {}, replacePocket() {} },
+    accountClient: { async authenticatePasskey() {
+      calls.push("authenticate");
+      return calls.filter((value) => value === "authenticate").length === 1
+        ? { ok: true, bootstrap: true, accountAuthenticated: true, contentUnlocked: false,
+          accountId: "account-a", credentialId: "credential-a", prf: { status: "not-requested" } }
+        : { ok: true, accountAuthenticated: true, contentUnlocked: false,
+          accountId: "account-b", credentialId: "credential-b", prf: { status: "available", outputBytes: new Uint8Array(32) } };
+    } },
+    discoveryService: { async readSyncedPocket() { calls.push("discovery"); } },
+    contentService: { async readRevision() {}, async downloadEncryptedRecord() {} },
+    envelopeService: { async listEnvelopes() {}, async downloadEnvelope() {}, async addEnvelope() {} },
+    randomBytes() { return new Uint8Array(32); }, now: () => 0,
+  });
+  const result = await opener.openExisting({ captureTarget: () => ({ ownerKind: "none", id: 1 }),
+    isTargetCurrent: () => true, validatePayload: () => true, adoptOpenedPocket: async () => true });
+  assert.equal(result.reason, "additional-device-open-failed");
+  assert.deepEqual(calls, ["authenticate", "authenticate"]);
 });
 
 test("P052a opens a real P029 content record with its authenticated content context and continues from device B's envelope", async () => {
@@ -646,7 +679,14 @@ test("P052c public browser Device B adoption joins visible truth, owner authorit
   });
   const authentications = journey.remoteCalls.filter((call) => call.route === "beginAuthentication");
   assert.equal(authentications.length, 2);
+  assert.notEqual(journey.aSessionId, null);
+  assert.equal(journey.bSessionBeforeOpen, null);
+  assert.notEqual(journey.bSessionId, null);
+  assert.notEqual(journey.aSessionId, journey.bSessionId);
   assert.deepEqual(Object.keys(authentications[0].body).sort(), ["apiVersion", "operationId"]);
+  assert.equal(authentications[0].sessionId, null);
+  assert.notEqual(authentications[1].sessionId, null);
+  assert.notEqual(authentications[1].sessionId, journey.aSessionId);
   assert.equal(authentications[1].body.accountLocator, undefined);
   const finishIndex = journey.remoteCalls.findIndex((call) => call.route === "finishAuthentication");
   assert.ok(finishIndex >= 0);

@@ -162,7 +162,14 @@
     try {
       let authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
       if (authentication?.bootstrap === true) {
+        if (authentication.ok !== true || authentication.accountAuthenticated !== true
+            || authentication.contentUnlocked !== false || !id(authentication.accountId)
+            || !id(authentication.credentialId)) return fail("additional-device-open-failed");
+        const bootstrapAccountId = authentication.accountId;
         authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+        if (authentication?.accountId !== bootstrapAccountId) {
+          return fail("additional-device-open-failed");
+        }
       }
       if (!authentication || authentication.ok !== true || authentication.accountAuthenticated !== true
           || authentication.contentUnlocked !== false || !id(authentication.accountId) || !id(authentication.credentialId)) {

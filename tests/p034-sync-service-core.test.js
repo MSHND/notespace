@@ -621,6 +621,47 @@ test("authentication completion updates verifier state, rotates a session, and n
   assert.equal(harness.verifierCalls.authentication, 1);
 });
 
+test("P052i1 discoverable failures are generic and completed bootstrap replay is idempotent", async () => {
+  const failing = createHarness({ verifyAuthentication() {
+    return { credentialId: credentialId(201), signCount: 1, backedUp: true };
+  } });
+  const registration = await register(failing);
+  const beginKnown = await failing.core.beginAuthentication(call(beginAuthenticationBody("discoverable-known-invalid")));
+  const beforeKnown = failing.driver.snapshot();
+  await assert.rejects(failing.core.finishAuthentication(call({ apiVersion: 1,
+    operationId: "discoverable-known-invalid", ceremonyId: beginKnown.body.ceremonyId,
+    credential: authenticationCredential(registration.credentialId),
+  })), errorCode("service-authentication-failed"));
+  assert.deepEqual(failing.driver.snapshot(), beforeKnown);
+
+  const beginUnknown = await failing.core.beginAuthentication(call(beginAuthenticationBody("discoverable-unknown")));
+  const beforeUnknown = failing.driver.snapshot();
+  await assert.rejects(failing.core.finishAuthentication(call({ apiVersion: 1,
+    operationId: "discoverable-unknown", ceremonyId: beginUnknown.body.ceremonyId,
+    credential: authenticationCredential(credentialId(211)),
+  })), errorCode("service-authentication-failed"));
+  assert.deepEqual(failing.driver.snapshot(), beforeUnknown);
+  assert.equal(failing.verifierCalls.authentication, 1);
+
+  const harness = createHarness();
+  const valid = await register(harness);
+  const begin = await harness.core.beginAuthentication(call(beginAuthenticationBody("discoverable-replay")));
+  const request = { apiVersion: 1, operationId: "discoverable-replay", ceremonyId: begin.body.ceremonyId,
+    credential: authenticationCredential(valid.credentialId) };
+  const completed = await harness.core.finishAuthentication(call(request));
+  const snapshot = harness.driver.snapshot();
+  const replay = await harness.core.finishAuthentication(call(request));
+  assert.deepEqual(plain(replay), plain(completed));
+  assert.equal(replay.body.prfEvaluationInput, undefined);
+  assert.equal(harness.verifierCalls.authentication, 1);
+  assert.deepEqual(harness.driver.snapshot(), snapshot);
+  const bound = await harness.core.beginAuthentication(call(
+    beginAuthenticationBody("after-discoverable-replay"), completed.session.sessionId
+  ));
+  assert.equal(bound.body.bootstrap, undefined);
+  assert.equal(bound.body.prfEvaluationInput, valid.begin.body.prfEvaluationInput);
+});
+
 test("authentication rejects credential substitution and non-advancing non-zero counters", async () => {
   const harness = createHarness({ registrationSignCount: 5, authenticationSignCount: 5 });
   const first = await register(harness, { credentialId: credentialId(91) });

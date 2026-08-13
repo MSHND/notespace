@@ -103,7 +103,7 @@ Request contains `apiVersion`, `operationId` and an optional opaque account loca
 
 Request contains `apiVersion`, `operationId`, `ceremonyId` and the public assertion response. Client-only PRF `results` are not included. The service validates the challenge, origin, relying-party scope, signature, user verification requirements, credential/account relationship and expiry.
 
-Response repeats the bound operation, ceremony and credential identities, establishes account authorisation and returns only opaque account/credential references and policy versions. A discoverable-bootstrap finish is marked as bootstrap and deliberately contains no PRF input. Authentication success does not assert that content is unlocked. P031 reports `accountAuthenticated: true` and `contentUnlocked: false`; later orchestration must independently open an approved content-key envelope.
+Response repeats the bound operation, ceremony and credential identities, establishes account authorisation and returns only opaque account/credential references and policy versions. A discoverable-bootstrap finish is marked as bootstrap and deliberately contains no PRF input. Before that verification succeeds, unknown credentials, inconsistent bindings and invalid assertions use the same public authentication-failure status/reason and set no cookie. Exact completed bootstrap finishes replay the original body and session instruction. Authentication success does not assert that content is unlocked. P031 reports `accountAuthenticated: true` and `contentUnlocked: false`; later orchestration must independently open an approved content-key envelope.
 
 ## 5. Credential management
 

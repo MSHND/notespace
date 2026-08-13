@@ -76,7 +76,7 @@ function encryptedRecord() {
   };
 }
 
-function createCoreHarness() {
+function createCoreHarness(options = {}) {
   const driver = createMemoryServiceStore();
   const core = createServiceCore({
     store: driver.store,
@@ -89,6 +89,7 @@ function createCoreHarness() {
         };
       },
       async verifyAuthentication(input) {
+        if (options.verifyAuthentication) return options.verifyAuthentication(input);
         return {
           credentialId: input.credential.id,
           signCount: input.storedCredential.signCount === 0 ? 1 : input.storedCredential.signCount + 1,
@@ -251,6 +252,33 @@ test("P046 emits one secure HttpOnly host cookie and rotates it without fixation
     headers: { Cookie: `__Host-pocket-sync-session=${secondSession}` },
   }));
   assert.equal(fresh.status, 200);
+});
+
+test("P052i1 exposes indistinguishable discoverable credential failures without cookies", async () => {
+  const { adapter } = createCoreHarness({ verifyAuthentication() {
+    return { credentialId: b64(bytes(32, 201)), signCount: 1, backedUp: true };
+  } });
+  const registeredBegin = await adapter.handle(request("beginRegistration", {
+    apiVersion: 1, operationId: "enumeration-register", accountIntent: "create-or-add-credential", deviceId: "device-opaque",
+  }));
+  const registrationBegin = await responseBody(registeredBegin);
+  await adapter.handle(request("finishRegistration", { apiVersion: 1,
+    operationId: "enumeration-register", ceremonyId: registrationBegin.ceremonyId,
+    deviceId: "device-opaque", credential: registrationCredential(),
+  }));
+  async function failedFinish(operationId, credential) {
+    const begun = await adapter.handle(request("beginAuthentication", { apiVersion: 1, operationId }));
+    const begin = await responseBody(begun);
+    const result = await adapter.handle(request("finishAuthentication", {
+      apiVersion: 1, operationId, ceremonyId: begin.ceremonyId, credential,
+    }));
+    return { status: result.status, body: await responseBody(result), cookie: result.headers.get("Set-Cookie") };
+  }
+  const known = await failedFinish("enumeration-known", authenticationCredential());
+  const unknown = await failedFinish("enumeration-unknown", authenticationCredential(b64(bytes(32, 211))));
+  assert.deepEqual(unknown, known);
+  assert.deepEqual(known, { status: 400, body: { apiVersion: 1, ok: false,
+    reason: "service-authentication-failed" }, cookie: null });
 });
 
 test("P046 rejects request security failures before body/core work", async () => {
