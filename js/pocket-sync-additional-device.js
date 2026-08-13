@@ -22,6 +22,7 @@
       envelopeService: ["listEnvelopes", "downloadEnvelope", "addEnvelope"],
     };
     if (Object.keys(required).some((name) => !object(value[name]) || required[name].some((method) => typeof value[name][method] !== "function"))
+        || !object(value.crypto.FORMAT) || typeof value.crypto.FORMAT.contentType !== "string"
         || typeof value.randomBytes !== "function" || typeof value.now !== "function") return null;
     return value;
   }
@@ -60,8 +61,8 @@
     };
   }
 
-  function remoteContent(syncedPocketId, revision, encryptedRecord) {
-    return { context: { syncedPocketId, revision, contentType: "pocket.sync.content.opaque" }, record: encryptedRecord };
+  function remoteContent(config, syncedPocketId, revision, encryptedRecord) {
+    return { context: { syncedPocketId, revision, contentType: config.crypto.FORMAT.contentType }, record: encryptedRecord };
   }
 
   async function readCurrent(config, syncedPocketId, operationId, masterKey, dependencies) {
@@ -71,7 +72,7 @@
     if (!downloadId) return null;
     const downloaded = await config.contentService.downloadEncryptedRecord({ apiVersion: 1, operationId: downloadId, syncedPocketId, revision: revision.revision });
     if (!downloaded || downloaded.syncedPocketId !== syncedPocketId || downloaded.revision !== revision.revision) return null;
-    const content = remoteContent(syncedPocketId, revision.revision, downloaded.encryptedRecord);
+    const content = remoteContent(config, syncedPocketId, revision.revision, downloaded.encryptedRecord);
     const payload = await config.crypto.openContent(content.record, masterKey, content.context);
     if (dependencies.validatePayload(payload) !== true) return null;
     return { content, revision: revision.revision, payload };
@@ -113,7 +114,9 @@
       let record = await config.deviceStore.readPocket(discovery.syncedPocketId);
       let draft;
       let envelope;
+      let resuming = false;
       if (record !== null) {
+        resuming = true;
         if (record.additionalDeviceDraft === null || record.storeRevision !== 1) return fail("additional-device-state-invalid");
         draft = await config.crypto.openContent(record.additionalDeviceDraft.record,
           record.deviceWrappingKey, record.additionalDeviceDraft.context);
@@ -141,7 +144,7 @@
           expectedKeySetVersion: listed.keySetVersion, operationId, logicalChangeId,
           pendingOperation: "device-envelope", createdAt };
         const draftContext = { syncedPocketId: discovery.syncedPocketId, revision: 1,
-          contentType: "pocket.sync.content.opaque" };
+          contentType: config.crypto.FORMAT.contentType };
         const encryptedDraft = await config.crypto.sealContent(draft, deviceKey, draftContext);
         record = { kind: "pocket.sync.device-state", schemaVersion: 5, storeRevision: 1,
           syncedPocketId: discovery.syncedPocketId, deviceId, deviceWrappingKey: deviceKey,
@@ -149,7 +152,7 @@
             rewrapped.envelopes[0].record, createdAt), content: current.content,
           remote: { confirmedRevision: current.revision, pending: null, conflict: null },
           usage: { masterKeyGeneration: 1, masterKeyContentEncryptions: 0,
-            masterKeyContentEncryptionLimit: 0, deviceWrappingKeyEncryptions: 1 },
+            masterKeyContentEncryptionLimit: 0, deviceWrappingKeyEncryptions: 2 },
           activationDraft: null, recoveryDraft: null,
           additionalDeviceDraft: { context: draftContext, record: encryptedDraft } };
         await config.deviceStore.createPocket(record);
@@ -159,7 +162,8 @@
       }
       const response = await config.envelopeService.addEnvelope({ apiVersion: 1,
         operationId: draft.operationId, logicalChangeId: draft.logicalChangeId,
-        attemptKind: "new-change", syncedPocketId: discovery.syncedPocketId,
+        attemptKind: resuming ? "idempotent-retry" : "new-change",
+        syncedPocketId: discovery.syncedPocketId,
         expectedKeySetVersion: draft.expectedKeySetVersion, envelope });
       if (!response || response.status === "master-key-rotation-required") return fail("master-key-rotation-required");
       if (response.status !== "committed" || response.keySetVersion !== draft.expectedKeySetVersion + 1 || response.masterKeyGeneration !== 1 || response.masterKeyContentEncryptionLimit !== LIMIT) return fail("key-set-changed");
@@ -167,7 +171,15 @@
         usage: Object.assign({}, record.usage, { masterKeyContentEncryptionLimit: LIMIT }),
         additionalDeviceDraft: null });
       await config.deviceStore.replacePocket(discovery.syncedPocketId, record.storeRevision, finalRecord);
-      const latest = await readCurrent(config, discovery.syncedPocketId, randomId(config), opened.masterKey, dependencies);
+      const durableBundle = await config.crypto.openMasterKeyBundle(
+        finalRecord.deviceEnvelope.record,
+        finalRecord.deviceWrappingKey,
+        finalRecord.deviceEnvelope.context,
+        []
+      );
+      config.crypto.validateNonExtractableAesKey(durableBundle?.masterKey);
+      const latest = await readCurrent(config, discovery.syncedPocketId, randomId(config),
+        durableBundle.masterKey, dependencies);
       if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
       if (latest.revision !== current.revision) {
         const stored = await config.deviceStore.readPocket(discovery.syncedPocketId);
@@ -175,7 +187,9 @@
         await config.deviceStore.replacePocket(discovery.syncedPocketId, stored.storeRevision, refreshed);
       }
       if (dependencies.isTargetCurrent() !== true) return fail("additional-device-target-stale");
-      const adopted = await dependencies.adoptOpenedPocket({ syncedPocketId: discovery.syncedPocketId, masterKey: opened.masterKey, payload: latest.payload, confirmedRemoteRevision: latest.revision });
+      const adopted = await dependencies.adoptOpenedPocket({ syncedPocketId: discovery.syncedPocketId,
+        masterKey: durableBundle.masterKey, payload: latest.payload,
+        confirmedRemoteRevision: latest.revision, target: captured });
       return adopted === true || adopted?.ok === true ? freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision }) : fail("owner-adoption-failed");
     } catch (_error) { return fail("additional-device-open-failed"); }
     finally { if (prf instanceof Uint8Array) prf.fill(0); }

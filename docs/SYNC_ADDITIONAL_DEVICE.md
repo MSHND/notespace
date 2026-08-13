@@ -5,6 +5,10 @@ PRF result. The service never receives that result. Pocket uses it only to
 unlock the existing encrypted master-key envelope, then creates a fresh
 device-specific envelope.
 
+Downloaded Pocket content is authenticated with P029's current content context,
+including its `portal.export.v1+json` content type. The record format is not a
+content type and is never substituted into authenticated data.
+
 Ordinary account authentication is not content unlock. If the passkey cannot
 produce the required PRF result, or the matching active PRF envelope cannot be
 opened, the routine flow returns `recovery-required`. It does not weaken
@@ -34,3 +38,7 @@ operation identity and target continuity locally. A later explicit
 same idempotent request. It never creates a second envelope for an interrupted
 attempt or adopts the Pocket until the stored request has committed and the
 target is still current.
+
+After the grant is persisted, the final refresh opens the master key from the
+new device's own durable envelope and wrapping key. The initial PRF-derived
+unlock is only a local onboarding step, not a readiness dependency.

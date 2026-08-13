@@ -228,10 +228,11 @@ device record for explicit, conditional Saves.
         || !sameStructuredValue(stored.remote, current.remote)
         || !sameStructuredValue(stored.activationDraft, current.activationDraft)
         || !sameStructuredValue(stored.recoveryDraft, current.recoveryDraft)
+        || !sameStructuredValue(stored.additionalDeviceDraft, current.additionalDeviceDraft)
         || stored.usage.masterKeyGeneration !== current.usage.masterKeyGeneration
         || stored.usage.masterKeyContentEncryptions < current.usage.masterKeyContentEncryptions
         || stored.usage.masterKeyContentEncryptionLimit
-          < current.usage.masterKeyContentEncryptionLimit
+          !== current.usage.masterKeyContentEncryptionLimit
         || stored.usage.deviceWrappingKeyEncryptions
           < current.usage.deviceWrappingKeyEncryptions) {
       return null;
@@ -340,7 +341,7 @@ device record for explicit, conditional Saves.
       return true;
     }
 
-    async function adoptSyncedOwner(input) {
+    async function canAdoptSyncedOwner(input) {
       let requested;
       try {
         requested = exactObject(input, OWNER_INPUT_FIELDS, "owner-adoption-input-invalid");
@@ -349,6 +350,24 @@ device record for explicit, conditional Saves.
       } catch (_error) {
         return result("owner-adoption-invalid");
       }
+      let record;
+      try { record = await config.deviceStore.readPocket(requested.syncedPocketId); }
+      catch (_error) { return result("owner-adoption-state-unavailable"); }
+      if (!record || record.syncedPocketId !== requested.syncedPocketId) {
+        return result("owner-adoption-state-invalid");
+      }
+      try {
+        await config.crypto.openContent(record.content.record, requested.masterKey, record.content.context);
+      } catch (_error) { return result("owner-adoption-state-invalid"); }
+      return freeze({ ok: true });
+    }
+
+    async function adoptSyncedOwner(input) {
+      const eligible = await canAdoptSyncedOwner(input);
+      if (!eligible.ok) return eligible;
+      let requested;
+      try { requested = exactObject(input, OWNER_INPUT_FIELDS, "owner-adoption-input-invalid"); }
+      catch (_error) { return result("owner-adoption-invalid"); }
       let record;
       try { record = await config.deviceStore.readPocket(requested.syncedPocketId); }
       catch (_error) { return result("owner-adoption-state-unavailable"); }
@@ -477,6 +496,24 @@ device record for explicit, conditional Saves.
       };
     }
 
+    async function nextAdditionalDeviceDraft(current, storeRevision) {
+      if (current.additionalDeviceDraft === null) return null;
+      const draft = await config.crypto.openContent(
+        current.additionalDeviceDraft.record,
+        current.deviceWrappingKey,
+        current.additionalDeviceDraft.context
+      );
+      const context = {
+        syncedPocketId: current.syncedPocketId,
+        revision: storeRevision,
+        contentType: config.crypto.FORMAT.contentType,
+      };
+      return {
+        context,
+        record: await config.crypto.sealContent(draft, current.deviceWrappingKey, context),
+      };
+    }
+
     function draftResealCount(current) {
       return (current.activationDraft === null ? 0 : 1)
         + (current.recoveryDraft === null ? 0 : 1)
@@ -518,7 +555,7 @@ device record for explicit, conditional Saves.
         },
         activationDraft: await nextActivationDraft(current, storeRevision),
         recoveryDraft: await nextRecoveryDraft(current, storeRevision),
-        additionalDeviceDraft: current.additionalDeviceDraft,
+        additionalDeviceDraft: await nextAdditionalDeviceDraft(current, storeRevision),
       };
     }
 
@@ -686,6 +723,7 @@ device record for explicit, conditional Saves.
     }
 
     return Object.freeze({
+      canAdoptSyncedOwner,
       adoptSyncedOwner,
       adoptReadyActivation,
       adoptReadyRecovery,

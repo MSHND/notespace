@@ -826,13 +826,17 @@ without adding UI, a live synced owner, background work, or deployment state.
           || response.keySetVersion !== execution.draft.keySetVersion + 1) {
         throw activationError("activation-state-invalid");
       }
+      if (isDevice && (response.masterKeyGeneration !== 1
+          || response.masterKeyContentEncryptionLimit !== 2 ** 20)) {
+        throw activationError("activation-state-invalid");
+      }
       await persistDraft(execution, changedDraft(execution.draft, {
         stage: committedStage,
         keySetVersion: response.keySetVersion,
         pendingOperation: null,
       }), isDevice ? { usage: Object.assign({}, execution.record.usage, {
-        masterKeyGeneration: response.masterKeyGeneration ?? 1,
-        masterKeyContentEncryptionLimit: response.masterKeyContentEncryptionLimit ?? 2 ** 20,
+        masterKeyGeneration: response.masterKeyGeneration,
+        masterKeyContentEncryptionLimit: response.masterKeyContentEncryptionLimit,
       }) } : undefined);
       return null;
     }

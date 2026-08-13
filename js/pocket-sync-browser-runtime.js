@@ -276,7 +276,14 @@
       const captured = additionalTarget();
       if (!captured || typeof global.normaliseInput !== "function"
           || typeof global.commitPreparedPocketDocument !== "function"
+          || input?.target?.ownerKind !== captured.ownerKind
+          || input.target.continuityId !== `${captured.ownerKind}:${captured.continuityId}`
           || global.isPocketPayloadShape?.(input.payload) !== true) return frozen({ ok: false });
+      let eligible;
+      try { eligible = await syncedOwnerController.canAdoptSyncedOwner({
+        syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,
+      }); } catch (_error) { eligible = null; }
+      if (!eligible?.ok || boundary.hasSyncedOwner?.() === true) return frozen({ ok: false });
       const norm = global.normaliseInput(input.payload);
       const committed = global.commitPreparedPocketDocument(norm, {
         schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
@@ -289,7 +296,7 @@
       });
       if (!adopted?.ok || boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
         try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
-        return frozen({ ok: false });
+        return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
       }
       return frozen({ ok: true });
     }

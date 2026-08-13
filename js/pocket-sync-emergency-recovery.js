@@ -41,7 +41,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     "beginRequest", "beginResponse", "finishRequest", "finishResponse",
     "confirmedRemoteRevision", "content", "deviceEnvelope", "replacementRecoveryRoot",
     "replacementRecoveryVerifier", "replacementRecoveryAuthorisation", "replacementRecoveryEnvelope", "replacementAccountLocator",
-    "replacementRecoveryPackage", "account", "keySetVersion", "recoveryVersion",
+    "replacementRecoveryPackage", "account", "keySetVersion", "recoveryVersion", "deviceGrant",
     "pendingOperation", "replacementRecoveryCopyStored", "createdAt", "updatedAt",
   ]);
   const STAGES = Object.freeze({
@@ -379,6 +379,14 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         || !Number.isSafeInteger(draft.recoveryVersion) || draft.recoveryVersion < 0) {
       throw recoveryError("recovery-state-invalid");
     }
+    if (draft.deviceGrant !== null) {
+      const grant = exactObject(draft.deviceGrant, ["masterKeyGeneration",
+        "masterKeyContentEncryptionLimit"], "recovery-state-invalid");
+      if (grant.masterKeyGeneration !== 1
+          || grant.masterKeyContentEncryptionLimit !== 2 ** 20) {
+        throw recoveryError("recovery-state-invalid");
+      }
+    }
     if (draft.beginRequest !== null) {
       const request = exactObject(draft.beginRequest,
         ["apiVersion", "operationId", "accountLocator", "deviceId"], "recovery-state-invalid");
@@ -421,7 +429,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         && (draft.content === null || draft.deviceEnvelope === null
           || draft.confirmedRemoteRevision < 1)) throw recoveryError("recovery-state-invalid");
     if (!final && STAGES[draft.stage] >= STAGES["device-envelope-committed"]
-        && draft.keySetVersion < 2) throw recoveryError("recovery-state-invalid");
+        && (draft.keySetVersion < 2 || draft.deviceGrant === null)) {
+      throw recoveryError("recovery-state-invalid");
+    }
     if (!final && STAGES[draft.stage] >= STAGES["rotation-pending"]
         && (draft.replacementRecoveryRoot === null
           || draft.replacementRecoveryVerifier === null
@@ -863,14 +873,16 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       if (response.keySetVersion !== execution.draft.keySetVersion + 1) {
         return remoteFailure("device-envelope-failed", execution, { resumable: false });
       }
-      if ((response.masterKeyGeneration !== undefined && response.masterKeyGeneration !== 1)
-          || (response.masterKeyContentEncryptionLimit !== undefined
-            && response.masterKeyContentEncryptionLimit !== 2 ** 20)) {
+      if (response.masterKeyGeneration !== 1
+          || response.masterKeyContentEncryptionLimit !== 2 ** 20) {
         return remoteFailure("device-envelope-failed", execution, { resumable: false });
       }
       await persistDraft(execution, changedDraft(execution.draft, {
         stage: "device-envelope-committed", keySetVersion: response.keySetVersion,
-        pendingOperation: null,
+        pendingOperation: null, deviceGrant: {
+          masterKeyGeneration: response.masterKeyGeneration,
+          masterKeyContentEncryptionLimit: response.masterKeyContentEncryptionLimit,
+        },
       }));
       return null;
     }
@@ -1057,6 +1069,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     async function finalise(execution) {
       const current = execution.record;
       const nextRevision = current.storeRevision + 1;
+      const deviceGrant = execution.draft.deviceGrant;
       const safeDraft = validateDraft(changedDraft(execution.draft, {
         stage: "ready-for-adoption",
         ids: null,
@@ -1073,6 +1086,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         replacementRecoveryEnvelope: null,
         replacementAccountLocator: null,
         replacementRecoveryPackage: null,
+        deviceGrant: null,
         pendingOperation: null,
         replacementRecoveryCopyStored: true,
         updatedAt: timestamp(config.now),
@@ -1120,9 +1134,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           content: execution.draft.content,
           remote: { confirmedRevision: safeDraft.confirmedRemoteRevision, pending: null, conflict: null },
           usage: {
-            masterKeyGeneration: 1,
+            masterKeyGeneration: deviceGrant.masterKeyGeneration,
             masterKeyContentEncryptions: 0,
-            masterKeyContentEncryptionLimit: 2 ** 20,
+            masterKeyContentEncryptionLimit: deviceGrant.masterKeyContentEncryptionLimit,
             deviceWrappingKeyEncryptions,
           },
           activationDraft: null,
@@ -1230,6 +1244,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           account: null,
           keySetVersion: 0,
           recoveryVersion: 0,
+          deviceGrant: null,
           pendingOperation: null,
           replacementRecoveryCopyStored: false,
           createdAt,

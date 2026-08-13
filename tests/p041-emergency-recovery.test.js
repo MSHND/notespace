@@ -195,7 +195,12 @@ async function createActivatedHarness(options = {}) {
         throw error;
       }
       if (result.session?.action === "set") sessionId = result.session.sessionId;
-      return { status: result.status, body: result.body };
+      const responseBody = options.omitRecoveryDeviceGrant === true && route === "addEnvelope"
+        && remoteCalls.filter((call) => call.route === "addEnvelope").length > 2
+        ? (() => { const copy = plain(result.body); delete copy.masterKeyGeneration;
+          delete copy.masterKeyContentEncryptionLimit; return copy; })()
+        : result.body;
+      return { status: result.status, body: responseBody };
     },
   });
 
@@ -627,6 +632,16 @@ test("actual P028-P040 modules recover, rotate and stage one safe new device", a
   assert.equal(harness.recoveryEvents.length, eventCount);
   assert.equal(harness.webAuthnCreates, 1);
   assert.equal(harness.verifierCalls.recovery, 1);
+});
+
+test("P052a refuses missing device-grant metadata before emergency recovery is ready", async () => {
+  const harness = await createActivatedHarness({ omitRecoveryDeviceGrant: true });
+  const result = await harness.recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p041-missing-grant",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.readyForAdoption, false);
+  assert.equal(result.reason, "device-envelope-failed");
 });
 
 test("P050a real service recovery rejects a different valid private authority without committing finish state", async () => {

@@ -191,7 +191,12 @@ function createHarness(options = {}) {
         throw error;
       }
       if (result.session?.action === "set") sessionId = result.session.sessionId;
-      return { status: result.status, body: result.body };
+      const responseBody = options.omitDeviceGrant === true && route === "addEnvelope"
+        && body.envelope?.envelopeKind === "device"
+        ? (() => { const copy = plain(result.body); delete copy.masterKeyGeneration;
+          delete copy.masterKeyContentEncryptionLimit; return copy; })()
+        : result.body;
+      return { status: result.status, body: responseBody };
     },
   });
   const accountService = production.remote.createAccountService({ transport, now: () => NOW });
@@ -393,6 +398,16 @@ test("actual P029-P038 modules complete activation device-first and adopt last",
   const serviceText = JSON.stringify(harness.serviceDriver.snapshot());
   assert.doesNotMatch(serviceText, new RegExp(READABLE));
   assert.doesNotMatch(serviceText, /rootMaterial|pocket-recovery-package/);
+});
+
+test("P052a refuses missing device-grant metadata before activation adoption", async () => {
+  const harness = createHarness({ omitDeviceGrant: true });
+  const result = await harness.orchestrator.activate(harness.dependencies, {
+    syncedPocketId: "pocket-p039-missing-grant", deviceId: "device-p039-missing-grant",
+  });
+  assert.equal(result.ok, false);
+  assert.equal(harness.adopted.length, 0);
+  assert.equal(result.locallyDurable, true);
 });
 
 test("P044 bridges the key-free P039 owner descriptor into P042 and the live P043 owner", async () => {

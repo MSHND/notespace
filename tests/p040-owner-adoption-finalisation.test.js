@@ -145,10 +145,13 @@ function createHarness(options = {}) {
   const envelopeService = Object.freeze({
     async addEnvelope(request) {
       remoteCalls.push({ route: "envelope", request: plain(request) });
-      return Object.freeze({
+      return Object.freeze(Object.assign({
         status: "committed",
         keySetVersion: request.expectedKeySetVersion + 1,
-      });
+      }, request.envelope.envelopeKind === "device" ? {
+        masterKeyGeneration: 1,
+        masterKeyContentEncryptionLimit: 2 ** 20,
+      } : {}));
     },
   });
   const recoveryService = Object.freeze({

@@ -466,6 +466,12 @@ test("P049e rejects unexpected same-revision mutations instead of treating them 
     ["master generation", (record) => Object.assign({}, record, { usage: Object.assign({}, record.usage, {
       masterKeyGeneration: record.usage.masterKeyGeneration + 1,
     }) })],
+    ["raised master-key allowance", (record) => Object.assign({}, record, { usage: Object.assign({}, record.usage, {
+      masterKeyContentEncryptionLimit: record.usage.masterKeyContentEncryptionLimit + 1,
+    }) })],
+    ["additional-device draft", (record) => Object.assign({}, record, {
+      additionalDeviceDraft: { changed: true },
+    })],
     ["device-key authority", async (record, apis) => Object.assign({}, record, {
       deviceWrappingKey: await apis.crypto.generateDeviceWrappingKey(),
     })],
