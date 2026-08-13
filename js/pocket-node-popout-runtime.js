@@ -356,6 +356,37 @@
     }
     return -1;
   }
+  function outlineParentIndex(index) {
+    var depth = outlineDepth(index);
+    for (var cursor = index - 1; cursor >= 0; cursor -= 1) {
+      if (outlineDepth(cursor) < depth) return cursor;
+    }
+    return -1;
+  }
+  function insertOutlineEditingNewline(text) {
+    if (!text) return false;
+    var inserted = false;
+    try {
+      var selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+      if (selection && selection.rangeCount > 0 && typeof selection.getRangeAt === "function" && document.createTextNode) {
+        var range = selection.getRangeAt(0);
+        if (range && text.contains(range.commonAncestorContainer)) {
+          range.deleteContents();
+          var newline = document.createTextNode("\\n");
+          range.insertNode(newline);
+          range.setStartAfter(newline);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          inserted = true;
+        }
+      }
+    } catch (_error) {}
+    if (!inserted) text.textContent = String(text.textContent || "") + "\\n";
+    syncOutlineTextElement(text);
+    setDirty(true);
+    return true;
+  }
   function moveSelectedOutlineBranch(direction) {
     var blockId = selectedOutlineBlockId();
     var index = blockIndexById(blockId);
@@ -363,8 +394,15 @@
     syncOutlineFromDom();
     if (direction === "left") {
       if (outlineDepth(index) <= 0) return false;
+      var parentIndex = outlineParentIndex(index);
+      if (parentIndex < 0) return false;
+      var parentId = ensureBlockId(outline[parentIndex]);
       var outdentEnd = outlineSubtreeEndIndex(index);
-      for (var outdent = index; outdent < outdentEnd; outdent += 1) outline[outdent].depth = outlineDepth(outdent) - 1;
+      var outdentedBranch = outline.splice(index, outdentEnd - index);
+      for (var outdent = 0; outdent < outdentedBranch.length; outdent += 1) outdentedBranch[outdent].depth = Math.max(0, Number(outdentedBranch[outdent].depth) - 1);
+      var relocatedParentIndex = blockIndexById(parentId);
+      if (relocatedParentIndex < 0) return false;
+      outline.splice.apply(outline, [outlineSubtreeEndIndex(relocatedParentIndex), 0].concat(outdentedBranch));
     } else if (direction === "right") {
       var previousIndex = outlineSiblingIndex(index, -1);
       var indentEnd = outlineSubtreeEndIndex(index);
@@ -669,7 +707,7 @@
       text.addEventListener("dblclick", function (ev) { ev.preventDefault(); ev.stopPropagation(); beginOutlineRowEditing(ensureBlockId(block)); });
       text.addEventListener("keydown", function (ev) {
         if (outlineEditingId !== block.id) return;
-        if (ev.key === "Enter" && ev.altKey) return;
+        if (ev.key === "Enter" && ev.altKey) { ev.preventDefault(); insertOutlineEditingNewline(text); return; }
         if (ev.key === "Enter") {
           ev.preventDefault();
           if (ev.metaKey || ev.ctrlKey) {
