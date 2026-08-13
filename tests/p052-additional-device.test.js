@@ -706,15 +706,42 @@ test("P052e refuses a dirty detached target before any Device B mutation", async
   assert.equal(journey.visible, null);
   assert.equal(journey.ownerKind, "detached");
   assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(journey.idb.records.size, 0);
   assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
 });
 
-test("P052f reports detached truth becoming dirty at the visible commit boundary", async () => {
+test("P052g retries a Device B completed while detached truth became dirty during onboarding", async () => {
   const journey = await createBrowserJourney({ dirtyBeforeCommit: true });
   assert.equal(journey.opened.reason, "additional-device-target-dirty");
   assert.equal(journey.visible, null);
   assert.equal(journey.ownerKind, "detached");
   assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  const [before] = [...journey.idb.records.values()];
+  assert.equal(before.kind, "pocket.sync.device-state");
+  assert.equal(before.schemaVersion, 5);
+  assert.equal(before.additionalDeviceDraft, null);
+  assert.equal(before.usage.masterKeyContentEncryptionLimit, 2 ** 20);
+  const deviceId = before.deviceId;
+  const metadata = plain(before.deviceEnvelope.metadata);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  journey.clearFaults();
+  journey.setDirtyBeforeCommit(false);
+  journey.setDetachedDirty(false);
+  const retry = await journey.openExisting();
+  assert.equal(retry.ok, true, JSON.stringify(retry));
+  const [after] = [...journey.idb.records.values()];
+  assert.equal(after.deviceId, deviceId);
+  assert.deepEqual(plain(after.deviceEnvelope.metadata), metadata);
+  assert.equal(after.usage.masterKeyContentEncryptionLimit, 2 ** 20);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+  assert.notEqual(journey.visible, null);
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  const saved = await journey.b.PocketOwnerSaveBoundary.save({
+    expectedSession: journey.b.capturePocketFileSaveSession(),
+    async freezePayload() { return { schema: "portal.export.v1", notes: ["P052g dirty transition retry Save"] }; },
+  });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.confirmedRemoteRevision, 2);
 });
 
 test("P052f reports a changing detached session as stale rather than dirty", async () => {
@@ -731,6 +758,7 @@ test("P052f fails closed when the detached dirty-state signal is unavailable", a
     assert.equal(journey.opened.reason, "additional-device-target-dirty");
     assert.equal(journey.visible, null);
     assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+    assert.equal(journey.idb.records.size, 0);
     assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
   }
 });
