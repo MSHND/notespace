@@ -154,7 +154,8 @@ persisting session state, retrying work, or changing a Pocket owner.
       value.forEach((item) => validateJsonValue(item, seen));
     } else {
       const prototype = Object.getPrototypeOf(value);
-      if (prototype !== Object.prototype && prototype !== null) {
+      if (prototype !== Object.prototype && prototype !== null
+          && Object.getPrototypeOf(prototype) !== null) {
         throw remoteError("remote-request-invalid");
       }
       Object.keys(value).forEach((field) => validateJsonValue(value[field], seen));
@@ -168,6 +169,20 @@ persisting session state, retrying work, or changing a Pocket owner.
     } catch (_error) {
       throw remoteError(code);
     }
+  }
+
+  function serialiseRequestBody(routeName, requestBody, encoder) {
+    const limits = routeLimits(routeName);
+    if (!isObject(requestBody)) throw remoteError("remote-request-invalid");
+    validateJsonValue(requestBody, new Set());
+    let bodyText;
+    try { bodyText = JSON.stringify(requestBody); }
+    catch (_error) { throw remoteError("remote-request-invalid"); }
+    if (typeof bodyText !== "string") throw remoteError("remote-request-invalid");
+    if (encodedSize(encoder, bodyText, "remote-request-invalid") > limits.request) {
+      throw remoteError("remote-request-too-large");
+    }
+    return bodyText;
   }
 
   function contentType(headers) {
@@ -297,18 +312,7 @@ persisting session state, retrying work, or changing a Pocket owner.
 
     async function request(routeName, requestBody) {
       const limits = routeLimits(routeName);
-      if (!isObject(requestBody)) throw remoteError("remote-request-invalid");
-      validateJsonValue(requestBody, new Set());
-      let bodyText;
-      try {
-        bodyText = JSON.stringify(requestBody);
-      } catch (_error) {
-        throw remoteError("remote-request-invalid");
-      }
-      if (typeof bodyText !== "string"
-          || encodedSize(encoder, bodyText, "remote-request-invalid") > limits.request) {
-        throw remoteError("remote-request-invalid");
-      }
+      const bodyText = serialiseRequestBody(routeName, requestBody, encoder);
       let response;
       try {
         response = await fetchFunction(`${serviceRoot}${ROUTES[routeName]}`, {
@@ -336,14 +340,21 @@ persisting session state, retrying work, or changing a Pocket owner.
       return Object.freeze({ status: response.status, body });
     }
 
-    return Object.freeze({ request });
+    function preflightRequest(routeName, requestBody) {
+      serialiseRequestBody(routeName, requestBody, encoder);
+    }
+
+    return Object.freeze({ request, preflightRequest });
   }
 
   function validateTransport(transport) {
+    const keys = isObject(transport) ? Object.keys(transport) : [];
     if (!isObject(transport)
-        || Object.keys(transport).length !== 1
-        || Object.keys(transport)[0] !== "request"
-        || typeof transport.request !== "function") {
+        || !keys.includes("request")
+        || typeof transport.request !== "function"
+        || !([1, 2].includes(keys.length))
+        || (keys.length === 2
+          && (!keys.includes("preflightRequest") || typeof transport.preflightRequest !== "function"))) {
       throw remoteError("remote-transport-invalid");
     }
     return transport;
@@ -1262,7 +1273,15 @@ persisting session state, retrying work, or changing a Pocket owner.
       return validateConditionalUploadResponse(result.status, result.body, request);
     }
 
-    return Object.freeze({ readRevision, downloadEncryptedRecord, conditionalUpload });
+    const service = { readRevision, downloadEncryptedRecord, conditionalUpload };
+    if (typeof transport.preflightRequest === "function") {
+      service.preflightConditionalUpload = function preflightConditionalUpload(input) {
+        const request = validateConditionalUploadRequest(input, contract);
+        transport.preflightRequest("conditionalUpload", request);
+        return request;
+      };
+    }
+    return Object.freeze(service);
   }
 
   function createPocketDiscoveryService({ transport } = {}) {

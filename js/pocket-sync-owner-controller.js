@@ -596,6 +596,7 @@ device record for explicit, conditional Saves.
       let encryptedRecord;
       let content;
       let pending;
+      let uploadRequest;
       const retryingPending = capturedOwner.record.remote.pending !== null;
       let current = capturedOwner.record;
       if (retryingPending) {
@@ -611,7 +612,7 @@ device record for explicit, conditional Saves.
         let payload;
         try { payload = await save.freezePayload(); }
         catch (_error) { return result("payload-freeze-failed"); }
-        try { current = await reserveOwnerUsage(session, current, 1, draftResealCount(current)); }
+        try { current = await reserveOwnerUsage(session, current, 1, 0); }
         catch (_error) { return result("pending-persistence-failed"); }
         if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
         try {
@@ -632,6 +633,29 @@ device record for explicit, conditional Saves.
         } catch (_error) { return result("payload-encryption-failed"); }
       }
 
+      uploadRequest = {
+        apiVersion: 1,
+        syncedPocketId: capturedOwner.syncedPocketId,
+        expectedRevision: pending.expectedRevision,
+        operationId: pending.operationId,
+        logicalChangeId: pending.logicalChangeId,
+        attemptKind: pending.attemptKind,
+        encryptedRecord,
+      };
+      if (!retryingPending && typeof config.contentService.preflightConditionalUpload === "function") {
+        try { config.contentService.preflightConditionalUpload(uploadRequest); }
+        catch (error) {
+          if (error?.code === "remote-request-too-large") return result("save-too-large");
+          return result("payload-encryption-failed");
+        }
+      }
+
+      if (!retryingPending) {
+        try { current = await reserveOwnerUsage(session, current, 0, draftResealCount(current)); }
+        catch (_error) { return result("pending-persistence-failed"); }
+        if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
+      }
+
       let pendingRecord;
       try { pendingRecord = await nextRecord(
         current,
@@ -648,15 +672,7 @@ device record for explicit, conditional Saves.
 
       let response;
       try {
-        response = await config.contentService.conditionalUpload({
-          apiVersion: 1,
-          syncedPocketId: capturedOwner.syncedPocketId,
-          expectedRevision: pending.expectedRevision,
-          operationId: pending.operationId,
-          logicalChangeId: pending.logicalChangeId,
-          attemptKind: pending.attemptKind,
-          encryptedRecord,
-        });
+        response = await config.contentService.conditionalUpload(uploadRequest);
       } catch (error) {
         if (!isSyncedOwnerSaveSessionCurrent(session)) return result("stale-owner-session");
         return result(classifyRemoteError(error));

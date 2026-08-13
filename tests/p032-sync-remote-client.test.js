@@ -176,7 +176,11 @@ test("browser transport and injected services enforce exact method surfaces", ()
     serviceRoot: "/test/pocket-sync/v1",
     fetch: async () => fixtures.textResponse({ ok: true }),
   });
-  assert.deepEqual(Object.keys(transport), ["request"]);
+  assert.deepEqual(Object.keys(transport), ["request", "preflightRequest"]);
+  assert.deepEqual(
+    Object.keys(api.createContentService({ transport })),
+    ["readRevision", "downloadEncryptedRecord", "conditionalUpload", "preflightConditionalUpload"]
+  );
   assert.throws(() => api.createContentService({ transport: {} }), remoteErrorCode("remote-transport-invalid"));
   assert.throws(() => api.createContentService({
     transport: { async request() {}, extra() {} },
@@ -238,7 +242,7 @@ test("oversized, undefined, cyclic, and unsupported requests fail before fetch",
   });
   await assert.rejects(
     transport.request("beginRegistration", { value: "x".repeat(262144) }),
-    remoteErrorCode("remote-request-invalid")
+    remoteErrorCode("remote-request-too-large")
   );
   await assert.rejects(transport.request("beginRegistration", { value: undefined }), remoteErrorCode("remote-request-invalid"));
   const cyclic = {};
@@ -666,6 +670,31 @@ test("conditional upload requires explicit API version and preserves P028 durabl
     service.conditionalUpload(fixtures.uploadRequest({ readablePocket: "READABLE" })),
     remoteErrorCode("remote-request-invalid")
   );
+});
+
+test("P052j preflights the canonical conditional-upload wire request before dispatch", async () => {
+  const { api } = loadProduction();
+  let encodedBytes = api.POLICY.contentJsonLimitBytes;
+  let fetches = 0;
+  class BoundaryEncoder {
+    encode() { return { byteLength: encodedBytes }; }
+  }
+  const transport = api.createBrowserJsonTransport({
+    serviceRoot: "/test/pocket-sync/v1",
+    TextEncoder: BoundaryEncoder,
+    fetch: async () => { fetches += 1; return fixtures.textResponse(fixtures.committed()); },
+  });
+  const service = api.createContentService({ transport });
+  const request = fixtures.uploadRequest();
+  assert.deepEqual(plain(service.preflightConditionalUpload(request)), plain(request));
+  assert.equal(fetches, 0);
+  encodedBytes += 1;
+  assert.throws(
+    () => service.preflightConditionalUpload(request),
+    remoteErrorCode("remote-request-too-large")
+  );
+  await assert.rejects(service.conditionalUpload(request), remoteErrorCode("remote-request-too-large"));
+  assert.equal(fetches, 0);
 });
 
 test("P033 rejects an unadvanceable expected revision before transport", async () => {

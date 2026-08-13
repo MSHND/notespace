@@ -353,6 +353,45 @@ test("P042 does not upload when pending encrypted persistence fails", async () =
   assert.equal(harness.calls.length, 0);
 });
 
+test("P052j rejects an oversized new Save before pending state or remote dispatch", async () => {
+  let tooLarge = true;
+  const uploads = [];
+  const harness = await createHarness({ contentService: Object.freeze({
+    preflightConditionalUpload() {
+      if (tooLarge) throw Object.assign(new Error("synthetic size limit"), { code: "remote-request-too-large" });
+    },
+    async conditionalUpload(input) {
+      uploads.push(input);
+      return { status: "committed", wrote: true, operationId: input.operationId,
+        revision: input.expectedRevision + 1 };
+    },
+  }) });
+  await adopt(harness);
+  const before = await harness.store.readPocket("pocket-a");
+  const rejected = await harness.controller.saveSyncedOwner({
+    freezePayload: async () => ({ sentinel: SENTINEL }),
+  });
+  assert.equal(rejected.reason, "save-too-large");
+  assert.equal(uploads.length, 0);
+  const afterRejected = await harness.store.readPocket("pocket-a");
+  assert.equal(afterRejected.remote.pending, null);
+  assert.equal(afterRejected.remote.conflict, null);
+  assert.equal(afterRejected.remote.confirmedRevision, before.remote.confirmedRevision);
+  assert.deepEqual(plain(afterRejected.content), plain(before.content));
+  assert.equal(
+    afterRejected.usage.deviceWrappingKeyEncryptions,
+    before.usage.deviceWrappingKeyEncryptions
+  );
+  assert.notEqual(harness.controller.captureSyncedOwnerSaveSession(), null);
+
+  tooLarge = false;
+  const saved = await harness.controller.saveSyncedOwner({
+    freezePayload: async () => ({ sentinel: "smaller-save-after-rejection" }),
+  });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(uploads.length, 1);
+});
+
 test("P042 returns a conflict with encrypted pending work retained and no retry", async () => {
   const harness = await createHarness({ contentService: Object.freeze({
     async conditionalUpload(input) {
