@@ -64,7 +64,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   let session = { ownerKind, id: 1 };
   let dirty = options.dirty === true;
-  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let resolveActivate; let resolveOpen;
+  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let resumeInput; let resolveActivate; let resolveOpen;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
     capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
@@ -81,11 +81,11 @@ function createUiHarness(ownerKind = "json", options = {}) {
   const integration = {
     activate() { activateCalls += 1; return new Promise((resolve) => { resolveActivate = resolve; }); },
     openExisting() { openCalls += 1; return options.holdOpen ? new Promise((resolve) => { resolveOpen = resolve; }) : Promise.resolve({ ok: true }); },
-    resume() { resumeCalls += 1; return Promise.resolve({ ok: false }); },
+    resume(input) { resumeCalls += 1; resumeInput = input; return Promise.resolve({ ok: false }); },
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -104,6 +104,7 @@ test("P053a gives JSON owners explicit consent, closes More, and single-flights 
   primary.fire("click");
   await Promise.resolve(); await Promise.resolve();
   assert.equal(harness.resumeCalls, 1);
+  assert.equal(JSON.stringify(harness.resumeInput), '{"activationId":"existing-activation"}');
   assert.equal(harness.activateCalls, 1);
 });
 
@@ -140,10 +141,14 @@ test("P053b keeps dirty detached work out of Sync open and single-flights a fres
   await Promise.resolve(); await Promise.resolve();
 });
 
-test("P053b cancel and idle Escape return focus visibly while busy Escape keeps Sync truthful", async () => {
+test("P053c idle Escape restores visible focus and busy Escape keeps Sync truthful", async () => {
   const idle = createUiHarness("json", { paletteOpen: true });
   idle.command.fire("click");
-  idle.overlay.querySelector(".vaultDialogSecondary").fire("click");
+  idle.event("keydown", { key: "Escape" });
+  assert.equal(idle.overlay.hidden, true);
+  assert.equal(idle.activateCalls, 0);
+  assert.equal(idle.openCalls, 0);
+  assert.equal(idle.resumeCalls, 0);
   assert.equal(idle.more.focused, true);
   idle.command.fire("click");
   const primary = idle.overlay.querySelector(".vaultDialogPrimary");
