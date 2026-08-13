@@ -27,7 +27,9 @@ function loadProduction() {
   for (const file of ["js/pocket-sync-security-contract.js", "js/pocket-sync-crypto.js",
     "js/pocket-sync-device-store.js", "js/pocket-sync-owner-controller.js",
     "js/pocket-sync-account-client.js", "js/pocket-sync-remote-client.js",
-    "js/pocket-sync-activation.js", "js/pocket-sync-additional-device.js"]) {
+    "js/pocket-sync-activation.js", "js/pocket-sync-additional-device.js",
+    "js/pocket-owner-save-boundary.js", "js/pocket-sync-activation-owner-bridge.js",
+    "js/pocket-sync-browser-runtime.js"]) {
     vm.runInContext(source(file), context, { filename: file });
   }
   return context;
@@ -39,6 +41,141 @@ function bytes(length, seed = 1) {
 
 function plain(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function createIndexedDb() {
+  const records = new Map();
+  let reads = 0;
+  let beforeRead = null;
+  let storeCreated = false;
+  const store = {
+    keyPath: "syncedPocketId", autoIncrement: false, indexNames: [],
+    get(key) {
+      const request = {};
+      queueMicrotask(() => {
+        reads += 1;
+        request.result = beforeRead?.({ key, reads, value: records.get(key) }) ?? records.get(key);
+        request.onsuccess?.();
+      });
+      return request;
+    },
+    getAll() { const request = {}; queueMicrotask(() => { request.result = [...records.values()]; request.onsuccess?.(); }); return request; },
+    add(value) { if (records.has(value.syncedPocketId)) throw new Error("duplicate"); const request = {};
+      queueMicrotask(() => { records.set(value.syncedPocketId, value); request.onsuccess?.(); }); return request; },
+    put(value) { const request = {}; queueMicrotask(() => { records.set(value.syncedPocketId, value); request.onsuccess?.(); }); return request; },
+  };
+  const database = {
+    version: 1, get objectStoreNames() { return storeCreated ? ["pockets"] : []; },
+    createObjectStore(name, options) { if (name !== "pockets" || options?.keyPath !== "syncedPocketId") throw new Error("schema invalid"); storeCreated = true; return store; },
+    transaction() { const transaction = { error: null, objectStore: () => store,
+      abort() { queueMicrotask(() => transaction.onabort?.()); } }; setImmediate(() => transaction.oncomplete?.()); return transaction; },
+    close() {}, onversionchange: null,
+  };
+  return { records, setBeforeRead(callback) { beforeRead = callback; },
+    indexedDB: { open(name, version) { if (name !== "pocket.sync.device.v1" || version !== 1) throw new Error("database invalid");
+      const request = { result: database, transaction: { abort() {} } };
+      queueMicrotask(() => { if (!storeCreated) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); }); return request; } } };
+}
+
+async function createBrowserJourney(options = {}) {
+  const a = loadProduction();
+  const b = loadProduction();
+  const serviceDriver = createMemoryServiceStore();
+  const origin = "https://sync.pocket.example";
+  const now = Date.parse("2041-01-01T00:00:00.000Z");
+  let serviceRandom = 0;
+  const core = createServiceCore({
+    store: serviceDriver.store,
+    webAuthnVerifier: {
+      async verifyRegistration(input) { return { credentialId: input.credential.id,
+        publicKey: Buffer.from(bytes(64, 101)).toString("base64url"), publicKeyAlgorithm: -7,
+        signCount: 0, transports: ["internal"], backupEligible: true, backedUp: false }; },
+      async verifyAuthentication(input) { return { credentialId: input.credential.id,
+        signCount: input.storedCredential.signCount + 1, backedUp: true }; },
+    },
+    recoveryProofVerifier: { async verifyRecoveryProof() { return { verified: true }; } },
+    randomBytes(length) { serviceRandom += 1; return bytes(length, serviceRandom * 7); },
+    now: () => now, trustedOrigin: origin, rpId: "sync.pocket.example", rpName: "Pocket",
+    credentialAlgorithms: [-7], ceremonyLifetimeMs: 300000, sessionLifetimeMs: 2592000000,
+  });
+  let sessionId = null;
+  const remoteCalls = [];
+  const transport = Object.freeze({ async request(route, body) {
+    remoteCalls.push({ route, body: plain(body) });
+    const response = await core[route]({ context: { method: "POST", origin, fetchSite: "same-origin",
+      contentType: "application/json", sessionId }, body: plain(body) });
+    if (response.session?.action === "set") sessionId = response.session.sessionId;
+    return { status: response.status, body: response.body };
+  } });
+  const aRemote = a.PocketSyncRemoteClient;
+  const aDeviceStore = a.PocketSyncDeviceStore.createStore(createMemoryDeviceStoreDriver(createSharedDeviceStoreState()));
+  let activationRandom = 0;
+  const activateA = a.PocketSyncActivation.createActivationOrchestrator({
+    securityContract: a.PocketSyncSecurityContract, crypto: a.PocketSyncCrypto, deviceStore: aDeviceStore,
+    accountClient: a.PocketSyncAccountClient.createClient({
+      accountService: aRemote.createAccountService({ transport, now: () => now }),
+      webAuthn: { async createCredential() { return fixtures.nativeRegistrationCredential(); }, async getCredential() {} }, now: () => now,
+    }),
+    contentService: aRemote.createContentService({ transport }), envelopeService: aRemote.createEnvelopeService({ transport }),
+    recoveryService: aRemote.createRecoveryService({ transport, now: () => now }),
+    randomBytes(length) { activationRandom += 1; return bytes(length, 151 + activationRandom); }, now: () => now,
+  });
+  const source = Object.freeze({ ownerKind: "json", continuityId: "device-a-source" });
+  const created = await activateA.activate({
+    captureSourceSession: () => source, isSourceSessionCurrent: (value) => value === source,
+    hasUnsavedSourceChanges: () => false, async saveLocalSource() { return { ok: true }; },
+    async freezePayload() { return { schema: "portal.export.v1", notes: ["P052c readable Device A content"] }; },
+    async prepareRecoveryCopyDestination() { return { ok: true, destination: { kind: "test" } }; },
+    async buildRecoveryPackage(input) { return a.PocketSyncSecurityContract.buildRecoveryPackage({ ...plain(input), checksum: "p052c" }); },
+    async writeRecoveryCopy() { return { ok: true }; }, async adoptSyncedOwner() { return { ok: true }; },
+  }, { syncedPocketId: "pocket-p052c-browser", deviceId: "device-a-p052c" });
+  assert.equal(created.ok, true, JSON.stringify(created));
+
+  const idb = createIndexedDb();
+  let ownerKind = "detached";
+  let continuity = 61;
+  let visible = null;
+  let commits = 0;
+  b.capturePocketFileSaveSession = () => ({ id: continuity, ownerKind });
+  b.isPocketFileSaveSessionCurrent = (session) => !!session && session.id === continuity && session.ownerKind === ownerKind;
+  b.setPocketFileSession = () => {
+    if (options.installFails) throw new Error("synthetic boundary install failure");
+    ownerKind = "synced"; continuity += 1;
+  };
+  b.isPocketPayloadShape = (payload) => payload?.schema === "portal.export.v1";
+  b.normaliseInput = (payload) => payload;
+  b.commitPreparedPocketDocument = (payload, _metadata, guard) => {
+    commits += 1;
+    if (options.targetChangesBeforeCommit) continuity += 1;
+    if (options.ownerAdoptionFailsAfterCommit) {
+      idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
+        content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
+      }));
+    }
+    if (options.commitFails || guard.canContinue() !== true) return { ok: false };
+    visible = plain(payload);
+    return { ok: true };
+  };
+  const bRemote = b.PocketSyncRemoteClient;
+  const environment = {
+    crypto: webcrypto, indexedDB: idb.indexedDB, now: () => now,
+    navigator: { credentials: { async create() { throw new Error("not used"); },
+      async get() { return fixtures.nativeAuthenticationCredential(); } } },
+  };
+  const runtime = b.PocketSyncBrowserRuntime.createRuntime({
+    accountService: bRemote.createAccountService({ transport, now: () => now }),
+    contentService: bRemote.createContentService({ transport }), envelopeService: bRemote.createEnvelopeService({ transport }),
+    recoveryService: bRemote.createRecoveryService({ transport, now: () => now }),
+    discoveryService: bRemote.createPocketDiscoveryService({ transport }), environment,
+  });
+  if (options.ownerEligibilityFails) {
+    idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
+      content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
+    }));
+  }
+  const opened = await runtime.openExisting();
+  return { b, core, idb, opened, remoteCalls, runtime, serviceDriver, get ownerKind() { return ownerKind; },
+    get visible() { return visible; }, get commits() { return commits; } };
 }
 
 test("P052 remains dormant until explicitly created and PRF absence requires recovery before discovery or device mutation", async () => {
@@ -234,6 +371,52 @@ test("P052b maps a wrong real P029 PRF unlock to recovery-required before device
   assert.equal(mutations, 0);
 });
 
+test("P052c keeps tampered PRF envelopes recoverable but local derivation failures local", async () => {
+  const context = loadProduction();
+  const crypto = context.PocketSyncCrypto;
+  const syncedPocketId = "pocket-p052c-prf";
+  const credentialId = "credential-p052c-prf";
+  const prfContext = { syncedPocketId, envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1 };
+  const prf = Uint8Array.from({ length: 32 }, (_value, index) => index + 1);
+  const salt = Buffer.from(Uint8Array.from({ length: 32 }, (_value, index) => index + 41)).toString("base64url");
+  const wrappingKey = await crypto.deriveWrappingKey(prf, salt, prfContext);
+  const bundle = await crypto.createMasterKeyBundle([{ context: prfContext, wrappingKey }]);
+  async function openWith(cryptoInput, encryptedEnvelope) {
+    let mutations = 0;
+    const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
+      crypto: cryptoInput,
+      deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; } },
+      accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
+        contentUnlocked: false, accountId: "account-p052c-prf", credentialId,
+        prf: { status: "available", outputBytes: Uint8Array.from(prf) } }; } },
+      discoveryService: { async readSyncedPocket() { return { status: "ready", syncedPocketId }; } },
+      contentService: { async readRevision() { throw new Error("must not read content"); }, async downloadEncryptedRecord() { throw new Error("must not download"); } },
+      envelopeService: { async listEnvelopes() { return { keySetVersion: 1, envelopes: [{
+        envelopeId: "prf-envelope", envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId, status: "active" }] }; },
+        async downloadEnvelope() { return { keySetVersion: 1, envelope: { envelopeId: "prf-envelope",
+          envelopeKind: "passkey-prf", envelopeVersion: 1, credentialId, kdf: "HKDF-SHA-256", kdfSalt: salt, encryptedEnvelope } }; },
+        async addEnvelope() { mutations += 1; } },
+      randomBytes(length) { return new Uint8Array(length); }, now: () => 0,
+    });
+    const result = await opener.openExisting({ captureTarget: () => ({ ownerKind: "detached", id: "prf" }),
+      isTargetCurrent: () => true, validatePayload: () => true, adoptOpenedPocket: async () => true });
+    return { result, mutations };
+  }
+  const tampered = Object.assign({}, bundle.envelopes[0].record, {
+    ciphertext: `${bundle.envelopes[0].record.ciphertext[0] === "A" ? "B" : "A"}${bundle.envelopes[0].record.ciphertext.slice(1)}`,
+  });
+  const tamperedResult = await openWith(crypto, tampered);
+  assert.equal(tamperedResult.result.reason, "recovery-required");
+  assert.equal(tamperedResult.mutations, 0);
+  const localCrypto = Object.freeze({ ...crypto, async deriveWrappingKey() {
+    const error = new Error("synthetic local derivation failure"); error.code = "wrapping-key-derivation-failed"; throw error;
+  } });
+  const localResult = await openWith(localCrypto, bundle.envelopes[0].record);
+  assert.equal(localResult.result.reason, "additional-device-open-failed");
+  assert.equal(localResult.result.reason === "recovery-required", false);
+  assert.equal(localResult.mutations, 0);
+});
+
 test("P052b preserves a reviewed irreversible adoption partial state", async () => {
   const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
   context.window = context; context.globalThis = context; vm.createContext(context);
@@ -357,4 +540,71 @@ test("P052b accepts a production Device A activation, Device B adoption and ordi
   const remoteText = JSON.stringify(serviceDriver.snapshot());
   assert.doesNotMatch(remoteText, /Device A initial content|Device B ordinary Save/);
   assert.deepEqual(routes.filter((route) => route === "conditionalUpload"), ["conditionalUpload", "conditionalUpload"]);
+});
+
+test("P052c public browser Device B adoption joins visible truth, owner authority and boundary Save", async () => {
+  const journey = await createBrowserJourney();
+  assert.deepEqual(plain(journey.opened), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
+  });
+  assert.deepEqual(journey.visible, { schema: "portal.export.v1", notes: ["P052c readable Device A content"] });
+  assert.equal(journey.commits, 1);
+  assert.equal(journey.ownerKind, "synced");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  const before = [...journey.idb.records.values()][0];
+  assert.equal(before.schemaVersion, 5);
+  assert.equal(before.usage.masterKeyContentEncryptionLimit, 2 ** 20);
+  const addCalls = journey.remoteCalls.filter((call) => call.route === "addEnvelope");
+  assert.equal(addCalls.length, 3);
+  const saved = await journey.b.PocketOwnerSaveBoundary.save({
+    expectedSession: journey.b.capturePocketFileSaveSession(),
+    async freezePayload() { return { schema: "portal.export.v1", notes: ["P052c Device B boundary Save"] }; },
+  });
+  assert.deepEqual(plain(saved), {
+    ownerKind: "synced", target: "synced", ok: true, reason: "saved", confirmedRemoteRevision: 2,
+  });
+  const after = [...journey.idb.records.values()][0];
+  assert.equal(after.usage.masterKeyContentEncryptions, before.usage.masterKeyContentEncryptions + 1);
+  assert.equal(after.usage.masterKeyContentEncryptionLimit, 2 ** 20);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 3);
+  const remoteText = JSON.stringify(journey.serviceDriver.snapshot());
+  const requests = JSON.stringify(journey.remoteCalls);
+  assert.doesNotMatch(remoteText, /P052c readable Device A content|P052c Device B boundary Save|"masterKey":|"deviceWrappingKey":/);
+  assert.doesNotMatch(requests, /P052c readable Device A content|P052c Device B boundary Save/);
+  assert.deepEqual(Object.keys(plain(journey.opened)), ["ok", "reason", "confirmedRemoteRevision"]);
+});
+
+test("P052c production browser adoption keeps visible truth and authority coherent across final transition failures", async () => {
+  const targetChanged = await createBrowserJourney({ targetChangesBeforeCommit: true });
+  assert.equal(targetChanged.opened.ok, false);
+  assert.equal(targetChanged.visible, null);
+  assert.equal(targetChanged.ownerKind, "detached");
+  assert.equal(targetChanged.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+
+  const ineligible = await createBrowserJourney({ ownerEligibilityFails: true });
+  assert.equal(ineligible.opened.ok, false);
+  assert.equal(ineligible.commits, 0);
+  assert.equal(ineligible.visible, null);
+  assert.equal(ineligible.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+
+  const commitFailed = await createBrowserJourney({ commitFails: true });
+  assert.equal(commitFailed.opened.ok, false);
+  assert.equal(commitFailed.visible, null);
+  assert.equal(commitFailed.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+
+  const adoptionFailed = await createBrowserJourney({ ownerAdoptionFailsAfterCommit: true });
+  assert.deepEqual(plain(adoptionFailed.opened), {
+    ok: false, reason: "owner-adoption-failed", adopted: false,
+    partialState: "visible-payload-committed-detached",
+  });
+  assert.notEqual(adoptionFailed.visible, null);
+  assert.equal(adoptionFailed.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+
+  const installFailed = await createBrowserJourney({ installFails: true });
+  assert.deepEqual(plain(installFailed.opened), {
+    ok: false, reason: "owner-adoption-failed", adopted: false,
+    partialState: "visible-payload-committed-detached",
+  });
+  assert.notEqual(installFailed.visible, null);
+  assert.equal(installFailed.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
 });

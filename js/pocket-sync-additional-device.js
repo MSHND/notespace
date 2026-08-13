@@ -108,11 +108,17 @@
       let wrappingKey;
       try {
         wrappingKey = await config.crypto.deriveWrappingKey(prf, downloaded.envelope.kdfSalt, context);
-        prf.fill(0); prf = null;
+      } catch (_error) { return fail("additional-device-open-failed"); }
+      prf.fill(0); prf = null;
+      try {
         opened = await config.crypto.openMasterKeyBundle(downloaded.envelope.encryptedEnvelope,
           wrappingKey, context, []);
-        config.crypto.validateNonExtractableAesKey(opened?.masterKey);
-      } catch (_error) { return fail("recovery-required"); }
+      } catch (error) {
+        return error?.code === "master-key-envelope-authentication-failed"
+          ? fail("recovery-required") : fail("additional-device-open-failed");
+      }
+      try { config.crypto.validateNonExtractableAesKey(opened?.masterKey); }
+      catch (_error) { return fail("additional-device-open-failed"); }
       const current = await readCurrent(config, discovery.syncedPocketId, randomId(config), opened.masterKey, dependencies);
       if (!current) return fail("remote-content-invalid");
       await config.deviceStore.open();
