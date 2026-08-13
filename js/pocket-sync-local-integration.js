@@ -142,7 +142,9 @@
       }
     }
 
-    return frozen({ activate, resume, openExisting, verifyRoundTrip });
+    const integration = frozen({ activate, resume, openExisting, verifyRoundTrip });
+    try { global.PocketSyncUi?.install?.(integration); } catch (_error) {}
+    return integration;
   }
 
   global.PocketSyncLocalIntegration = frozen({ create });

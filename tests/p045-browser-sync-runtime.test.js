@@ -301,7 +301,7 @@ test("P045 loading and runtime construction are inert", () => {
   assert.deepEqual(Object.keys(context.PocketSyncBrowserRuntime), ["createRuntime"]);
   assert.equal(Object.isFrozen(context.PocketSyncBrowserRuntime), true);
   assert.match(source("index.html"), /js\/pocket-sync-browser-runtime\.js/);
-  assert.doesNotMatch(source("index.html"), /Turn on sync/i);
+  assert.match(source("index.html"), /id="cmdSync"[^>]*hidden disabled/);
 });
 
 test("P045 explicitly composes browser activation, encrypted remote state and the live synced owner", async () => {

@@ -237,13 +237,14 @@ test("P043 invalidates every local and synced save generation across owner chang
   assert.equal(sameTargetNewGeneration.PocketOwnerSaveBoundary.isOwnerSaveSessionCurrent(captured), false);
 });
 
-test("P043 loads the boundary after P042 without adding a normal sync activation path", () => {
+test("P043 loads the boundary before P053's inert injected Sync doorway", () => {
   const index = source("index.html");
   const scripts = Array.from(index.matchAll(/<script\s+src="([^"]+)"/g), (match) => match[1]);
   assert.ok(scripts.indexOf("js/pocket-sync-owner-controller.js") >= 0);
   assert.ok(scripts.indexOf("js/pocket-owner-save-boundary.js")
     > scripts.indexOf("js/pocket-sync-owner-controller.js"));
-  assert.equal(/Sync button|Turn on sync|Start sync/i.test(index), false);
+  assert.match(index, /id="cmdSync"[^>]*hidden disabled/);
+  assert.ok(scripts.indexOf("js/pocket-sync-ui.js") > scripts.indexOf("js/pocket-owner-save-boundary.js"));
   assert.match(source("js/pocket-io-browser.js"), /const boundary = window\.PocketOwnerSaveBoundary/);
   assert.match(source("js/pocket-node-popout-editor.js"), /exportTree/);
 });
