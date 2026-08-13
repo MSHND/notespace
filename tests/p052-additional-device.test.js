@@ -101,8 +101,10 @@ async function createBrowserJourney(options = {}) {
   let sessionId = null;
   const remoteCalls = [];
   let serverDeviceInvalid = false;
+  let failReadRevision = false;
   const transport = Object.freeze({ async request(route, body) {
     remoteCalls.push({ route, body: plain(body) });
+    if (failReadRevision && route === "readRevision") throw new Error("synthetic revision read failure");
     const response = await core[route]({ context: { method: "POST", origin, fetchSite: "same-origin",
       contentType: "application/json", sessionId }, body: plain(body) });
     if (response.session?.action === "set") sessionId = response.session.sessionId;
@@ -140,6 +142,8 @@ async function createBrowserJourney(options = {}) {
   let continuity = 61;
   let visible = null;
   let commits = 0;
+  let detachedDirty = options.detachedDirty === true;
+  let dirtyBeforeCommit = options.dirtyBeforeCommit === true;
   let targetChangesBeforeCommit = options.targetChangesBeforeCommit === true;
   let commitFails = options.commitFails === true;
   let installFails = options.installFails === true;
@@ -147,6 +151,7 @@ async function createBrowserJourney(options = {}) {
   let prfUnavailable = false;
   b.capturePocketFileSaveSession = () => ({ id: continuity, ownerKind });
   b.isPocketFileSaveSessionCurrent = (session) => !!session && session.id === continuity && session.ownerKind === ownerKind;
+  b.hasPocketUnsavedChanges = () => detachedDirty;
   b.setPocketFileSession = () => {
     if (installFails) throw new Error("synthetic boundary install failure");
     ownerKind = "synced"; continuity += 1;
@@ -155,6 +160,7 @@ async function createBrowserJourney(options = {}) {
   b.normaliseInput = (payload) => payload;
   b.commitPreparedPocketDocument = (payload, _metadata, guard) => {
     commits += 1;
+    if (dirtyBeforeCommit) detachedDirty = true;
     if (targetChangesBeforeCommit) continuity += 1;
     if (ownerAdoptionFailsAfterCommit) {
       idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
@@ -192,6 +198,8 @@ async function createBrowserJourney(options = {}) {
   return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
     openExisting: () => runtime.openExisting(), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
       installFails = false; ownerAdoptionFailsAfterCommit = false; idb.setBeforeRead(null); }, setPrfUnavailable(value) { prfUnavailable = value === true; },
+    setDetachedDirty(value) { detachedDirty = value === true; }, setDirtyBeforeCommit(value) { dirtyBeforeCommit = value === true; },
+    setReadRevisionFailure(value) { failReadRevision = value === true; },
     setServerDeviceInvalid(value) { serverDeviceInvalid = value === true; },
     get ownerKind() { return ownerKind; }, get visible() { return visible; }, get commits() { return commits; } };
 }
@@ -655,6 +663,83 @@ test("P052d resumes completed Device B enrolment after post-grant browser failur
     assert.equal(saved.ok, true, name);
     assert.equal(saved.confirmedRemoteRevision, 2, name);
   }
+});
+
+test("P052e retries an owner-eligibility failure before visible commit without another Device B grant", async () => {
+  const journey = await createBrowserJourney({ ownerEligibilityFails: true });
+  assert.equal(journey.opened.ok, false);
+  assert.equal(journey.visible, null);
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope");
+  journey.clearFaults();
+  assert.equal((await journey.openExisting()).ok, true);
+  const retriedGrants = journey.remoteCalls.filter((call) => call.route === "addEnvelope");
+  assert.equal(retriedGrants.length, grants.length + 1);
+  assert.equal(retriedGrants.at(-1).body.attemptKind, "idempotent-retry");
+  assert.equal(retriedGrants.at(-1).body.operationId, grants.at(-1).body.operationId);
+  assert.equal(retriedGrants.at(-1).body.logicalChangeId, grants.at(-1).body.logicalChangeId);
+  assert.deepEqual(retriedGrants.at(-1).body.envelope, grants.at(-1).body.envelope);
+});
+
+test("P052e refuses a dirty detached target before any Device B mutation", async () => {
+  const journey = await createBrowserJourney({ detachedDirty: true });
+  assert.equal(journey.opened.reason, "additional-device-target-dirty");
+  assert.equal(journey.visible, null);
+  assert.equal(journey.ownerKind, "detached");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
+});
+
+test("P052e rechecks detached truth at the visible commit boundary", async () => {
+  const journey = await createBrowserJourney({ dirtyBeforeCommit: true });
+  assert.equal(journey.opened.ok, false);
+  assert.equal(journey.visible, null);
+  assert.equal(journey.ownerKind, "detached");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+});
+
+test("P052e preserves a dirty detached partial retry without another Device B grant", async () => {
+  const journey = await createBrowserJourney({ installFails: true });
+  assert.equal(journey.opened.ok, false);
+  const visible = plain(journey.visible);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  journey.clearFaults();
+  journey.setDetachedDirty(true);
+  const retry = await journey.openExisting();
+  assert.equal(retry.reason, "additional-device-target-dirty");
+  assert.deepEqual(plain(journey.visible), visible);
+  assert.equal(journey.ownerKind, "detached");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+});
+
+test("P052e permits an explicit clean retry after a transient completed-state reopen failure", async () => {
+  const journey = await createBrowserJourney({ targetChangesBeforeCommit: true });
+  assert.equal(journey.opened.ok, false);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  journey.clearFaults();
+  journey.setReadRevisionFailure(true);
+  assert.equal((await journey.openExisting()).reason, "additional-device-open-failed");
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+  journey.setReadRevisionFailure(false);
+  assert.equal((await journey.openExisting()).ok, true);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
+});
+
+test("P052e rejects malformed completed local state without replacement identifiers", async () => {
+  const journey = await createBrowserJourney({ targetChangesBeforeCommit: true });
+  assert.equal(journey.opened.ok, false);
+  const grants = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  const [record] = [...journey.idb.records.values()];
+  journey.idb.records.set(record.syncedPocketId, Object.assign({}, record, {
+    content: Object.assign({}, record.content, { context: Object.assign({}, record.content.context, { revision: "invalid" }) }),
+  }));
+  journey.clearFaults();
+  const rejected = await journey.openExisting();
+  assert.equal(rejected.reason, "additional-device-state-invalid");
+  assert.equal(journey.visible, null);
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grants);
 });
 
 test("P052d reopens an enrolled Device B without PRF output but keeps new devices recoverable", async () => {

@@ -273,6 +273,17 @@
         && `${target.ownerKind}:${target.continuityId}` === expected.continuityId));
     }
 
+    function additionalTargetReplaceable(expected = null) {
+      const target = additionalTarget();
+      if (!target || (expected !== null && (target.ownerKind !== expected.ownerKind
+          || `${target.ownerKind}:${target.continuityId}` !== expected.continuityId))) return false;
+      if (target.ownerKind === "none") return true;
+      try {
+        return typeof global.hasPocketUnsavedChanges === "function"
+          && global.hasPocketUnsavedChanges() === false;
+      } catch (_error) { return false; }
+    }
+
     async function adoptAdditionalDevice(input) {
       const captured = additionalTarget();
       if (!captured || typeof global.normaliseInput !== "function"
@@ -290,7 +301,7 @@
         schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
-        canContinue: () => additionalTargetCurrent(input.target) });
+        canContinue: () => additionalTargetReplaceable(input.target) });
       if (!committed?.ok) return frozen({ ok: false });
       const adopted = await syncedOwnerController.adoptSyncedOwner({
         syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,
@@ -362,6 +373,7 @@
       }
       try { requireMethods(config.discoveryService, ["readSyncedPocket"], "discovery-service-invalid"); }
       catch (_error) { return safeFailure("additional-device-unavailable"); }
+      if (!additionalTargetReplaceable()) return safeFailure("additional-device-target-dirty");
       const additionalDevice = additionalApi.createAdditionalDeviceOpener({
         crypto, deviceStore, accountClient,
         discoveryService: config.discoveryService,

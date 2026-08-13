@@ -165,9 +165,11 @@
       const discovery = await config.discoveryService.readSyncedPocket({ apiVersion: 1, operationId: randomId(config) });
       if (!discovery || discovery.status !== "ready" || !id(discovery.syncedPocketId)) return fail("synced-pocket-not-configured");
       await config.deviceStore.open();
-      let record = await config.deviceStore.readPocket(discovery.syncedPocketId);
+      let record;
+      try { record = await config.deviceStore.readPocket(discovery.syncedPocketId); }
+      catch (_error) { return fail("additional-device-state-invalid"); }
       if (record && record.additionalDeviceDraft === null) {
-        return openCompletedDevice(config, dependencies, captured, discovery.syncedPocketId, record);
+        return await openCompletedDevice(config, dependencies, captured, discovery.syncedPocketId, record);
       }
       if (authentication.prf?.status !== "available" || !(authentication.prf.outputBytes instanceof Uint8Array)
           || authentication.prf.outputBytes.byteLength !== 32) return fail("recovery-required");
