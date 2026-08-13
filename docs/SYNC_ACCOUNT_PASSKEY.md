@@ -35,7 +35,7 @@ Version 1 is passkey-only. Registration requires:
 - attestation `none`; and
 - one PRF evaluation input under `extensions.prf.eval.first`.
 
-Authentication also requires user verification and one PRF evaluation input. Conditional mediation is not requested. RP, user, challenge, credential descriptors, algorithms, timeouts and extensions use strict allowlists. Challenges decode to at least 32 bytes. Binary JSON is canonical unpadded base64url.
+Account-bound authentication requires user verification and one PRF evaluation input. A truly fresh browser first performs an explicit discoverable resident-passkey bootstrap with required user verification, no allow-list and no PRF extension; only its verified credential-to-account binding creates the account session. The client then performs the normal session-bound PRF ceremony. Conditional mediation is not requested. RP, user, challenge, credential descriptors, algorithms, timeouts and extensions use strict allowlists. Challenges decode to at least 32 bytes. Binary JSON is canonical unpadded base64url.
 
 Where supported, the client prefers `PublicKeyCredential.parseCreationOptionsFromJSON()`, `parseRequestOptionsFromJSON()` and credential `toJSON()`. The strict fallback converts every WebAuthn binary member to an independent `ArrayBuffer` for browser calls and serialises the public, server-verifiable credential response back to canonical base64url.
 

@@ -560,15 +560,19 @@ test("authentication resolves non-enumerating locator/session paths and builds P
   const browser = loadBrowserContracts();
   const harness = createHarness();
   const registration = await register(harness);
-  for (const body of [
-    beginAuthenticationBody("missing-locator"),
-    beginAuthenticationBody("unknown-locator", { accountLocator: "unknown-account" }),
-  ]) {
-    await assert.rejects(
-      harness.core.beginAuthentication(call(body)),
-      errorCode("service-account-unresolved")
-    );
-  }
+  const bootstrap = await harness.core.beginAuthentication(call(
+    beginAuthenticationBody("missing-locator")
+  ));
+  assert.equal(bootstrap.body.bootstrap, true);
+  assert.equal(bootstrap.body.prfEvaluationInput, undefined);
+  assert.equal(bootstrap.body.publicKeyRequestOptions.allowCredentials, undefined);
+  browser.account.validateBeginAuthenticationResponse(bootstrap.body, "missing-locator", NOW);
+  await assert.rejects(
+    harness.core.beginAuthentication(call(beginAuthenticationBody(
+      "unknown-locator", { accountLocator: "unknown-account" }
+    ))),
+    errorCode("service-account-unresolved")
+  );
   const explicit = await harness.core.beginAuthentication(call(beginAuthenticationBody(
     "authentication-explicit",
     { accountLocator: registration.accountId }
@@ -1301,7 +1305,7 @@ test("strict schemas preserve exact service record fields", async () => {
     ],
     ceremonies: [
       "accountId", "beginBody", "ceremonyId", "ceremonyType", "challenge",
-      "completedResult", "deviceId", "expiresAt", "finishDigest", "kind", "operationId",
+      "completedResult", "deviceId", "expiresAt", "finishDigest", "kind", "mode", "operationId",
       "prfEvaluationInput", "priorSessionId", "requestDigest", "schemaVersion", "storeVersion",
     ],
     pockets: [

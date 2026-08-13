@@ -144,7 +144,7 @@ A session stores opaque session/account/credential IDs, active or revoked status
 
 ### Ceremony
 
-A ceremony is keyed by operation ID and stores its registration/authentication type, generated ceremony ID and challenge, canonical request digest, account and prior-session relationship, public PRF input, expiry, exact begin body, and nullable finish digest/result. Pending ceremonies have no finish result. Completed ceremonies retain the exact committed result so an identical finish can replay without creating another credential or session.
+A ceremony is keyed by operation ID and stores its registration/authentication type and mode, generated ceremony ID and challenge, canonical request digest, account and prior-session relationship, public PRF input where account-bound, expiry, exact begin body, and nullable finish digest/result. A discoverable bootstrap ceremony has no account or PRF input before verification. Pending ceremonies have no finish result. Completed ceremonies retain the exact committed result so an identical finish can replay without creating another credential or session.
 
 ### Pocket
 
@@ -162,7 +162,7 @@ P036 adds one versioned key set per Pocket, active or ciphertext-free revoked en
 
 Registration begin creates only a pending ceremony. A new account remains provisional until finish. An exact pending-begin replay returns the stored challenge and options; a changed or completed operation cannot begin again. Options require resident credentials, user verification, no attestation, configured algorithms and one account-level PRF input.
 
-Authentication begin resolves the account from either a valid current session or an explicit opaque account locator. Missing and unknown locators use the same non-enumerating error. Options allow only the account's active credentials and stable PRF input. Discoverable sign-in without an account locator remains deferred.
+Authentication begin resolves the account from either a valid current session or an explicit opaque account locator. Unknown locators use a non-enumerating error. With neither, it creates a short-lived discoverable bootstrap ceremony with an empty credential allow-list, required user verification and no PRF input. Finish looks up the credential only by its stored binding, then verifies the assertion before creating the account session. The bootstrap returns no content, key, envelope, grant or device mutation; the now-session-bound second ceremony supplies the account PRF input and active credential descriptors.
 
 Finish reads and validates the ceremony, calls the injected verifier once outside a write transaction, validates the result, then re-reads every relevant record inside the commit transaction. Registration atomically creates the account when needed, credential, active session and completed ceremony. Authentication atomically advances permitted credential state, creates a replacement session, revokes the prior session where present and completes the ceremony. P048 applies the same registration verification boundary to ordinary and recovery credential registration; recovery receives no weaker verifier path.
 

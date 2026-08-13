@@ -97,13 +97,13 @@ Response contains the matching `operationId`, `ceremonyId` and `prfEvaluationInp
 
 ### Begin authentication
 
-Request contains `apiVersion`, `operationId` and an optional opaque account locator. Response contains the matching operation ID, `ceremonyId`, expiry, one canonical 32-byte public PRF evaluation input and standards-shaped public credential request options.
+Request contains `apiVersion`, `operationId` and an optional opaque account locator. With a session or locator, the response contains the matching operation ID, `ceremonyId`, expiry, one canonical 32-byte public PRF evaluation input and account-bound public credential request options. With neither, the response is an explicit discoverable bootstrap: it has the challenge, RP and required user verification but no account identifier, credential descriptors or PRF input.
 
 ### Finish authentication
 
 Request contains `apiVersion`, `operationId`, `ceremonyId` and the public assertion response. Client-only PRF `results` are not included. The service validates the challenge, origin, relying-party scope, signature, user verification requirements, credential/account relationship and expiry.
 
-Response repeats the bound operation, ceremony, credential and PRF-input identities, establishes account authorisation and returns only opaque account/credential references and policy versions. Authentication success does not assert that content is unlocked. P031 reports `accountAuthenticated: true` and `contentUnlocked: false`; later orchestration must independently open an approved content-key envelope.
+Response repeats the bound operation, ceremony and credential identities, establishes account authorisation and returns only opaque account/credential references and policy versions. A discoverable-bootstrap finish is marked as bootstrap and deliberately contains no PRF input. Authentication success does not assert that content is unlocked. P031 reports `accountAuthenticated: true` and `contentUnlocked: false`; later orchestration must independently open an approved content-key envelope.
 
 ## 5. Credential management
 

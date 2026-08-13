@@ -342,6 +342,21 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     return freezeTree(normalised);
   }
 
+  function validateDiscoverableAuthenticationOptions(input) {
+    const code = "authentication-options-invalid";
+    const options = exactObject(input, ["challenge", "timeout", "rpId", "userVerification"],
+      ["challenge", "rpId", "userVerification"], code);
+    if (options.userVerification !== POLICY.userVerification) throw accountError(code);
+    const normalised = {
+      challenge: canonicalBinaryText(options.challenge, code, { minimum: POLICY.minimumChallengeBytes }),
+      rpId: identifier(options.rpId, code),
+      userVerification: POLICY.userVerification,
+    };
+    const timeout = optionalTimeout(options.timeout, code);
+    if (timeout !== undefined) normalised.timeout = timeout;
+    return freezeTree(normalised);
+  }
+
   function fallbackRegistrationOptions(json) {
     const challenge = decodeBase64Url(json.challenge, "registration-options-invalid");
     const userId = decodeBase64Url(json.user.id, "registration-options-invalid");
@@ -392,6 +407,18 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       }
     }
     return fallbackAuthenticationOptions(json);
+  }
+
+  function parseDiscoverableAuthenticationOptions(input, publicKeyCredential) {
+    const json = validateDiscoverableAuthenticationOptions(input);
+    const parser = publicKeyCredential && publicKeyCredential.parseRequestOptionsFromJSON;
+    if (typeof parser === "function") {
+      try { return parser.call(publicKeyCredential, json); }
+      catch (_error) { throw accountError("authentication-options-invalid"); }
+    }
+    return freezeTree(Object.assign({}, json, {
+      challenge: bufferCopy(decodeBase64Url(json.challenge, "authentication-options-invalid")),
+    }));
   }
 
   function unavailablePrf(evaluationInput, status) {
@@ -707,6 +734,19 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     }
   }
 
+  function serializeDiscoverableAuthenticationCredential(credential) {
+    readClientExtensions(credential, "passkey-authentication-response-invalid");
+    try {
+      const safeCredential = credential && typeof credential.toJSON === "function"
+        ? normaliseAuthenticationJson(credential.toJSON(), { native: true })
+        : manualAuthenticationJson(credential);
+      return Object.freeze({ credential: safeCredential, prf: unavailablePrf(null, "not-requested") });
+    } catch (error) {
+      if (error && typeof error.code === "string") throw error;
+      throw accountError("passkey-authentication-response-invalid");
+    }
+  }
+
   function validateBeginRegistrationRequest(input) {
     const code = "registration-request-invalid";
     const request = exactObject(input, [
@@ -796,13 +836,13 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       "expiresAt",
       "prfEvaluationInput",
       "publicKeyRequestOptions",
+      "bootstrap",
     ], [
       "apiVersion",
       "ok",
       "operationId",
       "ceremonyId",
       "expiresAt",
-      "prfEvaluationInput",
       "publicKeyRequestOptions",
     ], code);
     if (response.apiVersion !== POLICY.apiVersion || response.ok !== true) {
@@ -812,6 +852,18 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       throw accountError("passkey-ceremony-mismatch");
     }
     expiryMilliseconds(response.expiresAt, nowMilliseconds);
+    if (response.bootstrap === true) {
+      if (response.prfEvaluationInput !== undefined) throw accountError(code);
+      return freezeTree({
+        apiVersion: POLICY.apiVersion, ok: true, operationId: response.operationId,
+        ceremonyId: identifier(response.ceremonyId, code), expiresAt: response.expiresAt,
+        bootstrap: true,
+        publicKeyRequestOptions: validateDiscoverableAuthenticationOptions(
+          response.publicKeyRequestOptions
+        ),
+      });
+    }
+    if (response.bootstrap !== undefined) throw accountError(code);
     const evaluationInput = validatePrfEvaluationInput(response.prfEvaluationInput, code);
     return freezeTree({
       apiVersion: POLICY.apiVersion,
@@ -912,6 +964,26 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
   }
 
   function validateFinishAuthenticationResponse(input, expected) {
+    if (expected.bootstrap === true) {
+      const code = "account-service-invalid";
+      const response = exactObject(input, [
+        "apiVersion", "ok", "operationId", "ceremonyId", "accountId", "credentialId",
+        "credentialVersion", "accountPolicyVersion", "bootstrap",
+      ], [
+        "apiVersion", "ok", "operationId", "ceremonyId", "accountId", "credentialId",
+        "credentialVersion", "accountPolicyVersion", "bootstrap",
+      ], code);
+      if (response.apiVersion !== POLICY.apiVersion || response.ok !== true
+          || response.bootstrap !== true || response.operationId !== expected.operationId
+          || response.ceremonyId !== expected.ceremonyId
+          || response.credentialId !== expected.credentialId) {
+        throw accountError("passkey-ceremony-mismatch");
+      }
+      return freezeTree({ ...response, accountId: identifier(response.accountId, code),
+        credentialId: identifier(response.credentialId, code),
+        credentialVersion: positiveInteger(response.credentialVersion, code),
+        accountPolicyVersion: positiveInteger(response.accountPolicyVersion, code) });
+    }
     return validateFinishResponse(input, expected, "account-service-invalid");
   }
 
@@ -942,6 +1014,14 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
           publicKeyCredential
         );
         return credentials.get({ publicKey });
+      },
+      async getDiscoverableCredential(jsonOptions) {
+        const publicKeyCredential = environment && environment.PublicKeyCredential;
+        const credentials = environment && environment.navigator && environment.navigator.credentials;
+        if (!credentials || typeof credentials.get !== "function") {
+          throw accountError("passkey-api-unavailable");
+        }
+        return credentials.get({ publicKey: parseDiscoverableAuthenticationOptions(jsonOptions, publicKeyCredential) });
       },
     });
   }
@@ -1160,14 +1240,18 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       ensureCurrent(expiry, now);
       let rawCredential;
       try {
-        rawCredential = await credentialApi.getCredential(begin.publicKeyRequestOptions);
+        rawCredential = begin.bootstrap === true && typeof credentialApi.getDiscoverableCredential === "function"
+          ? await credentialApi.getDiscoverableCredential(begin.publicKeyRequestOptions)
+          : await credentialApi.getCredential(begin.publicKeyRequestOptions);
       } catch (error) {
         mapBrowserFailure(error, "authentication");
       }
       let serialised;
       let completed = false;
       try {
-        serialised = serializeAuthenticationCredential(rawCredential, begin.prfEvaluationInput);
+        serialised = begin.bootstrap === true
+          ? serializeDiscoverableAuthenticationCredential(rawCredential)
+          : serializeAuthenticationCredential(rawCredential, begin.prfEvaluationInput);
         ensureCurrent(expiry, now);
         const finishRequest = validateFinishAuthenticationRequest({
           apiVersion: POLICY.apiVersion,
@@ -1181,9 +1265,12 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
           ceremonyId: begin.ceremonyId,
           credentialId: serialised.credential.id,
           prfEvaluationInput: begin.prfEvaluationInput,
+          bootstrap: begin.bootstrap === true,
         });
         completed = true;
-        return buildSuccess(finish, serialised.prf);
+        return Object.freeze(Object.assign({}, buildSuccess(finish, serialised.prf), {
+          bootstrap: begin.bootstrap === true,
+        }));
       } finally {
         if (!completed && serialised?.prf?.outputBytes) serialised.prf.outputBytes.fill(0);
       }
@@ -1205,11 +1292,14 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     validateFinishAuthenticationResponse,
     validateRegistrationOptions,
     validateAuthenticationOptions,
+    validateDiscoverableAuthenticationOptions,
     parseRegistrationOptions,
     parseAuthenticationOptions,
+    parseDiscoverableAuthenticationOptions,
     inspectPrfResult,
     serializeRegistrationCredential,
     serializeAuthenticationCredential,
+    serializeDiscoverableAuthenticationCredential,
     createBrowserWebAuthnAdapter,
     createClient,
   });

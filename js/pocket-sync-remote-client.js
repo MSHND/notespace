@@ -461,6 +461,7 @@ persisting session state, retrying work, or changing a Pocket owner.
         ceremonyId: request.ceremonyId,
         credentialId: request.credential.id,
         prfEvaluationInput: isObject(result.body) ? result.body.prfEvaluationInput : undefined,
+        bootstrap: isObject(result.body) && result.body.bootstrap === true,
       });
     }
 

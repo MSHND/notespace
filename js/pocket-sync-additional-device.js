@@ -160,7 +160,10 @@
     if (!captured || !sameTarget(dependencies, captured)) return fail("additional-device-target-invalid");
     let prf = null;
     try {
-      const authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+      let authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+      if (authentication?.bootstrap === true) {
+        authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+      }
       if (!authentication || authentication.ok !== true || authentication.accountAuthenticated !== true
           || authentication.contentUnlocked !== false || !id(authentication.accountId) || !id(authentication.credentialId)) {
         return fail("additional-device-open-failed");

@@ -123,6 +123,7 @@ const RECORD_FIELDS = Object.freeze({
     "schemaVersion",
     "storeVersion",
     "ceremonyType",
+    "mode",
     "operationId",
     "ceremonyId",
     "requestDigest",
@@ -656,6 +657,7 @@ function validateTransportList(value, code) {
 }
 
 function validateFinishBody(input, type, code = "service-state-invalid") {
+  const bootstrap = type === "authentication-bootstrap";
   const body = exactObject(input, [
     "apiVersion",
     "ok",
@@ -666,6 +668,7 @@ function validateFinishBody(input, type, code = "service-state-invalid") {
     "credentialVersion",
     "accountPolicyVersion",
     "prfEvaluationInput",
+    "bootstrap",
   ], [
     "apiVersion",
     "ok",
@@ -675,7 +678,7 @@ function validateFinishBody(input, type, code = "service-state-invalid") {
     "credentialId",
     "credentialVersion",
     "accountPolicyVersion",
-    "prfEvaluationInput",
+    ...(bootstrap ? ["bootstrap"] : ["prfEvaluationInput"]),
   ], code);
   if (!type || body.apiVersion !== 1 || body.ok !== true
       || body.credentialVersion !== POLICY.credentialVersion
@@ -686,7 +689,14 @@ function validateFinishBody(input, type, code = "service-state-invalid") {
   identifier(body.ceremonyId, code);
   identifier(body.accountId, code);
   identifier(body.credentialId, code);
-  canonicalBinary(body.prfEvaluationInput, { minimum: 32, maximum: 32 }, code);
+  if (bootstrap) {
+    if (body.bootstrap !== true || body.prfEvaluationInput !== undefined) {
+      throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
+    }
+  } else {
+    if (body.bootstrap !== undefined) throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
+    canonicalBinary(body.prfEvaluationInput, { minimum: 32, maximum: 32 }, code);
+  }
   return frozen(body);
 }
 
@@ -719,6 +729,7 @@ function validateResultWrapper(input, ceremonyType, code = "service-state-invali
 }
 
 function validateBeginBody(input, ceremonyType, code = "service-state-invalid") {
+  const bootstrap = ceremonyType === "authentication-bootstrap";
   const optionsField = ceremonyType === "registration"
     ? "publicKeyCreationOptions"
     : "publicKeyRequestOptions";
@@ -729,18 +740,28 @@ function validateBeginBody(input, ceremonyType, code = "service-state-invalid") 
     "ceremonyId",
     "expiresAt",
     "prfEvaluationInput",
+    "bootstrap",
     optionsField,
   ];
-  const body = exactObject(input, fields, fields, code);
+  const required = fields.filter((field) => (field !== "prfEvaluationInput" || !bootstrap)
+    && (field !== "bootstrap" || bootstrap));
+  const body = exactObject(input, fields, required, code);
   if (body.apiVersion !== 1 || body.ok !== true) throw serviceError(code, 500);
   identifier(body.operationId, code);
   identifier(body.ceremonyId, code);
   isoTimestamp(body.expiresAt, code);
-  canonicalBinary(body.prfEvaluationInput, { minimum: 32, maximum: 32 }, code);
+  if (bootstrap) {
+    if (body.bootstrap !== true || body.prfEvaluationInput !== undefined) throw serviceError(code, 500);
+  } else {
+    if (body.bootstrap !== undefined) throw serviceError(code, 500);
+    canonicalBinary(body.prfEvaluationInput, { minimum: 32, maximum: 32 }, code);
+  }
   if (ceremonyType === "registration") {
     validateRegistrationOptions(body[optionsField], body.prfEvaluationInput, code);
-  } else {
+  } else if (!bootstrap) {
     validateAuthenticationOptions(body[optionsField], body.prfEvaluationInput, code);
+  } else {
+    validateDiscoverableAuthenticationOptions(body[optionsField], code);
   }
   return frozen(body);
 }
@@ -811,13 +832,19 @@ function validateStoredRecord(collection, input, key) {
     case COLLECTIONS.ceremonies: {
       if (input.kind !== "pocket.sync.service-ceremony"
           || !["registration", "authentication"].includes(input.ceremonyType)
+          || !["account-bound", "discoverable"].includes(input.mode)
           || input.operationId !== key
           || !DIGEST_PATTERN.test(input.requestDigest)) {
         throw serviceError("service-state-invalid", 500);
       }
       identifier(input.operationId, "service-state-invalid");
       identifier(input.ceremonyId, "service-state-invalid");
-      identifier(input.accountId, "service-state-invalid");
+      if (input.mode === "discoverable") {
+        if (input.ceremonyType !== "authentication" || input.accountId !== null
+            || input.priorSessionId !== null) throw serviceError("service-state-invalid", 500);
+      } else {
+        identifier(input.accountId, "service-state-invalid");
+      }
       if (input.priorSessionId !== null) identifier(input.priorSessionId, "service-state-invalid");
       if (input.ceremonyType === "registration") {
         identifier(input.deviceId, "service-state-invalid");
@@ -825,16 +852,21 @@ function validateStoredRecord(collection, input, key) {
         throw serviceError("service-state-invalid", 500);
       }
       canonicalBinary(input.challenge, { minimum: 32, maximum: 32 }, "service-state-invalid");
-      canonicalBinary(input.prfEvaluationInput, { minimum: 32, maximum: 32 }, "service-state-invalid");
+      if (input.mode === "discoverable") {
+        if (input.prfEvaluationInput !== null) throw serviceError("service-state-invalid", 500);
+      } else {
+        canonicalBinary(input.prfEvaluationInput, { minimum: 32, maximum: 32 }, "service-state-invalid");
+      }
       isoTimestamp(input.expiresAt);
-      const beginBody = validateBeginBody(input.beginBody, input.ceremonyType);
+      const beginBody = validateBeginBody(input.beginBody,
+        input.mode === "discoverable" ? "authentication-bootstrap" : input.ceremonyType);
       const options = input.ceremonyType === "registration"
         ? beginBody.publicKeyCreationOptions
         : beginBody.publicKeyRequestOptions;
       if (beginBody.operationId !== input.operationId
           || beginBody.ceremonyId !== input.ceremonyId
           || beginBody.expiresAt !== input.expiresAt
-          || beginBody.prfEvaluationInput !== input.prfEvaluationInput
+          || (input.mode !== "discoverable" && beginBody.prfEvaluationInput !== input.prfEvaluationInput)
           || options.challenge !== input.challenge
           || (input.ceremonyType === "registration"
             && (options.user.name !== input.accountId
@@ -849,12 +881,12 @@ function validateStoredRecord(collection, input, key) {
       if (completed) {
         const completedResult = validateResultWrapper(
           input.completedResult,
-          input.ceremonyType
+          input.mode === "discoverable" ? "authentication-bootstrap" : input.ceremonyType
         );
         if (completedResult.body.operationId !== input.operationId
             || completedResult.body.ceremonyId !== input.ceremonyId
-            || completedResult.body.accountId !== input.accountId
-            || completedResult.body.prfEvaluationInput !== input.prfEvaluationInput) {
+            || (input.mode !== "discoverable" && (completedResult.body.accountId !== input.accountId
+              || completedResult.body.prfEvaluationInput !== input.prfEvaluationInput))) {
           throw serviceError("service-state-invalid", 500);
         }
       }
@@ -1261,6 +1293,18 @@ function validateAuthenticationOptions(input, expectedPrfInput, code = "service-
   canonicalBinary(evaluation.first, { minimum: 32, maximum: 32 }, code);
   if (evaluation.first !== expectedPrfInput) throw serviceError(code, 500);
   (options.allowCredentials || []).forEach((value) => validateCredentialDescriptor(value, code));
+  if (options.timeout !== undefined) positiveInteger(options.timeout, code);
+  return frozen(options);
+}
+
+function validateDiscoverableAuthenticationOptions(input, code = "service-state-invalid") {
+  const options = exactObject(input, ["challenge", "timeout", "rpId", "userVerification"],
+    ["challenge", "rpId", "userVerification"], code);
+  if (options.userVerification !== "required") {
+    throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
+  }
+  plainIdentifier(options.rpId, code);
+  canonicalBinary(options.challenge, { minimum: 32 }, code);
   if (options.timeout !== undefined) positiveInteger(options.timeout, code);
   return frozen(options);
 }
@@ -1931,10 +1975,10 @@ function createServiceCore(input) {
       result.session.sessionId,
       atMilliseconds
     );
-    if (authorised.account.accountId !== ceremony.accountId
+    if ((ceremony.mode !== "discoverable" && authorised.account.accountId !== ceremony.accountId)
         || authorised.account.accountId !== result.body.accountId
         || authorised.credential.credentialId !== result.body.credentialId
-        || authorised.session.accountId !== ceremony.accountId
+        || (ceremony.mode !== "discoverable" && authorised.session.accountId !== ceremony.accountId)
         || authorised.session.credentialId !== result.body.credentialId) {
       throw serviceError("service-state-invalid", 500);
     }
@@ -1992,6 +2036,15 @@ function createServiceCore(input) {
       })),
       userVerification: "required",
       extensions: { prf: { eval: { first: prfEvaluationInput } } },
+    });
+  }
+
+  function discoverableAuthenticationOptions(challenge) {
+    return frozen({
+      challenge,
+      timeout: ceremonyLifetimeMs,
+      rpId,
+      userVerification: "required",
     });
   }
 
@@ -2072,6 +2125,7 @@ function createServiceCore(input) {
         schemaVersion: 1,
         storeVersion: 1,
         ceremonyType: "registration",
+        mode: "account-bound",
         operationId: request.operationId,
         ceremonyId,
         requestDigest: digest,
@@ -2103,7 +2157,7 @@ function createServiceCore(input) {
         if (Date.parse(existing.expiresAt) <= at) {
           throw serviceError("service-ceremony-expired", 410);
         }
-        if (context.sessionId !== null) {
+      if (context.sessionId !== null) {
           const authorised = await authoriseSession(transaction, context.sessionId, at);
           if (authorised.account.accountId !== existing.accountId) {
             throw serviceError("service-state-invalid", 500);
@@ -2115,8 +2169,9 @@ function createServiceCore(input) {
         return frozen({ status: 200, body: existing.beginBody, session: null });
       }
 
-      let account;
-      let credentials;
+      const discoverable = context.sessionId === null && request.accountLocator === undefined;
+      let account = null;
+      let credentials = null;
       if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
         account = authorised.account;
@@ -2125,19 +2180,24 @@ function createServiceCore(input) {
             && request.accountLocator !== account.accountId) {
           throw serviceError("service-authorisation-failed", 403);
         }
-      } else {
-        if (request.accountLocator === undefined) {
-          throw serviceError("service-account-unresolved", 404);
-        }
+      } else if (!discoverable) {
         account = await readRecord(transaction, COLLECTIONS.accounts, request.accountLocator);
         if (account === null) throw serviceError("service-account-unresolved", 404);
         credentials = await loadAccountCredentials(transaction, account);
       }
-      if (credentials.length < 1) throw serviceError("service-account-unresolved", 404);
+      if (!discoverable && credentials.length < 1) throw serviceError("service-account-unresolved", 404);
       const ceremonyId = randomToken();
       const challenge = randomToken();
       const expiresAt = expiry(at, ceremonyLifetimeMs);
-      const beginBody = frozen({
+      const beginBody = discoverable ? frozen({
+        apiVersion: 1,
+        ok: true,
+        operationId: request.operationId,
+        ceremonyId,
+        expiresAt,
+        bootstrap: true,
+        publicKeyRequestOptions: discoverableAuthenticationOptions(challenge),
+      }) : frozen({
         apiVersion: 1,
         ok: true,
         operationId: request.operationId,
@@ -2150,24 +2210,25 @@ function createServiceCore(input) {
           credentials
         ),
       });
-      validateAuthenticationOptions(
-        beginBody.publicKeyRequestOptions,
-        account.prfEvaluationInput,
-        "service-state-invalid"
+      if (discoverable) validateDiscoverableAuthenticationOptions(
+        beginBody.publicKeyRequestOptions, "service-state-invalid"
       );
+      else validateAuthenticationOptions(beginBody.publicKeyRequestOptions,
+        account.prfEvaluationInput, "service-state-invalid");
       const ceremony = frozen({
         kind: "pocket.sync.service-ceremony",
         schemaVersion: 1,
         storeVersion: 1,
         ceremonyType: "authentication",
+        mode: discoverable ? "discoverable" : "account-bound",
         operationId: request.operationId,
         ceremonyId,
         requestDigest: digest,
-        accountId: account.accountId,
+        accountId: discoverable ? null : account.accountId,
         priorSessionId: context.sessionId,
         deviceId: null,
         challenge,
-        prfEvaluationInput: account.prfEvaluationInput,
+        prfEvaluationInput: discoverable ? null : account.prfEvaluationInput,
         expiresAt,
         beginBody,
         finishDigest: null,
@@ -2247,18 +2308,23 @@ function createServiceCore(input) {
     });
   }
 
-  function finishBody(ceremony, credentialId) {
-    return frozen({
+  function finishBody(ceremony, credentialId, accountId = ceremony.accountId) {
+    const body = {
       apiVersion: 1,
       ok: true,
       operationId: ceremony.operationId,
       ceremonyId: ceremony.ceremonyId,
-      accountId: ceremony.accountId,
+      accountId,
       credentialId,
       credentialVersion: POLICY.credentialVersion,
       accountPolicyVersion: POLICY.accountPolicyVersion,
-      prfEvaluationInput: ceremony.prfEvaluationInput,
-    });
+    };
+    if (ceremony.mode === "discoverable") {
+      body.bootstrap = true;
+    } else {
+      body.prfEvaluationInput = ceremony.prfEvaluationInput;
+    }
+    return frozen(body);
   }
 
   async function finishRegistration(value) {
@@ -2457,11 +2523,18 @@ function createServiceCore(input) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
         account = authorised.account;
         priorSession = authorised.session;
+      } else if (ceremony.mode === "discoverable") {
+        const credential = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
+        if (credential === null) throw serviceError("service-authorisation-failed", 403);
+        account = await readRecord(transaction, COLLECTIONS.accounts, credential.accountId);
+        if (account === null || !account.credentialIds.includes(credential.credentialId)) {
+          throw serviceError("service-authorisation-failed", 403);
+        }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
         if (account === null) throw serviceError("service-state-invalid", 500);
       }
-      if (account.accountId !== ceremony.accountId
+      if ((ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
           || !account.credentialIds.includes(request.credential.id)) {
         throw serviceError("service-authorisation-failed", 403);
       }
@@ -2515,6 +2588,13 @@ function createServiceCore(input) {
         const authorised = await authoriseSession(transaction, context.sessionId, commitAt);
         account = authorised.account;
         priorSession = authorised.session;
+      } else if (ceremony.mode === "discoverable") {
+        const selected = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
+        if (selected === null) throw serviceError("service-authorisation-failed", 403);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
+          throw serviceError("service-authorisation-failed", 403);
+        }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
         if (account === null) throw serviceError("service-state-invalid", 500);
@@ -2525,7 +2605,7 @@ function createServiceCore(input) {
         request.credential.id
       );
       if (credential === null
-          || account.accountId !== ceremony.accountId
+          || (ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
           || credential.accountId !== account.accountId
           || account.storeVersion !== prepared.account.storeVersion
           || credential.storeVersion !== prepared.credential.storeVersion
@@ -2560,7 +2640,7 @@ function createServiceCore(input) {
         priorSession,
         commitAt
       );
-      const bodyValue = finishBody(ceremony, currentCredential.credentialId);
+      const bodyValue = finishBody(ceremony, currentCredential.credentialId, account.accountId);
       const result = frozen({ status: 200, body: bodyValue, session: session.instruction });
       const completed = frozen({
         ...ceremony,

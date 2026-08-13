@@ -146,32 +146,35 @@ async function createBrowserJourney(options = {}) {
     now: () => now, trustedOrigin: origin, rpId: "sync.pocket.example", rpName: "Pocket",
     credentialAlgorithms: [-7], ceremonyLifetimeMs: 300000, sessionLifetimeMs: 2592000000,
   });
-  let sessionId = null;
+  let aSessionId = null;
+  let bSessionId = null;
   const remoteCalls = [];
   let serverDeviceInvalid = false;
   let failReadRevision = false;
-  const transport = Object.freeze({ async request(route, body) {
+  function transportFor(readSession, writeSession) { return Object.freeze({ async request(route, body) {
     remoteCalls.push({ route, body: plain(body) });
     if (failReadRevision && route === "readRevision") throw new Error("synthetic revision read failure");
     const response = await core[route]({ context: { method: "POST", origin, fetchSite: "same-origin",
-      contentType: "application/json", sessionId }, body: plain(body) });
-    if (response.session?.action === "set") sessionId = response.session.sessionId;
+      contentType: "application/json", sessionId: readSession() }, body: plain(body) });
+    if (response.session?.action === "set") writeSession(response.session.sessionId);
     const responseBody = serverDeviceInvalid && route === "listEnvelopes"
       ? Object.assign({}, response.body, { envelopes: response.body.envelopes.filter((item) => item.envelopeKind !== "device") })
       : response.body;
     return { status: response.status, body: responseBody };
-  } });
+  } }); }
+  const aTransport = transportFor(() => aSessionId, (value) => { aSessionId = value; });
+  const bTransport = transportFor(() => bSessionId, (value) => { bSessionId = value; });
   const aRemote = a.PocketSyncRemoteClient;
   const aDeviceStore = a.PocketSyncDeviceStore.createStore(createMemoryDeviceStoreDriver(createSharedDeviceStoreState()));
   let activationRandom = 0;
   const activateA = a.PocketSyncActivation.createActivationOrchestrator({
     securityContract: a.PocketSyncSecurityContract, crypto: a.PocketSyncCrypto, deviceStore: aDeviceStore,
     accountClient: a.PocketSyncAccountClient.createClient({
-      accountService: aRemote.createAccountService({ transport, now: () => now }),
+      accountService: aRemote.createAccountService({ transport: aTransport, now: () => now }),
       webAuthn: { async createCredential() { return fixtures.nativeRegistrationCredential(); }, async getCredential() {} }, now: () => now,
     }),
-    contentService: aRemote.createContentService({ transport }), envelopeService: aRemote.createEnvelopeService({ transport }),
-    recoveryService: aRemote.createRecoveryService({ transport, now: () => now }),
+    contentService: aRemote.createContentService({ transport: aTransport }), envelopeService: aRemote.createEnvelopeService({ transport: aTransport }),
+    recoveryService: aRemote.createRecoveryService({ transport: aTransport, now: () => now }),
     randomBytes(length) { activationRandom += 1; return bytes(length, 151 + activationRandom); }, now: () => now,
   });
   const source = Object.freeze({ ownerKind: "json", continuityId: "device-a-source" });
@@ -251,14 +254,14 @@ async function createBrowserJourney(options = {}) {
       } } },
   };
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
-    accountService: bRemote.createAccountService({ transport, now: () => now }),
-    contentService: bRemote.createContentService({ transport }), envelopeService: bRemote.createEnvelopeService({ transport }),
-    recoveryService: bRemote.createRecoveryService({ transport, now: () => now }),
-    discoveryService: bRemote.createPocketDiscoveryService({ transport }), environment,
+    accountService: bRemote.createAccountService({ transport: bTransport, now: () => now }),
+    contentService: bRemote.createContentService({ transport: bTransport }), envelopeService: bRemote.createEnvelopeService({ transport: bTransport }),
+    recoveryService: bRemote.createRecoveryService({ transport: bTransport, now: () => now }),
+    discoveryService: bRemote.createPocketDiscoveryService({ transport: bTransport }), environment,
   });
   const opened = await runtime.openExisting();
   return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
-    readRemoteRevision: () => bRemote.createContentService({ transport }).readRevision({
+    readRemoteRevision: () => bRemote.createContentService({ transport: bTransport }).readRevision({
       apiVersion: 1, operationId: "p052h2-read-revision", syncedPocketId: "pocket-p052c-browser",
     }),
     openExisting: () => runtime.openExisting(), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
@@ -641,6 +644,14 @@ test("P052c public browser Device B adoption joins visible truth, owner authorit
   assert.deepEqual(plain(journey.opened), {
     ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
   });
+  const authentications = journey.remoteCalls.filter((call) => call.route === "beginAuthentication");
+  assert.equal(authentications.length, 2);
+  assert.deepEqual(Object.keys(authentications[0].body).sort(), ["apiVersion", "operationId"]);
+  assert.equal(authentications[1].body.accountLocator, undefined);
+  const finishIndex = journey.remoteCalls.findIndex((call) => call.route === "finishAuthentication");
+  assert.ok(finishIndex >= 0);
+  assert.ok(journey.remoteCalls.findIndex((call, index) => index > finishIndex
+    && call.route === "beginAuthentication") > finishIndex);
   assert.deepEqual(journey.visible, { schema: "portal.export.v1", notes: ["P052c readable Device A content"] });
   assert.equal(journey.commits, 1);
   assert.equal(journey.ownerKind, "synced");
