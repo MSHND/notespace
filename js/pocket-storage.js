@@ -644,11 +644,12 @@ function appendLocalSafetyTrail(entry) {
 }
 
 function clearLocalSafetySnapshot(options = {}) {
-  if (pocketBrowserStoragePrivacyMode() === "vault" && options.coveredDetachedVaultAdoption !== true) {
+  const storagePrivacy = pocketBrowserStoragePrivacyMode();
+  if (storagePrivacy === "synced") return false;
+  if (storagePrivacy === "vault" && options.coveredDetachedVaultAdoption !== true) {
     void window.PocketVaultRecovery?.clearActiveVaultRecoveryIfClean?.();
     return true;
   }
-  if (pocketBrowserStoragePrivacyMode() === "synced") return false;
   try {
     localStorage.removeItem(LOCAL_SAFETY_KEY);
     return true;

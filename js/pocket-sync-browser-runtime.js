@@ -315,6 +315,17 @@
         try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
         return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
       }
+      try {
+        global.setPocketFileSession(null, "Synced Pocket", {
+          ownerKind: "synced",
+          storagePrivate: "synced",
+          forceNewSession: true,
+        });
+      } catch (_error) {
+        try { boundary.retireSyncedOwner?.(); } catch (_ignored) {}
+        try { syncedOwnerController.releaseSyncedOwner(); } catch (_ignored) {}
+        return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
+      }
       return frozen({ ok: true });
     }
 

@@ -17,20 +17,56 @@ function source(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
-function loadProduction() {
+function loadProduction(options = {}) {
+  const storage = new Map(Object.entries(options.localStorageSeed || {}).map(([key, value]) => [String(key), String(value)]));
+  const storageCalls = [];
+  const document = {
+    body: { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } } },
+    activeElement: null,
+    getElementById() { return null; },
+    addEventListener() {},
+    createElement() { return { style: {}, classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, remove() {}, click() {} }; },
+  };
   const context = { crypto: webcrypto, CryptoKey: globalThis.CryptoKey, TextEncoder, TextDecoder,
     Uint8Array, ArrayBuffer, Object, Array, Number, String, Boolean, JSON, Date, Error, TypeError, Promise, Set,
+    Map, URL, Blob, structuredClone, document,
+    HTMLElement: class HTMLElement {}, HTMLInputElement: class HTMLInputElement {}, HTMLTextAreaElement: class HTMLTextAreaElement {}, HTMLButtonElement: class HTMLButtonElement {},
+    location: { href: "https://pocket.test/index.html" }, navigator: { clipboard: {} },
+    localStorage: { getItem(key) { return storage.has(String(key)) ? storage.get(String(key)) : null; },
+      setItem(key, value) { const entry = { type: "set", key: String(key), value: String(value) }; storage.set(entry.key, entry.value); storageCalls.push(entry); },
+      removeItem(key) { const entry = { type: "remove", key: String(key) }; storage.delete(entry.key); storageCalls.push(entry); } },
+    setTimeout() { return 1; }, clearTimeout() {}, setInterval() { return 1; }, clearInterval() {},
+    requestAnimationFrame(callback) { if (typeof callback === "function") callback(); return 1; }, cancelAnimationFrame() {},
+    addEventListener() {}, removeEventListener() {}, confirm() { return true; }, alert() {}, open() { return null; },
+    refreshMeta() {}, renderTree() {}, refocusTreeNavigation() {}, softlyEnsureSelectionVisible() {}, repairVisibleSelectionAfterRender() {},
+    collapseAllNodes() {}, expandPathToNode() {}, focusRowByNodeId() {}, stopMovePadRepeat() {}, getExpandableIds() { return []; }, getPath(id) { return String(id || ""); },
+    isDetailsEditorOpen() { return false; }, hasUnsavedDetailsEditorChanges() { return false; }, saveDetailsEditor() {}, flashSaveChip() {}, setStatus() {},
+    __localStorage: { values: storage, calls: storageCalls },
     btoa: (value) => Buffer.from(value, "binary").toString("base64"),
     atob: (value) => Buffer.from(value, "base64").toString("binary") };
   context.window = context; context.globalThis = context;
   vm.createContext(context);
-  for (const file of ["js/pocket-sync-security-contract.js", "js/pocket-sync-crypto.js",
+  const browserFiles = options.browserPersistence === true ? [
+    "js/pocket-state.js", "js/pocket-data.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js",
+    "js/pocket-storage.js", "js/pocket-import.js", "js/pocket-editor-copy.js", "js/pocket-history-status.js",
+    "js/pocket-render.js", "js/pocket-io-browser.js", "js/pocket-device-changes.js",
+  ] : [];
+  for (const file of browserFiles.concat(["js/pocket-sync-security-contract.js", "js/pocket-sync-crypto.js",
     "js/pocket-sync-device-store.js", "js/pocket-sync-owner-controller.js",
     "js/pocket-sync-account-client.js", "js/pocket-sync-remote-client.js",
     "js/pocket-sync-activation.js", "js/pocket-sync-additional-device.js",
     "js/pocket-owner-save-boundary.js", "js/pocket-sync-activation-owner-bridge.js",
-    "js/pocket-sync-browser-runtime.js"]) {
+    "js/pocket-sync-browser-runtime.js"])) {
     vm.runInContext(source(file), context, { filename: file });
+  }
+  if (options.browserPersistence === true) {
+    context.refreshMeta = () => {};
+    context.renderTree = () => {};
+    context.refocusTreeNavigation = () => {};
+    context.softlyEnsureSelectionVisible = () => {};
+    context.repairVisibleSelectionAfterRender = () => {};
+    context.setStatus = () => {};
+    context.flashSaveChip = () => {};
   }
   return context;
 }
@@ -79,7 +115,10 @@ function createIndexedDb() {
 
 async function createBrowserJourney(options = {}) {
   const a = loadProduction();
-  const b = loadProduction();
+  const b = loadProduction({
+    browserPersistence: options.browserPersistence === true,
+    localStorageSeed: options.localStorageSeed,
+  });
   const serviceDriver = createMemoryServiceStore();
   const origin = "https://sync.pocket.example";
   const now = Date.parse("2041-01-01T00:00:00.000Z");
@@ -130,7 +169,18 @@ async function createBrowserJourney(options = {}) {
   const created = await activateA.activate({
     captureSourceSession: () => source, isSourceSessionCurrent: (value) => value === source,
     hasUnsavedSourceChanges: () => false, async saveLocalSource() { return { ok: true }; },
-    async freezePayload() { return { schema: "portal.export.v1", notes: ["P052c readable Device A content"] }; },
+    async freezePayload() {
+      if (options.browserPersistence === true) {
+        const sentinel = options.remoteSentinel || "P052c readable Device A content";
+        return {
+          schema: "portal.export.v1",
+          mainThoughtTree: [{ id: "p052h1-remote", label: sentinel, details: sentinel, children: [] }],
+          mainThoughtTreeTombstones: [],
+          data: { mainThoughtTree: [{ id: "p052h1-remote", label: sentinel, details: sentinel, children: [] }], mainThoughtTreeTombstones: [] },
+        };
+      }
+      return { schema: "portal.export.v1", notes: [options.remoteSentinel || "P052c readable Device A content"] };
+    },
     async prepareRecoveryCopyDestination() { return { ok: true, destination: { kind: "test" } }; },
     async buildRecoveryPackage(input) { return a.PocketSyncSecurityContract.buildRecoveryPackage({ ...plain(input), checksum: "p052c" }); },
     async writeRecoveryCopy() { return { ok: true }; }, async adoptSyncedOwner() { return { ok: true }; },
@@ -150,33 +200,35 @@ async function createBrowserJourney(options = {}) {
   let ownerAdoptionFailsAfterCommit = options.ownerAdoptionFailsAfterCommit === true;
   let prfUnavailable = false;
   let dirtySignalThrows = options.dirtySignalThrows === true;
-  b.capturePocketFileSaveSession = () => ({ id: continuity, ownerKind });
-  b.isPocketFileSaveSessionCurrent = (session) => !!session && session.id === continuity && session.ownerKind === ownerKind;
-  if (options.dirtySignalMissing !== true) {
-    b.hasPocketUnsavedChanges = () => {
-      if (dirtySignalThrows) throw new Error("synthetic dirty signal failure");
-      return detachedDirty;
+  if (options.browserPersistence !== true) {
+    b.capturePocketFileSaveSession = () => ({ id: continuity, ownerKind });
+    b.isPocketFileSaveSessionCurrent = (session) => !!session && session.id === continuity && session.ownerKind === ownerKind;
+    if (options.dirtySignalMissing !== true) {
+      b.hasPocketUnsavedChanges = () => {
+        if (dirtySignalThrows) throw new Error("synthetic dirty signal failure");
+        return detachedDirty;
+      };
+    }
+    b.setPocketFileSession = () => {
+      if (installFails) throw new Error("synthetic boundary install failure");
+      ownerKind = "synced"; continuity += 1;
+    };
+    b.isPocketPayloadShape = (payload) => payload?.schema === "portal.export.v1";
+    b.normaliseInput = (payload) => payload;
+    b.commitPreparedPocketDocument = (payload, _metadata, guard) => {
+      commits += 1;
+      if (dirtyBeforeCommit) detachedDirty = true;
+      if (targetChangesBeforeCommit) continuity += 1;
+      if (ownerAdoptionFailsAfterCommit) {
+        idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
+          content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
+        }));
+      }
+      if (commitFails || guard.canContinue() !== true) return { ok: false };
+      visible = plain(payload);
+      return { ok: true };
     };
   }
-  b.setPocketFileSession = () => {
-    if (installFails) throw new Error("synthetic boundary install failure");
-    ownerKind = "synced"; continuity += 1;
-  };
-  b.isPocketPayloadShape = (payload) => payload?.schema === "portal.export.v1";
-  b.normaliseInput = (payload) => payload;
-  b.commitPreparedPocketDocument = (payload, _metadata, guard) => {
-    commits += 1;
-    if (dirtyBeforeCommit) detachedDirty = true;
-    if (targetChangesBeforeCommit) continuity += 1;
-    if (ownerAdoptionFailsAfterCommit) {
-      idb.setBeforeRead(({ value }) => value && Object.assign({}, value, {
-        content: Object.assign({}, value.content, { context: Object.assign({}, value.content.context, { revision: 99 }) }),
-      }));
-    }
-    if (commitFails || guard.canContinue() !== true) return { ok: false };
-    visible = plain(payload);
-    return { ok: true };
-  };
   const bRemote = b.PocketSyncRemoteClient;
   const environment = {
     crypto: webcrypto, indexedDB: idb.indexedDB, now: () => now,
@@ -203,7 +255,9 @@ async function createBrowserJourney(options = {}) {
     setDirtySignalThrows(value) { dirtySignalThrows = value === true; },
     setReadRevisionFailure(value) { failReadRevision = value === true; },
     setServerDeviceInvalid(value) { serverDeviceInvalid = value === true; },
-    get ownerKind() { return ownerKind; }, get visible() { return visible; }, get commits() { return commits; } };
+    get ownerKind() { return options.browserPersistence === true ? b.capturePocketFileSaveSession().ownerKind : ownerKind; },
+    get visible() { return options.browserPersistence === true ? plain(vm.runInContext("state.nodes", b)) : visible; },
+    get commits() { return commits; } };
 }
 
 test("P052 remains dormant until explicitly created and a new device without PRF requires recovery before mutation", async () => {
@@ -600,6 +654,42 @@ test("P052c public browser Device B adoption joins visible truth, owner authorit
   assert.doesNotMatch(remoteText, /P052c readable Device A content|P052c Device B boundary Save|"masterKey":|"deviceWrappingKey":/);
   assert.doesNotMatch(requests, /P052c readable Device A content|P052c Device B boundary Save/);
   assert.deepEqual(Object.keys(plain(journey.opened)), ["ok", "reason", "confirmedRemoteRevision"]);
+});
+
+test("P052h1 public Device B adoption uses production browser storage privacy through ordinary Save", async () => {
+  const legacySentinel = "P052H1 LEGACY JSON SAFETY";
+  const remoteSentinel = "P052H1 REMOTE SENTINEL";
+  const editedSentinel = "P052H1 EDITED SENTINEL";
+  const journey = await createBrowserJourney({
+    browserPersistence: true,
+    remoteSentinel,
+    localStorageSeed: {
+      "pocketLite.localSafety.snapshot.v1": legacySentinel,
+      "pocketLite.localSafety.trail.v1": legacySentinel,
+      "pocketLite.pipSnapshot.v1": legacySentinel,
+      "pocketLite.autoCache.v1": legacySentinel,
+    },
+  });
+  assert.equal(journey.opened.ok, true, JSON.stringify(journey.opened));
+  assert.equal(journey.ownerKind, "synced");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  assert.equal(journey.visible.length > 0, true);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), legacySentinel);
+  assert.equal(journey.b.clearLocalSafetySnapshot(), false);
+  const state = vm.runInContext("state", journey.b);
+  state.nodes.push({ id: "p052h1-edit", label: editedSentinel, children: [] });
+  journey.b.recordOp({ type: "p052h1-edit", id: "p052h1-edit", changed: editedSentinel });
+  const saved = await journey.b.exportTree({ returnDetails: true, downloadFallback: false });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.reason, "synced-save");
+  const writes = JSON.stringify(journey.b.__localStorage.calls);
+  assert.equal(writes.includes(remoteSentinel), false);
+  assert.equal(writes.includes(editedSentinel), false);
+  assert.doesNotMatch(writes, /masterKey|deviceWrappingKey|prf|recovery/i);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.snapshot.v1"), legacySentinel);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.trail.v1"), legacySentinel);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.pipSnapshot.v1"), legacySentinel);
+  assert.equal(journey.b.__localStorage.values.get("pocketLite.autoCache.v1"), legacySentinel);
 });
 
 test("P052c production browser adoption keeps visible truth and authority coherent across final transition failures", async () => {

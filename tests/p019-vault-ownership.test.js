@@ -3352,6 +3352,9 @@ test("P052h temporary detached Synced adoption and its bound owner never write r
       "pocketLite.localSafety.snapshot.v1": existingJsonSafety,
       "pocketLite.localSafety.trail.v1": "ordinary JSON trail remains intact",
       "pocketLite.pipSnapshot.v1": "ordinary JSON PiP snapshot remains intact",
+      "pocketLite.workspace.v1": "ordinary JSON workspace remains intact",
+      "pocketLite.autoCache.v1": "ordinary JSON cache remains intact",
+      "pocketLite.lastSaveSnapshot.v1": "ordinary JSON last-save remains intact",
     },
   });
   const remotePayload = pocketPayload({
@@ -3377,6 +3380,11 @@ test("P052h temporary detached Synced adoption and its bound owner never write r
   assert.equal(context.capturePocketFileSaveSession().ownerKind, "detached");
   assert.equal(context.capturePocketFileSaveSession().storagePrivacy, "synced");
   assert.equal(lexicalState(context).nodes[0].label, sentinel);
+  context.PocketVaultRecovery = {
+    clearActiveVaultRecoveryIfClean() { throw new Error("Synced must not clear Vault recovery"); },
+    scheduleCapture() { throw new Error("Synced must not schedule Vault recovery"); },
+  };
+  assert.equal(context.clearLocalSafetySnapshot(), false);
 
   context.setPocketFileSession(null, "Synced Pocket", {
     ownerKind: "synced",
@@ -3387,6 +3395,7 @@ test("P052h temporary detached Synced adoption and its bound owner never write r
   assert.equal(context.capturePocketFileSaveSession().storagePrivacy, "synced");
   assert.equal(context.saveWorkspaceState(), false);
   assert.equal(context.restoreWorkspaceState(), false);
+  assert.equal(context.clearLocalSafetySnapshot(), false);
   assert.equal(context.saveLocalSafetySnapshot("synced-edit"), false);
   assert.equal(context.readLocalSafetySnapshot(), null);
   assert.deepEqual(plain(context.readLocalSafetyTrail()), []);
@@ -3414,6 +3423,9 @@ test("P052h temporary detached Synced adoption and its bound owner never write r
     context.__localStorage.values.get("pocketLite.pipSnapshot.v1"),
     "ordinary JSON PiP snapshot remains intact",
   );
+  assert.equal(context.__localStorage.values.get("pocketLite.workspace.v1"), "ordinary JSON workspace remains intact");
+  assert.equal(context.__localStorage.values.get("pocketLite.autoCache.v1"), "ordinary JSON cache remains intact");
+  assert.equal(context.__localStorage.values.get("pocketLite.lastSaveSnapshot.v1"), "ordinary JSON last-save remains intact");
   const allBrowserWrites = JSON.stringify(context.__localStorage.calls);
   assert.equal(allBrowserWrites.includes(sentinel), false);
   assert.equal(JSON.stringify([...context.__localStorage.values.values()]).includes(sentinel), false);
