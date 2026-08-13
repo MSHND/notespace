@@ -325,25 +325,31 @@ test("P052 remains dormant until explicitly created and a new device without PRF
 });
 
 test("P054b uses real Pocket document and file-session adoption for recovery", async () => {
-  for (const initialOwnerKind of ["none", "detached"]) {
-    const journey = await createBrowserJourney({ browserPersistence: true, skipOpenExisting: true, recovery: true });
-    if (initialOwnerKind === "detached") {
-      journey.b.setPocketFileSession(null, "Detached recovery target", {
-        ownerKind: "detached", detachedDeviceChanges: true, forceNewSession: true,
-      });
-    }
-    const before = journey.b.capturePocketFileSaveSession();
-    const recovered = await journey.runtime.recoverExisting();
-    assert.equal(recovered.ok, true, `${initialOwnerKind}: ${JSON.stringify(recovered)}`);
-    const after = journey.b.capturePocketFileSaveSession();
-    assert.equal(after.ownerKind, "synced");
-    assert.notEqual(after.id, before.id);
-    const saved = await journey.b.PocketOwnerSaveBoundary.save({
-      expectedSession: after,
-      freezePayload: async () => ({ schema: "portal.export.v1", mainThoughtTree: [], mainThoughtTreeTombstones: [], data: { mainThoughtTree: [], mainThoughtTreeTombstones: [] } }),
-    });
-    assert.equal(saved.ok, true, JSON.stringify(saved));
-  }
+  const journey = await createBrowserJourney({ browserPersistence: true, skipOpenExisting: true, recovery: true });
+  const before = journey.b.capturePocketFileSaveSession();
+  const recovered = await journey.runtime.recoverExisting();
+  assert.equal(recovered.ok, true, JSON.stringify(recovered));
+  const after = journey.b.capturePocketFileSaveSession();
+  assert.equal(after.ownerKind, "synced");
+  assert.notEqual(after.id, before.id);
+  const saved = await journey.b.PocketOwnerSaveBoundary.save({
+    expectedSession: after,
+    freezePayload: async () => ({ schema: "portal.export.v1", mainThoughtTree: [], mainThoughtTreeTombstones: [], data: { mainThoughtTree: [], mainThoughtTreeTombstones: [] } }),
+  });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+});
+
+test("P054b refuses a real dirty detached target before recovery", async () => {
+  const journey = await createBrowserJourney({ browserPersistence: true, skipOpenExisting: true, recovery: true });
+  journey.b.setPocketFileSession(null, "Detached recovery target", {
+    ownerKind: "detached", detachedDeviceChanges: true, forceNewSession: true,
+  });
+  const before = journey.b.capturePocketFileSaveSession();
+  const recovered = await journey.runtime.recoverExisting();
+  assert.equal(recovered.ok, false, JSON.stringify(recovered));
+  assert.equal(recovered.reason, "recovery-target-dirty");
+  assert.equal(journey.b.capturePocketFileSaveSession().id, before.id);
+  assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "detached");
 });
 
 test("P052i1 rejects a bootstrap account mismatch before discovery or local mutation", async () => {

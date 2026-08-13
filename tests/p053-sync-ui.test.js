@@ -129,10 +129,53 @@ test("P053a exposes fresh-device open directly and updates after an owner transi
   assert.equal(harness.source.textContent, "Synced Pocket");
 });
 
-test("P055 keeps recovery optional, explicit and single-flight", async () => {
+test("P055a opens recovery only after explicit confirmation, and Cancel or idle Escape leave it untouched", () => {
+  const cancel = createUiHarness("none", { paletteOpen: true });
+  cancel.topbar.fire("click");
+  const cancelRecovery = cancel.overlay.querySelector(".vaultDialogRecovery");
+  cancelRecovery.fire("click");
+  assert.equal(cancel.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "recovery");
+  assert.equal(cancel.recoveryCalls, 0);
+  cancel.overlay.querySelector(".vaultDialogSecondary").fire("click");
+  assert.equal(cancel.overlay.hidden, true);
+  assert.equal(cancel.recoveryCalls, 0);
+  assert.equal(cancel.more.focused, true);
+
+  const escape = createUiHarness("none", { paletteOpen: true });
+  escape.topbar.fire("click");
+  escape.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  assert.equal(escape.recoveryCalls, 0);
+  escape.event("keydown", { key: "Escape" });
+  assert.equal(escape.overlay.hidden, true);
+  assert.equal(escape.recoveryCalls, 0);
+  assert.equal(escape.more.focused, true);
+});
+
+test("P055a recovery is unavailable behind dirty work or every existing blocking overlay", () => {
+  const dirty = createUiHarness("detached", { dirty: true });
+  assert.equal(dirty.command.hidden, true);
+  assert.equal(dirty.topbar.hidden, true);
+  dirty.topbar.fire("click");
+  dirty.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  assert.equal(dirty.overlay.hidden, true);
+  assert.equal(dirty.recoveryCalls, 0);
+
+  for (const blocker of ["recovery", "permission", "device", "vault"]) {
+    const harness = createUiHarness("none", { blocker });
+    harness.topbar.fire("click");
+    harness.overlay.querySelector(".vaultDialogRecovery").fire("click");
+    assert.equal(harness.overlay.hidden, true, blocker);
+    assert.equal(harness.recoveryCalls, 0, blocker);
+  }
+});
+
+test("P055a keeps recovery optional, single-flight, and resumes only with its opaque attempt ID", async () => {
   const unavailable = createUiHarness("none", { recovery: false });
   unavailable.topbar.fire("click");
   assert.equal(unavailable.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+  unavailable.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(unavailable.openCalls, 1);
 
   const harness = createUiHarness("none");
   harness.topbar.fire("click");
@@ -143,12 +186,38 @@ test("P055 keeps recovery optional, explicit and single-flight", async () => {
   assert.equal(harness.recoveryCalls, 1);
   harness.event("keydown", { key: "Escape" });
   assert.equal(harness.overlay.hidden, false);
+  assert.equal(harness.overlay.querySelector(".vaultDialogSecondary").disabled, true);
   harness.resolveRecovery({ ok: false, resumable: true, recoveryAttemptId: "existing-recovery" });
-  await Promise.resolve(); await Promise.resolve();
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.recoveryCalls, 1);
   primary.fire("click");
   await Promise.resolve();
   assert.equal(harness.recoveryResumeCalls, 1);
   assert.equal(JSON.stringify(harness.recoveryResumeInput), '{"recoveryAttemptId":"existing-recovery"}');
+  assert.equal(harness.recoveryCalls, 1);
+  for (const element of [
+    harness.overlay.querySelector("h2"),
+    harness.overlay.querySelector("#syncSetupBody"),
+    harness.overlay.querySelector("#syncSetupStatus"),
+    primary,
+  ]) assert.doesNotMatch(element.textContent, /existing-recovery/);
+});
+
+test("P055a successful recovery closes and refreshes after the owner state becomes synced", async () => {
+  const harness = createUiHarness("none");
+  harness.topbar.fire("click");
+  harness.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+  primary.fire("click");
+  assert.equal(harness.recoveryCalls, 1);
+  harness.setSession({ ownerKind: "synced", id: 2 });
+  harness.event("pocket-owner-state-changed");
+  harness.resolveRecovery({ ok: true });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.overlay.hidden, true);
+  assert.equal(harness.command.hidden, true);
+  assert.equal(harness.topbar.hidden, true);
+  assert.equal(harness.source.textContent, "Synced Pocket");
 });
 
 test("P053b keeps dirty detached work out of Sync open and single-flights a fresh open", async () => {
