@@ -168,6 +168,7 @@ test("P036 core remains isolated from P046-P049 server adapters and browser load
     "migrations",
     "pocket-sync-db-migrate.js",
     "pocket-sync-http-adapter.js",
+    "pocket-sync-local-integration-server.js",
     "pocket-sync-postgres-schema.js",
     "pocket-sync-postgres-store.js",
     "pocket-sync-recovery-proof-verifier.js",

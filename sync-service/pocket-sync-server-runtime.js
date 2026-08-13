@@ -191,7 +191,7 @@ function listenOptions(value) {
   return value;
 }
 
-function createSyncServerRuntime(configuration) {
+function createSyncServerApplication(configuration) {
   validatePlatform();
   const config = validateConfiguration(configuration);
   const pool = new Pool({ connectionString: config.postgres.connectionString });
@@ -217,14 +217,43 @@ function createSyncServerRuntime(configuration) {
     trustedOrigin: config.trustedOrigin,
     serviceRoot: config.serviceRoot,
   });
-  const server = https.createServer(config.tls, async (request, response) => {
+  async function handle(request, response) {
     try {
       await writeResponse(await adapter.handle(adapterRequest(config.trustedOrigin, request)), response);
     } catch (_error) {
       if (!response.headersSent) writeSafeFailure(response);
       else response.destroy();
     }
-  });
+  }
+
+  async function preflight() {
+    try {
+      await config.recoveryProofVerifier.assertSupported();
+      await pool.query("SELECT 1");
+      await verifyPocketSyncSchema(pool);
+    } catch (_error) {
+      await close();
+      throw runtimeError();
+    }
+  }
+
+  let shutdown = null;
+
+  function close() {
+    if (shutdown) return shutdown;
+    shutdown = (async () => {
+      try { await pool.end(); } catch (_error) { throw runtimeError(); }
+    })();
+    return shutdown;
+  }
+
+  return Object.freeze({ handle, preflight, close });
+}
+
+function createSyncServerRuntime(configuration) {
+  const application = createSyncServerApplication(configuration);
+  const config = validateConfiguration(configuration);
+  const server = https.createServer(config.tls, application.handle);
   if (!server || typeof server.listen !== "function" || typeof server.close !== "function") throw runtimeError();
 
   let started = false;
@@ -234,14 +263,7 @@ function createSyncServerRuntime(configuration) {
   async function listen(value) {
     const options = listenOptions(value);
     if (started || shutdown) throw runtimeError();
-    try {
-      await config.recoveryProofVerifier.assertSupported();
-      await pool.query("SELECT 1");
-      await verifyPocketSyncSchema(pool);
-    } catch (_error) {
-      await close();
-      throw runtimeError();
-    }
+    await application.preflight();
     try { await new Promise((resolve, reject) => {
       const failed = () => { server.off("error", failed); reject(runtimeError()); };
       server.once("error", failed);
@@ -271,7 +293,7 @@ function createSyncServerRuntime(configuration) {
       await closeServer();
       started = false;
       serverMayBeOpen = false;
-      try { await pool.end(); } catch (_error) { throw runtimeError(); }
+      await application.close();
     })();
     return shutdown;
   }
@@ -279,4 +301,4 @@ function createSyncServerRuntime(configuration) {
   return Object.freeze({ listen, close });
 }
 
-module.exports = Object.freeze({ createSyncServerRuntime });
+module.exports = Object.freeze({ createSyncServerApplication, createSyncServerRuntime });
