@@ -35,13 +35,14 @@
     overlay.innerHTML = '<section class="vaultDialogCard" role="dialog" aria-modal="true" aria-labelledby="syncSetupTitle" aria-describedby="syncSetupBody syncSetupStatus">'
       + '<header class="vaultDialogHeader"><h2 id="syncSetupTitle"></h2><p id="syncSetupBody"></p></header>'
       + '<p id="syncSetupStatus" class="vaultDialogError" role="status" aria-live="polite"></p>'
-      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
+      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
       + '</section>';
     document.body.appendChild(overlay);
     const title = overlay.querySelector("h2");
     const body = overlay.querySelector("#syncSetupBody");
     const status = overlay.querySelector("#syncSetupStatus");
     const primary = overlay.querySelector(".vaultDialogPrimary");
+    const recovery = overlay.querySelector(".vaultDialogRecovery");
     const cancel = overlay.querySelector(".vaultDialogSecondary");
 
     function eligibleActivation(session) { return !!session && ["json", "vault"].includes(session.ownerKind); }
@@ -49,6 +50,10 @@
       if (!session || !["none", "detached"].includes(session.ownerKind)) return false;
       if (session.ownerKind === "none") return true;
       try { return global.hasPocketUnsavedChanges?.() === false; } catch (_error) { return false; }
+    }
+    function hasRecovery() {
+      return typeof integration.recoverExisting === "function"
+        && typeof integration.resumeRecovery === "function";
     }
     function refresh() {
       const session = owner();
@@ -89,6 +94,14 @@
         title.textContent = "Open synced Pocket";
         body.textContent = "Open the encrypted Pocket already linked to your passkey on this device.";
         primary.textContent = "Open synced Pocket";
+      } else if (mode === "recovery") {
+        title.textContent = "Use recovery copy";
+        body.textContent = "Pocket will ask for your saved Recovery Copy, create a passkey for this device, then ask where to save the replacement Recovery Copy.";
+        primary.textContent = "Use recovery copy";
+      } else if (mode === "recovery-continue") {
+        title.textContent = "Continue recovery";
+        body.textContent = "Continue the recovery already in progress for this Pocket.";
+        primary.textContent = "Continue recovery";
       } else if (mode === "continue") {
         title.textContent = "Continue Sync setup";
         body.textContent = "Continue the setup already in progress for this Pocket.";
@@ -99,6 +112,7 @@
         primary.textContent = "Turn on Sync";
       }
       primary.dataset.mode = mode;
+      recovery.hidden = mode !== "open" || !hasRecovery();
       cancel.hidden = false;
       global.requestAnimationFrame?.(() => primary.focus({ preventScroll: true }));
       return true;
@@ -108,12 +122,14 @@
       busy = true;
       primary.disabled = true;
       cancel.disabled = true;
-      status.textContent = mode === "open" ? "Opening synced Pocket…" : "Setting up Sync…";
+      status.textContent = mode === "open" ? "Opening synced Pocket…"
+        : mode.startsWith("recovery") ? "Recovering synced Pocket…" : "Setting up Sync…";
       let result;
       try {
         result = mode === "open" ? await integration.openExisting()
           : mode === "continue" ? await integration.resume({ activationId: continuation })
-            : await integration.activate();
+            : mode === "recovery-continue" ? await integration.resumeRecovery({ recoveryAttemptId: continuation })
+              : mode === "recovery" ? await integration.recoverExisting() : await integration.activate();
       } catch (_error) { result = { ok: false, reason: "sync-unavailable" }; }
       busy = false;
       primary.disabled = false;
@@ -124,7 +140,11 @@
         refresh();
         return;
       }
-      if (result?.resumable === true && typeof result.activationId === "string") {
+      if (result?.resumable === true && typeof result.recoveryAttemptId === "string") {
+        continuation = result.recoveryAttemptId;
+        primary.dataset.mode = "recovery-continue";
+        primary.textContent = "Continue recovery";
+      } else if (result?.resumable === true && typeof result.activationId === "string") {
         continuation = result.activationId;
         primary.dataset.mode = "continue";
         primary.textContent = "Continue setup";
@@ -140,6 +160,7 @@
     button.addEventListener("click", begin);
     topbarButton.addEventListener("click", begin);
     primary.addEventListener("click", () => void run(primary.dataset.mode));
+    recovery.addEventListener("click", () => { if (!busy && eligibleOpen(owner())) show("recovery"); });
     cancel.addEventListener("click", close);
     document.addEventListener("keydown", (event) => {
       if (!overlay.hidden && event.key === "Escape" && !busy) { event.preventDefault(); close(); }

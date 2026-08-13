@@ -46,6 +46,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
       this.children.set("#syncSetupBody", new Element("syncSetupBody"));
       this.children.set("#syncSetupStatus", new Element("syncSetupStatus"));
       this.children.set(".vaultDialogPrimary", new Button("syncPrimary"));
+      this.children.set(".vaultDialogRecovery", new Button("syncRecovery"));
       this.children.set(".vaultDialogSecondary", new Button("syncCancel"));
     }
   }
@@ -64,7 +65,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   let session = { ownerKind, id: 1 };
   let dirty = options.dirty === true;
-  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let resumeInput; let resolveActivate; let resolveOpen;
+  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let resumeInput; let recoveryResumeInput; let resolveActivate; let resolveOpen; let resolveRecovery;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
     capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
@@ -82,10 +83,14 @@ function createUiHarness(ownerKind = "json", options = {}) {
     activate() { activateCalls += 1; return new Promise((resolve) => { resolveActivate = resolve; }); },
     openExisting() { openCalls += 1; return options.holdOpen ? new Promise((resolve) => { resolveOpen = resolve; }) : Promise.resolve({ ok: true }); },
     resume(input) { resumeCalls += 1; resumeInput = input; return Promise.resolve({ ok: false }); },
+    ...(options.recovery === false ? {} : {
+      recoverExisting() { recoveryCalls += 1; return new Promise((resolve) => { resolveRecovery = resolve; }); },
+      resumeRecovery(input) { recoveryResumeCalls += 1; recoveryResumeInput = input; return Promise.resolve({ ok: false }); },
+    }),
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryResumeInput() { return recoveryResumeInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -122,6 +127,28 @@ test("P053a exposes fresh-device open directly and updates after an owner transi
   assert.equal(harness.command.hidden, true);
   assert.equal(harness.topbar.hidden, true);
   assert.equal(harness.source.textContent, "Synced Pocket");
+});
+
+test("P055 keeps recovery optional, explicit and single-flight", async () => {
+  const unavailable = createUiHarness("none", { recovery: false });
+  unavailable.topbar.fire("click");
+  assert.equal(unavailable.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+
+  const harness = createUiHarness("none");
+  harness.topbar.fire("click");
+  const recovery = harness.overlay.querySelector(".vaultDialogRecovery");
+  recovery.fire("click");
+  const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+  primary.fire("click"); primary.fire("click");
+  assert.equal(harness.recoveryCalls, 1);
+  harness.event("keydown", { key: "Escape" });
+  assert.equal(harness.overlay.hidden, false);
+  harness.resolveRecovery({ ok: false, resumable: true, recoveryAttemptId: "existing-recovery" });
+  await Promise.resolve(); await Promise.resolve();
+  primary.fire("click");
+  await Promise.resolve();
+  assert.equal(harness.recoveryResumeCalls, 1);
+  assert.equal(JSON.stringify(harness.recoveryResumeInput), '{"recoveryAttemptId":"existing-recovery"}');
 });
 
 test("P053b keeps dirty detached work out of Sync open and single-flights a fresh open", async () => {
