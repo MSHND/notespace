@@ -7,6 +7,7 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
 const { createServiceCore } = require("../sync-service/pocket-sync-service-core.js");
+const { createRecoveryProofVerifier } = require("../sync-service/pocket-sync-recovery-proof-verifier.js");
 const { createMemoryServiceStore } = require("./helpers/p034-memory-service-store.js");
 const { createSharedDeviceStoreState, createMemoryDeviceStoreDriver } = require("./helpers/p030-memory-device-store-driver.js");
 const fixtures = require("./helpers/p032-remote-fixtures.js");
@@ -15,6 +16,14 @@ const ROOT = path.resolve(__dirname, "..");
 
 function source(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
+}
+
+function recoveryRegistrationCredential() {
+  const native = fixtures.nativeRegistrationCredential();
+  const id = Buffer.from(bytes(32, 241)).toString("base64url");
+  return { getClientExtensionResults() { return native.getClientExtensionResults(); }, toJSON() {
+    const value = native.toJSON(); value.id = id; value.rawId = id; return value;
+  } };
 }
 
 function loadProduction(options = {}) {
@@ -141,7 +150,7 @@ async function createBrowserJourney(options = {}) {
       async verifyAuthentication(input) { return { credentialId: input.credential.id,
         signCount: input.storedCredential.signCount + 1, backedUp: true }; },
     },
-    recoveryProofVerifier: { async verifyRecoveryProof() { return { verified: true }; } },
+    recoveryProofVerifier: createRecoveryProofVerifier(),
     randomBytes(length) { serviceRandom += 1; return bytes(length, serviceRandom * 7); },
     now: () => now, trustedOrigin: origin, rpId: "sync.pocket.example", rpName: "Pocket",
     credentialAlgorithms: [-7], ceremonyLifetimeMs: 300000, sessionLifetimeMs: 2592000000,
@@ -165,6 +174,7 @@ async function createBrowserJourney(options = {}) {
   const aTransport = transportFor(() => aSessionId, (value) => { aSessionId = value; });
   const bTransport = transportFor(() => bSessionId, (value) => { bSessionId = value; });
   const aRemote = a.PocketSyncRemoteClient;
+  const recoveryPackages = [];
   const aDeviceStore = a.PocketSyncDeviceStore.createStore(createMemoryDeviceStoreDriver(createSharedDeviceStoreState()));
   let activationRandom = 0;
   const activateA = a.PocketSyncActivation.createActivationOrchestrator({
@@ -195,7 +205,7 @@ async function createBrowserJourney(options = {}) {
     },
     async prepareRecoveryCopyDestination() { return { ok: true, destination: { kind: "test" } }; },
     async buildRecoveryPackage(input) { return a.PocketSyncSecurityContract.buildRecoveryPackage({ ...plain(input), checksum: "p052c" }); },
-    async writeRecoveryCopy() { return { ok: true }; }, async adoptSyncedOwner() { return { ok: true }; },
+    async writeRecoveryCopy({ recoveryPackage }) { recoveryPackages.push(plain(recoveryPackage)); return { ok: true }; }, async adoptSyncedOwner() { return { ok: true }; },
   }, { syncedPocketId: "pocket-p052c-browser", deviceId: "device-a-p052c" });
   assert.equal(created.ok, true, JSON.stringify(created));
 
@@ -244,7 +254,10 @@ async function createBrowserJourney(options = {}) {
   const bRemote = b.PocketSyncRemoteClient;
   const environment = {
     crypto: webcrypto, indexedDB: idb.indexedDB, now: () => now,
-    navigator: { credentials: { async create() { throw new Error("not used"); },
+    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+    navigator: { credentials: { async create() {
+      if (options.recovery === true) return recoveryRegistrationCredential();
+      throw new Error("not used"); },
       async get() {
         if (!prfUnavailable) return fixtures.nativeAuthenticationCredential();
         const credential = fixtures.nativeAuthenticationCredential();
@@ -252,6 +265,14 @@ async function createBrowserJourney(options = {}) {
           const json = credential.toJSON(); json.clientExtensionResults = {}; return json;
         } };
       } } },
+    async showOpenFilePicker() {
+      if (options.recovery !== true) throw new Error("not used");
+      return [{ async getFile() { return { async text() { return JSON.stringify(recoveryPackages[0]); } }; } }];
+    },
+    async showSaveFilePicker() {
+      if (options.recovery !== true) throw new Error("not used");
+      return { async createWritable() { return { async write() {}, async close() {}, async abort() {} }; } };
+    },
   };
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
     accountService: bRemote.createAccountService({ transport: bTransport, now: () => now }),
@@ -260,8 +281,8 @@ async function createBrowserJourney(options = {}) {
     discoveryService: bRemote.createPocketDiscoveryService({ transport: bTransport }), environment,
   });
   const bSessionBeforeOpen = bSessionId;
-  const opened = await runtime.openExisting();
-  return { b, core, idb, opened, remoteCalls, runtime, serviceDriver,
+  const opened = options.skipOpenExisting === true ? null : await runtime.openExisting();
+  return { b, core, idb, opened, remoteCalls, runtime, serviceDriver, recoveryPackage: recoveryPackages[0],
     readRemoteRevision: () => bRemote.createContentService({ transport: bTransport }).readRevision({
       apiVersion: 1, operationId: "p052h2-read-revision", syncedPocketId: "pocket-p052c-browser",
     }),
@@ -301,6 +322,28 @@ test("P052 remains dormant until explicitly created and a new device without PRF
   });
   assert.equal(result.reason, "recovery-required");
   assert.deepEqual(calls, ["authenticate", "discovery"]);
+});
+
+test("P054b uses real Pocket document and file-session adoption for recovery", async () => {
+  for (const initialOwnerKind of ["none", "detached"]) {
+    const journey = await createBrowserJourney({ browserPersistence: true, skipOpenExisting: true, recovery: true });
+    if (initialOwnerKind === "detached") {
+      journey.b.setPocketFileSession(null, "Detached recovery target", {
+        ownerKind: "detached", detachedDeviceChanges: true, forceNewSession: true,
+      });
+    }
+    const before = journey.b.capturePocketFileSaveSession();
+    const recovered = await journey.runtime.recoverExisting();
+    assert.equal(recovered.ok, true, `${initialOwnerKind}: ${JSON.stringify(recovered)}`);
+    const after = journey.b.capturePocketFileSaveSession();
+    assert.equal(after.ownerKind, "synced");
+    assert.notEqual(after.id, before.id);
+    const saved = await journey.b.PocketOwnerSaveBoundary.save({
+      expectedSession: after,
+      freezePayload: async () => ({ schema: "portal.export.v1", mainThoughtTree: [], mainThoughtTreeTombstones: [], data: { mainThoughtTree: [], mainThoughtTreeTombstones: [] } }),
+    });
+    assert.equal(saved.ok, true, JSON.stringify(saved));
+  }
 });
 
 test("P052i1 rejects a bootstrap account mismatch before discovery or local mutation", async () => {
