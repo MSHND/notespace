@@ -412,7 +412,7 @@ function fakeElement(tagName = "div") {
   return element;
 }
 
-function createTreeRenderHarness(nodes, query = "") {
+function createTreeRenderHarness(nodes, query = "", options = {}) {
   class TreeElement {
     constructor(tagName = "div") {
       this.tagName = String(tagName).toUpperCase();
@@ -462,9 +462,19 @@ function createTreeRenderHarness(nodes, query = "") {
       this.attributes.delete(String(name));
     }
 
-    addEventListener(type, handler) {
+    addEventListener(type, handler, capture = false) {
       if (!this.listeners.has(type)) this.listeners.set(type, []);
-      this.listeners.get(type).push(handler);
+      if (capture) this.listeners.get(type).unshift(handler);
+      else this.listeners.get(type).push(handler);
+    }
+
+    removeEventListener(type, handler) {
+      if (!this.listeners.has(type)) return;
+      this.listeners.set(type, this.listeners.get(type).filter((candidate) => candidate !== handler));
+    }
+
+    listenerCount(type) {
+      return (this.listeners.get(type) || []).length;
     }
 
     dispatch(type, values = {}) {
@@ -529,6 +539,21 @@ function createTreeRenderHarness(nodes, query = "") {
       return this.querySelectorAll(selector)[0] || null;
     }
 
+    closest(selector) {
+      let candidate = this;
+      while (candidate) {
+        if (selector === ".row[data-node-id]"
+          && String(candidate.className).split(/\s+/).includes("row")
+          && candidate.getAttribute("data-node-id")) return candidate;
+        candidate = candidate.parentNode;
+      }
+      return null;
+    }
+
+    getBoundingClientRect() {
+      return { left: 0, top: 0, right: 100, bottom: 30, width: 100, height: 30 };
+    }
+
     focus() { document.activeElement = this; }
 
     select() {}
@@ -546,20 +571,59 @@ function createTreeRenderHarness(nodes, query = "") {
     ["treeRoot", treeRoot],
     ["search", search],
   ]);
+  const documentListeners = new Map();
   const document = {
     activeElement: null,
     body: new TreeElement("body"),
     documentElement: { clientWidth: 1024, clientHeight: 768 },
     createElement(tagName) { return new TreeElement(tagName); },
     getElementById(id) { return elements.get(id) || null; },
-    addEventListener() {},
-    removeEventListener() {},
+    addEventListener(type, handler) {
+      if (!documentListeners.has(type)) documentListeners.set(type, []);
+      documentListeners.get(type).push(handler);
+    },
+    removeEventListener(type, handler) {
+      if (!documentListeners.has(type)) return;
+      documentListeners.set(type, documentListeners.get(type).filter((candidate) => candidate !== handler));
+    },
+    dispatch(type, values = {}) {
+      const event = {
+        type,
+        target: values.target || document.body,
+        button: 0,
+        clientX: 0,
+        clientY: 0,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() {},
+        stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+        ...values,
+      };
+      for (const handler of [...(documentListeners.get(type) || [])]) {
+        handler(event);
+        if (event.immediatePropagationStopped) break;
+      }
+      return event;
+    },
+    elementFromPoint() { return document.pointedElement || null; },
   };
   const context = createBrowserContext({
     document,
     HTMLElement: TreeElement,
     HTMLInputElement: TreeElement,
   });
+  const zeroTimers = new Map();
+  let nextTimerId = 1;
+  context.setTimeout = (handler, delay = 0) => {
+    const timerId = nextTimerId++;
+    if (Number(delay) > 0) {
+      if (typeof handler === "function") handler();
+      return timerId;
+    }
+    zeroTimers.set(timerId, handler);
+    return timerId;
+  };
+  context.clearTimeout = (timerId) => zeroTimers.delete(timerId);
   context.canShowPocketTree = () => true;
   context.shouldCopyOnSingleClick = () => false;
   context.getPath = (nodeId) => {
@@ -571,7 +635,14 @@ function createTreeRenderHarness(nodes, query = "") {
   context.refreshMeta = () => {};
   context.scheduleCopyClick = () => {};
   context.cancelPendingCopyClick = () => {};
-  loadScriptsInIndexOrder(context, CORE_INDEX_SCRIPTS.concat(["js/pocket-render.js"]));
+  loadScriptsInIndexOrder(context, CORE_INDEX_SCRIPTS.concat(options.withDragActions
+    ? ["js/pocket-tree-actions.js", "js/pocket-render.js"]
+    : ["js/pocket-render.js"]));
+  context.repairVisibleSelectionAfterRender = () => {};
+  context.focusRowByNodeId = () => {};
+  context.refreshMeta = () => {};
+  if (options.withDragActions) context.requestAnimationFrame = () => 1;
+  if (!options.withDragActions) context.refocusTreeNavigation = () => {};
   const state = resetState(context, nodes);
   context.renderTree();
   return {
@@ -580,6 +651,12 @@ function createTreeRenderHarness(nodes, query = "") {
     treeRoot,
     badges: treeRoot.querySelectorAll(".detailBadge"),
     rows: treeRoot.querySelectorAll(".row"),
+    flushZeroTimers() {
+      const pending = [...zeroTimers.values()];
+      zeroTimers.clear();
+      pending.forEach((handler) => { if (typeof handler === "function") handler(); });
+    },
+    documentListenerCount: (type) => (documentListeners.get(type) || []).length,
   };
 }
 
@@ -636,6 +713,8 @@ function executeControlledRuntime(payload, options = {}) {
   const alerts = [];
   const clipboardWrites = [];
   const classNames = new Set(["textMode"]);
+  const zeroWindowTimers = new Map();
+  let nextWindowTimerId = 1;
   let closeCalls = 0;
 
   function classList(set) {
@@ -711,10 +790,16 @@ function executeControlledRuntime(payload, options = {}) {
       textContent: "",
       contentEditable: "false",
       isConnected: true,
-      addEventListener(type, handler) {
+      addEventListener(type, handler, capture = false) {
         if (!ownListeners.has(type)) ownListeners.set(type, []);
-        ownListeners.get(type).push(handler);
+        if (capture) ownListeners.get(type).unshift(handler);
+        else ownListeners.get(type).push(handler);
       },
+      removeEventListener(type, handler) {
+        if (!ownListeners.has(type)) return;
+        ownListeners.set(type, ownListeners.get(type).filter((candidate) => candidate !== handler));
+      },
+      listenerCount(type) { return (ownListeners.get(type) || []).length; },
       dispatch(type, values = {}) {
         const event = {
           type,
@@ -866,7 +951,16 @@ function executeControlledRuntime(payload, options = {}) {
       for (const handler of windowListeners.get(type) || []) handler(event);
       return event;
     },
-    setTimeout(handler) { if (typeof handler === "function") handler(); return 1; },
+    setTimeout(handler, delay = 0) {
+      const timerId = nextWindowTimerId++;
+      if (Number(delay) > 0) {
+        if (typeof handler === "function") handler();
+        return timerId;
+      }
+      zeroWindowTimers.set(timerId, handler);
+      return timerId;
+    },
+    clearTimeout(timerId) { zeroWindowTimers.delete(timerId); },
     close() { closeCalls += 1; },
     focus() {},
   };
@@ -902,6 +996,12 @@ function executeControlledRuntime(payload, options = {}) {
     classNames,
     closeCalls: () => closeCalls,
     windowListenerCount: (type) => (windowListeners.get(type) || []).length,
+    documentListenerCount: (type) => (listeners.get(type) || []).length,
+    flushZeroTimers() {
+      const pending = [...zeroWindowTimers.values()];
+      zeroWindowTimers.clear();
+      pending.forEach((handler) => { if (typeof handler === "function") handler(); });
+    },
   };
 }
 
@@ -2738,7 +2838,7 @@ test("P060 main-tree disclosure owns selection and navigation while leaf gutters
   assert.equal(opened, 0);
 });
 
-test("P060 main-tree gutter drops move whole branches and reject descendant cycles", () => {
+test("P060a main-tree gutter drops allow canonical depth while preserving branch and safety contracts", () => {
   const context = createFullContractContext();
   context.renderTree = () => {};
   context.refreshMeta = () => {};
@@ -2766,6 +2866,81 @@ test("P060 main-tree gutter drops move whole branches and reject descendant cycl
   assert.equal(context.moveTreeBranchByDrop("p060_a", "p060_b", "before"), true);
   assert.equal(state.nodes.find((node) => node.id === "p060_a").parentId, "root");
   assert.equal(state.nodes.find((node) => node.id === "p060_a_child").parentId, "p060_a");
+
+  resetState(context, [
+    ...Array.from({ length: 10 }, (_, index) => syntheticNode(`p060a_deep_${index}`, {
+      parentId: index === 0 ? "root" : `p060a_deep_${index - 1}`,
+      order: 1001,
+    })),
+    syntheticNode("p060a_moving", { parentId: "root", order: 1002 }),
+    syntheticNode("p060a_moving_child", { parentId: "p060a_moving", order: 1001 }),
+    syntheticNode("p060a_managed", {
+      parentId: "root",
+      order: 1003,
+      system: { kind: "bucket", managed: true },
+    }),
+  ]);
+  assert.equal(context.moveTreeBranchByDrop("p060a_moving", "p060a_deep_9", "inside"), true);
+  assert.equal(state.nodes.find((node) => node.id === "p060a_moving").parentId, "p060a_deep_9");
+  assert.equal(state.nodes.find((node) => node.id === "p060a_moving_child").parentId, "p060a_moving");
+  assert.equal(state.selectedId, "p060a_moving");
+  const beforeManagedDrop = plain(state.nodes);
+  assert.equal(context.moveTreeBranchByDrop("p060a_managed", "p060a_deep_0", "inside"), false);
+  assert.deepEqual(plain(state.nodes), beforeManagedDrop);
+});
+
+test("P060a main-tree drag suppression is gesture-scoped and fully cleans up", () => {
+  const makeHarness = () => createTreeRenderHarness([
+    syntheticNode("p060a_parent", { label: "Parent", parentId: "root", order: 1001 }),
+    syntheticNode("p060a_child", { label: "Child", parentId: "p060a_parent", order: 1001 }),
+    syntheticNode("p060a_leaf", { label: "Leaf", parentId: "root", order: 1002 }),
+  ], "", { withDragActions: true });
+  const row = (harness, id) => harness.treeRoot.querySelectorAll(".row")
+    .find((candidate) => candidate.getAttribute("data-node-id") === id);
+
+  const belowThreshold = makeHarness();
+  const leafGutter = row(belowThreshold, "p060a_leaf").children[0];
+  leafGutter.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  belowThreshold.context.document.pointedElement = row(belowThreshold, "p060a_parent").children[0];
+  belowThreshold.context.document.dispatch("pointermove", { clientX: 3, clientY: 4 });
+  belowThreshold.context.document.dispatch("pointerup", { clientX: 3, clientY: 4 });
+  leafGutter.dispatch("click");
+  assert.equal(belowThreshold.state.selectedId, "p060a_leaf");
+  assert.equal(belowThreshold.documentListenerCount("pointermove"), 0);
+
+  const syntheticClick = makeHarness();
+  const syntheticSource = row(syntheticClick, "p060a_parent").children[0];
+  syntheticSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  syntheticClick.context.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  syntheticClick.context.document.pointedElement = row(syntheticClick, "p060a_child").children[0];
+  syntheticClick.context.document.dispatch("pointerup", { clientX: 7, clientY: 15 });
+  assert.equal(syntheticSource.listenerCount("click"), 2);
+  assert.equal(syntheticSource.dispatch("click").defaultPrevented, true);
+  assert.equal(syntheticClick.state.collapsed.has("p060a_parent"), false);
+  assert.equal(syntheticSource.listenerCount("click"), 1);
+
+  const expired = makeHarness();
+  const expiredSource = row(expired, "p060a_parent").children[0];
+  expiredSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  expired.context.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  expired.context.document.pointedElement = row(expired, "p060a_child").children[0];
+  expired.context.document.dispatch("pointerup", { clientX: 7, clientY: 15 });
+  expired.flushZeroTimers();
+  assert.equal(expiredSource.listenerCount("click"), 1);
+  expiredSource.dispatch("click");
+  assert.equal(expired.state.collapsed.has("p060a_parent"), true);
+  assert.equal(expired.documentListenerCount("pointermove"), 0);
+
+  const cancelled = makeHarness();
+  const cancelledSource = row(cancelled, "p060a_parent").children[0];
+  cancelledSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  cancelled.context.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  cancelled.context.document.dispatch("pointercancel");
+  assert.equal(cancelled.documentListenerCount("pointermove"), 0);
+  assert.equal(cancelled.documentListenerCount("pointerup"), 0);
+  assert.equal(cancelled.documentListenerCount("pointercancel"), 0);
+  cancelledSource.dispatch("click");
+  assert.equal(cancelled.state.collapsed.has("p060a_parent"), true);
 });
 
 test("an unrelated edit preserves raw editor metadata while later export omits retired pe", () => {
@@ -4228,6 +4403,66 @@ test("P060 PE gutter drag honours its threshold, moves subtrees, and rejects des
   runtime.document.pointedElement = row("p060_drag_b_child").children[0];
   runtime.document.dispatch("pointerup", { clientX: 8, clientY: 15, target: runtime.document.pointedElement });
   assert.deepEqual(labels(), beforeIllegalDrop);
+});
+
+test("P060a PE drag suppression expires after its gesture and pointercancel leaves no residue", () => {
+  const makeRuntime = () => executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p060a_pe_parent", text: "Parent", depth: 0, collapsed: false },
+      { id: "p060a_pe_child", text: "Child", depth: 1, collapsed: false },
+      { id: "p060a_pe_leaf", text: "Leaf", depth: 0, collapsed: false },
+    ],
+  }));
+  const row = (runtime, id) => runtime.controls.get("outlinePane")
+    .querySelectorAll(".outlineRow[data-block-id]")
+    .find((candidate) => candidate.getAttribute("data-block-id") === id);
+
+  const belowThreshold = makeRuntime();
+  const leafGutter = row(belowThreshold, "p060a_pe_leaf").children[0];
+  leafGutter.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  belowThreshold.document.dispatch("pointermove", { clientX: 3, clientY: 4 });
+  belowThreshold.document.pointedElement = row(belowThreshold, "p060a_pe_parent").children[0];
+  belowThreshold.document.dispatch("pointerup", { clientX: 3, clientY: 4 });
+  leafGutter.dispatch("click");
+  assert.equal(row(belowThreshold, "p060a_pe_leaf").getAttribute("aria-selected"), "true");
+  assert.equal(belowThreshold.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(belowThreshold.documentListenerCount("pointermove"), 0);
+
+  const syntheticClick = makeRuntime();
+  const syntheticSource = row(syntheticClick, "p060a_pe_parent").children[0];
+  syntheticSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  syntheticClick.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  syntheticClick.document.pointedElement = row(syntheticClick, "p060a_pe_child").children[0];
+  syntheticClick.document.dispatch("pointerup", { clientX: 7, clientY: 15 });
+  assert.equal(syntheticSource.listenerCount("click"), 2);
+  assert.equal(syntheticSource.dispatch("click").defaultPrevented, true);
+  assert.equal(syntheticSource.listenerCount("click"), 1);
+  assert.equal(syntheticClick.controls.get("outlinePane").children.length, 3);
+  assert.equal(syntheticClick.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  const expired = makeRuntime();
+  const expiredSource = row(expired, "p060a_pe_parent").children[0];
+  expiredSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  expired.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  expired.document.pointedElement = row(expired, "p060a_pe_child").children[0];
+  expired.document.dispatch("pointerup", { clientX: 7, clientY: 15 });
+  expired.flushZeroTimers();
+  assert.equal(expiredSource.listenerCount("click"), 1);
+  expiredSource.dispatch("click");
+  assert.deepEqual(expired.controls.get("outlinePane").children.map((candidate) => candidate.children[1].textContent), ["Parent", "Leaf"]);
+  assert.equal(expired.documentListenerCount("pointermove"), 0);
+
+  const cancelled = makeRuntime();
+  const cancelledSource = row(cancelled, "p060a_pe_parent").children[0];
+  cancelledSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  cancelled.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  cancelled.document.dispatch("pointercancel");
+  assert.equal(cancelled.documentListenerCount("pointermove"), 0);
+  assert.equal(cancelled.documentListenerCount("pointerup"), 0);
+  assert.equal(cancelled.documentListenerCount("pointercancel"), 0);
+  cancelledSource.dispatch("click");
+  assert.deepEqual(cancelled.controls.get("outlinePane").children.map((candidate) => candidate.children[1].textContent), ["Parent", "Leaf"]);
 });
 
 test("generated PE runtime accepts and forwards a synced source identity", () => {

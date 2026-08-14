@@ -465,13 +465,21 @@
   }
   function installOutlineGutterDrag(gutter, blockId) {
     if (!gutter || typeof gutter.addEventListener !== "function") return;
-    var suppressNextClick = false;
-    gutter.addEventListener("click", function (ev) {
-      if (!suppressNextClick) return;
-      suppressNextClick = false;
-      ev.preventDefault();
-      ev.stopImmediatePropagation();
-    }, true);
+    function suppressGestureClick() {
+      var timeoutId = 0;
+      function clear() {
+        gutter.removeEventListener("click", suppress, true);
+        if (timeoutId && typeof window.clearTimeout === "function") window.clearTimeout(timeoutId);
+        timeoutId = 0;
+      }
+      function suppress(ev) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        clear();
+      }
+      gutter.addEventListener("click", suppress, true);
+      timeoutId = window.setTimeout(clear, 0);
+    }
     gutter.addEventListener("pointerdown", function (ev) {
       if (ev.button !== undefined && ev.button !== 0) return;
       var startX = Number(ev.clientX) || 0;
@@ -496,7 +504,7 @@
       function onUp(upEvent) {
         cleanup();
         if (!dragging) return;
-        suppressNextClick = true;
+        suppressGestureClick();
         upEvent.preventDefault();
         var pointed = typeof document.elementFromPoint === "function"
           ? document.elementFromPoint(Number(upEvent.clientX) || 0, Number(upEvent.clientY) || 0)

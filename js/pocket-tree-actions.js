@@ -288,19 +288,6 @@ function moveNodeWithinSiblings(nodeId, direction) {
 
 const TREE_GUTTER_DRAG_THRESHOLD_PX = 6;
 
-function treeNodeDepth(nodeId, map = nodeMap()) {
-  let depth = 0;
-  let current = map.get(cleanText(nodeId, 80)) || null;
-  const seen = new Set();
-  while (current && current.parentId && current.parentId !== "root") {
-    if (seen.has(current.id)) return 99;
-    seen.add(current.id);
-    depth += 1;
-    current = map.get(current.parentId) || null;
-  }
-  return depth;
-}
-
 function treeBranchIds(nodeId, byParent = childrenMap()) {
   const ids = [];
   const pending = [cleanText(nodeId, 80)];
@@ -330,12 +317,6 @@ function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
   const nextParentId = position === "inside" ? target.id : (target.parentId || "root");
   const nextParent = nextParentId === "root" ? null : (map.get(nextParentId) || null);
   if ((nextParent && isCompletedSystemBucketNode(nextParent)) || branchIds.has(nextParentId)) return false;
-
-  const currentDepth = treeNodeDepth(sourceId, map);
-  const nextDepth = position === "inside" ? treeNodeDepth(target.id, map) + 1 : treeNodeDepth(target.id, map);
-  let deepestRelativeDepth = 0;
-  for (const id of branchIds) deepestRelativeDepth = Math.max(deepestRelativeDepth, treeNodeDepth(id, map) - currentDepth);
-  if (nextDepth + deepestRelativeDepth > 8) return false;
 
   const previousParentId = node.parentId || "root";
   lastMoveUndoSnapshot = createTreeUndoSnapshot("drag_branch");
@@ -377,13 +358,21 @@ function treeDropPositionForPointer(row, clientY) {
 
 function installTreeGutterDrag(gutter, nodeId) {
   if (!(gutter instanceof HTMLElement)) return;
-  let suppressNextClick = false;
-  gutter.addEventListener("click", (ev) => {
-    if (!suppressNextClick) return;
-    suppressNextClick = false;
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-  }, true);
+  const suppressGestureClick = () => {
+    let timeoutId = 0;
+    const clear = () => {
+      gutter.removeEventListener("click", suppress, true);
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = 0;
+    };
+    const suppress = (ev) => {
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      clear();
+    };
+    gutter.addEventListener("click", suppress, true);
+    timeoutId = setTimeout(clear, 0);
+  };
   gutter.addEventListener("pointerdown", (ev) => {
     if (ev.button !== undefined && ev.button !== 0) return;
     const startX = Number(ev.clientX) || 0;
@@ -406,7 +395,7 @@ function installTreeGutterDrag(gutter, nodeId) {
     const onUp = (upEvent) => {
       cleanup();
       if (!dragging) return;
-      suppressNextClick = true;
+      suppressGestureClick();
       upEvent.preventDefault();
       const pointed = typeof document.elementFromPoint === "function"
         ? document.elementFromPoint(Number(upEvent.clientX) || 0, Number(upEvent.clientY) || 0)
