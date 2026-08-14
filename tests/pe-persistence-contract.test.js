@@ -3922,6 +3922,200 @@ test("queued truth write reports file-session-changed and never writes the newly
   assert.equal(state.ops.length, 0);
 });
 
+test("P061 fresh new-Pocket truth contains exactly four ordinary starter nodes", () => {
+  const context = createFullContractContext();
+  const writtenAt = "2026-08-14T03:04:05.000Z";
+  const payload = context.buildEmptyPocketPayload(writtenAt);
+  const nodes = plain(payload.mainThoughtTree);
+  const byLabel = new Map(nodes.map((node) => [node.label, node]));
+  const mind = byLabel.get("Things on my mind");
+
+  assert.equal(payload.schema, "portal.export.v1");
+  assert.equal(payload.exportedAt, writtenAt);
+  assert.equal(payload.writtenAt, writtenAt);
+  assert.deepEqual(plain(payload.data.mainThoughtTree), nodes);
+  assert.deepEqual(plain(payload.mainThoughtTreeTombstones), []);
+  assert.deepEqual(plain(payload.data.mainThoughtTreeTombstones), []);
+  assert.deepEqual(nodes.map((node) => node.label), [
+    "Things on my mind",
+    "Something I want to think about",
+    "Something I don’t want to forget",
+    "Things I might do",
+  ]);
+  assert.equal(new Set(nodes.map((node) => node.id)).size, 4);
+  assert.equal(nodes.every((node) => /^node_[a-z0-9]+_[a-z0-9]+$/.test(node.id)), true);
+  assert.deepEqual(nodes.map((node) => node.parentId), ["root", mind.id, mind.id, "root"]);
+  assert.deepEqual(nodes.map((node) => node.order), [1001, 1001, 1002, 1002]);
+  for (const node of nodes) {
+    assert.deepEqual(Object.keys(node).sort(), ["id", "label", "order", "parentId", "source", "updatedAt"]);
+    assert.equal(node.source, "manual");
+    assert.equal(node.updatedAt, writtenAt);
+  }
+  const normalised = context.normaliseInput(payload);
+  assert.equal(normalised.schema, "portal.export.v1");
+  assert.deepEqual(plain(normalised.nodes), nodes);
+});
+
+test("P061 retained recovery truth always outranks first-use seeding, including an empty tree", () => {
+  const context = createFullContractContext();
+  const recoveredNode = syntheticNode("p061_recovered", { label: "Retained recovery" });
+  const recovered = {
+    schema: "portal.export.v1",
+    exportedAt: "2026-08-13T00:00:00.000Z",
+    writtenAt: "2026-08-13T00:00:00.000Z",
+    mainThoughtTree: [recoveredNode],
+    mainThoughtTreeTombstones: [],
+    data: { mainThoughtTree: [recoveredNode], mainThoughtTreeTombstones: [] },
+  };
+  context.readLocalSafetySnapshot = () => ({ parsed: { payload: recovered } });
+  assert.deepEqual(plain(context.payloadForNewPocketFile()), recovered);
+
+  const emptyRecovered = {
+    ...recovered,
+    mainThoughtTree: [],
+    data: { mainThoughtTree: [], mainThoughtTreeTombstones: [] },
+  };
+  context.readLocalSafetySnapshot = () => ({ parsed: { payload: emptyRecovered } });
+  assert.deepEqual(plain(context.payloadForNewPocketFile()), emptyRecovered);
+});
+
+test("P061 existing empty Pocket truth stays empty and keeps the normal owned-empty UI", () => {
+  const context = createFullContractContext();
+  const existingEmpty = {
+    schema: "portal.export.v1",
+    exportedAt: "2026-08-13T00:00:00.000Z",
+    writtenAt: "2026-08-13T00:00:00.000Z",
+    mainThoughtTree: [],
+    mainThoughtTreeTombstones: [],
+    data: { mainThoughtTree: [], mainThoughtTreeTombstones: [] },
+  };
+  const normalised = context.normaliseInput(existingEmpty);
+  context.applyLoadedState(normalised, {
+    schema: normalised.schema,
+    fileName: "deliberately-empty.json",
+    writtenAt: normalised.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  const saved = context.buildPocketPayload("2026-08-14T00:00:00.000Z");
+  const reopened = context.normaliseInput(plain(saved));
+  assert.deepEqual(plain(saved.mainThoughtTree), []);
+  assert.deepEqual(plain(saved.data.mainThoughtTree), []);
+  assert.deepEqual(plain(reopened.nodes), []);
+
+  const deletedContext = createFullContractContext();
+  const starter = deletedContext.buildEmptyPocketPayload("2026-08-13T01:00:00.000Z");
+  const starterNormalised = deletedContext.normaliseInput(starter);
+  deletedContext.applyLoadedState(starterNormalised, {
+    schema: starterNormalised.schema,
+    fileName: "starter-deleted.json",
+    writtenAt: starterNormalised.writtenAt,
+  }, { skipLocalSafetyCheck: true });
+  lexicalState(deletedContext).nodes = [];
+  const afterDeletion = deletedContext.buildPocketPayload("2026-08-14T01:00:00.000Z");
+  assert.deepEqual(plain(deletedContext.normaliseInput(afterDeletion).nodes), []);
+
+  const rendered = createTreeRenderHarness([]);
+  const card = rendered.treeRoot.children[0].children[0];
+  assert.equal(card.children[0].textContent, "Nothing here yet.");
+  assert.equal(card.children[1].textContent, "Add the first item when you're ready.");
+});
+
+test("P061 creation keeps the old owner intact on cancel, write failure, or adoption failure and adopts clean starter truth on success", async () => {
+  const activeNode = syntheticNode("p061_active", { label: "Existing active truth" });
+
+  const cancelled = createFullContractContext();
+  const cancelledState = resetState(cancelled, [activeNode], [{ type: "existing-edit", seq: 1 }]);
+  const cancelledBefore = {
+    nodes: plain(cancelledState.nodes),
+    ops: plain(cancelledState.ops),
+    session: cancelled.capturePocketFileSaveSession(),
+  };
+  cancelled.showSaveFilePicker = async () => {
+    const error = new Error("cancelled");
+    error.name = "AbortError";
+    throw error;
+  };
+  assert.equal(await cancelled.createNewPocketFile(), false);
+  assert.deepEqual(plain(cancelledState.nodes), cancelledBefore.nodes);
+  assert.deepEqual(plain(cancelledState.ops), cancelledBefore.ops);
+  assert.strictEqual(cancelled.capturePocketFileSaveSession().handle, cancelledBefore.session.handle);
+  assert.equal(cancelled.capturePocketFileSaveSession().id, cancelledBefore.session.id);
+
+  const failed = createFullContractContext();
+  const failedState = resetState(failed, [activeNode], [{ type: "existing-edit", seq: 1 }]);
+  const failedBefore = {
+    nodes: plain(failedState.nodes),
+    ops: plain(failedState.ops),
+    session: failed.capturePocketFileSaveSession(),
+  };
+  const failedHandle = {
+    name: "failed-new.json",
+    async isSameEntry(other) { return other === this; },
+    async createWritable() {
+      return {
+        async write() { throw new Error("synthetic write failure"); },
+        async abort() {},
+      };
+    },
+  };
+  failed.showSaveFilePicker = async () => failedHandle;
+  assert.equal(await failed.createNewPocketFile(), false);
+  assert.deepEqual(plain(failedState.nodes), failedBefore.nodes);
+  assert.deepEqual(plain(failedState.ops), failedBefore.ops);
+  assert.strictEqual(failed.capturePocketFileSaveSession().handle, failedBefore.session.handle);
+  assert.equal(failed.capturePocketFileSaveSession().id, failedBefore.session.id);
+
+  const adoptionFailed = createFullContractContext();
+  const adoptionFailedState = resetState(adoptionFailed, [activeNode], [{ type: "existing-edit", seq: 1 }]);
+  const adoptionFailedBefore = {
+    nodes: plain(adoptionFailedState.nodes),
+    ops: plain(adoptionFailedState.ops),
+    session: adoptionFailed.capturePocketFileSaveSession(),
+  };
+  const adoptionFailedHandle = {
+    name: "adoption-failed-new.json",
+    async isSameEntry(other) { return other === this; },
+    async createWritable() {
+      return {
+        async write() {},
+        async close() {},
+      };
+    },
+  };
+  adoptionFailed.showSaveFilePicker = async () => adoptionFailedHandle;
+  adoptionFailed.finishLoadedStateAdoption = () => false;
+  assert.equal(await adoptionFailed.createNewPocketFile(), false);
+  assert.deepEqual(plain(adoptionFailedState.nodes), adoptionFailedBefore.nodes);
+  assert.deepEqual(plain(adoptionFailedState.ops), adoptionFailedBefore.ops);
+  assert.strictEqual(adoptionFailed.capturePocketFileSaveSession().handle, adoptionFailedBefore.session.handle);
+  assert.equal(adoptionFailed.capturePocketFileSaveSession().id, adoptionFailedBefore.session.id);
+
+  const successful = createFullContractContext();
+  const successfulState = resetState(successful, [activeNode]);
+  let writtenPayload = null;
+  let writeCount = 0;
+  const successfulHandle = {
+    name: "first-use.json",
+    async isSameEntry(other) { return other === this; },
+    async createWritable() {
+      return {
+        async write(value) {
+          writeCount += 1;
+          writtenPayload = JSON.parse(String(value));
+        },
+        async close() {},
+      };
+    },
+  };
+  successful.showSaveFilePicker = async () => successfulHandle;
+  assert.equal(await successful.createNewPocketFile(), true);
+  assert.equal(writeCount, 1);
+  assert.equal(writtenPayload.mainThoughtTree.length, 4);
+  assert.deepEqual(plain(successfulState.nodes), plain(writtenPayload.mainThoughtTree));
+  assert.deepEqual(plain(successfulState.ops), []);
+  assert.equal(successfulState.documentBaseline.payload.nodes.length, 4);
+  assert.strictEqual(successful.capturePocketFileSaveSession().handle, successfulHandle);
+});
+
 test("successful picked and newly created truth-file targets establish new editor source identities", async () => {
   const context = createFullContractContext();
   const state = resetState(context, [syntheticNode("save_as", { details: "Save as" })], [{ type: "save_as_change" }]);

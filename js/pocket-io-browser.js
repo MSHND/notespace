@@ -1142,15 +1142,54 @@ async function writeTruthFile(payload, options = {}) {
   }
 }
 
+function buildFirstUsePocketNodes(updatedAt = nowIso()) {
+  const thingsOnMyMindId = makeId("node");
+  return [
+    {
+      id: thingsOnMyMindId,
+      parentId: "root",
+      label: "Things on my mind",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: thingsOnMyMindId,
+      label: "Something I want to think about",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: thingsOnMyMindId,
+      label: "Something I don’t want to forget",
+      source: "manual",
+      order: 1002,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: "root",
+      label: "Things I might do",
+      source: "manual",
+      order: 1002,
+      updatedAt,
+    },
+  ];
+}
+
 function buildEmptyPocketPayload(writtenAt = nowIso()) {
+  const nodes = buildFirstUsePocketNodes(writtenAt);
   return {
     schema: "portal.export.v1",
     exportedAt: writtenAt,
     writtenAt,
-    mainThoughtTree: [],
+    mainThoughtTree: nodes,
     mainThoughtTreeTombstones: [],
     data: {
-      mainThoughtTree: [],
+      mainThoughtTree: nodes,
       mainThoughtTreeTombstones: [],
     },
   };
