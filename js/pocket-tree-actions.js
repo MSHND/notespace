@@ -198,7 +198,6 @@ function indentNodeById(nodeId) {
   state.selectedId = node.id;
   expandPathToNode(node.id);
   recordOp({ type: "indent", id: node.id, newParentId: previousSibling.id });
-  refreshMeta();
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
@@ -237,7 +236,6 @@ function outdentNodeById(nodeId) {
   state.selectedId = node.id;
   expandPathToNode(node.id);
   recordOp({ type: "outdent", id: node.id, newParentId: grandParentId, afterId: parent.id });
-  refreshMeta();
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
@@ -278,7 +276,6 @@ function moveNodeWithinSiblings(nodeId, direction) {
   node.updatedAt = nowIso();
   state.selectedId = node.id;
   recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
-  refreshMeta();
   renderTree();
   saveWorkspaceState();
   persistPipSnapshot();
@@ -286,6 +283,143 @@ function moveNodeWithinSiblings(nodeId, direction) {
   requestAnimationFrame(() => flashTouchedRow(node.id));
   setStatus(`${direction < 0 ? "Moved up" : "Moved down"}.`, "ok", {
     action: { label: "Undo", onClick: () => undoLastMoveAction() },
+  });
+}
+
+const TREE_GUTTER_DRAG_THRESHOLD_PX = 6;
+
+function treeNodeDepth(nodeId, map = nodeMap()) {
+  let depth = 0;
+  let current = map.get(cleanText(nodeId, 80)) || null;
+  const seen = new Set();
+  while (current && current.parentId && current.parentId !== "root") {
+    if (seen.has(current.id)) return 99;
+    seen.add(current.id);
+    depth += 1;
+    current = map.get(current.parentId) || null;
+  }
+  return depth;
+}
+
+function treeBranchIds(nodeId, byParent = childrenMap()) {
+  const ids = [];
+  const pending = [cleanText(nodeId, 80)];
+  const seen = new Set();
+  while (pending.length > 0) {
+    const id = pending.shift();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    for (const child of byParent.get(id) || []) pending.push(child.id);
+  }
+  return ids;
+}
+
+function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
+  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
+  const sourceId = cleanText(nodeId, 80);
+  const destinationId = cleanText(targetId, 80);
+  if (!sourceId || !destinationId || !["before", "inside", "after"].includes(position)) return false;
+  const map = nodeMap();
+  const node = map.get(sourceId) || null;
+  const target = map.get(destinationId) || null;
+  if (!node || !target || isManagedSystemBucketNode(node) || isManagedSystemBucketNode(target)) return false;
+
+  const branchIds = new Set(treeBranchIds(sourceId));
+  if (branchIds.has(destinationId)) return false;
+  const nextParentId = position === "inside" ? target.id : (target.parentId || "root");
+  const nextParent = nextParentId === "root" ? null : (map.get(nextParentId) || null);
+  if ((nextParent && isCompletedSystemBucketNode(nextParent)) || branchIds.has(nextParentId)) return false;
+
+  const currentDepth = treeNodeDepth(sourceId, map);
+  const nextDepth = position === "inside" ? treeNodeDepth(target.id, map) + 1 : treeNodeDepth(target.id, map);
+  let deepestRelativeDepth = 0;
+  for (const id of branchIds) deepestRelativeDepth = Math.max(deepestRelativeDepth, treeNodeDepth(id, map) - currentDepth);
+  if (nextDepth + deepestRelativeDepth > 8) return false;
+
+  const previousParentId = node.parentId || "root";
+  lastMoveUndoSnapshot = createTreeUndoSnapshot("drag_branch");
+  lastTreeUndoKind = "move";
+  node.parentId = nextParentId;
+  if (position === "inside") {
+    node.order = maxSiblingOrder(nextParentId) + 1;
+    state.collapsed.delete(nextParentId);
+  } else {
+    const targetOrder = Number.isFinite(target.order) ? target.order : maxSiblingOrder(nextParentId) + 1;
+    node.order = targetOrder + (position === "before" ? -0.5 : 0.5);
+  }
+  node.updatedAt = nowIso();
+  renumberChildren(previousParentId);
+  if (nextParentId !== previousParentId) renumberChildren(nextParentId);
+  state.selectedId = node.id;
+  expandPathToNode(node.id);
+  recordOp({ type: "drag_branch", id: node.id, targetId: target.id, position, newParentId: nextParentId });
+  renderTree();
+  saveWorkspaceState();
+  persistPipSnapshot();
+  refocusTreeNavigation(node.id);
+  requestAnimationFrame(() => flashTouchedRow(node.id));
+  setStatus("Moved branch.", "ok", {
+    action: { label: "Undo", onClick: () => undoLastMoveAction() },
+  });
+  return true;
+}
+
+function treeDropPositionForPointer(row, clientY) {
+  if (!(row instanceof HTMLElement) || !Number.isFinite(clientY)) return "inside";
+  const rect = row.getBoundingClientRect();
+  const height = Math.max(1, Number(rect.height) || (Number(rect.bottom) - Number(rect.top)) || 1);
+  const offset = clientY - Number(rect.top || 0);
+  if (offset < height * 0.3) return "before";
+  if (offset > height * 0.7) return "after";
+  return "inside";
+}
+
+function installTreeGutterDrag(gutter, nodeId) {
+  if (!(gutter instanceof HTMLElement)) return;
+  let suppressNextClick = false;
+  gutter.addEventListener("click", (ev) => {
+    if (!suppressNextClick) return;
+    suppressNextClick = false;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+  }, true);
+  gutter.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== undefined && ev.button !== 0) return;
+    const startX = Number(ev.clientX) || 0;
+    const startY = Number(ev.clientY) || 0;
+    let dragging = false;
+    const cleanup = () => {
+      document.removeEventListener("pointermove", onMove, true);
+      document.removeEventListener("pointerup", onUp, true);
+      document.removeEventListener("pointercancel", onCancel, true);
+      gutter.classList.remove("branchDragSource");
+    };
+    const onMove = (moveEvent) => {
+      if (dragging) return;
+      const dx = (Number(moveEvent.clientX) || 0) - startX;
+      const dy = (Number(moveEvent.clientY) || 0) - startY;
+      if (Math.hypot(dx, dy) < TREE_GUTTER_DRAG_THRESHOLD_PX) return;
+      dragging = true;
+      gutter.classList.add("branchDragSource");
+    };
+    const onUp = (upEvent) => {
+      cleanup();
+      if (!dragging) return;
+      suppressNextClick = true;
+      upEvent.preventDefault();
+      const pointed = typeof document.elementFromPoint === "function"
+        ? document.elementFromPoint(Number(upEvent.clientX) || 0, Number(upEvent.clientY) || 0)
+        : upEvent.target;
+      const targetRow = pointed && typeof pointed.closest === "function"
+        ? pointed.closest(".row[data-node-id]") : null;
+      const targetId = cleanText(targetRow?.getAttribute("data-node-id"), 80);
+      if (targetId) moveTreeBranchByDrop(nodeId, targetId, treeDropPositionForPointer(targetRow, Number(upEvent.clientY)));
+    };
+    const onCancel = () => cleanup();
+    document.addEventListener("pointermove", onMove, true);
+    document.addEventListener("pointerup", onUp, true);
+    document.addEventListener("pointercancel", onCancel, true);
   });
 }
 

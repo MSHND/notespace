@@ -61,7 +61,7 @@
       var rows = outlinePane.querySelectorAll(".outlineRow[data-block-id]");
       for (var i = 0; i < rows.length; i += 1) {
         if (rows[i].getAttribute("data-block-id") !== blockId) continue;
-        var target = rows[i].querySelector(".outlineSelect") || rows[i].querySelector(".outlineToggle") || rows[i].querySelector(".outlineText");
+        var target = rows[i].querySelector(".outlineToggle") || rows[i].querySelector(".outlineText");
         if (target && typeof target.focus === "function") target.focus({ preventScroll: true });
         return;
       }
@@ -156,11 +156,6 @@
       var selected = outlineSelectedIds.has(blockId);
       row.classList.toggle("isOutlineSelected", selected);
       row.setAttribute("aria-selected", selected ? "true" : "false");
-      var selector = row.querySelector(".outlineSelect");
-      if (selector) {
-        selector.classList.toggle("on", selected);
-        selector.setAttribute("aria-pressed", selected ? "true" : "false");
-      }
     });
   }
   function clearOutlineSelection() {
@@ -226,7 +221,7 @@
   function openOutlineContextMenu(ev, row) {
     if (!outlineContextMenu || !row) return false;
     closeOutlineContextMenu({ restoreFocus: false });
-    outlineContextReturnFocus = row.querySelector(".outlineSelect") || row.querySelector(".outlineText") || document.activeElement;
+    outlineContextReturnFocus = row.querySelector(".outlineToggle") || row.querySelector(".outlineText") || document.activeElement;
     outlineContextMenu.hidden = false;
     outlineContextMenu.style.left = "0px";
     outlineContextMenu.style.top = "0px";
@@ -424,9 +419,97 @@
       }
     }
     setDirty(true);
+    selectSingleOutlineBlock(blockId);
     renderOutline(blockIndexById(blockId));
-    selectAndFocusOutlineBlock(blockId);
     return true;
+  }
+
+  var OUTLINE_GUTTER_DRAG_THRESHOLD_PX = 6;
+  function moveOutlineBranchToDrop(blockId, targetId, position) {
+    if (readOnly || mode !== "outline" || !Array.isArray(outline) || ["before", "inside", "after"].indexOf(position) < 0) return false;
+    syncOutlineFromDom();
+    var sourceIndex = blockIndexById(blockId);
+    var targetIndex = blockIndexById(targetId);
+    if (sourceIndex < 0 || targetIndex < 0) return false;
+    var sourceEnd = outlineSubtreeEndIndex(sourceIndex);
+    if (targetIndex >= sourceIndex && targetIndex < sourceEnd) return false;
+    var sourceDepth = outlineDepth(sourceIndex);
+    var targetDepth = outlineDepth(targetIndex);
+    var branch = outline.slice(sourceIndex, sourceEnd);
+    var nextDepth = position === "inside" ? targetDepth + 1 : targetDepth;
+    var depthDelta = nextDepth - sourceDepth;
+    for (var depthIndex = 0; depthIndex < branch.length; depthIndex += 1) {
+      var adjustedDepth = Math.max(0, Number(branch[depthIndex].depth) || 0) + depthDelta;
+      if (adjustedDepth < 0 || adjustedDepth > 8) return false;
+    }
+    outline.splice(sourceIndex, branch.length);
+    targetIndex = blockIndexById(targetId);
+    if (targetIndex < 0) return false;
+    var insertAt = position === "before" ? targetIndex : outlineSubtreeEndIndex(targetIndex);
+    for (var branchIndex = 0; branchIndex < branch.length; branchIndex += 1) branch[branchIndex].depth = outlineDepthForBlock(branch[branchIndex]) + depthDelta;
+    outline.splice.apply(outline, [insertAt, 0].concat(branch));
+    selectSingleOutlineBlock(blockId);
+    setDirty(true);
+    renderOutline(blockIndexById(blockId));
+    return true;
+  }
+  function outlineDepthForBlock(block) { return Math.max(0, Number(block && block.depth) || 0); }
+  function outlineDropPositionForPointer(row, clientY) {
+    if (!row || typeof row.getBoundingClientRect !== "function" || !Number.isFinite(clientY)) return "inside";
+    var rect = row.getBoundingClientRect();
+    var height = Math.max(1, Number(rect.height) || (Number(rect.bottom) - Number(rect.top)) || 1);
+    var offset = clientY - Number(rect.top || 0);
+    if (offset < height * 0.3) return "before";
+    if (offset > height * 0.7) return "after";
+    return "inside";
+  }
+  function installOutlineGutterDrag(gutter, blockId) {
+    if (!gutter || typeof gutter.addEventListener !== "function") return;
+    var suppressNextClick = false;
+    gutter.addEventListener("click", function (ev) {
+      if (!suppressNextClick) return;
+      suppressNextClick = false;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+    }, true);
+    gutter.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== undefined && ev.button !== 0) return;
+      var startX = Number(ev.clientX) || 0;
+      var startY = Number(ev.clientY) || 0;
+      var dragging = false;
+      function cleanup() {
+        if (typeof document.removeEventListener === "function") {
+          document.removeEventListener("pointermove", onMove, true);
+          document.removeEventListener("pointerup", onUp, true);
+          document.removeEventListener("pointercancel", onCancel, true);
+        }
+        gutter.classList.remove("branchDragSource");
+      }
+      function onMove(moveEvent) {
+        if (dragging) return;
+        var dx = (Number(moveEvent.clientX) || 0) - startX;
+        var dy = (Number(moveEvent.clientY) || 0) - startY;
+        if (Math.hypot(dx, dy) < OUTLINE_GUTTER_DRAG_THRESHOLD_PX) return;
+        dragging = true;
+        gutter.classList.add("branchDragSource");
+      }
+      function onUp(upEvent) {
+        cleanup();
+        if (!dragging) return;
+        suppressNextClick = true;
+        upEvent.preventDefault();
+        var pointed = typeof document.elementFromPoint === "function"
+          ? document.elementFromPoint(Number(upEvent.clientX) || 0, Number(upEvent.clientY) || 0)
+          : upEvent.target;
+        var targetRow = pointed && typeof pointed.closest === "function" ? pointed.closest(".outlineRow[data-block-id]") : null;
+        var targetBlockId = targetRow ? targetRow.getAttribute("data-block-id") || "" : "";
+        if (targetBlockId) moveOutlineBranchToDrop(blockId, targetBlockId, outlineDropPositionForPointer(targetRow, Number(upEvent.clientY)));
+      }
+      function onCancel() { cleanup(); }
+      document.addEventListener("pointermove", onMove, true);
+      document.addEventListener("pointerup", onUp, true);
+      document.addEventListener("pointercancel", onCancel, true);
+    });
   }
   function insertOutlineSiblingFromNavigation() {
     var selectedId = selectedOutlineBlockId();
@@ -671,6 +754,20 @@
     if (insertStructuredOutlineText(text, { target: ev.target }) > 0) ev.preventDefault();
   }
   function updateModeChrome() { document.body.classList.toggle("textMode", mode === "text"); document.body.classList.toggle("outlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
+  function wakeOutlineNavigation(preferredId) {
+    if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)];
+    outline.forEach(ensureBlockId);
+    var preferredIndex = blockIndexById(preferredId);
+    if (preferredIndex < 0 || isHidden(preferredIndex)) {
+      preferredIndex = 0;
+      while (preferredIndex < outline.length && isHidden(preferredIndex)) preferredIndex += 1;
+    }
+    var block = outline[preferredIndex] || outline[0];
+    var blockId = ensureBlockId(block);
+    selectSingleOutlineBlock(blockId);
+    renderOutline(blockIndexById(blockId));
+    return blockId;
+  }
   function renderOutline(focusIndex) {
     syncOutlineFromDom();
     if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)];
@@ -685,17 +782,22 @@
       row.setAttribute("data-block-id", block.id);
       row.setAttribute("aria-selected", outlineSelectedIds.has(block.id) ? "true" : "false");
       row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px";
-      var selector = document.createElement("button");
-      selector.type = "button";
-      selector.className = "outlineSelect" + (outlineSelectedIds.has(block.id) ? " on" : "");
-      selector.setAttribute("aria-label", "Select outline row");
-      selector.setAttribute("aria-pressed", outlineSelectedIds.has(block.id) ? "true" : "false");
-      selector.addEventListener("click", function (ev) { handleOutlineSelectClick(ev, block); });
       var toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
-      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "•";
-      toggle.addEventListener("click", function () { syncOutlineFromDom(); if (!hasChildren(index)) return; block.collapsed = !block.collapsed; setDirty(true); renderOutline(index); });
+      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "";
+      toggle.setAttribute("aria-label", hasChildren(index) ? (block.collapsed ? "Expand branch" : "Collapse branch") : "Select branch");
+      installOutlineGutterDrag(toggle, block.id);
+      toggle.addEventListener("click", function (ev) {
+        syncOutlineFromDom();
+        handleOutlineSelectClick(ev, block);
+        if (ev.shiftKey || ev.metaKey || ev.ctrlKey) { focusOutlineBlock(block.id); return; }
+        if (hasChildren(index)) {
+          block.collapsed = !block.collapsed;
+          setDirty(true);
+          renderOutline(index);
+        } else focusOutlineBlock(block.id);
+      });
       var text = document.createElement("div");
       text.className = "outlineText";
       text.setAttribute("data-block-id", block.id);
@@ -704,7 +806,12 @@
       text.spellcheck = true;
       text.textContent = block.text || "";
       text.addEventListener("input", function () { block.text = text.textContent || ""; setDirty(true); });
-      text.addEventListener("dblclick", function (ev) { ev.preventDefault(); ev.stopPropagation(); beginOutlineRowEditing(ensureBlockId(block)); });
+      text.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        if (outlineEditingId === block.id) return;
+        ev.preventDefault();
+        beginOutlineRowEditing(ensureBlockId(block));
+      });
       text.addEventListener("keydown", function (ev) {
         if (outlineEditingId !== block.id) return;
         if (ev.key === "Enter" && ev.altKey) { ev.preventDefault(); insertOutlineEditingNewline(text); return; }
@@ -748,11 +855,10 @@
         }
         if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finishOutlineRowEditing(text, { cancel: true }); }
       });
-      row.appendChild(selector);
       row.appendChild(toggle);
       row.appendChild(text);
       row.addEventListener("click", function (ev) {
-        if (outlineEditingId === block.id || ev.target === selector || ev.target === toggle) return;
+        if (outlineEditingId === block.id || ev.target === text || ev.target === toggle) return;
         var blockId = ensureBlockId(block);
         if (ev.shiftKey) selectOutlineRange(blockId);
         else if (ev.metaKey || ev.ctrlKey) {
@@ -764,13 +870,13 @@
         focusOutlineBlock(blockId);
       });
       outlinePane.appendChild(row);
-      if (index === focusIndex) requestAnimationFrame(function () {
-        if (outlineEditingId === block.id) text.focus({ preventScroll: true });
+      if (index === focusIndex) {
+        if (outlineEditingId === block.id) requestAnimationFrame(function () { text.focus({ preventScroll: true }); });
         else focusOutlineBlock(block.id);
-      });
+      }
     });
   }
-  function setMode(nextMode) { if (readOnly) return false; if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { outlineEditingId = ""; outlineEditingOriginalText = ""; outlineEditingWasDirty = false; closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } mode = nextMode === "outline" ? "outline" : "text"; updateModeChrome(); if (mode === "outline") renderOutline(0); else bodyInput.focus({ preventScroll: true }); return true; }
+  function setMode(nextMode) { if (readOnly) return false; if (mode === "outline") syncOutlineFromDom(); if (nextMode !== "outline") { outlineEditingId = ""; outlineEditingOriginalText = ""; outlineEditingWasDirty = false; closeOutlineContextMenu({ restoreFocus: false }); clearOutlineSelection(); } mode = nextMode === "outline" ? "outline" : "text"; updateModeChrome(); if (mode === "outline") wakeOutlineNavigation(selectedOutlineBlockId()); else bodyInput.focus({ preventScroll: true }); return true; }
   function selectAndFocusOutlineBlock(blockId) {
     if (!blockId || blockIndexById(blockId) < 0) return false;
     selectSingleOutlineBlock(blockId);
@@ -1141,8 +1247,8 @@
   window.addEventListener("beforeunload", function (ev) { if (readOnly || !dirty || allowedToClose) return; ev.preventDefault(); ev.returnValue = ""; });
   applyReadOnlyState();
   updateModeChrome();
-  if (!readOnly && mode === "outline") { if (!outline) outline = []; renderOutline(0); }
   if (readOnly) bodyInput.focus({ preventScroll: true });
+  else if (mode === "outline") wakeOutlineNavigation("");
   else { titleInput.focus(); titleInput.select(); }
 })();
 `;

@@ -382,14 +382,24 @@ function renderTree() {
     const isCollapsed = !filtering && state.collapsed.has(node.id);
 
     const twisty = document.createElement("button");
+    twisty.type = "button";
     twisty.className = `twisty${hasKids ? "" : " empty"}`;
-    twisty.textContent = hasKids ? (isCollapsed ? "▸" : "▾") : "•";
+    twisty.textContent = hasKids ? (isCollapsed ? "▸" : "▾") : "";
+    twisty.setAttribute("aria-label", hasKids
+      ? `${isCollapsed ? "Expand" : "Collapse"} branch`
+      : "Select branch");
+    if (typeof installTreeGutterDrag === "function") installTreeGutterDrag(twisty, node.id);
     twisty.addEventListener("click", (ev) => {
+      ev.preventDefault();
       ev.stopPropagation();
-      if (!hasKids) return;
-      if (state.collapsed.has(node.id)) state.collapsed.delete(node.id);
-      else state.collapsed.add(node.id);
+      cancelPendingCopyClick();
+      state.selectedId = node.id;
+      if (hasKids) {
+        if (state.collapsed.has(node.id)) state.collapsed.delete(node.id);
+        else state.collapsed.add(node.id);
+      }
       renderTree();
+      refocusTreeNavigation(node.id);
     });
     row.appendChild(twisty);
 

@@ -467,6 +467,30 @@ function createTreeRenderHarness(nodes, query = "") {
       this.listeners.get(type).push(handler);
     }
 
+    dispatch(type, values = {}) {
+      const event = {
+        type,
+        target: this,
+        button: 0,
+        clientX: 0,
+        clientY: 0,
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+        altKey: false,
+        defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopPropagation() {},
+        stopImmediatePropagation() { this.immediatePropagationStopped = true; },
+        ...values,
+      };
+      for (const handler of this.listeners.get(type) || []) {
+        handler(event);
+        if (event.immediatePropagationStopped) break;
+      }
+      return event;
+    }
+
     appendChild(child) {
       child.parentNode = this;
       this.children.push(child);
@@ -484,6 +508,7 @@ function createTreeRenderHarness(nodes, query = "") {
         const classes = String(candidate.className || "").split(/\s+/);
         if (selector === ".detailBadge") return classes.includes("detailBadge");
         if (selector === ".row") return classes.includes("row");
+        if (selector === ".twisty") return classes.includes("twisty");
         if (selector === ".label[data-full-label]") {
           return classes.includes("label") && candidate.getAttribute("data-full-label") !== null;
         }
@@ -504,7 +529,7 @@ function createTreeRenderHarness(nodes, query = "") {
       return this.querySelectorAll(selector)[0] || null;
     }
 
-    focus() {}
+    focus() { document.activeElement = this; }
 
     select() {}
   }
@@ -635,6 +660,10 @@ function executeControlledRuntime(payload, options = {}) {
       if (!listeners.has(type)) listeners.set(type, []);
       listeners.get(type).push(handler);
     },
+    removeEventListener(type, handler) {
+      if (!listeners.has(type)) return;
+      listeners.set(type, listeners.get(type).filter((candidate) => candidate !== handler));
+    },
     dispatch(type, values = {}) {
       const event = {
         type,
@@ -647,14 +676,18 @@ function executeControlledRuntime(payload, options = {}) {
         defaultPrevented: false,
         preventDefault() { this.defaultPrevented = true; },
         stopPropagation() {},
-        stopImmediatePropagation() {},
+        stopImmediatePropagation() { this.immediatePropagationStopped = true; },
         ...values,
       };
-      for (const handler of listeners.get(type) || []) handler(event);
+      for (const handler of [...(listeners.get(type) || [])]) {
+        handler(event);
+        if (event.immediatePropagationStopped) break;
+      }
       return event;
     },
     getElementById(id) { return controls.get(id) || null; },
     createElement(tagName) { return makeControl("", tagName); },
+    elementFromPoint() { return document.pointedElement || null; },
     execCommand() { return true; },
   };
 
@@ -694,10 +727,13 @@ function executeControlledRuntime(payload, options = {}) {
           defaultPrevented: false,
           preventDefault() { this.defaultPrevented = true; },
           stopPropagation() {},
-          stopImmediatePropagation() {},
+          stopImmediatePropagation() { this.immediatePropagationStopped = true; },
           ...values,
         };
-        for (const handler of ownListeners.get(type) || []) handler(event);
+        for (const handler of ownListeners.get(type) || []) {
+          handler(event);
+          if (event.immediatePropagationStopped) break;
+        }
         return event;
       },
       setAttribute(name, value) { attributes.set(String(name), String(value)); },
@@ -711,6 +747,8 @@ function executeControlledRuntime(payload, options = {}) {
           if (selector === ".outlineText[data-block-id]") return String(candidate.className).split(/\s+/).includes("outlineText") && candidate.getAttribute("data-block-id");
           if (selector === ".outlineRow[data-block-id]") return String(candidate.className).split(/\s+/).includes("outlineRow") && candidate.getAttribute("data-block-id");
           if (selector === ".outlineSelect") return String(candidate.className).split(/\s+/).includes("outlineSelect");
+          if (selector === ".outlineToggle") return String(candidate.className).split(/\s+/).includes("outlineToggle");
+          if (selector === ".outlineText") return String(candidate.className).split(/\s+/).includes("outlineText");
           if (selector === "button[data-outline-action]") return candidate.tagName === "BUTTON" && !!candidate.getAttribute("data-outline-action");
           return false;
         };
@@ -740,7 +778,7 @@ function executeControlledRuntime(payload, options = {}) {
       },
       focus() { document.activeElement = control; },
       select() {},
-      getBoundingClientRect() { return { width: 100, height: 30 }; },
+      getBoundingClientRect() { return { left: 0, top: 0, right: 100, bottom: 30, width: 100, height: 30 }; },
     };
     Object.defineProperty(control, "innerHTML", {
       get() { return ""; },
@@ -2671,6 +2709,65 @@ test("P058 main-tree Ctrl/Cmd arrows move whole branches while plain arrows stay
   assert.equal(visibleDelta, 1);
 });
 
+test("P060 main-tree disclosure owns selection and navigation while leaf gutters stay visually blank", () => {
+  const harness = createTreeRenderHarness([
+    syntheticNode("p060_parent", { label: "Parent", parentId: "root", order: 1001 }),
+    syntheticNode("p060_child", { label: "Child", parentId: "p060_parent", order: 1001 }),
+    syntheticNode("p060_leaf", { label: "Leaf", parentId: "root", order: 1002 }),
+  ]);
+  const row = (id) => harness.treeRoot.querySelectorAll(".row").find((candidate) => candidate.getAttribute("data-node-id") === id);
+  const parentGutter = row("p060_parent").children[0];
+  const leafGutter = row("p060_leaf").children[0];
+  assert.equal(parentGutter.textContent, "▾");
+  assert.equal(leafGutter.textContent, "");
+  assert.equal(leafGutter.classList.contains("empty"), true);
+
+  let refocusedId = "";
+  let copied = 0;
+  let opened = 0;
+  harness.context.refocusTreeNavigation = (id) => { refocusedId = id; };
+  harness.context.shouldCopyOnSingleClick = () => true;
+  harness.context.scheduleCopyClick = () => { copied += 1; };
+  harness.context.openPocketPeEditor = () => { opened += 1; return true; };
+  const event = parentGutter.dispatch("click");
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(harness.state.selectedId, "p060_parent");
+  assert.equal(harness.state.collapsed.has("p060_parent"), true);
+  assert.equal(refocusedId, "p060_parent");
+  assert.equal(copied, 0);
+  assert.equal(opened, 0);
+});
+
+test("P060 main-tree gutter drops move whole branches and reject descendant cycles", () => {
+  const context = createFullContractContext();
+  context.renderTree = () => {};
+  context.refreshMeta = () => {};
+  context.refocusTreeNavigation = () => {};
+  context.setStatus = () => {};
+  context.flashTouchedRow = () => {};
+  context.requirePocketFileForChanges = () => true;
+  context.maxSiblingOrder = (parentId) => Math.max(1000, ...lexicalState(context).nodes
+    .filter((node) => (node.parentId || "root") === (parentId || "root"))
+    .map((node) => Number(node.order) || 0));
+  const state = resetState(context, [
+    syntheticNode("p060_a", { label: "A", parentId: "root", order: 1001 }),
+    syntheticNode("p060_a_child", { label: "A child", parentId: "p060_a", order: 1001 }),
+    syntheticNode("p060_b", { label: "B", parentId: "root", order: 1002 }),
+    syntheticNode("p060_b_child", { label: "B child", parentId: "p060_b", order: 1001 }),
+  ]);
+  runScript(context, "js/pocket-tree-actions.js");
+  assert.equal(context.moveTreeBranchByDrop("p060_a", "p060_b", "inside"), true);
+  assert.equal(state.nodes.find((node) => node.id === "p060_a").parentId, "p060_b");
+  assert.equal(state.nodes.find((node) => node.id === "p060_a_child").parentId, "p060_a");
+  assert.equal(state.selectedId, "p060_a");
+  const beforeIllegalDrop = plain(state.nodes);
+  assert.equal(context.moveTreeBranchByDrop("p060_b", "p060_a_child", "inside"), false);
+  assert.deepEqual(plain(state.nodes), beforeIllegalDrop);
+  assert.equal(context.moveTreeBranchByDrop("p060_a", "p060_b", "before"), true);
+  assert.equal(state.nodes.find((node) => node.id === "p060_a").parentId, "root");
+  assert.equal(state.nodes.find((node) => node.id === "p060_a_child").parentId, "p060_a");
+});
+
 test("an unrelated edit preserves raw editor metadata while later export omits retired pe", () => {
   const context = createFullContractContext();
   const unknown = fixture("unknown-editor-schema.json").mainThoughtTree[0];
@@ -3818,7 +3915,7 @@ test("P056 PE Outline shortcuts collapse and expand branches once, while Text an
   runtime.controls.get("saveBtn").dispatch("click");
   assert.deepEqual(runtime.saveCalls[0].outline.map((block) => block.collapsed), [false, false, false]);
 
-  const editable = pane.children[0].children[2];
+  const editable = pane.children[0].children[1];
   editable.isContentEditable = true;
   event = runtime.document.dispatch("keydown", { key: ",", ctrlKey: true, target: editable });
   assert.equal(event.defaultPrevented, false);
@@ -3845,10 +3942,10 @@ test("P057 PE Outline is selection-first while retaining editing, hierarchy, con
   const pane = runtime.controls.get("outlinePane");
   const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
   const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
-  const text = (id) => row(id).children[2];
+  const text = (id) => row(id).children[1];
   const select = (id) => row(id).children[0];
 
-  assert.ok(rows().every((candidate) => candidate.children[2].contentEditable === "false"));
+  assert.ok(rows().every((candidate) => candidate.children[1].contentEditable === "false"));
   row("p057_child").dispatch("click", { target: row("p057_child") });
   assert.equal(row("p057_child").getAttribute("aria-selected"), "true");
 
@@ -3865,7 +3962,7 @@ test("P057 PE Outline is selection-first while retaining editing, hierarchy, con
   assert.equal(event.defaultPrevented, true);
   assert.equal(row("p057_parent").getAttribute("aria-selected"), "true");
   runtime.document.dispatch("keydown", { key: "ArrowLeft", target: select("p057_parent") });
-  assert.deepEqual(rows().map((candidate) => candidate.children[2].textContent), ["Parent", "Sibling"]);
+  assert.deepEqual(rows().map((candidate) => candidate.children[1].textContent), ["Parent", "Sibling"]);
   runtime.document.dispatch("keydown", { key: "ArrowRight", target: select("p057_parent") });
   assert.equal(rows().length, 3);
   runtime.document.dispatch("keydown", { key: "ArrowRight", target: select("p057_child") });
@@ -3883,20 +3980,20 @@ test("P057 PE Outline is selection-first while retaining editing, hierarchy, con
   assert.equal(text("p057_parent").textContent, "Parent revised");
   assert.strictEqual(runtime.document.activeElement, select("p057_parent"));
 
-  text("p057_child").dispatch("dblclick", { target: text("p057_child") });
+  text("p057_child").dispatch("click", { target: text("p057_child") });
   assert.equal(text("p057_child").contentEditable, "true");
   text("p057_child").dispatch("keydown", { key: "Enter", ctrlKey: true });
-  const insertedByEnter = rows().find((candidate) => candidate.children[2].contentEditable === "true");
-  insertedByEnter.children[2].textContent = "Inserted";
-  insertedByEnter.children[2].dispatch("input");
-  insertedByEnter.children[2].dispatch("keydown", { key: "Enter" });
+  const insertedByEnter = rows().find((candidate) => candidate.children[1].contentEditable === "true");
+  insertedByEnter.children[1].textContent = "Inserted";
+  insertedByEnter.children[1].dispatch("input");
+  insertedByEnter.children[1].dispatch("keydown", { key: "Enter" });
 
   row("p057_parent").dispatch("click", { target: row("p057_parent") });
   row("p057_child").dispatch("click", { target: row("p057_child"), shiftKey: true });
   assert.deepEqual([row("p057_parent"), row("p057_child")].map((candidate) => candidate.getAttribute("aria-selected")), ["true", "true"]);
   event = runtime.document.dispatch("keydown", { key: ",", ctrlKey: true, target: select("p057_child") });
   assert.equal(event.defaultPrevented, true);
-  assert.deepEqual(rows().map((candidate) => candidate.children[2].textContent), ["Parent revised", "Sibling"]);
+  assert.deepEqual(rows().map((candidate) => candidate.children[1].textContent), ["Parent revised", "Sibling"]);
   event = runtime.document.dispatch("keydown", { key: ".", metaKey: true, target: select("p057_parent") });
   assert.equal(event.defaultPrevented, true);
   assert.equal(rows().length, 5);
@@ -3906,18 +4003,18 @@ test("P057 PE Outline is selection-first while retaining editing, hierarchy, con
   runtime.controls.get("outlineContextMenu").appendChild(insertAbove);
   pane.dispatch("contextmenu", { target: text("p057_sibling"), clientX: 20, clientY: 20 });
   runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertAbove });
-  const insertedByContext = rows().find((candidate) => candidate.children[2].contentEditable === "true");
-  insertedByContext.children[2].textContent = "Context";
-  insertedByContext.children[2].dispatch("input");
-  insertedByContext.children[2].dispatch("keydown", { key: "Escape" });
-  text(insertedByContext.getAttribute("data-block-id")).dispatch("dblclick", { target: text(insertedByContext.getAttribute("data-block-id")) });
+  const insertedByContext = rows().find((candidate) => candidate.children[1].contentEditable === "true");
+  insertedByContext.children[1].textContent = "Context";
+  insertedByContext.children[1].dispatch("input");
+  insertedByContext.children[1].dispatch("keydown", { key: "Escape" });
+  text(insertedByContext.getAttribute("data-block-id")).dispatch("click", { target: text(insertedByContext.getAttribute("data-block-id")) });
   text(insertedByContext.getAttribute("data-block-id")).textContent = "";
   text(insertedByContext.getAttribute("data-block-id")).dispatch("input");
   text(insertedByContext.getAttribute("data-block-id")).dispatch("keydown", { key: "Backspace" });
-  assert.equal(rows().some((candidate) => candidate.children[2].textContent === "Context"), false);
-  const continuedEditing = rows().find((candidate) => candidate.children[2].contentEditable === "true");
-  assert.equal(continuedEditing.children[2].textContent, "Inserted");
-  continuedEditing.children[2].dispatch("keydown", { key: "Escape" });
+  assert.equal(rows().some((candidate) => candidate.children[1].textContent === "Context"), false);
+  const continuedEditing = rows().find((candidate) => candidate.children[1].contentEditable === "true");
+  assert.equal(continuedEditing.children[1].textContent, "Inserted");
+  continuedEditing.children[1].dispatch("keydown", { key: "Escape" });
 
   runtime.controls.get("saveBtn").dispatch("click");
   await settleRuntime();
@@ -3938,7 +4035,7 @@ test("P058 PE Outline separates navigation edits from branch movement and preser
   const pane = runtime.controls.get("outlinePane");
   const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
   const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
-  const text = (id) => row(id).children[2];
+  const text = (id) => row(id).children[1];
   const select = (id) => row(id).children[0];
   const key = (keyName, extras = {}) => runtime.document.dispatch("keydown", { key: keyName, target: runtime.document.activeElement || select("p058_parent"), ...extras });
 
@@ -3965,20 +4062,20 @@ test("P058 PE Outline separates navigation edits from branch movement and preser
   assert.equal(text("p058_parent").dispatch("keydown", { key: "Enter", altKey: true }).defaultPrevented, true);
   assert.equal(text("p058_parent").textContent, "Committed\n");
   text("p058_parent").dispatch("keydown", { key: "Enter", ctrlKey: true });
-  const created = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  const created = rows().find((candidate) => candidate.children[1].contentEditable === "true");
   assert.equal(Number(created.style.paddingLeft.replace("px", "")), 4);
-  created.children[2].textContent = "Created";
-  created.children[2].dispatch("input");
+  created.children[1].textContent = "Created";
+  created.children[1].dispatch("input");
   runtime.controls.get("saveBtn").dispatch("click");
   await settleRuntime();
   assert.equal(runtime.saveCalls[0].outline.some((block) => block.text === "Created"), true);
-  created.children[2].dispatch("keydown", { key: "Enter" });
+  created.children[1].dispatch("keydown", { key: "Enter" });
   row("p058_next").dispatch("click", { target: row("p058_next") });
   runtime.document.dispatch("keydown", { key: "+", shiftKey: true, target: select("p058_next") });
-  const createdByPlus = rows().find((candidate) => candidate.children[2].contentEditable === "true");
+  const createdByPlus = rows().find((candidate) => candidate.children[1].contentEditable === "true");
   assert.ok(createdByPlus);
-  assert.equal(runtime.document.dispatch("keydown", { key: "ArrowLeft", ctrlKey: true, target: createdByPlus.children[2] }).defaultPrevented, false);
-  createdByPlus.children[2].dispatch("keydown", { key: "Enter" });
+  assert.equal(runtime.document.dispatch("keydown", { key: "ArrowLeft", ctrlKey: true, target: createdByPlus.children[1] }).defaultPrevented, false);
+  createdByPlus.children[1].dispatch("keydown", { key: "Enter" });
   const beforeDelete = rows().length;
   runtime.document.dispatch("keydown", { key: "Delete", target: runtime.document.activeElement });
   assert.equal(rows().length, beforeDelete - 1);
@@ -3997,9 +4094,9 @@ test("P058 PE Outline separates navigation edits from branch movement and preser
   const structuralRow = (id) => structuralRows().find((candidate) => candidate.getAttribute("data-block-id") === id);
   structuralRow("p058_b").dispatch("click", { target: structuralRow("p058_b") });
   structural.document.dispatch("keydown", { key: "ArrowUp", ctrlKey: true, target: structuralRow("p058_b").children[0] });
-  assert.deepEqual(structuralRows().map((candidate) => candidate.children[2].textContent), ["B", "B child", "A", "A child"]);
+  assert.deepEqual(structuralRows().map((candidate) => candidate.children[1].textContent), ["B", "B child", "A", "A child"]);
   structural.document.dispatch("keydown", { key: "ArrowRight", ctrlKey: true, target: structuralRow("p058_b").children[0] });
-  assert.deepEqual(structuralRows().map((candidate) => candidate.children[2].textContent), ["B", "B child", "A", "A child"]);
+  assert.deepEqual(structuralRows().map((candidate) => candidate.children[1].textContent), ["B", "B child", "A", "A child"]);
   structuralRow("p058_a").dispatch("click", { target: structuralRow("p058_a") });
   structural.document.dispatch("keydown", { key: "ArrowRight", ctrlKey: true, target: structuralRow("p058_a").children[0] });
   structural.controls.get("saveBtn").dispatch("click");
@@ -4023,23 +4120,23 @@ test("P058a PE Outline outdents a whole branch structurally and persists explici
   const pane = runtime.controls.get("outlinePane");
   const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
   const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
-  const text = (id) => row(id).children[2];
+  const text = (id) => row(id).children[1];
   const select = (id) => row(id).children[0];
 
   row("p058a_a").dispatch("click", { target: row("p058a_a") });
   let event = runtime.document.dispatch("keydown", { key: "ArrowLeft", ctrlKey: true, target: select("p058a_a") });
   assert.equal(event.defaultPrevented, true);
-  assert.deepEqual(rows().map((candidate) => candidate.children[2].textContent), ["Parent", "B", "A", "A child", "Outer"]);
+  assert.deepEqual(rows().map((candidate) => candidate.children[1].textContent), ["Parent", "B", "A", "A child", "Outer"]);
   assert.equal(row("p058a_a").getAttribute("aria-selected"), "true");
   assert.strictEqual(runtime.document.activeElement, select("p058a_a"));
 
-  const beforeInvalidOutdent = rows().map((candidate) => candidate.children[2].textContent);
+  const beforeInvalidOutdent = rows().map((candidate) => candidate.children[1].textContent);
   row("p058a_parent").dispatch("click", { target: row("p058a_parent") });
   event = runtime.document.dispatch("keydown", { key: "ArrowLeft", ctrlKey: true, target: select("p058a_parent") });
   assert.equal(event.defaultPrevented, true);
-  assert.deepEqual(rows().map((candidate) => candidate.children[2].textContent), beforeInvalidOutdent);
+  assert.deepEqual(rows().map((candidate) => candidate.children[1].textContent), beforeInvalidOutdent);
 
-  text("p058a_a").dispatch("dblclick", { target: text("p058a_a") });
+  text("p058a_a").dispatch("click", { target: text("p058a_a") });
   event = text("p058a_a").dispatch("keydown", { key: "Enter", altKey: true });
   assert.equal(event.defaultPrevented, true);
   assert.equal(text("p058a_a").contentEditable, "true");
@@ -4049,6 +4146,88 @@ test("P058a PE Outline outdents a whole branch structurally and persists explici
   assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.id, block.text, block.depth, block.collapsed]), [
     ["p058a_parent", "Parent", 0, false], ["p058a_b", "B", 1, false], ["p058a_a", "A\n", 0, false], ["p058a_a_child", "A child", 1, false], ["p058a_outer", "Outer", 0, false],
   ]);
+});
+
+test("P060 PE Outline wakes structural navigation, edits text on one click, and keeps a blank gutter without selection chrome", () => {
+  assert.doesNotMatch(source("js/pocket-node-popout-template.js"), /outlineSelect/);
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p060_parent", text: "Parent", depth: 0, collapsed: false },
+      { id: "p060_child", text: "Child", depth: 1, collapsed: false },
+      { id: "p060_leaf", text: "Leaf", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  assert.strictEqual(runtime.document.activeElement, row("p060_parent").children[0]);
+  assert.equal(row("p060_parent").getAttribute("aria-selected"), "true");
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(pane.querySelector(".outlineSelect"), null);
+  assert.equal(row("p060_leaf").children[0].textContent, "");
+
+  row("p060_leaf").children[0].dispatch("click", { target: row("p060_leaf").children[0] });
+  assert.equal(row("p060_leaf").getAttribute("aria-selected"), "true");
+  assert.equal(row("p060_leaf").children[1].contentEditable, "false");
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  row("p060_child").children[1].dispatch("click", { target: row("p060_child").children[1] });
+  assert.equal(row("p060_child").children[1].contentEditable, "true");
+  row("p060_child").children[1].dispatch("keydown", { key: "Escape" });
+  assert.equal(row("p060_child").children[1].contentEditable, "false");
+  assert.strictEqual(runtime.document.activeElement, row("p060_child").children[0]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  runtime.controls.get("textModeBtn").dispatch("click");
+  runtime.controls.get("outlineModeBtn").dispatch("click");
+  assert.strictEqual(runtime.document.activeElement, row("p060_parent").children[0]);
+  assert.equal(row("p060_parent").getAttribute("aria-selected"), "true");
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  row("p060_parent").children[0].dispatch("click", { target: row("p060_parent").children[0] });
+  assert.equal(row("p060_parent").getAttribute("aria-selected"), "true");
+  assert.equal(row("p060_parent").children[1].contentEditable, "false");
+  assert.deepEqual(rows().map((candidate) => candidate.children[1].textContent), ["Parent", "Leaf"]);
+});
+
+test("P060 PE gutter drag honours its threshold, moves subtrees, and rejects descendant drops", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p060_drag_a", text: "A", depth: 0, collapsed: false },
+      { id: "p060_drag_a_child", text: "A child", depth: 1, collapsed: false },
+      { id: "p060_drag_b", text: "B", depth: 0, collapsed: false },
+      { id: "p060_drag_b_child", text: "B child", depth: 1, collapsed: false },
+      { id: "p060_drag_c", text: "C", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const labels = () => rows().map((candidate) => candidate.children[1].textContent);
+
+  row("p060_drag_b").children[0].dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  runtime.document.dispatch("pointermove", { clientX: 3, clientY: 4 });
+  runtime.document.pointedElement = row("p060_drag_a").children[0];
+  runtime.document.dispatch("pointerup", { clientX: 3, clientY: 2, target: runtime.document.pointedElement });
+  assert.deepEqual(labels(), ["A", "A child", "B", "B child", "C"]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  row("p060_drag_b").children[0].dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  runtime.document.dispatch("pointermove", { clientX: 7, clientY: 0 });
+  runtime.document.pointedElement = row("p060_drag_a").children[0];
+  runtime.document.dispatch("pointerup", { clientX: 7, clientY: 2, target: runtime.document.pointedElement });
+  assert.deepEqual(labels(), ["B", "B child", "A", "A child", "C"]);
+  assert.equal(row("p060_drag_b").getAttribute("aria-selected"), "true");
+  assert.strictEqual(runtime.document.activeElement, row("p060_drag_b").children[0]);
+
+  const beforeIllegalDrop = labels();
+  row("p060_drag_b").children[0].dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  runtime.document.dispatch("pointermove", { clientX: 8, clientY: 0 });
+  runtime.document.pointedElement = row("p060_drag_b_child").children[0];
+  runtime.document.dispatch("pointerup", { clientX: 8, clientY: 15, target: runtime.document.pointedElement });
+  assert.deepEqual(labels(), beforeIllegalDrop);
 });
 
 test("generated PE runtime accepts and forwards a synced source identity", () => {
@@ -4343,7 +4522,7 @@ test("generated Outline runtime retains subtree Copy, Paste-after-selection, Dup
   const runtime = executeControlledRuntime(payload, { clipboardText: "Pasted\n  Pasted child" });
   const pane = runtime.controls.get("outlinePane");
   assert.equal(pane.children.length, 3);
-  pane.children[0].children[0].dispatch("click");
+  pane.children[0].dispatch("click", { target: pane.children[0] });
 
   const copy = runtime.document.dispatch("keydown", { key: "c", metaKey: true, target: pane });
   await settleRuntime();
@@ -4359,7 +4538,7 @@ test("generated Outline runtime retains subtree Copy, Paste-after-selection, Dup
   assert.equal(removeDuplicate.defaultPrevented, true);
   assert.equal(pane.children.length, 3);
 
-  pane.children[0].children[0].dispatch("click");
+  pane.children[0].dispatch("click", { target: pane.children[0] });
   const pasteButton = runtime.document.createElement("button");
   pasteButton.setAttribute("data-outline-action", "paste");
   runtime.controls.get("outlineContextMenu").appendChild(pasteButton);
@@ -4368,7 +4547,7 @@ test("generated Outline runtime retains subtree Copy, Paste-after-selection, Dup
   await settleRuntime();
   assert.equal(pane.children.length, 5);
   assert.deepEqual(
-    pane.children.map((row) => row.children[2].textContent),
+    pane.children.map((row) => row.children[1].textContent),
     ["Parent", "Child", "Pasted", "Pasted child", "Sibling"],
   );
 });
@@ -4397,12 +4576,12 @@ test("generated Outline runtime inserts context siblings at the target row with 
   runtime.controls.get("outlineContextMenu").appendChild(insertBelow);
   runtime.controls.get("outlineContextMenu").appendChild(insertAbove);
 
-  pane.children[0].children[0].dispatch("click");
-  pane.children[1].children[0].dispatch("click", { ctrlKey: true });
-  pane.dispatch("contextmenu", { target: pane.children[1].children[2], clientX: 20, clientY: 20 });
+  pane.children[0].dispatch("click", { target: pane.children[0] });
+  pane.children[1].dispatch("click", { target: pane.children[1], ctrlKey: true });
+  pane.dispatch("contextmenu", { target: pane.children[1].children[1], clientX: 20, clientY: 20 });
   runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertBelow });
 
-  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "", "C"]);
+  assert.deepEqual(pane.children.map((row) => row.children[1].textContent), ["A", "B", "", "C"]);
   const insertedBelow = pane.children[2];
   const insertedBelowId = insertedBelow.getAttribute("data-block-id");
   assert.notEqual(insertedBelowId, "sibling_a");
@@ -4411,18 +4590,18 @@ test("generated Outline runtime inserts context siblings at the target row with 
   assert.equal(Number(insertedBelow.style.paddingLeft.replace("px", "")), 26);
   assert.equal(insertedBelow.getAttribute("aria-selected"), "true");
   assert.equal(pane.children.filter((row) => row.getAttribute("aria-selected") === "true").length, 1);
-  assert.strictEqual(runtime.document.activeElement, insertedBelow.children[2]);
+  assert.strictEqual(runtime.document.activeElement, insertedBelow.children[1]);
   assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
   assert.equal(runtime.saveCalls.length, 0);
 
   pane.children[3].children[0].dispatch("click", { shiftKey: true });
   assert.deepEqual(pane.children.map((row) => row.getAttribute("aria-selected")), ["false", "false", "true", "true"]);
 
-  pane.dispatch("contextmenu", { target: pane.children[1].children[2], clientX: 20, clientY: 20 });
+  pane.dispatch("contextmenu", { target: pane.children[1].children[1], clientX: 20, clientY: 20 });
   runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertAbove });
-  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "", "B", "", "C"]);
+  assert.deepEqual(pane.children.map((row) => row.children[1].textContent), ["A", "", "B", "", "C"]);
   assert.equal(Number(pane.children[1].style.paddingLeft.replace("px", "")), 26);
-  assert.strictEqual(runtime.document.activeElement, pane.children[1].children[2]);
+  assert.strictEqual(runtime.document.activeElement, pane.children[1].children[1]);
 
   runtime.controls.get("saveBtn").dispatch("click");
   await settleRuntime();
@@ -4448,10 +4627,10 @@ test("generated Outline runtime inserts above a parent without splitting its bra
   insertAbove.setAttribute("data-outline-action", "insert-above");
   runtime.controls.get("outlineContextMenu").appendChild(insertAbove);
 
-  pane.dispatch("contextmenu", { target: pane.children[1].children[2], clientX: 20, clientY: 20 });
+  pane.dispatch("contextmenu", { target: pane.children[1].children[1], clientX: 20, clientY: 20 });
   runtime.controls.get("outlineContextMenu").dispatch("click", { target: insertAbove });
-  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "", "B", "B1", "C"]);
-  assert.strictEqual(runtime.document.activeElement, pane.children[1].children[2]);
+  assert.deepEqual(pane.children.map((row) => row.children[1].textContent), ["A", "", "B", "B1", "C"]);
+  assert.strictEqual(runtime.document.activeElement, pane.children[1].children[1]);
 
   runtime.controls.get("saveBtn").dispatch("click");
   await settleRuntime();
@@ -4481,13 +4660,13 @@ test("generated Outline runtime routes Ctrl/Cmd+Enter through below-sibling subt
   });
   const runtime = executeControlledRuntime(payload);
   const pane = runtime.controls.get("outlinePane");
-  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "C"]);
+  assert.deepEqual(pane.children.map((row) => row.children[1].textContent), ["A", "B", "C"]);
 
-  pane.children[1].children[2].dispatch("dblclick", { target: pane.children[1].children[2] });
-  const enter = pane.children[1].children[2].dispatch("keydown", { key: "Enter", ctrlKey: true });
+  pane.children[1].children[1].dispatch("click", { target: pane.children[1].children[1] });
+  const enter = pane.children[1].children[1].dispatch("keydown", { key: "Enter", ctrlKey: true });
   assert.equal(enter.defaultPrevented, true);
-  assert.deepEqual(pane.children.map((row) => row.children[2].textContent), ["A", "B", "", "C"]);
-  assert.strictEqual(runtime.document.activeElement, pane.children[2].children[2]);
+  assert.deepEqual(pane.children.map((row) => row.children[1].textContent), ["A", "B", "", "C"]);
+  assert.strictEqual(runtime.document.activeElement, pane.children[2].children[1]);
   assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
   assert.equal(runtime.saveCalls.length, 0);
 
@@ -4519,7 +4698,7 @@ test("generated runtime preserves P007 Escape ordering for menu, dialog, row edi
   const runtime = executeControlledRuntime(payload);
   const pane = runtime.controls.get("outlinePane");
   const row = pane.children[0];
-  const text = row.children[2];
+  const text = row.children[1];
   pane.dispatch("contextmenu", { target: text, clientX: 20, clientY: 20 });
   assert.equal(runtime.controls.get("outlineContextMenu").hidden, false);
   runtime.document.dispatch("keydown", { key: "Escape", target: text });
@@ -4533,8 +4712,8 @@ test("generated runtime preserves P007 Escape ordering for menu, dialog, row edi
   assert.equal(runtime.controls.get("unsavedDialog").hidden, true);
   assert.equal(runtime.closeCalls(), 0);
 
-  text.dispatch("dblclick", { target: text });
-  const editingText = pane.children[0].children[2];
+  text.dispatch("click", { target: text });
+  const editingText = pane.children[0].children[1];
   runtime.document.activeElement = editingText;
   runtime.document.dispatch("keydown", { key: "Escape", target: editingText });
   assert.strictEqual(runtime.document.activeElement, pane.children[0].children[0]);
@@ -4693,17 +4872,17 @@ test("generated PE tabs preserve independent unsaved Notes and Outline without d
   assert.equal(runtime.classNames.has("outlineMode"), true);
   assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
   assert.equal(pane.children.length, 1);
-  assert.equal(pane.children[0].children[2].textContent, "");
+  assert.equal(pane.children[0].children[1].textContent, "");
   assert.equal(body.value, notes);
 
-  pane.children[0].children[2].textContent = "Independent outline";
-  pane.children[0].children[2].dispatch("input");
+  pane.children[0].children[1].textContent = "Independent outline";
+  pane.children[0].children[1].dispatch("input");
   body.value = "Changed independent Notes";
   body.dispatch("input");
   runtime.controls.get("textModeBtn").dispatch("click");
   runtime.controls.get("outlineModeBtn").dispatch("click");
   assert.equal(body.value, "Changed independent Notes");
-  assert.equal(pane.children[0].children[2].textContent, "Independent outline");
+  assert.equal(pane.children[0].children[1].textContent, "Independent outline");
   runtime.controls.get("saveBtn").dispatch("click");
   assert.equal(runtime.saveCalls.length, 1);
   assert.equal(runtime.saveCalls[0].body, "Changed independent Notes");
@@ -4727,7 +4906,7 @@ test("generated PE saves submit independent clear-Notes and clear-Outline intent
   assert.equal(clearNotes.saveCalls[0].outline[0].text, "Keep or clear Outline");
 
   const clearOutline = executeControlledRuntime(payload);
-  const outlineText = clearOutline.controls.get("outlinePane").children[0].children[2];
+  const outlineText = clearOutline.controls.get("outlinePane").children[0].children[1];
   outlineText.textContent = "";
   outlineText.dispatch("input");
   clearOutline.controls.get("saveBtn").dispatch("click");
@@ -4750,7 +4929,7 @@ test("generated PE tabs preserve structural-only blank Outlines and do not class
     }));
     const pane = runtime.controls.get("outlinePane");
     assert.equal(pane.children.length, 1, label);
-    assert.equal(pane.children[0].children[2].textContent, "", label);
+    assert.equal(pane.children[0].children[1].textContent, "", label);
     assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false, label);
     runtime.controls.get("textModeBtn").dispatch("click");
     runtime.controls.get("outlineModeBtn").dispatch("click");
