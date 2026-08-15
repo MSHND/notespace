@@ -4076,12 +4076,12 @@ test("P023 one smart Choose file path classifies and opens plain JSON or Vault b
 
   const indexSource = source("index.html");
   assert.doesNotMatch(indexSource, /id="cmdOpenVault"/);
-  assert.match(indexSource, /id="btnLoad"[^>]*>Choose file<\/button>/);
+  assert.match(indexSource, /id="btnLoad"[^>]*hidden[^>]*>Choose file<\/button>/);
 });
 
 test("P026 offline shell refreshes the tightened recovery prompt", () => {
   const serviceWorkerSource = source("sw.js");
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v7";/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v8";/);
   assert.equal(
     (serviceWorkerSource.match(/\.\/vault\.css/g) || []).length,
     1,

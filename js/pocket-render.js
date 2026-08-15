@@ -83,14 +83,14 @@ function buildPocketFileGate() {
   const title = document.createElement("div");
   title.className = "emptyStateTitle";
   title.textContent = gate.blocked
-    ? "Load your Pocket file to make changes"
-    : (gate.recovery ? "Finish saving your Pocket changes" : "Load your Pocket file");
+    ? "Open a Pocket to continue"
+    : (gate.recovery ? "Finish saving your Pocket changes" : "Pocket");
 
   const text = document.createElement("div");
   text.className = "emptyStateText";
   text.textContent = gate.blocked
-    ? "Choose a Pocket file, or create a new one."
-    : (gate.recovery ? "Pocket found changes that may not have been saved." : "Choose a Pocket file to continue, or create a new one.");
+    ? "Open an existing Pocket, or start a new one."
+    : (gate.recovery ? "Pocket found changes that may not have been saved." : "Open an existing Pocket, or start a new one.");
 
   const actions = document.createElement("div");
   actions.className = "emptyStateActions";
@@ -107,10 +107,11 @@ function buildPocketFileGate() {
     });
     actions.appendChild(btn);
   };
-  addAction("Choose Pocket file", () => {
-    if (typeof openPocketFile === "function") void openPocketFile();
+  addAction("Open", () => {
+    if (typeof openPocketDoorway === "function") openPocketDoorway();
+    else if (typeof openPocketFile === "function") void openPocketFile();
   });
-  addAction("Create new Pocket file", () => {
+  addAction("New", () => {
     if (typeof createNewPocketFile === "function") void createNewPocketFile();
   });
 

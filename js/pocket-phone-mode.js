@@ -1,5 +1,5 @@
-/* phone mode toggle: intentionally manual and persisted locally.
-   Also injects topbar more if an older cached index.html does not include it. */
+/* Legacy manual phone mode remains available to responsive code, but its
+   toolbar switch is no longer part of the normal shell. */
 
 (function initialisePocketPhoneMode(global) {
   "use strict";
@@ -33,18 +33,16 @@
   function ensureMoreButton() {
     let more = document.getElementById("btnMore");
     if (!more) {
-      const phone = document.getElementById("btnPhoneMode");
-      const pip = document.getElementById("btnPip");
+      const save = document.getElementById("btnExportTree");
       const topbar = document.querySelector(".topbar");
       if (!topbar) return null;
       more = document.createElement("button");
       more.id = "btnMore";
       more.className = "chip utilityChip";
       more.type = "button";
-      more.textContent = "more";
-      more.setAttribute("aria-label", "More pocket actions");
-      if (phone) phone.insertAdjacentElement("afterend", more);
-      else if (pip) pip.insertAdjacentElement("afterend", more);
+      more.textContent = "⋯";
+      more.setAttribute("aria-label", "More Pocket actions");
+      if (save) save.insertAdjacentElement("afterend", more);
       else topbar.appendChild(more);
     }
     if (more.dataset.moreButtonWired !== "1") {

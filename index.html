@@ -13,24 +13,23 @@
   <link rel="stylesheet" href="file-permission.css">
   <link rel="stylesheet" href="vault.css">
 </head>
-<body>
+<body class="pocketShellClosed">
   <div class="app">
     <div class="topbar">
       <div class="title">pocket</div>
       <span id="activeDocumentSource" class="activeDocumentSource" aria-live="polite" hidden></span>
-      <input id="search" class="search topbarSearch" placeholder="Filter">
-      <button id="btnLoad" class="chip utilityChip" title="Choose Pocket file" aria-label="Choose Pocket file">Choose file</button>
+      <button id="btnLoad" class="chip utilityChip" title="Choose Pocket file" aria-label="Choose Pocket file" hidden>Choose file</button>
       <button id="btnOpenSynced" class="chip utilityChip" type="button" hidden disabled>Open synced Pocket…</button>
       <button id="btnExportTree" class="chip utilityChip">save</button>
-      <button id="btnUnfoldAll" class="chip primaryChip" disabled>Unfold</button>
-      <button id="btnAddPrimary" class="chip primaryChip" disabled>Add</button>
-      <button id="btnMovePrimary" class="chip primaryChip" disabled>Move</button>
-      <button id="btnRenamePrimary" class="chip primaryChip" disabled>Rename</button>
-      <button id="btnDeletePrimary" class="chip primaryChip" disabled>Delete</button>
-      <button id="btnOpenPrimary" class="chip primaryChip" disabled>Edit</button>
-      <button id="btnPip" class="chip utilityChip" title="Open pocket in a small pop-out window" aria-label="Pop out pocket">popout</button>
-      <button id="btnPhoneMode" class="chip utilityChip" type="button" aria-pressed="false">phone</button>
-      <button id="btnMore" class="chip utilityChip" type="button" aria-label="More pocket actions">more</button>
+      <button id="btnUnfoldAll" class="chip primaryChip" hidden disabled>Unfold</button>
+      <button id="btnAddPrimary" class="chip primaryChip" hidden disabled>Add</button>
+      <button id="btnMovePrimary" class="chip primaryChip" hidden disabled>Move</button>
+      <button id="btnRenamePrimary" class="chip primaryChip" hidden disabled>Rename</button>
+      <button id="btnDeletePrimary" class="chip primaryChip" hidden disabled>Delete</button>
+      <button id="btnOpenPrimary" class="chip primaryChip" hidden disabled>Edit</button>
+      <button id="btnPip" class="chip utilityChip" title="Open pocket in a small pop-out window" aria-label="Pop out pocket" hidden>popout</button>
+      <button id="btnPhoneMode" class="chip utilityChip" type="button" aria-pressed="false" hidden>phone</button>
+      <button id="btnMore" class="chip utilityChip" type="button" aria-label="More Pocket actions">⋯</button>
       <button id="btnImportNow" class="chip utilityChip" type="button" hidden>Import now</button>
       <button id="btnCancelImport" class="chip utilityChip" type="button" hidden>Cancel import</button>
       <button id="btnUndoImport" class="chip utilityChip" type="button" hidden>Undo import</button>
@@ -45,11 +44,11 @@
     <div class="layout">
       <section class="panel treePanel">
         <div class="panelHead treeHead">
-          <span>pocket</span>
           <div class="focusMeta">
             <span id="focusPath" class="focusPath">Focus: all</span>
             <span id="modePill" class="modePill" aria-live="polite"></span>
           </div>
+          <input id="search" class="search topbarSearch treeSearch" placeholder="find" aria-label="Filter Pocket">
         </div>
         <div id="treeWrap" class="treeWrap" tabindex="0">
           <ul id="treeRoot" class="treeRoot"></ul>
@@ -69,21 +68,30 @@
 
     <div id="commandOverlay" class="commandOverlay" hidden>
       <div class="commandCard" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle">
-        <div id="commandPaletteTitle" class="commandTitle">What do you want to do?</div>
-        <button id="cmdAddChild" class="commandBtn" type="button"><span>Add child</span><span class="commandHint">palette</span></button>
-        <button id="cmdAddSibling" class="commandBtn" type="button"><span>Add sibling below</span><span class="commandHint">+</span></button>
-        <button id="cmdRename" class="commandBtn" type="button"><span>Rename</span><span class="commandHint">R</span></button>
-        <button id="cmdEdit" class="commandBtn" type="button"><span>Edit details</span><span class="commandHint">Double-click</span></button>
-        <button id="cmdMove" class="commandBtn" type="button"><span>Move mode</span><span class="commandHint">arrows</span></button>
-        <button id="cmdFocus" class="commandBtn" type="button"><span>Focus here</span><span class="commandHint">Shift + F</span></button>
-        <button id="cmdSearch" class="commandBtn" type="button"><span>Filter</span><span class="commandHint">Ctrl/Cmd + F</span></button>
-        <button id="cmdSave" class="commandBtn" type="button"><span>save</span><span class="commandHint">Ctrl/Cmd + S</span></button>
+        <div id="commandPaletteTitle" class="commandTitle">Pocket</div>
+        <button id="cmdOpenPocket" class="commandBtn" type="button"><span>Open another Pocket</span><span class="commandHint">existing</span></button>
+        <button id="cmdNewPocket" class="commandBtn" type="button"><span>New Pocket</span><span class="commandHint">fresh</span></button>
+        <button id="cmdStorage" class="commandBtn" type="button"><span>Storage &amp; Sync…</span><span class="commandHint">Pocket</span></button>
+        <button id="cmdHelp" class="commandBtn" type="button"><span>Help / controls</span><span class="commandHint">?</span></button>
+      </div>
+    </div>
+
+    <div id="pocketOpenOverlay" class="commandOverlay" hidden>
+      <div class="commandCard" role="dialog" aria-modal="true" aria-labelledby="pocketOpenTitle">
+        <div id="pocketOpenTitle" class="commandTitle">Open a Pocket</div>
+        <button id="cmdOpenFile" class="commandBtn" type="button"><span>Pocket file…</span><span class="commandHint">JSON or Vault</span></button>
+        <button id="cmdOpenSyncedPocket" class="commandBtn" type="button" hidden><span>Synced Pocket…</span><span class="commandHint">this account</span></button>
+        <button id="cmdOpenCancel" class="commandBtn" type="button"><span>Cancel</span><span class="commandHint">Esc</span></button>
+      </div>
+    </div>
+
+    <div id="storageOverlay" class="commandOverlay" hidden>
+      <div class="commandCard" role="dialog" aria-modal="true" aria-labelledby="storageOverlayTitle">
+        <div id="storageOverlayTitle" class="commandTitle">Storage &amp; Sync</div>
         <button id="cmdCreateVault" class="commandBtn" type="button" hidden disabled><span>Convert to encrypted Vault…</span><span class="commandHint">new encrypted file</span></button>
         <button id="cmdExportVaultJson" class="commandBtn" type="button" hidden disabled><span>Convert to plain JSON…</span><span class="commandHint">new readable file</span></button>
         <button id="cmdSync" class="commandBtn" type="button" hidden disabled><span>Turn on Sync…</span><span class="commandHint">encrypted copy</span></button>
-        <button id="cmdHealth" class="commandBtn" type="button"><span>Health check</span><span class="commandHint">calm status</span></button>
-        <button id="cmdRestoreRecent" class="commandBtn" type="button"><span>Review an earlier device version</span><span class="commandHint">safety</span></button>
-        <button id="cmdHelp" class="commandBtn" type="button"><span>Show controls</span><span class="commandHint">?</span></button>
+        <button id="cmdStorageClose" class="commandBtn" type="button"><span>Back</span><span class="commandHint">Esc</span></button>
       </div>
     </div>
 

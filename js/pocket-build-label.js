@@ -1,4 +1,4 @@
-/* Quiet build label so stale GitHub Pages/browser cache is visible. */
+/* Build metadata remains available to diagnostics without occupying the shell. */
 
 (function initialisePocketBuildLabel(global) {
   "use strict";
@@ -27,6 +27,8 @@
 
     label.textContent = BUILD.label;
     label.title = `${BUILD.label} - ${BUILD.stamp}`;
+    label.hidden = true;
+    label.setAttribute("aria-hidden", "true");
     return label;
   }
 

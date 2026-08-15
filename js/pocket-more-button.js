@@ -1,5 +1,4 @@
-/* Topbar more button: visible doorway to the command palette.
-   Also injects itself if an older cached index.html is missing the button. */
+/* Topbar app menu doorway. Also repairs an older cached shell if needed. */
 
 (function initialisePocketMoreButton(global) {
   "use strict";
@@ -9,8 +8,8 @@
     button.id = "btnMore";
     button.className = "chip utilityChip";
     button.type = "button";
-    button.setAttribute("aria-label", "More pocket actions");
-    button.textContent = "more";
+    button.setAttribute("aria-label", "More Pocket actions");
+    button.textContent = "⋯";
     return button;
   }
 
@@ -18,16 +17,13 @@
     let button = document.getElementById("btnMore");
     if (button) return button;
 
-    const phoneButton = document.getElementById("btnPhoneMode");
-    const pipButton = document.getElementById("btnPip");
+    const saveButton = document.getElementById("btnExportTree");
     const topbar = document.querySelector(".topbar");
     if (!topbar) return null;
 
     button = createMoreButton();
-    if (phoneButton && phoneButton.parentNode) {
-      phoneButton.insertAdjacentElement("afterend", button);
-    } else if (pipButton && pipButton.parentNode) {
-      pipButton.insertAdjacentElement("afterend", button);
+    if (saveButton && saveButton.parentNode) {
+      saveButton.insertAdjacentElement("afterend", button);
     } else {
       topbar.appendChild(button);
     }

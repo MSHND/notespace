@@ -3988,14 +3988,30 @@ test("P017: the no-file gate has no duplicate hidden Continue or Cancel permissi
   state.pocketFile.pendingName = "pending.json";
   const gate = context.buildPocketFileGate();
 
-  assert.match(gate.textContent, /Load your Pocket file/);
-  assert.match(gate.textContent, /Choose Pocket file/);
-  assert.match(gate.textContent, /Create new Pocket file/);
+  assert.match(gate.textContent, /PocketOpen an existing Pocket/);
+  assert.match(gate.textContent, /Open/);
+  assert.match(gate.textContent, /New/);
   assert.doesNotMatch(gate.textContent, /Continue|Cancel|Chrome may ask/);
   const renderSource = source("js/pocket-render.js");
   assert.doesNotMatch(renderSource, /continuePocketFilePermissionRequest/);
   assert.doesNotMatch(renderSource, /cancelPocketFilePermissionRequest/);
   assert.doesNotMatch(renderSource, /gate\.permission/);
+});
+
+test("P062 shell state follows proven Pocket ownership without changing the owner contract", () => {
+  const context = createUiIntegrationContext();
+  resetIntegrationState(context, []);
+  context.clearPocketFileSession();
+  context.__productionRefreshMeta();
+  assert.equal(context.document.body.classList.contains("pocketShellClosed"), true);
+  assert.equal(context.document.body.classList.contains("pocketShellOpen"), false);
+
+  const handle = fakeHandle("p062-open.json");
+  context.setPocketFileSession(handle, handle.name, { forceNewSession: true });
+  context.__productionRefreshMeta();
+  assert.equal(context.document.body.classList.contains("pocketShellClosed"), false);
+  assert.equal(context.document.body.classList.contains("pocketShellOpen"), true);
+  assert.strictEqual(context.capturePocketFileSaveSession().handle, handle);
 });
 
 test("P017: cancelling an in-flight permission request revokes its async adoption", async () => {

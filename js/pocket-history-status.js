@@ -443,6 +443,9 @@ function flashSaveChip(label = "saved") {
 function refreshMeta() {
   if (!state.selectedId) state.moveMode = false;
   const focusPath = state.focusRootId ? getPath(state.focusRootId) : "";
+  const shellOpen = typeof canShowPocketTree === "function" && canShowPocketTree();
+  document.body.classList.toggle("pocketShellOpen", shellOpen);
+  document.body.classList.toggle("pocketShellClosed", !shellOpen);
   document.body.classList.toggle("focusedView", !!state.focusRootId);
   document.body.classList.toggle("moveModeActive", !!(state.moveMode && state.selectedId));
   if (el.focusPath) el.focusPath.textContent = focusPath ? `Focus: ${focusPath}` : "Focus: all";
