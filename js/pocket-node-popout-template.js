@@ -80,9 +80,16 @@
   .outlineRow:focus-within { background: rgba(241, 245, 249, .72); }
   .outlineRow.isOutlineSelected { background: rgba(37, 99, 235, .08); }
   .outlineRow.isOutlineSelected:focus-within { background: rgba(37, 99, 235, .11); }
-  .outlineToggle { width: 20px; min-height: 24px; border-radius: 9px; color: rgba(100, 116, 139, .7); cursor: pointer; }
-  .outlineToggle.empty { color: transparent; }
-  .outlineToggle.branchDragSource { background: rgba(37, 99, 235, .12); }
+  .outlineToggle { width: 20px; min-height: 24px; border-radius: 9px; color: rgba(100, 116, 139, .7); cursor: grab; }
+  .outlineToggle.empty { color: rgba(100, 116, 139, .42); }
+  .outlineToggle.branchDragSource { cursor: grabbing; background: rgba(37, 99, 235, .12); }
+  .outlineRow.branchDragLifted { opacity: .54; }
+  .outlineRow.branchDropBefore, .outlineRow.branchDropAfter, .outlineRow.branchDropInside { position: relative; }
+  .outlineRow.branchDropBefore::before, .outlineRow.branchDropAfter::after { content: ""; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: rgba(37, 99, 235, .72); }
+  .outlineRow.branchDropBefore::before { top: -2px; }
+  .outlineRow.branchDropAfter::after { bottom: -2px; }
+  .outlineRow.branchDropInside { background: rgba(37, 99, 235, .10); box-shadow: inset 3px 0 0 rgba(37, 99, 235, .70); }
+  .outlineDragGhost { position: fixed; z-index: 20; max-width: 220px; overflow: hidden; padding: 5px 8px; border: 1px solid rgba(37, 99, 235, .24); border-radius: 7px; background: rgba(255, 255, 255, .96); color: rgba(30, 41, 59, .88); box-shadow: 0 8px 20px -14px rgba(15, 23, 42, .65); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
   .outlineText { min-height: 26px; padding: 3px 6px; border-radius: 8px; outline: none; font-size: 16px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: rgba(37, 99, 235, .86); }
   .outlineToggle:focus-visible, .outlineText:focus-visible { box-shadow: var(--pe-focus-ring); }
   .outlineText[contenteditable="true"] { background: transparent; box-shadow: none; }

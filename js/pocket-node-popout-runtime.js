@@ -20,6 +20,7 @@
   var outlineEditingId = "";
   var outlineEditingOriginalText = "";
   var outlineEditingWasDirty = false;
+  var outlineDragUndoSnapshot = null;
   var titleInput = document.getElementById("titleInput");
   var bodyInput = document.getElementById("bodyInput");
   var outlinePane = document.getElementById("outlinePane");
@@ -38,7 +39,7 @@
   var outlineContextTargetId = "";
   var saveInFlight = false;
   function setSaveState(text, kind) { saveState.textContent = text || ""; saveState.className = "status" + (kind ? " " + kind : ""); }
-  function setDirty(next) { if (readOnly) { dirty = false; document.body.classList.remove("isDirty"); return; } dirty = !!next; if (dirty) editGeneration += 1; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
+  function setDirty(next, options) { if (readOnly) { dirty = false; document.body.classList.remove("isDirty"); return; } if (next && !(options && options.preserveOutlineDragUndo)) outlineDragUndoSnapshot = null; dirty = !!next; if (dirty) editGeneration += 1; document.body.classList.toggle("isDirty", dirty); if (dirty) setSaveState("", ""); }
   function applyReadOnlyState() {
     if (!readOnly) return;
     document.body.classList.add("readOnly");
@@ -425,9 +426,35 @@
   }
 
   var OUTLINE_GUTTER_DRAG_THRESHOLD_PX = 6;
+  function copyOutlineStructure(value) {
+    return Array.isArray(value) ? value.map(function (block) {
+      return { id: String(block && block.id || ""), text: String(block && block.text || ""), depth: outlineDepthForBlock(block), collapsed: !!(block && block.collapsed) };
+    }) : [];
+  }
+  function outlineStructureMatches(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    for (var index = 0; index < left.length; index += 1) {
+      if (left[index].id !== right[index].id || left[index].text !== right[index].text
+        || outlineDepthForBlock(left[index]) !== outlineDepthForBlock(right[index])
+        || !!left[index].collapsed !== !!right[index].collapsed) return false;
+    }
+    return true;
+  }
+  function undoOutlineDrag() {
+    if (!outlineDragUndoSnapshot || readOnly || mode !== "outline" || outlineEditingId) return false;
+    outline = copyOutlineStructure(outlineDragUndoSnapshot.outline);
+    var restoreId = outlineDragUndoSnapshot.selectedId;
+    var restoreDirty = outlineDragUndoSnapshot.wasDirty;
+    outlineDragUndoSnapshot = null;
+    selectSingleOutlineBlock(restoreId);
+    setDirty(restoreDirty, { preserveOutlineDragUndo: true });
+    renderOutline(blockIndexById(restoreId));
+    return true;
+  }
   function moveOutlineBranchToDrop(blockId, targetId, position) {
     if (readOnly || mode !== "outline" || !Array.isArray(outline) || ["before", "inside", "after"].indexOf(position) < 0) return false;
     syncOutlineFromDom();
+    var beforeMove = copyOutlineStructure(outline);
     var sourceIndex = blockIndexById(blockId);
     var targetIndex = blockIndexById(targetId);
     if (sourceIndex < 0 || targetIndex < 0) return false;
@@ -448,8 +475,10 @@
     var insertAt = position === "before" ? targetIndex : outlineSubtreeEndIndex(targetIndex);
     for (var branchIndex = 0; branchIndex < branch.length; branchIndex += 1) branch[branchIndex].depth = outlineDepthForBlock(branch[branchIndex]) + depthDelta;
     outline.splice.apply(outline, [insertAt, 0].concat(branch));
+    if (outlineStructureMatches(beforeMove, outline)) return false;
+    outlineDragUndoSnapshot = { outline: beforeMove, selectedId: blockId, wasDirty: dirty };
     selectSingleOutlineBlock(blockId);
-    setDirty(true);
+    setDirty(true, { preserveOutlineDragUndo: true });
     renderOutline(blockIndexById(blockId));
     return true;
   }
@@ -462,6 +491,13 @@
     if (offset < height * 0.3) return "before";
     if (offset > height * 0.7) return "after";
     return "inside";
+  }
+  function clearOutlineDragFeedback(gutter, ghost, targetRow) {
+    gutter.classList.remove("branchDragSource");
+    var sourceRow = typeof gutter.closest === "function" ? gutter.closest(".outlineRow[data-block-id]") : null;
+    if (sourceRow) sourceRow.classList.remove("branchDragLifted");
+    if (targetRow) targetRow.classList.remove("branchDropBefore", "branchDropInside", "branchDropAfter");
+    if (ghost && ghost.parentNode && typeof ghost.parentNode.removeChild === "function") ghost.parentNode.removeChild(ghost);
   }
   function installOutlineGutterDrag(gutter, blockId) {
     if (!gutter || typeof gutter.addEventListener !== "function") return;
@@ -485,21 +521,62 @@
       var startX = Number(ev.clientX) || 0;
       var startY = Number(ev.clientY) || 0;
       var dragging = false;
+      var ghost = null;
+      var dropTargetRow = null;
+      function updateFeedback(moveEvent) {
+        if (ghost) {
+          ghost.style.left = (Number(moveEvent.clientX) || 0) + 14 + "px";
+          ghost.style.top = (Number(moveEvent.clientY) || 0) + 14 + "px";
+        }
+        var pointed = typeof document.elementFromPoint === "function"
+          ? document.elementFromPoint(Number(moveEvent.clientX) || 0, Number(moveEvent.clientY) || 0)
+          : moveEvent.target;
+        var targetRow = pointed && typeof pointed.closest === "function" ? pointed.closest(".outlineRow[data-block-id]") : null;
+        var targetBlockId = targetRow ? targetRow.getAttribute("data-block-id") || "" : "";
+        var sourceIndex = blockIndexById(blockId);
+        var sourceEnd = sourceIndex < 0 ? -1 : outlineSubtreeEndIndex(sourceIndex);
+        var targetIndex = blockIndexById(targetBlockId);
+        var position = targetRow ? outlineDropPositionForPointer(targetRow, Number(moveEvent.clientY)) : "";
+        var valid = sourceIndex >= 0 && targetIndex >= 0 && (targetIndex < sourceIndex || targetIndex >= sourceEnd);
+        var nextDepth = position === "inside" && targetIndex >= 0 ? outlineDepth(targetIndex) + 1 : outlineDepth(targetIndex);
+        var depthDelta = nextDepth - outlineDepth(sourceIndex);
+        for (var branchIndex = sourceIndex; valid && branchIndex < sourceEnd; branchIndex += 1) {
+          if (outlineDepth(branchIndex) + depthDelta > 8) valid = false;
+        }
+        if (dropTargetRow) dropTargetRow.classList.remove("branchDropBefore", "branchDropInside", "branchDropAfter");
+        dropTargetRow = valid ? targetRow : null;
+        if (dropTargetRow) dropTargetRow.classList.add(position === "before" ? "branchDropBefore" : position === "after" ? "branchDropAfter" : "branchDropInside");
+      }
       function cleanup() {
         if (typeof document.removeEventListener === "function") {
           document.removeEventListener("pointermove", onMove, true);
           document.removeEventListener("pointerup", onUp, true);
           document.removeEventListener("pointercancel", onCancel, true);
         }
-        gutter.classList.remove("branchDragSource");
+        clearOutlineDragFeedback(gutter, ghost, dropTargetRow);
+        ghost = null;
+        dropTargetRow = null;
       }
       function onMove(moveEvent) {
-        if (dragging) return;
         var dx = (Number(moveEvent.clientX) || 0) - startX;
         var dy = (Number(moveEvent.clientY) || 0) - startY;
-        if (Math.hypot(dx, dy) < OUTLINE_GUTTER_DRAG_THRESHOLD_PX) return;
-        dragging = true;
-        gutter.classList.add("branchDragSource");
+        if (!dragging) {
+          if (Math.hypot(dx, dy) < OUTLINE_GUTTER_DRAG_THRESHOLD_PX) return;
+          dragging = true;
+          gutter.classList.add("branchDragSource");
+          var sourceRow = typeof gutter.closest === "function" ? gutter.closest(".outlineRow[data-block-id]") : null;
+          if (sourceRow) sourceRow.classList.add("branchDragLifted");
+          var sourceBlock = outline[blockIndexById(blockId)];
+          if (sourceBlock && document.body && typeof document.createElement === "function" && typeof document.body.appendChild === "function") {
+            var branchSize = outlineSubtreeEndIndex(blockIndexById(blockId)) - blockIndexById(blockId);
+            ghost = document.createElement("div");
+            ghost.className = "outlineDragGhost";
+            ghost.setAttribute("aria-hidden", "true");
+            ghost.textContent = String(sourceBlock.text || "Untitled") + (branchSize > 1 ? " · " + (branchSize - 1) + " below" : "");
+            document.body.appendChild(ghost);
+          }
+        }
+        updateFeedback(moveEvent);
       }
       function onUp(upEvent) {
         cleanup();
@@ -793,7 +870,7 @@
       var toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
-      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "";
+      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "▸";
       toggle.setAttribute("aria-label", hasChildren(index) ? (block.collapsed ? "Expand branch" : "Collapse branch") : "Select branch");
       installOutlineGutterDrag(toggle, block.id);
       toggle.addEventListener("click", function (ev) {
@@ -1197,6 +1274,12 @@
   textModeBtn.addEventListener("click", function () { setMode("text"); });
   outlineModeBtn.addEventListener("click", function () { setMode("outline"); });
   document.addEventListener("keydown", function (ev) {
+    if (!isEditablePeTarget(ev.target) && mode === "outline" && !outlineContextMenuIsOpen() && unsavedDialog.hidden
+      && !ev.altKey && !ev.shiftKey && (ev.metaKey || ev.ctrlKey) && (ev.key === "z" || ev.key === "Z")
+      && undoOutlineDrag()) {
+      ev.preventDefault();
+      return;
+    }
     var outlineNavigationTarget = !isEditablePeTarget(ev.target)
       && mode === "outline"
       && !outlineContextMenuIsOpen()

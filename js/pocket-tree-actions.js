@@ -358,6 +358,58 @@ function treeDropPositionForPointer(row, clientY) {
 
 function installTreeGutterDrag(gutter, nodeId) {
   if (!(gutter instanceof HTMLElement)) return;
+  let dragGhost = null;
+  let dropTargetRow = null;
+  const clearDragFeedback = () => {
+    gutter.classList.remove("branchDragSource");
+    const sourceRow = typeof gutter.closest === "function" ? gutter.closest(".row[data-node-id]") : null;
+    sourceRow?.classList.remove("branchDragLifted");
+    if (dropTargetRow) {
+      dropTargetRow.classList.remove("branchDropBefore", "branchDropInside", "branchDropAfter");
+      dropTargetRow = null;
+    }
+    if (dragGhost?.parentNode && typeof dragGhost.parentNode.removeChild === "function") dragGhost.parentNode.removeChild(dragGhost);
+    dragGhost = null;
+  };
+  const showDragGhost = (event) => {
+    if (!document.body || typeof document.createElement !== "function" || typeof document.body.appendChild !== "function") return;
+    const node = nodeMap().get(cleanText(nodeId, 80));
+    if (!node) return;
+    const branchSize = treeBranchIds(node.id).length;
+    dragGhost = document.createElement("div");
+    dragGhost.className = "branchDragGhost";
+    dragGhost.setAttribute("aria-hidden", "true");
+    dragGhost.textContent = `${node.label || "Untitled"}${branchSize > 1 ? ` · ${branchSize - 1} below` : ""}`;
+    document.body.appendChild(dragGhost);
+    moveDragFeedback(event);
+  };
+  const moveDragFeedback = (event) => {
+    if (dragGhost) {
+      dragGhost.style.left = `${(Number(event.clientX) || 0) + 14}px`;
+      dragGhost.style.top = `${(Number(event.clientY) || 0) + 14}px`;
+    }
+    const pointed = typeof document.elementFromPoint === "function"
+      ? document.elementFromPoint(Number(event.clientX) || 0, Number(event.clientY) || 0)
+      : event.target;
+    const targetRow = pointed && typeof pointed.closest === "function" ? pointed.closest(".row[data-node-id]") : null;
+    const targetId = cleanText(targetRow?.getAttribute("data-node-id"), 80);
+    const position = targetRow ? treeDropPositionForPointer(targetRow, Number(event.clientY)) : "";
+    const source = nodeMap().get(cleanText(nodeId, 80));
+    const target = nodeMap().get(targetId);
+    const branchIds = new Set(treeBranchIds(nodeId));
+    const nextParentId = position === "inside" ? target?.id : (target?.parentId || "root");
+    const nextParent = nextParentId === "root" ? null : nodeMap().get(nextParentId);
+    const valid = !!(source && target && targetId !== cleanText(nodeId, 80)
+      && !isManagedSystemBucketNode(source) && !isManagedSystemBucketNode(target)
+      && !branchIds.has(targetId) && !branchIds.has(nextParentId)
+      && !(nextParent && isCompletedSystemBucketNode(nextParent)));
+    if (dropTargetRow) dropTargetRow.classList.remove("branchDropBefore", "branchDropInside", "branchDropAfter");
+    dropTargetRow = valid ? targetRow : null;
+    if (dropTargetRow) {
+      dropTargetRow.classList.remove("branchDropBefore", "branchDropInside", "branchDropAfter");
+      dropTargetRow.classList.add(position === "before" ? "branchDropBefore" : position === "after" ? "branchDropAfter" : "branchDropInside");
+    }
+  };
   const suppressGestureClick = () => {
     let timeoutId = 0;
     const clear = () => {
@@ -382,15 +434,20 @@ function installTreeGutterDrag(gutter, nodeId) {
       document.removeEventListener("pointermove", onMove, true);
       document.removeEventListener("pointerup", onUp, true);
       document.removeEventListener("pointercancel", onCancel, true);
-      gutter.classList.remove("branchDragSource");
+      clearDragFeedback();
     };
     const onMove = (moveEvent) => {
-      if (dragging) return;
       const dx = (Number(moveEvent.clientX) || 0) - startX;
       const dy = (Number(moveEvent.clientY) || 0) - startY;
-      if (Math.hypot(dx, dy) < TREE_GUTTER_DRAG_THRESHOLD_PX) return;
-      dragging = true;
-      gutter.classList.add("branchDragSource");
+      if (!dragging) {
+        if (Math.hypot(dx, dy) < TREE_GUTTER_DRAG_THRESHOLD_PX) return;
+        dragging = true;
+        gutter.classList.add("branchDragSource");
+        const sourceRow = typeof gutter.closest === "function" ? gutter.closest(".row[data-node-id]") : null;
+        sourceRow?.classList.add("branchDragLifted");
+        showDragGhost(moveEvent);
+      }
+      moveDragFeedback(moveEvent);
     };
     const onUp = (upEvent) => {
       cleanup();

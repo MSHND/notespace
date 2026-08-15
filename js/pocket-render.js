@@ -385,7 +385,7 @@ function renderTree() {
     const twisty = document.createElement("button");
     twisty.type = "button";
     twisty.className = `twisty${hasKids ? "" : " empty"}`;
-    twisty.textContent = hasKids ? (isCollapsed ? "▸" : "▾") : "";
+    twisty.textContent = hasKids ? (isCollapsed ? "▸" : "▾") : "▸";
     twisty.setAttribute("aria-label", hasKids
       ? `${isCollapsed ? "Expand" : "Collapse"} branch`
       : "Select branch");

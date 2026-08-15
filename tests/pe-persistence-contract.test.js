@@ -507,6 +507,12 @@ function createTreeRenderHarness(nodes, query = "", options = {}) {
       return child;
     }
 
+    removeChild(child) {
+      this.children = this.children.filter((candidate) => candidate !== child);
+      child.parentNode = null;
+      return child;
+    }
+
     contains(candidate) {
       if (this === candidate || this.children.includes(candidate)) return true;
       return this.children.some((child) => typeof child.contains === "function" && child.contains(candidate));
@@ -2809,7 +2815,7 @@ test("P058 main-tree Ctrl/Cmd arrows move whole branches while plain arrows stay
   assert.equal(visibleDelta, 1);
 });
 
-test("P060 main-tree disclosure owns selection and navigation while leaf gutters stay visually blank", () => {
+test("P060 main-tree disclosure owns selection and navigation while leaf gutters keep a structural marker", () => {
   const harness = createTreeRenderHarness([
     syntheticNode("p060_parent", { label: "Parent", parentId: "root", order: 1001 }),
     syntheticNode("p060_child", { label: "Child", parentId: "p060_parent", order: 1001 }),
@@ -2819,7 +2825,7 @@ test("P060 main-tree disclosure owns selection and navigation while leaf gutters
   const parentGutter = row("p060_parent").children[0];
   const leafGutter = row("p060_leaf").children[0];
   assert.equal(parentGutter.textContent, "▾");
-  assert.equal(leafGutter.textContent, "");
+  assert.equal(leafGutter.textContent, "▸");
   assert.equal(leafGutter.classList.contains("empty"), true);
 
   let refocusedId = "";
@@ -2941,6 +2947,37 @@ test("P060a main-tree drag suppression is gesture-scoped and fully cleans up", (
   assert.equal(cancelled.documentListenerCount("pointercancel"), 0);
   cancelledSource.dispatch("click");
   assert.equal(cancelled.state.collapsed.has("p060a_parent"), true);
+});
+
+test("P063 main-tree drag feedback follows the existing threshold and destination calculation", () => {
+  const harness = createTreeRenderHarness([
+    syntheticNode("p063_main_a", { label: "A", parentId: "root", order: 1001 }),
+    syntheticNode("p063_main_b", { label: "B", parentId: "root", order: 1002 }),
+  ], "", { withDragActions: true });
+  const row = (id) => harness.treeRoot.querySelectorAll(".row")
+    .find((candidate) => candidate.getAttribute("data-node-id") === id);
+  harness.context.createTreeUndoSnapshot = () => null;
+  harness.context.recordOp = () => {};
+  harness.context.saveWorkspaceState = () => {};
+  harness.context.persistPipSnapshot = () => {};
+  harness.context.flashTouchedRow = () => {};
+  harness.context.expandPathToNode = () => {};
+  const source = row("p063_main_b").children[0];
+  const target = row("p063_main_a");
+
+  source.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  harness.context.document.pointedElement = target.children[0];
+  harness.context.document.dispatch("pointermove", { clientX: 3, clientY: 4 });
+  assert.equal(source.classList.contains("branchDragSource"), false);
+  harness.context.document.dispatch("pointermove", { clientX: 7, clientY: 2 });
+  assert.equal(source.classList.contains("branchDragSource"), true);
+  assert.equal(row("p063_main_b").classList.contains("branchDragLifted"), true);
+  assert.equal(target.classList.contains("branchDropBefore"), true);
+  assert.equal(harness.context.document.body.children.some((child) => child.classList.contains("branchDragGhost")), true);
+  harness.context.document.dispatch("pointerup", { clientX: 7, clientY: 2 });
+  assert.equal(source.classList.contains("branchDragSource"), false);
+  assert.equal(target.classList.contains("branchDropBefore"), false);
+  assert.equal(harness.context.document.body.children.some((child) => child.classList.contains("branchDragGhost")), false);
 });
 
 test("an unrelated edit preserves raw editor metadata while later export omits retired pe", () => {
@@ -4517,7 +4554,7 @@ test("P058a PE Outline outdents a whole branch structurally and persists explici
   ]);
 });
 
-test("P060 PE Outline wakes structural navigation, edits text on one click, and keeps a blank gutter without selection chrome", () => {
+test("P060 PE Outline wakes structural navigation, edits text on one click, and keeps a structural marker without selection chrome", () => {
   assert.doesNotMatch(source("js/pocket-node-popout-template.js"), /outlineSelect/);
   const runtime = executeControlledRuntime(runtimeEditablePayload({
     mode: "outline",
@@ -4534,7 +4571,7 @@ test("P060 PE Outline wakes structural navigation, edits text on one click, and 
   assert.equal(row("p060_parent").getAttribute("aria-selected"), "true");
   assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
   assert.equal(pane.querySelector(".outlineSelect"), null);
-  assert.equal(row("p060_leaf").children[0].textContent, "");
+  assert.equal(row("p060_leaf").children[0].textContent, "▸");
 
   row("p060_leaf").children[0].dispatch("click", { target: row("p060_leaf").children[0] });
   assert.equal(row("p060_leaf").getAttribute("aria-selected"), "true");
@@ -4657,6 +4694,54 @@ test("P060a PE drag suppression expires after its gesture and pointercancel leav
   assert.equal(cancelled.documentListenerCount("pointercancel"), 0);
   cancelledSource.dispatch("click");
   assert.deepEqual(cancelled.controls.get("outlinePane").children.map((candidate) => candidate.children[1].textContent), ["Parent", "Leaf"]);
+});
+
+test("P063 PE drag feedback is cleaned up and Ctrl/Cmd+Z restores the exact moved subtree", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p063_pe_a", text: "A", depth: 0, collapsed: false },
+      { id: "p063_pe_a_child", text: "A child", depth: 1, collapsed: false },
+      { id: "p063_pe_b", text: "B", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const labels = () => rows().map((candidate) => candidate.children[1].textContent);
+  const source = row("p063_pe_b").children[0];
+  const target = row("p063_pe_a");
+
+  assert.equal(source.textContent, "▸");
+  source.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  runtime.document.pointedElement = target.children[0];
+  runtime.document.dispatch("pointermove", { clientX: 3, clientY: 4 });
+  assert.equal(source.classList.contains("branchDragSource"), false);
+  runtime.document.dispatch("pointermove", { clientX: 7, clientY: 2 });
+  assert.equal(source.classList.contains("branchDragSource"), true);
+  assert.equal(row("p063_pe_b").classList.contains("branchDragLifted"), true);
+  assert.equal(target.classList.contains("branchDropBefore"), true);
+  runtime.document.dispatch("pointerup", { clientX: 7, clientY: 2 });
+  assert.deepEqual(labels(), ["B", "A", "A child"]);
+  assert.equal(source.classList.contains("branchDragSource"), false);
+  assert.equal(target.classList.contains("branchDropBefore"), false);
+
+  const undo = runtime.document.dispatch("keydown", { key: "z", ctrlKey: true, target: row("p063_pe_b").children[0] });
+  assert.equal(undo.defaultPrevented, true);
+  assert.deepEqual(labels(), ["A", "A child", "B"]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  const noOpSource = row("p063_pe_b").children[0];
+  noOpSource.dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  runtime.document.pointedElement = row("p063_pe_a").children[0];
+  runtime.document.dispatch("pointermove", { clientX: 7, clientY: 28 });
+  runtime.document.dispatch("pointerup", { clientX: 7, clientY: 28 });
+  assert.deepEqual(labels(), ["A", "A child", "B"]);
+  assert.equal(runtime.document.dispatch("keydown", { key: "z", ctrlKey: true, target: row("p063_pe_b").children[0] }).defaultPrevented, false);
+
+  row("p063_pe_b").children[1].dispatch("click");
+  const textUndo = runtime.document.dispatch("keydown", { key: "z", metaKey: true, target: row("p063_pe_b").children[1] });
+  assert.equal(textUndo.defaultPrevented, false);
 });
 
 test("generated PE runtime accepts and forwards a synced source identity", () => {
