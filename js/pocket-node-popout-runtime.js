@@ -1320,7 +1320,7 @@
       collapseOrExpandAllOutlineBranches(ev.key === ",");
       return;
     }
-    if ((ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; }
+    if (!isEditablePeTarget(ev.target) && (ev.key === "c" || ev.key === "C") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && copyOutlineSelection()) { ev.preventDefault(); return; }
     if ((ev.key === "d" || ev.key === "D") && (ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && duplicateOutlineSelection()) { ev.preventDefault(); return; }
     if ((ev.key === "Delete" || ev.key === "Backspace") && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !ev.shiftKey && mode === "outline" && hasOutlineSelection() && !isEditablePeTarget(ev.target)) {
       ev.preventDefault();

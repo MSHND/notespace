@@ -5140,6 +5140,33 @@ test("generated Outline runtime retains subtree Copy, Paste-after-selection, Dup
   );
 });
 
+test("generated PE native copy wins in title, Notes, and active Outline text fields", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    title: "Copy title",
+    body: "Copy Notes",
+    mode: "outline",
+    outline: [
+      { id: "copy_parent", text: "Parent", depth: 0, collapsed: false },
+      { id: "copy_child", text: "Child", depth: 1, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  pane.children[0].dispatch("click", { target: pane.children[0] });
+
+  const titleCopy = runtime.document.dispatch("keydown", { key: "c", metaKey: true, target: runtime.controls.get("titleInput") });
+  const bodyCopy = runtime.document.dispatch("keydown", { key: "c", ctrlKey: true, target: runtime.controls.get("bodyInput") });
+  assert.equal(titleCopy.defaultPrevented, false);
+  assert.equal(bodyCopy.defaultPrevented, false);
+  assert.equal(runtime.clipboardWrites.length, 0);
+
+  pane.children[0].children[1].dispatch("click", { target: pane.children[0].children[1] });
+  const outlineText = pane.children[0].children[1];
+  assert.equal(outlineText.contentEditable, "true");
+  const outlineCopy = runtime.document.dispatch("keydown", { key: "c", metaKey: true, target: outlineText });
+  assert.equal(outlineCopy.defaultPrevented, false);
+  assert.equal(runtime.clipboardWrites.length, 0);
+});
+
 test("generated Outline runtime inserts context siblings at the target row with selection, focus, and save integrity", async () => {
   const template = source("js/pocket-node-popout-template.js");
   assert.match(template, /data-outline-action="insert-above"/);
