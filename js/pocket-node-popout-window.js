@@ -3,8 +3,8 @@
   "use strict";
 
   const ownerToken = randomToken("owner");
-  let currentPopup = null;
-  let pendingOpen = null;
+  const livePopups = new Set();
+  let lastOpenedPopup = null;
 
   function randomToken(prefix) {
     let value = "";
@@ -136,10 +136,11 @@
     return sessionMatches(session, record.popupToken) ? session : null;
   }
 
-  function abandonCurrentPopup(record, clearPending) {
-    if (!record || currentPopup === record) {
-      currentPopup = null;
-      if (clearPending === true) pendingOpen = null;
+  function unregisterPopup(record) {
+    if (!record) return;
+    livePopups.delete(record);
+    if (lastOpenedPopup === record) {
+      lastOpenedPopup = Array.from(livePopups).at(-1) || null;
     }
   }
 
@@ -149,78 +150,54 @@
     } catch (_error) {}
   }
 
-  function hasUnsavedChanges(win) {
-    const record = currentPopup;
-    if (!record || record.window !== win) return false;
+  function popupHasUnsavedChanges(record) {
     const session = ownedSession(record);
     if (!session) {
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
     try {
       return !!(session && typeof session.hasUnsavedChanges === "function" && session.hasUnsavedChanges());
     } catch (_error) {
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
+  }
+
+  function hasUnsavedChanges(win) {
+    if (win) {
+      const record = Array.from(livePopups).find((candidate) => candidate.window === win);
+      return !!record && popupHasUnsavedChanges(record);
+    }
+    let dirty = false;
+    for (const record of Array.from(livePopups)) {
+      if (popupHasUnsavedChanges(record)) dirty = true;
+    }
+    return dirty;
   }
 
   function requestUnsavedProtection(record) {
     const session = ownedSession(record);
     if (!session) {
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
     try {
       if (typeof session.requestUnsavedProtection !== "function"
           || session.requestUnsavedProtection(ownerToken, record.popupToken) !== true) {
-        abandonCurrentPopup(record, true);
+        unregisterPopup(record);
         return false;
       }
       if (record.window && typeof record.window.focus === "function") record.window.focus();
       return true;
     } catch (_error) {
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
-  }
-
-  function rememberPendingOpen(payload, helpers) {
-    pendingOpen = { payload: payload, helpers: helpers || {} };
-  }
-
-  function blockIfDirty(record, pending) {
-    if (!record || !hasUnsavedChanges(record.window)) return false;
-    rememberPendingOpen(pending.payload, pending.helpers);
-    if (!record.attentionRequested) {
-      record.attentionRequested = true;
-      if (!requestUnsavedProtection(record)) return false;
-    }
-    return true;
-  }
-
-  function closeCleanPopup(record) {
-    const session = ownedSession(record);
-    if (!session) {
-      abandonCurrentPopup(record, true);
-      return false;
-    }
-    try {
-      if (typeof session.requestOwnedClose !== "function"
-          || session.requestOwnedClose(ownerToken, record.popupToken) !== true) {
-        abandonCurrentPopup(record, true);
-        return false;
-      }
-    } catch (_error) {
-      abandonCurrentPopup(record, true);
-      return false;
-    }
-    abandonCurrentPopup(record);
-    return true;
   }
 
   function writeFreshPopup(record, payload, helpers) {
-    if (!record || currentPopup !== record || !freshPopupIsOwned(record.window)) return false;
+    if (!record || !livePopups.has(record) || !freshPopupIsOwned(record.window)) return false;
     try {
       record.window.name = record.targetName;
       record.window.document.open();
@@ -228,20 +205,20 @@
       record.window.document.close();
     } catch (_error) {
       closeFreshPopup(record);
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
     const session = ownedSession(record);
     if (!session) {
       closeFreshPopup(record);
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
     try {
       if (typeof record.window.focus === "function") record.window.focus();
     } catch (_error) {
       closeFreshPopup(record);
-      abandonCurrentPopup(record, true);
+      unregisterPopup(record);
       return false;
     }
     return true;
@@ -264,10 +241,10 @@
     const record = {
       window: win,
       popupToken: popupToken,
-      targetName: targetName,
-      attentionRequested: false
+      targetName: targetName
     };
-    currentPopup = record;
+    livePopups.add(record);
+    lastOpenedPopup = record;
     if (!writeFreshPopup(record, payload, helpers)) {
       setIsolatedPopupFailureStatus(helpers);
       return false;
@@ -277,10 +254,6 @@
 
   function open(payload, helpers) {
     helpers = helpers || {};
-    const pending = { payload: payload, helpers: helpers };
-    const record = currentPopup;
-    if (record && blockIfDirty(record, pending)) return false;
-    if (record && currentPopup === record) closeCleanPopup(record);
     return openFresh(payload, helpers);
   }
 
@@ -297,14 +270,18 @@
   }
 
   function validatePopupCall(candidateOwnerToken, candidatePopupToken, callerWindow) {
-    const record = currentPopup;
+    const record = Array.from(livePopups).find((candidate) => candidate.window === callerWindow);
     if (!record
         || candidateOwnerToken !== ownerToken
-        || candidatePopupToken !== record.popupToken
-        || callerWindow !== record.window) {
+        || candidatePopupToken !== record.popupToken) {
       return null;
     }
-    return ownedSession(record) ? record : null;
+    const session = ownedSession(record);
+    if (!session) {
+      unregisterPopup(record);
+      return null;
+    }
+    return record;
   }
 
   async function applyAndSaveFromOwnedPopup(candidateOwnerToken, candidatePopupToken, payload, callerWindow) {
@@ -328,32 +305,27 @@
     } catch (_error) {
       return false;
     }
-    abandonCurrentPopup(record);
-    const pending = pendingOpen;
-    pendingOpen = null;
-    if (!pending) return true;
-    return openFresh(pending.payload, pending.helpers);
+    unregisterPopup(record);
+    return true;
   }
 
   function cancelPendingOpen(candidateOwnerToken, candidatePopupToken, callerWindow) {
     const record = validatePopupCall(candidateOwnerToken, candidatePopupToken, callerWindow);
     if (!record) return false;
-    pendingOpen = null;
-    record.attentionRequested = false;
     return true;
   }
 
   global.PocketNodePopoutWindow = Object.freeze({
     open: open,
     hasUnsavedChanges: function () {
-      return !!currentPopup && hasUnsavedChanges(currentPopup.window);
+      return hasUnsavedChanges();
     },
     getOwnerToken: function () {
       return ownerToken;
     },
     getCurrentSessionIdentity: function () {
-      return currentPopup
-        ? { ownerToken: ownerToken, popupToken: currentPopup.popupToken, targetName: currentPopup.targetName }
+      return lastOpenedPopup && livePopups.has(lastOpenedPopup)
+        ? { ownerToken: ownerToken, popupToken: lastOpenedPopup.popupToken, targetName: lastOpenedPopup.targetName }
         : null;
     },
     applyAndSaveFromOwnedPopup: applyAndSaveFromOwnedPopup,

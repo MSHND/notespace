@@ -307,7 +307,7 @@ test("P018 opens simultaneous normal and Incognito-like PE windows without cross
   assert.deepEqual(broker.openCalls.map((call) => call.target), ["_blank", "_blank"]);
 });
 
-test("P018 retires the reusable global target and writes each fresh popup document once", () => {
+test("P065 opens concurrent PE windows and writes each fresh popup document once", () => {
   const ownerSource = source("js/pocket-node-popout-window.js");
   const retiredTarget = ["pocket", "Node", "Popout", "Editor"].join("");
   const broker = createPopupBroker();
@@ -324,8 +324,9 @@ test("P018 retires the reusable global target and writes each fresh popup docume
   assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("second")), true);
   const second = broker.popups[1];
   assert.notEqual(first.name, second.name);
-  assert.equal(first.calls.ownedClose, 1);
-  assert.equal(first.calls.close, 1);
+  assert.equal(first.calls.ownedClose, 0);
+  assert.equal(first.calls.close, 0);
+  assert.equal(first.closed, false);
   assert.equal(first.calls.documentWrite, 1);
   assert.deepEqual(
     [second.calls.documentOpen, second.calls.documentWrite, second.calls.documentClose],
@@ -333,7 +334,7 @@ test("P018 retires the reusable global target and writes each fresh popup docume
   );
 });
 
-test("P018 keeps a dirty PE private while another page opens and replaces its own PE", () => {
+test("P065 keeps one page's dirty PE private while another page opens concurrent PEs", () => {
   const broker = createPopupBroker();
   const pageA = createMainPage(broker, "page_a");
   const pageB = createMainPage(broker, "page_b");
@@ -343,137 +344,86 @@ test("P018 keeps a dirty PE private while another page opens and replaces its ow
   const before = { ...popupA.calls };
 
   pageB.context.PocketNodePopoutWindow.open(editorPayload("b_first"));
+  const firstB = broker.popups[1];
   pageB.context.PocketNodePopoutWindow.open(editorPayload("b_second"));
 
   assert.deepEqual(popupA.calls, before);
   assert.equal(popupA.closed, false);
+  assert.equal(firstB.closed, false);
   assert.equal(pageA.metrics.truthWrites, 0);
   assert.equal(pageB.metrics.truthWrites, 0);
   assert.equal(broker.popups.length, 3);
 });
 
-test("P018 keeps one dirty PE per owner, one pending item, and one attention request", () => {
+test("P065 allows a dirty PE to coexist with a newly opened PE and reports owner dirtiness", () => {
   const broker = createPopupBroker();
-  const page = createMainPage(broker, "single_owner");
-  page.context.PocketNodePopoutWindow.open(editorPayload("current"));
-  const popup = broker.popups[0];
-  popup.dirty = true;
+  const page = createMainPage(broker, "concurrent");
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("a")), true);
+  const popupA = broker.popups[0];
+  popupA.dirty = true;
+  const beforeA = { ...popupA.calls };
 
-  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("pending_first")), false);
-  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("pending_latest")), false);
-  assert.equal(broker.popups.length, 1);
-  assert.equal(popup.calls.unsavedDialog, 1);
-  assert.equal(popup.calls.focus, 2);
-
-  const identity = currentIdentity(page);
-  popup.dirty = false;
-  assert.equal(
-    page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(
-      identity.ownerToken,
-      identity.popupToken,
-      popup,
-    ),
-    true,
-  );
-  assert.equal(broker.popups.length, 2);
-  assert.match(broker.popups[1].html, /pending_latest/);
-  assert.equal(broker.popups[1].html.includes("pending_first"), false);
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("b")), true);
+  const popupB = broker.popups[1];
+  assert.equal(popupA.closed, false);
+  assert.equal(popupB.closed, false);
+  assert.notEqual(popupA.name, popupB.name);
+  assert.deepEqual(popupA.calls, beforeA);
+  assert.equal(page.context.PocketNodePopoutWindow.hasUnsavedChanges(), true);
+  assert.equal(popupA.calls.unsavedDialog, 0);
+  popupA.dirty = false;
+  assert.equal(page.context.PocketNodePopoutWindow.hasUnsavedChanges(), false);
 });
 
-test("P018 Cancel clears only the owned pending open and retains the dirty editor", () => {
+test("P065 keeps cancel compatibility local and closing one PE leaves another untouched", () => {
   const broker = createPopupBroker();
-  const page = createMainPage(broker, "cancel");
-  page.context.PocketNodePopoutWindow.open(editorPayload("current"));
-  const popup = broker.popups[0];
-  popup.dirty = true;
-  page.context.PocketNodePopoutWindow.open(editorPayload("cancelled_pending"));
-  const identity = currentIdentity(page);
+  const page = createMainPage(broker, "close_one");
+  page.context.PocketNodePopoutWindow.open(editorPayload("a"));
+  const popupA = broker.popups[0];
+  page.context.PocketNodePopoutWindow.open(editorPayload("b"));
+  const popupB = broker.popups[1];
+  const identityA = popupA.identity;
+  const beforeB = { ...popupB.calls };
 
-  assert.equal(
-    page.context.PocketNodePopoutWindow.cancelPendingOpen(
-      identity.ownerToken,
-      identity.popupToken,
-      popup,
-    ),
-    true,
-  );
-  assert.equal(popup.dirty, true);
-  assert.equal(popup.closed, false);
-  assert.equal(page.metrics.truthWrites, 0);
-  assert.equal(broker.popups.length, 1);
-
-  page.context.PocketNodePopoutWindow.open(editorPayload("new_pending"));
-  assert.equal(popup.calls.unsavedDialog, 2);
-  assert.equal(popup.calls.focus, 3);
+  assert.equal(page.context.PocketNodePopoutWindow.cancelPendingOpen(identityA.ownerToken, identityA.popupToken, popupA), true);
+  assert.equal(page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(identityA.ownerToken, identityA.popupToken, popupA), true);
+  assert.equal(popupA.closed, true);
+  assert.equal(popupB.closed, false);
+  assert.deepEqual(popupB.calls, beforeB);
+  assert.equal(page.context.PocketNodePopoutWindow.hasUnsavedChanges(), false);
 });
 
-test("P018 Discard closes the exact dirty PE and opens its pending item without a write", () => {
+test("P065 independently authenticates and saves each live PE", async () => {
   const broker = createPopupBroker();
-  const page = createMainPage(broker, "discard");
-  page.context.PocketNodePopoutWindow.open(editorPayload("discard_current"));
-  const popup = broker.popups[0];
-  popup.dirty = true;
-  page.context.PocketNodePopoutWindow.open(editorPayload("discard_pending"));
-  const identity = currentIdentity(page);
-  popup.dirty = false;
+  const page = createMainPage(broker, "save_both");
+  page.context.PocketNodePopoutWindow.open(editorPayload("a"));
+  page.context.PocketNodePopoutWindow.open(editorPayload("b"));
+  const popupA = broker.popups[0];
+  const popupB = broker.popups[1];
+  const identityA = popupA.identity;
+  const identityB = popupB.identity;
 
-  assert.equal(
-    page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(
-      identity.ownerToken,
-      identity.popupToken,
-      popup,
-    ),
-    true,
-  );
-  assert.equal(page.metrics.truthWrites, 0);
-  assert.equal(popup.closed, true);
-  assert.equal(popup.calls.close, 1);
-  assert.equal(broker.popups.length, 2);
-  assert.match(broker.popups[1].html, /discard_pending/);
+  const resultA = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(identityA.ownerToken, identityA.popupToken, editorPayload("a", { body: "A saved" }), popupA);
+  const resultB = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(identityB.ownerToken, identityB.popupToken, editorPayload("b", { body: "B saved" }), popupB);
+  assert.equal(resultA.exported, true);
+  assert.equal(resultB.exported, true);
+  assert.equal(page.metrics.truthWrites, 2);
+  assert.deepEqual(page.metrics.applyAndSaveCalls.map((payload) => payload.body), ["A saved", "B saved"]);
+  assert.equal(page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(identityA.ownerToken, identityA.popupToken, popupA), true);
+  assert.equal(popupA.closed, true);
+  assert.equal(popupB.closed, false);
 });
 
-test("P018 Save delegates once through the owned bridge before opening a fresh pending PE", async () => {
-  const broker = createPopupBroker();
-  const page = createMainPage(broker, "save");
-  page.context.PocketNodePopoutWindow.open(editorPayload("save_current"));
-  const popup = broker.popups[0];
-  popup.dirty = true;
-  page.context.PocketNodePopoutWindow.open(editorPayload("save_pending"));
-  const identity = currentIdentity(page);
-  const outgoing = editorPayload("save_current", { body: "Saved draft" });
-
-  const result = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
-    identity.ownerToken,
-    identity.popupToken,
-    outgoing,
-    popup,
-  );
-  assert.equal(result.ok, true);
-  assert.equal(result.exported, true);
-  assert.equal(page.metrics.truthWrites, 1);
-  assert.equal(page.metrics.applyAndSaveCalls.length, 1);
-  popup.dirty = false;
-  assert.equal(
-    page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(
-      identity.ownerToken,
-      identity.popupToken,
-      popup,
-    ),
-    true,
-  );
-  assert.equal(broker.popups.length, 2);
-  assert.match(broker.popups[1].html, /save_pending/);
-  assert.notEqual(identity.popupToken, currentIdentity(page).popupToken);
-  assert.equal(popup.calls.documentWrite, 1);
-});
-
-test("P018 rejects wrong owner, wrong popup, foreign caller, and replaced popup before save delegation", async () => {
+test("P065 rejects wrong owner, wrong popup, foreign caller, and unregistered popup before save delegation", async () => {
   const broker = createPopupBroker();
   const page = createMainPage(broker, "bridge");
-  page.context.PocketNodePopoutWindow.open(editorPayload("bridge_first"));
+  page.context.PocketNodePopoutWindow.open(editorPayload("bridge_a"));
+  page.context.PocketNodePopoutWindow.open(editorPayload("bridge_b"));
   const first = broker.popups[0];
-  const firstIdentity = currentIdentity(page);
-  const outgoing = editorPayload("bridge_first", { body: "Must stay local" });
+  const second = broker.popups[1];
+  const firstIdentity = first.identity;
+  const secondIdentity = second.identity;
+  const outgoing = editorPayload("bridge_a", { body: "Must stay local" });
   const wrongCalls = [
     ["owner_wrong", firstIdentity.popupToken, first],
     [firstIdentity.ownerToken, "popup_wrong", first],
@@ -492,7 +442,7 @@ test("P018 rejects wrong owner, wrong popup, foreign caller, and replaced popup 
   }
   assert.equal(page.metrics.truthWrites, 0);
 
-  page.context.PocketNodePopoutWindow.open(editorPayload("bridge_replacement"));
+  assert.equal(page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(firstIdentity.ownerToken, firstIdentity.popupToken, first), true);
   const replaced = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
     firstIdentity.ownerToken,
     firstIdentity.popupToken,
@@ -502,13 +452,11 @@ test("P018 rejects wrong owner, wrong popup, foreign caller, and replaced popup 
   assert.equal(replaced.reason, "popup-session-changed");
   assert.equal(page.metrics.truthWrites, 0);
 
-  const current = broker.popups[1];
-  const identity = currentIdentity(page);
   const accepted = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
-    identity.ownerToken,
-    identity.popupToken,
-    editorPayload("bridge_replacement"),
-    current,
+    secondIdentity.ownerToken,
+    secondIdentity.popupToken,
+    editorPayload("bridge_b"),
+    second,
   );
   assert.equal(accepted.ok, true);
   assert.equal(page.metrics.truthWrites, 1);
