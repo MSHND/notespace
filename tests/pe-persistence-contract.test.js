@@ -2825,7 +2825,7 @@ test("P060 main-tree disclosure owns selection and navigation while leaf gutters
   const parentGutter = row("p060_parent").children[0];
   const leafGutter = row("p060_leaf").children[0];
   assert.equal(parentGutter.textContent, "▾");
-  assert.equal(leafGutter.textContent, "▸");
+  assert.equal(leafGutter.textContent, "");
   assert.equal(leafGutter.classList.contains("empty"), true);
 
   let refocusedId = "";
@@ -4571,7 +4571,7 @@ test("P060 PE Outline wakes structural navigation, edits text on one click, and 
   assert.equal(row("p060_parent").getAttribute("aria-selected"), "true");
   assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
   assert.equal(pane.querySelector(".outlineSelect"), null);
-  assert.equal(row("p060_leaf").children[0].textContent, "▸");
+  assert.equal(row("p060_leaf").children[0].textContent, "");
 
   row("p060_leaf").children[0].dispatch("click", { target: row("p060_leaf").children[0] });
   assert.equal(row("p060_leaf").getAttribute("aria-selected"), "true");
@@ -4712,7 +4712,7 @@ test("P063 PE drag feedback is cleaned up and Ctrl/Cmd+Z restores the exact move
   const source = row("p063_pe_b").children[0];
   const target = row("p063_pe_a");
 
-  assert.equal(source.textContent, "▸");
+  assert.equal(source.textContent, "");
   source.dispatch("pointerdown", { clientX: 0, clientY: 0 });
   runtime.document.pointedElement = target.children[0];
   runtime.document.dispatch("pointermove", { clientX: 3, clientY: 4 });

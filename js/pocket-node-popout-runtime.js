@@ -871,7 +871,7 @@
       var toggle = document.createElement("button");
       toggle.type = "button";
       toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
-      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "▸";
+      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "";
       toggle.setAttribute("aria-label", hasChildren(index) ? (block.collapsed ? "Expand branch" : "Collapse branch") : "Select branch");
       installOutlineGutterDrag(toggle, block.id);
       toggle.addEventListener("click", function (ev) {
