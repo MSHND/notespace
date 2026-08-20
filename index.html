@@ -17,6 +17,7 @@
   <div class="app">
     <div class="topbar">
       <div class="title">pocket</div>
+      <input id="search" class="search topbarSearch treeSearch" placeholder="find" aria-label="Filter Pocket">
       <span id="activeDocumentSource" class="activeDocumentSource" aria-live="polite" hidden></span>
       <button id="btnLoad" class="chip utilityChip" title="Choose Pocket file" aria-label="Choose Pocket file" hidden>Choose file</button>
       <button id="btnOpenSynced" class="chip utilityChip" type="button" hidden disabled>Open synced Pocket…</button>
@@ -48,7 +49,6 @@
             <span id="focusPath" class="focusPath">Focus: all</span>
             <span id="modePill" class="modePill" aria-live="polite"></span>
           </div>
-          <input id="search" class="search topbarSearch treeSearch" placeholder="find" aria-label="Filter Pocket">
         </div>
         <div id="treeWrap" class="treeWrap" tabindex="0">
           <ul id="treeRoot" class="treeRoot"></ul>

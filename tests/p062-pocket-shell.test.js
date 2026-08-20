@@ -28,10 +28,12 @@ test("P062 no-owner and open-owner shells expose only their intended permanent c
   assert.match(history, /classList\.toggle\("pocketShellClosed", !shellOpen\)/);
   assert.match(css, /body\.pocketShellClosed:not\(\.pipMode\) \.topbar\s*\{[^}]*display: none !important;/s);
   assert.match(topbar, /<div class="title">pocket<\/div>/);
+  assert.match(topbar, /id="search"[^>]*class="[^"]*topbarSearch/);
   assert.match(topbar, /id="btnExportTree"[^>]*>save<\/button>/);
   assert.match(topbar, /id="btnMore"[^>]*>⋯<\/button>/);
-  assert.doesNotMatch(topbar, /id="search"/);
-  assert.match(treeHead, /id="search"[^>]*class="[^"]*treeSearch/);
+  assert.doesNotMatch(treeHead, /id="search"/);
+  assert.match(treeHead, /id="focusPath"/);
+  assert.match(treeHead, /id="modePill"/);
   assert.match(render, /addAction\("Open"/);
   assert.match(render, /addAction\("New"/);
 
@@ -42,6 +44,25 @@ test("P062 no-owner and open-owner shells expose only their intended permanent c
     assert.match(topbar, new RegExp(`id="${id}"[^>]*hidden`), id);
     assert.match(css, new RegExp(`#${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`), id);
   }
+});
+
+test("P068 open shell balances Find and Save while the ordinary tree header stays metadata-only", () => {
+  const index = source("index.html");
+  const topbar = section(index, '<div class="topbar">', '<p id="vaultRecoveryNotice"');
+  const treeHead = section(index, '<div class="panelHead treeHead">', '<div id="treeWrap"');
+  const css = source("topbar.css");
+  const baseCss = source("styles.css");
+
+  assert.equal((topbar.match(/id="search"/g) || []).length, 1);
+  assert.doesNotMatch(treeHead, /class="[^"]*treeSearch/);
+  assert.match(topbar, /id="search"[^>]*aria-label="Filter Pocket"/);
+  assert.match(topbar, /id="btnExportTree"[^>]*>save<\/button>/);
+  assert.match(topbar, /id="btnMore"[^>]*>⋯<\/button>/);
+  assert.match(css, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar \{[\s\S]*?display: flex !important;/);
+  assert.match(css, /body:not\(\.pipMode\) \.topbar \.grow \{[\s\S]*?flex: 1 1 auto !important;/);
+  assert.match(css, /body\.pocketShellOpen\.focusedView \.panelHead\.treeHead/);
+  assert.match(css, /body\.pocketShellOpen\.moveModeActive \.panelHead\.treeHead/);
+  assert.match(baseCss, /body:not\(.focusedView\):not\(.moveModeActive\) \.panelHead\.treeHead \{[\s\S]*?height: 0;/);
 });
 
 test("P062 app menu contains Pocket actions only and reuses established doorways", () => {
