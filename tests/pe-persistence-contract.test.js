@@ -2815,6 +2815,110 @@ test("P058 main-tree Ctrl/Cmd arrows move whole branches while plain arrows stay
   assert.equal(visibleDelta, 1);
 });
 
+test("P067 repeated main structural arrows stay one-step, persist once, and retain move undo", () => {
+  class TreeKeyboardElement {}
+  const search = new TreeKeyboardElement();
+  const context = {
+    URL, Date, Math, JSON, Map, Set, Promise, Object, Array, String, Number, Boolean,
+    location: { href: "https://example.test/index.html" },
+    HTMLElement: TreeKeyboardElement,
+    HTMLInputElement: TreeKeyboardElement,
+    document: { getElementById(id) { return id === "search" ? search : null; } },
+  };
+  context.window = context;
+  context.globalThis = context;
+  vm.createContext(context);
+  runScript(context, "js/pocket-state.js");
+  const state = resetState(context, [
+    syntheticNode("p067_a", { label: "A", parentId: "root", order: 1001 }),
+    syntheticNode("p067_b", { label: "B", parentId: "root", order: 1002 }),
+    syntheticNode("p067_c", { label: "C", parentId: "root", order: 1003 }),
+    syntheticNode("p067_d", { label: "D", parentId: "root", order: 1004 }),
+  ]);
+  let renders = 0;
+  let pipSnapshots = 0;
+  let workspaceSaves = 0;
+  let refocuses = 0;
+  let touchedRows = 0;
+  context.cleanText = (value) => String(value || "");
+  context.renderTree = () => { renders += 1; };
+  context.persistPipSnapshot = () => { pipSnapshots += 1; context.saveWorkspaceState(); };
+  context.saveWorkspaceState = () => { workspaceSaves += 1; };
+  context.refocusTreeNavigation = () => { refocuses += 1; };
+  context.flashTouchedRow = () => { touchedRows += 1; };
+  context.recordOp = () => {};
+  context.requirePocketFileForChanges = () => true;
+  context.isDetailsEditorOpen = () => false;
+  context.isControlsHelpOpen = () => false;
+  context.isCommandPaletteOpen = () => false;
+  context.isPocketVaultRecoveryFlowOpen = () => false;
+  context.isPocketDeviceChangesDecisionOpen = () => false;
+  context.nodeMap = () => new Map(lexicalState(context).nodes.map((node) => [node.id, node]));
+  context.compareSiblingOrder = (left, right) => Number(left.order) - Number(right.order);
+  context.renumberChildren = (parentId) => {
+    lexicalState(context).nodes
+      .filter((node) => (node.parentId || "root") === (parentId || "root"))
+      .sort(context.compareSiblingOrder)
+      .forEach((node, index) => { node.order = 1001 + index; });
+  };
+  context.maxSiblingOrder = (parentId) => Math.max(1000, ...lexicalState(context).nodes
+    .filter((node) => (node.parentId || "root") === (parentId || "root"))
+    .map((node) => Number(node.order) || 0));
+  context.nowIso = () => "2026-01-01T00:00:00.000Z";
+  context.expandPathToNode = () => {};
+  context.requestAnimationFrame = (callback) => callback();
+  runScript(context, "js/pocket-history-status.js");
+  context.setStatus = () => {};
+  context.refreshMeta = () => {};
+  context.recordOp = () => {};
+  runScript(context, "js/pocket-tree-actions.js");
+  context.refocusTreeNavigation = () => { refocuses += 1; };
+  context.flashTouchedRow = () => { touchedRows += 1; };
+  state.inlineEdit.id = "";
+  state.detailsEdit.id = "";
+
+  const dispatch = (key, extras = {}) => {
+    const event = {
+      key,
+      ctrlKey: extras.ctrlKey === true,
+      metaKey: extras.metaKey === true,
+      altKey: false,
+      shiftKey: false,
+      target: null,
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    context.handleTreeKeydown(event);
+    return event;
+  };
+  state.selectedId = "p067_d";
+  for (let index = 0; index < 3; index += 1) {
+    assert.equal(dispatch("ArrowUp", { ctrlKey: true }).defaultPrevented, true, `up ${index}`);
+  }
+  assert.deepEqual(state.nodes.filter((node) => node.parentId === "root").sort((a, b) => a.order - b.order).map((node) => node.id), [
+    "p067_d", "p067_a", "p067_b", "p067_c",
+  ]);
+  for (let index = 0; index < 2; index += 1) {
+    assert.equal(dispatch("ArrowDown", { metaKey: true }).defaultPrevented, true, `down ${index}`);
+  }
+  assert.deepEqual(state.nodes.filter((node) => node.parentId === "root").sort((a, b) => a.order - b.order).map((node) => node.id), [
+    "p067_a", "p067_b", "p067_d", "p067_c",
+  ]);
+  assert.equal(dispatch("ArrowRight", { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(state.nodes.find((node) => node.id === "p067_d").parentId, "p067_b");
+  assert.equal(dispatch("ArrowLeft", { ctrlKey: true }).defaultPrevented, true);
+  assert.equal(state.nodes.find((node) => node.id === "p067_d").parentId, "root");
+  assert.equal(state.selectedId, "p067_d");
+  assert.equal(renders, 7);
+  assert.equal(pipSnapshots, 7);
+  assert.equal(workspaceSaves, 7);
+  assert.equal(refocuses, 7);
+  assert.equal(touchedRows, 0);
+
+  assert.equal(context.undoLastMoveAction(), undefined);
+  assert.equal(state.nodes.find((node) => node.id === "p067_d").parentId, "p067_b");
+});
+
 test("P060 main-tree disclosure owns selection and navigation while leaf gutters keep a structural marker", () => {
   const harness = createTreeRenderHarness([
     syntheticNode("p060_parent", { label: "Parent", parentId: "root", order: 1001 }),
@@ -4552,6 +4656,41 @@ test("P058a PE Outline outdents a whole branch structurally and persists explici
   assert.deepEqual(runtime.saveCalls[0].outline.map((block) => [block.id, block.text, block.depth, block.collapsed]), [
     ["p058a_parent", "Parent", 0, false], ["p058a_b", "B", 1, false], ["p058a_a", "A\n", 0, false], ["p058a_a_child", "A child", 1, false], ["p058a_outer", "Outer", 0, false],
   ]);
+});
+
+test("P067 PE repeated structural arrows remain one-step and editable arrows stay native", () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p067_a", text: "A", depth: 0, collapsed: false },
+      { id: "p067_b", text: "B", depth: 0, collapsed: false },
+      { id: "p067_c", text: "C", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const text = (id) => row(id).children[1];
+  const select = (id) => row(id).children[0];
+  row("p067_b").dispatch("click", { target: row("p067_b") });
+  const moves = [
+    ["ArrowUp", { ctrlKey: true }],
+    ["ArrowDown", { metaKey: true }],
+    ["ArrowUp", { ctrlKey: true }],
+    ["ArrowDown", { metaKey: true }],
+  ];
+  for (const [key, modifiers] of moves) {
+    const event = runtime.document.dispatch("keydown", { key, target: select("p067_b"), ...modifiers });
+    assert.equal(event.defaultPrevented, true);
+  }
+  assert.deepEqual(rows().map((candidate) => candidate.children[1].textContent), ["A", "B", "C"]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+
+  text("p067_b").dispatch("click", { target: text("p067_b") });
+  const editableArrow = text("p067_b").dispatch("keydown", {
+    key: "ArrowRight", ctrlKey: true, target: text("p067_b"),
+  });
+  assert.equal(editableArrow.defaultPrevented, false);
 });
 
 test("P060 PE Outline wakes structural navigation, edits text on one click, and keeps a structural marker without selection chrome", () => {

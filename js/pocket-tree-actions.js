@@ -201,7 +201,6 @@ function indentNodeById(nodeId) {
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
-  requestAnimationFrame(() => flashTouchedRow(node.id));
   setStatus(`Tucked under "${previousSibling.label}".`, "ok", {
     action: { label: "Undo", onClick: () => undoLastMoveAction() },
   });
@@ -239,7 +238,6 @@ function outdentNodeById(nodeId) {
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
-  requestAnimationFrame(() => flashTouchedRow(node.id));
   setStatus(`Lifted up a level.`, "ok", {
     action: { label: "Undo", onClick: () => undoLastMoveAction() },
   });
@@ -277,10 +275,8 @@ function moveNodeWithinSiblings(nodeId, direction) {
   state.selectedId = node.id;
   recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
   renderTree();
-  saveWorkspaceState();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
-  requestAnimationFrame(() => flashTouchedRow(node.id));
   setStatus(`${direction < 0 ? "Moved up" : "Moved down"}.`, "ok", {
     action: { label: "Undo", onClick: () => undoLastMoveAction() },
   });
