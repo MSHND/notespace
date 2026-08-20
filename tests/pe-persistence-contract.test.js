@@ -4744,6 +4744,80 @@ test("P063 PE drag feedback is cleaned up and Ctrl/Cmd+Z restores the exact move
   assert.equal(textUndo.defaultPrevented, false);
 });
 
+test("P063a keeps a saved PE drag undoable and protects its restored unsaved structure", async () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p063a_saved_a", text: "A", depth: 0, collapsed: false },
+      { id: "p063a_saved_a_child", text: "A child", depth: 1, collapsed: false },
+      { id: "p063a_saved_b", text: "B", depth: 0, collapsed: false },
+    ],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const labels = () => rows().map((candidate) => candidate.children[1].textContent);
+
+  row("p063a_saved_b").children[0].dispatch("pointerdown", { clientX: 0, clientY: 0 });
+  runtime.document.pointedElement = row("p063a_saved_a").children[0];
+  runtime.document.dispatch("pointermove", { clientX: 7, clientY: 2 });
+  runtime.document.dispatch("pointerup", { clientX: 7, clientY: 2 });
+  assert.deepEqual(labels(), ["B", "A", "A child"]);
+
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  const undo = runtime.document.dispatch("keydown", { key: "z", ctrlKey: true, target: row("p063a_saved_b").children[0] });
+  assert.equal(undo.defaultPrevented, true);
+  assert.deepEqual(labels(), ["A", "A child", "B"]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(runtime.window.dispatch("beforeunload").defaultPrevented, true);
+
+  runtime.controls.get("closeBtn").dispatch("click");
+  assert.equal(runtime.controls.get("unsavedDialog").hidden, false);
+});
+
+test("P063a preserves PE drag undo across an unchanged failed save and invalidates it for a later outline edit", async () => {
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p063a_failed_a", text: "A", depth: 0, collapsed: false },
+      { id: "p063a_failed_a_child", text: "A child", depth: 1, collapsed: false },
+      { id: "p063a_failed_b", text: "B", depth: 0, collapsed: false },
+    ],
+  }), {
+    applyAndSave() {
+      return { ok: false, applied: false, changed: false, exported: false, reason: "cancelled" };
+    },
+  });
+  const pane = runtime.controls.get("outlinePane");
+  const rows = () => pane.querySelectorAll(".outlineRow[data-block-id]");
+  const row = (id) => rows().find((candidate) => candidate.getAttribute("data-block-id") === id);
+  const labels = () => rows().map((candidate) => candidate.children[1].textContent);
+  const dragBBeforeA = () => {
+    row("p063a_failed_b").children[0].dispatch("pointerdown", { clientX: 0, clientY: 0 });
+    runtime.document.pointedElement = row("p063a_failed_a").children[0];
+    runtime.document.dispatch("pointermove", { clientX: 7, clientY: 2 });
+    runtime.document.dispatch("pointerup", { clientX: 7, clientY: 2 });
+  };
+
+  dragBBeforeA();
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  const undoAfterFailedSave = runtime.document.dispatch("keydown", { key: "z", ctrlKey: true, target: row("p063a_failed_b").children[0] });
+  assert.equal(undoAfterFailedSave.defaultPrevented, true);
+  assert.deepEqual(labels(), ["A", "A child", "B"]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+
+  dragBBeforeA();
+  row("p063a_failed_a").children[0].dispatch("click");
+  assert.deepEqual(labels(), ["B", "A"]);
+  const staleUndo = runtime.document.dispatch("keydown", { key: "z", ctrlKey: true, target: row("p063a_failed_b").children[0] });
+  assert.equal(staleUndo.defaultPrevented, false);
+  assert.deepEqual(labels(), ["B", "A"]);
+});
+
 test("generated PE runtime accepts and forwards a synced source identity", () => {
   const runtime = executeControlledRuntime(runtimeEditablePayload({
     sourceOwnerKind: "synced",
