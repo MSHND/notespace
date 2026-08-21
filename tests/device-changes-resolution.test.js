@@ -4234,3 +4234,89 @@ test("Phone mode invokes the shared difference review and never directly restore
   assert.equal(state.nodes[0].label, "Current file");
   assert.equal(body.classList.contains("phoneMode"), true);
 });
+
+test("Phone mode auto-enters only for coarse phone-sized input and remains ephemeral", () => {
+  const makeContext = ({ saved = null, matches = false, throws = false } = {}) => {
+    const storage = new Map(saved === null ? [] : [["pocket.phoneMode.v1", saved]]);
+    const body = { classList: createClassList() };
+    const button = {
+      classList: createClassList(),
+      dataset: {},
+      setAttribute() {},
+      addEventListener() {},
+    };
+    const more = {
+      classList: createClassList(),
+      dataset: { moreButtonWired: "1" },
+      setAttribute() {},
+      addEventListener() {},
+    };
+    let changeListener = null;
+    const context = {
+      window: null,
+      globalThis: null,
+      Date,
+      document: {
+        body,
+        readyState: "complete",
+        getElementById(id) {
+          if (id === "btnPhoneMode") return button;
+          if (id === "btnMore") return more;
+          return null;
+        },
+        querySelector() { return null; },
+        createElement() { throw new Error("unexpected element creation"); },
+        addEventListener() {},
+      },
+      localStorage: {
+        getItem(key) { return storage.has(String(key)) ? storage.get(String(key)) : null; },
+        setItem(key, value) { storage.set(String(key), String(value)); },
+      },
+      matchMedia() {
+        if (throws) throw new Error("matchMedia unavailable");
+        return {
+          matches,
+          addEventListener(_type, callback) { changeListener = callback; },
+        };
+      },
+      requestAnimationFrame(callback) { callback(); return 1; },
+    };
+    context.window = context;
+    context.globalThis = context;
+    vm.createContext(context);
+    vm.runInContext(source("js/pocket-phone-mode.js"), context, { filename: "js/pocket-phone-mode.js" });
+    return {
+      context,
+      body,
+      storage,
+      trigger(matchesNow) {
+        if (changeListener) changeListener({ matches: matchesNow });
+      },
+    };
+  };
+
+  const freshPhone = makeContext({ matches: true });
+  assert.equal(freshPhone.body.classList.contains("phoneMode"), true);
+  assert.equal(freshPhone.storage.has("pocket.phoneMode.v1"), false);
+
+  const legacyOffPhone = makeContext({ saved: "0", matches: true });
+  assert.equal(legacyOffPhone.body.classList.contains("phoneMode"), true);
+  assert.equal(legacyOffPhone.storage.get("pocket.phoneMode.v1"), "0");
+
+  const fineDesktop = makeContext({ matches: false });
+  assert.equal(fineDesktop.body.classList.contains("phoneMode"), false);
+
+  const legacyOnDesktop = makeContext({ saved: "1", matches: false });
+  assert.equal(legacyOnDesktop.body.classList.contains("phoneMode"), true);
+
+  const rotatedPhone = makeContext({ matches: false });
+  assert.equal(rotatedPhone.body.classList.contains("phoneMode"), false);
+  rotatedPhone.trigger(true);
+  assert.equal(rotatedPhone.body.classList.contains("phoneMode"), true);
+  assert.equal(rotatedPhone.storage.has("pocket.phoneMode.v1"), false);
+  rotatedPhone.trigger(false);
+  assert.equal(rotatedPhone.body.classList.contains("phoneMode"), true);
+
+  const unavailableMedia = makeContext({ matches: true, throws: true });
+  assert.equal(unavailableMedia.body.classList.contains("phoneMode"), false);
+});

@@ -6,6 +6,7 @@
 
   const STORAGE_KEY = "pocket.phoneMode.v1";
   const REVIEW_SEEN_KEY = "pocket.phoneMode.autoRestoreSeen.v1";
+  const AUTO_PHONE_QUERY = "(max-width: 700px) and (pointer: coarse)";
 
   function readSavedMode() {
     try {
@@ -72,9 +73,9 @@
     return opened;
   }
 
-  function setPhoneMode(enabled) {
+  function setPhoneMode(enabled, options = {}) {
     document.body.classList.toggle("phoneMode", enabled);
-    saveMode(enabled);
+    if (options.persist !== false) saveMode(enabled);
     syncButton(document.getElementById("btnPhoneMode"), enabled);
     ensureMoreButton();
     if (enabled) {
@@ -86,11 +87,33 @@
     setPhoneMode(!document.body.classList.contains("phoneMode"));
   }
 
+  function readAutoPhoneQuery() {
+    if (typeof global.matchMedia !== "function") return null;
+    try {
+      return global.matchMedia(AUTO_PHONE_QUERY);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function enablePhoneModeForAutoMatch(event) {
+    if (!event?.matches || document.body.classList.contains("phoneMode")) return;
+    setPhoneMode(true, { persist: false });
+  }
+
   function initPhoneMode() {
     ensureMoreButton();
     const button = document.getElementById("btnPhoneMode");
     if (button) button.addEventListener("click", togglePhoneMode);
-    setPhoneMode(readSavedMode());
+    const autoPhoneQuery = readAutoPhoneQuery();
+    if (autoPhoneQuery) {
+      if (typeof autoPhoneQuery.addEventListener === "function") {
+        autoPhoneQuery.addEventListener("change", enablePhoneModeForAutoMatch);
+      } else if (typeof autoPhoneQuery.addListener === "function") {
+        autoPhoneQuery.addListener(enablePhoneModeForAutoMatch);
+      }
+    }
+    setPhoneMode(readSavedMode() || !!autoPhoneQuery?.matches, { persist: false });
   }
 
   global.PocketPhoneMode = Object.freeze({
