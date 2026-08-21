@@ -2661,6 +2661,111 @@ test("Phone editor cutover uses the in-page detail owner for safe nodes and keep
   assert.equal(desktop.standaloneCalls, 1);
 });
 
+test("P073a proves Phone detail Save and Cancel preserve Outline metadata and defer truth writes", () => {
+  class FakeHTMLElement {
+    constructor() {
+      this.hidden = true;
+      this.textContent = "";
+      this.title = "";
+      this.classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+    }
+    addEventListener() {}
+    focus() {}
+    select() {}
+  }
+  class FakeInput extends FakeHTMLElement {
+    constructor() {
+      super();
+      this.value = "";
+      this.checked = false;
+    }
+  }
+  class FakeTextArea extends FakeInput {}
+
+  const makeContext = (ops = []) => {
+    const elements = new Map([
+      ["detailOverlay", new FakeHTMLElement()],
+      ["detailEditorTitle", new FakeHTMLElement()],
+      ["detailEditorPath", new FakeHTMLElement()],
+      ["detailEditorLabel", new FakeInput()],
+      ["detailEditorBody", new FakeTextArea()],
+      ["detailEditorUrgent", new FakeInput()],
+      ["detailEditorCopyContext", new FakeInput()],
+    ]);
+    const context = createFullContractContext({
+      HTMLElement: FakeHTMLElement,
+      HTMLInputElement: FakeInput,
+      document: {
+        body: { classList: { add() {}, remove() {}, toggle() {}, contains(name) { return name === "phoneMode"; } } },
+        getElementById(id) { return elements.get(id) || null; },
+        addEventListener() {},
+      },
+    });
+    context.HTMLTextAreaElement = FakeTextArea;
+    context.flashTouchedRow = () => {};
+    context.persistPipSnapshot = () => {};
+    context.saveLocalSafetySnapshot = () => {};
+    const node = normaliseOne(context, fixture("current-outline-v1.json").mainThoughtTree[0]);
+    node.id = "p073a_phone_note";
+    const state = resetState(context, [node], ops);
+    state.operationHighWater = ops.reduce((highest, operation) => Math.max(highest, Number(operation?.seq) || 0), 0);
+    let standaloneCalls = 0;
+    context.PocketPeEditor = {
+      open() {
+        standaloneCalls += 1;
+        return true;
+      },
+    };
+    runScript(context, "js/pocket-editor-cutover-v3.js");
+    return { context, elements, state, node, standaloneCalls: () => standaloneCalls };
+  };
+
+  const save = makeContext();
+  const editorBefore = plain(save.state.nodes[0].editor);
+  const originalTitle = save.state.nodes[0].label;
+  const originalDetails = save.state.nodes[0].details;
+  assert.equal(save.context.openPocketNodeEditor(save.node.id), true);
+  assert.equal(save.standaloneCalls(), 0);
+  assert.equal(save.elements.get("detailOverlay").hidden, false);
+  assert.equal(save.state.detailsEdit.id, save.node.id);
+  save.elements.get("detailEditorLabel").value = "Phone saved title";
+  save.elements.get("detailEditorBody").value = "Phone saved Notes";
+  save.context.saveDetailsEditor();
+  const savedNode = save.state.nodes[0];
+  assert.equal(savedNode.label, "Phone saved title");
+  assert.equal(savedNode.details, "Phone saved Notes");
+  assert.notEqual(savedNode.label, originalTitle);
+  assert.notEqual(savedNode.details, originalDetails);
+  assert.deepEqual(plain(savedNode.editor), editorBefore);
+  assert.ok(save.state.ops.some((operation) => operation.type === "details_edit"));
+  assert.equal(save.context.__surfaceCalls.exportTree, 0);
+  assert.equal(save.context.__surfaceCalls.writeTruthFile, 0);
+  assert.equal(save.state.detailsEdit.id, "");
+  assert.equal(save.elements.get("detailOverlay").hidden, true);
+
+  const unrelated = { type: "unrelated_change", id: "keep-me", seq: 1 };
+  const cancel = makeContext([unrelated]);
+  const cancelEditorBefore = plain(cancel.state.nodes[0].editor);
+  const cancelTitle = cancel.state.nodes[0].label;
+  const cancelDetails = cancel.state.nodes[0].details;
+  assert.equal(cancel.context.openPocketNodeEditor(cancel.node.id), true);
+  cancel.elements.get("detailEditorLabel").value = "Draft title";
+  cancel.elements.get("detailEditorBody").value = "Draft Notes";
+  cancel.context.stageDetailsEditorDraft();
+  assert.equal(cancel.state.nodes[0].label, "Draft title");
+  assert.equal(cancel.state.nodes[0].details, "Draft Notes");
+  assert.ok(cancel.state.ops.length > 1);
+  cancel.context.closeDetailsEditor({ restoreFocus: false, revertDraft: true });
+  assert.equal(cancel.state.nodes[0].label, cancelTitle);
+  assert.equal(cancel.state.nodes[0].details, cancelDetails);
+  assert.deepEqual(plain(cancel.state.nodes[0].editor), cancelEditorBefore);
+  assert.deepEqual(plain(cancel.state.ops), [unrelated]);
+  assert.equal(cancel.state.detailsEdit.id, "");
+  assert.equal(cancel.elements.get("detailOverlay").hidden, true);
+  assert.equal(cancel.context.__surfaceCalls.exportTree, 0);
+  assert.equal(cancel.context.__surfaceCalls.writeTruthFile, 0);
+});
+
 test("active and compatibility popouts contain no Notes-Outline conversion route", () => {
   for (const file of [
     "js/pocket-node-popout-runtime.js",
