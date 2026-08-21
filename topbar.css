@@ -171,6 +171,7 @@ body.pocketShellOpen:not(.pipMode) .topbar {
   display: grid !important;
   grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   align-items: center !important;
+  opacity: 1 !important;
   min-height: 30px !important;
   gap: 9px !important;
   padding: 2px 10px !important;
@@ -231,7 +232,8 @@ body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
 body.pocketShellOpen:not(.pipMode) .topbar .title {
   margin-right: 2px !important;
   font-size: 12px !important;
-  font-weight: 650 !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
 }
 
 body.pocketShellOpen:not(.pipMode) .topbar #btnExportTree,
@@ -241,6 +243,7 @@ body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
   color: rgba(71, 85, 105, 0.78) !important;
   font-size: 12px !important;
   font-weight: 400 !important;
+  letter-spacing: 0 !important;
 }
 
 body.pocketShellOpen:not(.pipMode) .topbar #btnMore {

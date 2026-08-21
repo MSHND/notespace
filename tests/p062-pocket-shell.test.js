@@ -79,6 +79,20 @@ test("P069 keeps blank leaf gutters grabbable and Find visibly anchored without 
   assert.match(topbar, /#search:focus,[\s\S]*?#search:not\(:placeholder-shown\)[\s\S]*?width: min\(150px, 100%\)/);
 });
 
+test("P070 sharpens ordinary desktop typography without touching narrow overrides or adding rendering hacks", () => {
+  const css = source("styles.css");
+  const topbar = source("topbar.css");
+  const label = section(css, "    .label {", "    .row.urgent .label,");
+  const narrow = section(css, "    @media (max-width: 420px) {", "    @media (max-width: 860px),");
+
+  assert.match(label, /font-size: 15px;[\s\S]*font-weight: 500;[\s\S]*line-height: 20px;/);
+  assert.match(narrow, /\.label\s*\{[\s\S]*font-size: 13\.5px;[\s\S]*line-height: 1\.24;/);
+  assert.match(topbar, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar \{[\s\S]*?opacity: 1 !important;/);
+  assert.match(topbar, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar \.title \{[\s\S]*?font-weight: 600 !important;[\s\S]*?letter-spacing: 0 !important;/);
+  assert.match(topbar, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar #btnExportTree,[\s\S]*?#btnMore \{[\s\S]*?font-weight: 400 !important;[\s\S]*?letter-spacing: 0 !important;/);
+  assert.doesNotMatch(`${css}\n${topbar}`, /-webkit-font-smoothing|text-rendering\s*:|zoom\s*:/);
+});
+
 test("P062 app menu contains Pocket actions only and reuses established doorways", () => {
   const index = source("index.html");
   const appMenu = section(index, '<div id="commandOverlay"', '<div id="pocketOpenOverlay"');
