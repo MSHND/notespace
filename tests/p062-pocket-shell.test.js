@@ -58,11 +58,25 @@ test("P068 open shell balances Find and Save while the ordinary tree header stay
   assert.match(topbar, /id="search"[^>]*aria-label="Filter Pocket"/);
   assert.match(topbar, /id="btnExportTree"[^>]*>save<\/button>/);
   assert.match(topbar, /id="btnMore"[^>]*>⋯<\/button>/);
-  assert.match(css, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar \{[\s\S]*?display: flex !important;/);
+  assert.match(css, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar \{[\s\S]*?display: grid !important;/);
+  assert.match(css, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
   assert.match(css, /body:not\(\.pipMode\) \.topbar \.grow \{[\s\S]*?flex: 1 1 auto !important;/);
   assert.match(css, /body\.pocketShellOpen\.focusedView \.panelHead\.treeHead/);
   assert.match(css, /body\.pocketShellOpen\.moveModeActive \.panelHead\.treeHead/);
   assert.match(baseCss, /body:not\(.focusedView\):not\(.moveModeActive\) \.panelHead\.treeHead \{[\s\S]*?height: 0;/);
+});
+
+test("P069 keeps blank leaf gutters grabbable and Find visibly anchored without focus reflow", () => {
+  const css = source("styles.css");
+  const topbar = source("topbar.css");
+  const actions = source("js/pocket-tree-actions.js");
+
+  assert.match(css, /\.twisty\s*\{[\s\S]*?min-width: 18px;[\s\S]*?min-height: 24px;[\s\S]*?height: 24px;/);
+  assert.match(css, /\.twisty\.empty\s*\{[^}]*color: transparent;/);
+  assert.match(actions, /recordOp\(\{ type: direction < 0 \? "move_up"[\s\S]*?refreshSaveState\(\)/);
+  assert.match(actions, /recordOp\(\{ type: "drag_branch"[\s\S]*?refreshSaveState\(\)/);
+  assert.match(topbar, /body\.pocketShellOpen:not\(\.pipMode\) \.topbar #search\s*\{[\s\S]*?border: 1px solid/);
+  assert.match(topbar, /#search:focus,[\s\S]*?#search:not\(:placeholder-shown\)[\s\S]*?width: min\(150px, 100%\)/);
 });
 
 test("P062 app menu contains Pocket actions only and reuses established doorways", () => {

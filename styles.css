@@ -765,6 +765,12 @@
     }
     .twisty {
       width: 18px;
+      min-width: 18px;
+      min-height: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       text-align: center;
       color: #4b5563;
       border: 0;
@@ -777,7 +783,7 @@
       user-select: none;
     }
     .twisty { cursor: grab; }
-    .twisty.empty { visibility: visible; color: rgba(100, 116, 139, 0.42); }
+    .twisty.empty { visibility: visible; color: transparent; }
     .twisty.branchDragSource { visibility: visible; cursor: grabbing; background: rgba(37, 99, 235, 0.12); border-radius: 6px; }
     .row.branchDragLifted { opacity: 0.54; }
     .row.branchDropBefore, .row.branchDropAfter, .row.branchDropInside { position: relative; }

@@ -198,6 +198,7 @@ function indentNodeById(nodeId) {
   state.selectedId = node.id;
   expandPathToNode(node.id);
   recordOp({ type: "indent", id: node.id, newParentId: previousSibling.id });
+  if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
@@ -235,6 +236,7 @@ function outdentNodeById(nodeId) {
   state.selectedId = node.id;
   expandPathToNode(node.id);
   recordOp({ type: "outdent", id: node.id, newParentId: grandParentId, afterId: parent.id });
+  if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
@@ -274,6 +276,7 @@ function moveNodeWithinSiblings(nodeId, direction) {
   node.updatedAt = nowIso();
   state.selectedId = node.id;
   recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
+  if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
@@ -331,8 +334,8 @@ function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
   state.selectedId = node.id;
   expandPathToNode(node.id);
   recordOp({ type: "drag_branch", id: node.id, targetId: target.id, position, newParentId: nextParentId });
+  if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
-  saveWorkspaceState();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
   requestAnimationFrame(() => flashTouchedRow(node.id));

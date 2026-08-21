@@ -2919,6 +2919,53 @@ test("P067 repeated main structural arrows stay one-step, persist once, and reta
   assert.equal(state.nodes.find((node) => node.id === "p067_d").parentId, "p067_b");
 });
 
+test("P069 Main structural moves mark Save immediately without a selection refresh", () => {
+  const saveButton = {
+    textContent: "save",
+    disabled: false,
+    title: "",
+    attributes: {},
+    classList: { add() {}, remove() {} },
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const context = createFullContractContext({
+    document: {
+      body: { classList },
+      activeElement: null,
+      getElementById(id) { return id === "btnExportTree" ? saveButton : null; },
+      addEventListener() {},
+    },
+  });
+  context.renderTree = () => {};
+  context.refreshMeta = () => { throw new Error("structural moves must use the small Save refresh"); };
+  context.refocusTreeNavigation = () => {};
+  context.setStatus = () => {};
+  context.persistPipSnapshot = () => {};
+  context.flashTouchedRow = () => {};
+  context.requestAnimationFrame = (callback) => callback();
+  context.requirePocketFileForChanges = () => true;
+  context.maxSiblingOrder = (parentId) => Math.max(1000, ...lexicalState(context).nodes
+    .filter((node) => (node.parentId || "root") === (parentId || "root"))
+    .map((node) => Number(node.order) || 0));
+  const state = resetState(context, [
+    syntheticNode("p069_a", { label: "A", parentId: "root", order: 1001 }),
+    syntheticNode("p069_b", { label: "B", parentId: "root", order: 1002 }),
+  ]);
+  runScript(context, "js/pocket-tree-actions.js");
+
+  state.selectedId = "p069_b";
+  context.moveNodeWithinSiblings("p069_b", -1);
+  assert.equal(saveButton.textContent, "save*");
+  assert.equal(state.selectedId, "p069_b");
+  assert.equal(state.ops.length, 1);
+
+  context.moveTreeBranchByDrop("p069_b", "p069_a", "inside");
+  assert.equal(saveButton.textContent, "save*");
+  assert.equal(state.selectedId, "p069_b");
+  assert.equal(state.ops.length, 2);
+});
+
 test("P060 main-tree disclosure owns selection and navigation while leaf gutters keep a structural marker", () => {
   const harness = createTreeRenderHarness([
     syntheticNode("p060_parent", { label: "Parent", parentId: "root", order: 1001 }),
