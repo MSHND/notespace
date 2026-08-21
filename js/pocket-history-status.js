@@ -433,11 +433,13 @@ function flashSaveChip(label = "saved") {
   }
   el.btnExportTree.textContent = nextLabel;
   el.btnExportTree.classList.add("on");
-  saveChipTimer = window.setTimeout(() => {
+  const timer = window.setTimeout(() => {
+    if (saveChipTimer !== timer) return;
     el.btnExportTree.classList.remove("on");
     saveChipTimer = null;
     refreshMeta();
   }, 1200);
+  saveChipTimer = timer;
 }
 
 function refreshSaveState() {
@@ -449,6 +451,11 @@ function refreshSaveState() {
   const vaultActive = typeof isPocketVaultOwnerActive === "function"
     && isPocketVaultOwnerActive();
   const saveState = { hasData, unsavedCount, hasUnsavedDetails, hasUnsaved, vaultActive };
+  if (hasUnsaved && saveChipTimer) {
+    clearTimeout(saveChipTimer);
+    saveChipTimer = null;
+    if (el.btnExportTree) el.btnExportTree.classList.remove("on");
+  }
   if (!el.btnExportTree) return saveState;
 
   const isSaving = !!state.saveInProgress;

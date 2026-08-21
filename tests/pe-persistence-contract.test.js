@@ -2966,6 +2966,94 @@ test("P069 Main structural moves mark Save immediately without a selection refre
   assert.equal(state.ops.length, 2);
 });
 
+test("P069a dirty structural state supersedes a saved flash while clean flashes still complete", () => {
+  const classes = new Set();
+  const saveButton = {
+    textContent: "save",
+    disabled: false,
+    title: "",
+    attributes: {},
+    classList: {
+      add(name) { classes.add(name); },
+      remove(name) { classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const context = createBrowserContext({
+    document: {
+      body: { classList },
+      activeElement: null,
+      getElementById(id) { return id === "btnExportTree" ? saveButton : null; },
+      addEventListener() {},
+    },
+  });
+  loadScriptsInIndexOrder(context, FULL_CONTRACT_SCRIPTS);
+  let nextTimer = 0;
+  const timers = new Map();
+  const clearedTimers = [];
+  context.setTimeout = (callback) => {
+    const id = ++nextTimer;
+    timers.set(id, callback);
+    return id;
+  };
+  context.clearTimeout = (id) => {
+    clearedTimers.push(id);
+    timers.delete(id);
+  };
+  let refreshMetaCalls = 0;
+  context.refreshMeta = () => { refreshMetaCalls += 1; };
+  context.renderTree = () => {};
+  context.refocusTreeNavigation = () => {};
+  context.setStatus = () => {};
+  context.persistPipSnapshot = () => {};
+  context.requirePocketFileForChanges = () => true;
+  context.nowIso = () => "2026-01-01T00:00:00.000Z";
+  context.expandPathToNode = () => {};
+  context.compareSiblingOrder = (left, right) => Number(left.order) - Number(right.order);
+  context.nodeMap = () => new Map(lexicalState(context).nodes.map((node) => [node.id, node]));
+  context.renumberChildren = (parentId) => lexicalState(context).nodes
+    .filter((node) => (node.parentId || "root") === (parentId || "root"))
+    .sort(context.compareSiblingOrder)
+    .forEach((node, index) => { node.order = 1001 + index; });
+  context.recordOp = (op) => { lexicalState(context).ops.push(op); };
+  const state = resetState(context, [
+    syntheticNode("p069a_a", { label: "A", parentId: "root", order: 1001 }),
+    syntheticNode("p069a_b", { label: "B", parentId: "root", order: 1002 }),
+  ]);
+  context.maxSiblingOrder = (parentId) => Math.max(1000, ...state.nodes
+    .filter((node) => (node.parentId || "root") === (parentId || "root"))
+    .map((node) => Number(node.order) || 0));
+  runScript(context, "js/pocket-tree-actions.js");
+
+  context.flashSaveChip("saved");
+  const staleTimer = nextTimer;
+  assert.equal(saveButton.textContent, "saved");
+  assert.equal(classes.has("on"), true);
+  const staleCallback = timers.get(staleTimer);
+
+  state.selectedId = "p069a_b";
+  context.moveNodeWithinSiblings("p069a_b", -1);
+  assert.equal(clearedTimers.includes(staleTimer), true);
+  assert.equal(saveButton.textContent, "save*");
+  assert.equal(classes.has("on"), false);
+  assert.equal(refreshMetaCalls, 0);
+  staleCallback();
+  assert.equal(saveButton.textContent, "save*");
+  assert.equal(refreshMetaCalls, 0);
+
+  state.ops = [];
+  context.flashSaveChip("saved");
+  const cleanTimer = nextTimer;
+  context.refreshSaveState();
+  assert.equal(saveButton.textContent, "saved");
+  assert.equal(classes.has("on"), true);
+  timers.get(cleanTimer)();
+  assert.equal(classes.has("on"), false);
+  assert.equal(refreshMetaCalls, 1);
+});
+
 test("P060 main-tree disclosure owns selection and navigation while leaf gutters keep a structural marker", () => {
   const harness = createTreeRenderHarness([
     syntheticNode("p060_parent", { label: "Parent", parentId: "root", order: 1001 }),
