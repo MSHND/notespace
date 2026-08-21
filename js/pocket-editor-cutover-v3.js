@@ -120,6 +120,19 @@
     }
   }
 
+  function isPhoneMode() {
+    return global.document?.body?.classList?.contains("phoneMode") === true;
+  }
+
+  function openPhoneDetails(node) {
+    if (!isPhoneMode() || !legacyOpenDetailsForSelectedNode) return false;
+    if (typeof global.requirePocketFileForChanges === "function"
+        && !global.requirePocketFileForChanges()) return false;
+    if (typeof state !== "undefined" && state) state.selectedId = node.id;
+    legacyOpenDetailsForSelectedNode();
+    return true;
+  }
+
   function openDirect(input) {
     const node = selectedNode(input);
     console.info("[editor cutover v3] edit requested", {
@@ -135,6 +148,7 @@
     }
 
     const readOnlyCompatibility = requiresReadOnlyCompatibility(node);
+    if (!readOnlyCompatibility && isPhoneMode()) return openPhoneDetails(node);
     let ok = false;
     try {
       ok = openStandalone(node);

@@ -469,6 +469,10 @@ function openSelectedItemDetailsFromControls() {
     return false;
   }
   if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
+  if (document.body?.classList?.contains("phoneMode") === true
+      && typeof window.openPocketNodeEditor === "function") {
+    return !!window.openPocketNodeEditor(id);
+  }
   if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
   if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") return !!window.PocketPeEditor.open(id);
   if (typeof window.openPocketNodeEditor === "function") return !!window.openPocketNodeEditor(id);

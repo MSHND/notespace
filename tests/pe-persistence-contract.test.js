@@ -2607,6 +2607,60 @@ test("editor cutover fails closed when the canonical editor cannot open and neve
   assert.equal(legacyPopupCalls, 0);
 });
 
+test("Phone editor cutover uses the in-page detail owner for safe nodes and keeps desktop and unsupported routes", () => {
+  const makeContext = (phoneMode) => {
+    const context = createFullContractContext({
+      document: {
+        body: {
+          classList: {
+            contains(name) { return phoneMode && name === "phoneMode"; },
+          },
+        },
+        getElementById() { return null; },
+        addEventListener() {},
+      },
+    });
+    const ordinary = syntheticNode("phone_cutover_ordinary", { details: "Phone Notes" });
+    const supported = normaliseOne(context, fixture("current-outline-v1.json").mainThoughtTree[0]);
+    supported.id = "phone_cutover_supported";
+    const unsupported = normaliseOne(context, fixture("unknown-editor-schema.json").mainThoughtTree[0]);
+    unsupported.id = "phone_cutover_unsupported";
+    resetState(context, [ordinary, supported, unsupported]);
+    let inlineCalls = 0;
+    let standaloneCalls = 0;
+    context.openDetailsEditorForSelectedNode = () => { inlineCalls += 1; };
+    context.PocketPeEditor = {
+      open() {
+        standaloneCalls += 1;
+        return true;
+      },
+    };
+    runScript(context, "js/pocket-editor-cutover-v3.js");
+    return { context, ordinary, supported, unsupported, get inlineCalls() { return inlineCalls; }, get standaloneCalls() { return standaloneCalls; } };
+  };
+
+  const phone = makeContext(true);
+  const supportedEditorBefore = plain(phone.supported.editor);
+  assert.equal(phone.context.openPocketNodeEditor(phone.ordinary.id), true);
+  assert.equal(phone.inlineCalls, 1);
+  assert.equal(phone.standaloneCalls, 0);
+  assert.equal(lexicalState(phone.context).selectedId, phone.ordinary.id);
+
+  assert.equal(phone.context.openPocketNodeEditor(phone.supported.id), true);
+  assert.equal(phone.inlineCalls, 2);
+  assert.equal(phone.standaloneCalls, 0);
+  assert.deepEqual(plain(phone.supported.editor), supportedEditorBefore);
+
+  assert.equal(phone.context.openPocketNodeEditor(phone.unsupported.id), true);
+  assert.equal(phone.inlineCalls, 2);
+  assert.equal(phone.standaloneCalls, 1);
+
+  const desktop = makeContext(false);
+  assert.equal(desktop.context.openPocketNodeEditor(desktop.ordinary.id), true);
+  assert.equal(desktop.inlineCalls, 0);
+  assert.equal(desktop.standaloneCalls, 1);
+});
+
 test("active and compatibility popouts contain no Notes-Outline conversion route", () => {
   for (const file of [
     "js/pocket-node-popout-runtime.js",
