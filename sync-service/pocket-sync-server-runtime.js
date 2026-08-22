@@ -21,7 +21,6 @@ const CONFIG_FIELDS = Object.freeze([
   "ceremonyLifetimeMs",
   "sessionLifetimeMs",
   "recoveryProofVerifier",
-  "tls",
 ]);
 
 function runtimeError() {
@@ -107,7 +106,6 @@ function validateConfiguration(value) {
     ceremonyLifetimeMs: value.ceremonyLifetimeMs,
     sessionLifetimeMs: value.sessionLifetimeMs,
     recoveryProofVerifier: validateRecoveryProofVerifier(value.recoveryProofVerifier),
-    tls: validateTls(value.tls),
   });
 }
 
@@ -250,10 +248,14 @@ function createSyncServerApplication(configuration) {
   return Object.freeze({ handle, preflight, close });
 }
 
-function createSyncServerRuntime(configuration) {
-  const application = createSyncServerApplication(configuration);
-  const config = validateConfiguration(configuration);
-  const server = https.createServer(config.tls, application.handle);
+function createSyncServerRuntime(configuration, suppliedListenerTls = null) {
+  const listenerTls = suppliedListenerTls || (configuration && Object.hasOwn(configuration, "tls") ? configuration.tls : null);
+  const applicationConfiguration = configuration && Object.hasOwn(configuration, "tls")
+    ? Object.fromEntries(Object.entries(configuration).filter(([key]) => key !== "tls"))
+    : configuration;
+  const application = createSyncServerApplication(applicationConfiguration);
+  const config = validateConfiguration(applicationConfiguration);
+  const server = https.createServer(validateTls(listenerTls), application.handle);
   if (!server || typeof server.listen !== "function" || typeof server.close !== "function") throw runtimeError();
 
   let started = false;
@@ -301,4 +303,8 @@ function createSyncServerRuntime(configuration) {
   return Object.freeze({ listen, close });
 }
 
-module.exports = Object.freeze({ createSyncServerApplication, createSyncServerRuntime });
+module.exports = Object.freeze({
+  createSyncServerApplication,
+  createSyncServerRuntime,
+  validateSyncServerTls: validateTls,
+});

@@ -1458,6 +1458,7 @@ test("package and production loader boundaries retain the P048/P049 server-only 
     "sync:db:migrate",
     "sync:server",
     "sync:local",
+    "sync:production",
   ]);
   assert.doesNotMatch(source("index.html"), /sync-service\//);
   assert.doesNotMatch(source("sw.js"), /sync-service\//);

@@ -6,7 +6,7 @@ const { createSyncServerRuntime } = require("./pocket-sync-server-runtime.js");
 
 async function startLocalServer() {
   const config = createLocalServerConfig({ environment: process.env, readFile: fs.readFileSync });
-  const runtime = createSyncServerRuntime(config.runtime);
+  const runtime = createSyncServerRuntime(config.runtime, config.tls);
   await runtime.listen(config.listen);
   let stopping = false;
   const stop = async () => {

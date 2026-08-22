@@ -2,7 +2,8 @@
 
 const { createRecoveryProofVerifier } = require("./pocket-sync-recovery-proof-verifier.js");
 
-const CONFIG_FIELDS = Object.freeze(["environment", "readFile"]);
+const LOCAL_CONFIG_FIELDS = Object.freeze(["environment", "readFile"]);
+const PRODUCTION_CONFIG_FIELDS = Object.freeze(["environment"]);
 
 function configError() {
   const error = new Error("Pocket Sync local configuration is invalid.");
@@ -51,6 +52,18 @@ function trustedOriginAndRpId(origin, rpId) {
   }
 }
 
+function serviceRoot(value) {
+  if (typeof value !== "string" || value.length < 2 || value !== value.trim()
+      || !value.startsWith("/") || value.startsWith("//") || value.includes("//")
+      || /[:?#\\@%]/.test(value)) throw configError();
+  const normalised = value.endsWith("/") ? value.slice(0, -1) : value;
+  if (normalised.length < 2
+      || normalised.split("/").some((segment, index) => index > 0 && ["", ".", ".."].includes(segment))) {
+    throw configError();
+  }
+  return normalised;
+}
+
 function createUnavailableRecoveryProofVerifier() {
   const verifier = {
     async verifyRecoveryProof() {
@@ -66,10 +79,25 @@ function createUnavailableRecoveryProofVerifier() {
   return Object.freeze(verifier);
 }
 
-function createLocalServerConfig(input) {
-  exactObject(input, CONFIG_FIELDS);
-  if (!isObject(input.environment) || typeof input.readFile !== "function") throw configError();
-  const environment = input.environment;
+function createApplicationConfig(environment, rpNameFallback) {
+  if (!isObject(environment)) throw configError();
+  const trustedOrigin = required(environment, "POCKET_SYNC_TRUSTED_ORIGIN");
+  const rpId = required(environment, "POCKET_SYNC_RP_ID");
+  trustedOriginAndRpId(trustedOrigin, rpId);
+  return Object.freeze({
+    trustedOrigin,
+    rpId,
+    rpName: optional(environment, "POCKET_SYNC_RP_NAME", rpNameFallback),
+    serviceRoot: serviceRoot(optional(environment, "POCKET_SYNC_SERVICE_ROOT", "/pocket-sync/v1")),
+    postgres: Object.freeze({ connectionString: required(environment, "POCKET_SYNC_DATABASE_URL") }),
+    credentialAlgorithms: Object.freeze([-7, -257]),
+    ceremonyLifetimeMs: 300000,
+    sessionLifetimeMs: 2592000000,
+    recoveryProofVerifier: createRecoveryProofVerifier(),
+  });
+}
+
+function readTlsMaterial(input, environment) {
   const certFile = required(environment, "POCKET_SYNC_TLS_CERT_FILE");
   const keyFile = required(environment, "POCKET_SYNC_TLS_KEY_FILE");
   let cert;
@@ -83,24 +111,30 @@ function createLocalServerConfig(input) {
   if (!(cert instanceof Uint8Array) || !(key instanceof Uint8Array) || cert.byteLength < 1 || key.byteLength < 1) {
     throw configError();
   }
-  const trustedOrigin = required(environment, "POCKET_SYNC_TRUSTED_ORIGIN");
-  const rpId = required(environment, "POCKET_SYNC_RP_ID");
-  trustedOriginAndRpId(trustedOrigin, rpId);
-  const runtime = Object.freeze({
-    trustedOrigin,
-    rpId,
-    rpName: optional(environment, "POCKET_SYNC_RP_NAME", "Pocket local Sync"),
-    serviceRoot: optional(environment, "POCKET_SYNC_SERVICE_ROOT", "/pocket-sync/v1"),
-    postgres: Object.freeze({ connectionString: required(environment, "POCKET_SYNC_DATABASE_URL") }),
-    credentialAlgorithms: Object.freeze([-7, -257]),
-    ceremonyLifetimeMs: 300000,
-    sessionLifetimeMs: 2592000000,
-    recoveryProofVerifier: createRecoveryProofVerifier(),
-    tls: Object.freeze({ cert: new Uint8Array(cert), key: new Uint8Array(key) }),
-  });
+  return Object.freeze({ cert: new Uint8Array(cert), key: new Uint8Array(key) });
+}
+
+function createLocalServerConfig(input) {
+  exactObject(input, LOCAL_CONFIG_FIELDS);
+  if (!isObject(input.environment) || typeof input.readFile !== "function") throw configError();
+  const runtime = createApplicationConfig(input.environment, "Pocket local Sync");
   return Object.freeze({
     runtime,
-    listen: Object.freeze({ host: "127.0.0.1", port: localPort(optional(environment, "POCKET_SYNC_PORT", "8443")) }),
+    application: runtime,
+    tls: readTlsMaterial(input, input.environment),
+    listen: Object.freeze({ host: "127.0.0.1", port: localPort(optional(input.environment, "POCKET_SYNC_PORT", "8443")) }),
+  });
+}
+
+function createProductionServerConfig(input) {
+  exactObject(input, PRODUCTION_CONFIG_FIELDS);
+  if (!isObject(input.environment)) throw configError();
+  const environment = input.environment;
+  const runtime = createApplicationConfig(environment, "Pocket");
+  return Object.freeze({
+    runtime,
+    application: runtime,
+    listen: Object.freeze({ host: "0.0.0.0", port: localPort(required(environment, "PORT")) }),
   });
 }
 
@@ -114,6 +148,7 @@ function readDatabaseConnection(input) {
 
 module.exports = Object.freeze({
   createLocalServerConfig,
+  createProductionServerConfig,
   createUnavailableRecoveryProofVerifier,
   readDatabaseConnection,
 });

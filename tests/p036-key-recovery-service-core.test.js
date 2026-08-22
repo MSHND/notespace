@@ -171,11 +171,13 @@ test("P036 core remains isolated from P046-P049 server adapters and browser load
     "pocket-sync-local-integration-server.js",
     "pocket-sync-postgres-schema.js",
     "pocket-sync-postgres-store.js",
+    "pocket-sync-production-server.js",
     "pocket-sync-recovery-proof-verifier.js",
     "pocket-sync-server-config.js",
     "pocket-sync-server-runtime.js",
     "pocket-sync-server.js",
     "pocket-sync-service-core.js",
+    "pocket-sync-static-assets.js",
     "pocket-sync-webauthn-verifier.js",
   ]);
 });

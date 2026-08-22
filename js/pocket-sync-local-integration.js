@@ -1,4 +1,4 @@
-/* Local-host-only Sync composition. The local HTTPS host injects this module. */
+/* Same-origin Sync composition. Local HTTPS and production bootstraps load this module. */
 
 (function initialisePocketSyncLocalIntegration(global) {
   "use strict";
@@ -159,5 +159,7 @@
     return integration;
   }
 
-  global.PocketSyncLocalIntegration = frozen({ create });
+  const integrationApi = frozen({ create });
+  global.PocketSyncBrowserIntegration = integrationApi;
+  global.PocketSyncLocalIntegration = integrationApi;
 })(typeof window !== "undefined" ? window : globalThis);
