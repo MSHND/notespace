@@ -90,6 +90,6 @@ test("P080 does not apply typed-integer handling to unrelated verifier checks", 
     const constraints = validConstraints();
     constraints.find((row) => row.definition.includes("storeVersion") && row.definition.includes("NUMERIC"))
       .definition = "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '1'::bigint AND (record->>'storeVersion')::NUMERIC=store_version)";
-    await rejectsComponent(constraints, "record-store-version-check");
+    await rejectsComponent(constraints, "record-store-version-pattern");
   });
 });

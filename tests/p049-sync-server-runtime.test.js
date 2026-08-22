@@ -452,7 +452,7 @@ test("P049c production schema verifier fails closed for every reviewed malformed
     ["missing JSON object check", "record-json-object-check", (fixture) => {
       fixture.constraints = fixture.constraints.filter((row) => !row.definition.includes("jsonb_typeof(record)='object'"));
     }],
-    ["weakened JSON store-version agreement", "record-store-version-check", (fixture) => {
+    ["weakened JSON store-version agreement", "record-store-version-extract", (fixture) => {
       fixture.constraints.find((row) => row.definition.includes("storeVersion") && row.definition.includes("NUMERIC"))
         .definition = "CHECK (jsonb_typeof(record->'storeVersion')='number')";
     }],

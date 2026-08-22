@@ -12,7 +12,8 @@ const SCHEMA_COMPONENTS = Object.freeze([
   "columns-catalog", "columns-contract", "constraints-catalog", "records-primary-key",
   "metadata-identity", "collection-check", "record-key-check", "store-version-bounds-check",
   "record-json-object-check", "record-store-version-check", "schema-version-query",
-  "schema-version-value", "unknown",
+  "record-store-version-json-type", "record-store-version-extract",
+  "record-store-version-pattern", "record-store-version-equality", "schema-version-value", "unknown",
 ]);
 
 function safeSchemaComponent(error) {
@@ -68,6 +69,20 @@ function hasCheck(rows, predicate) {
   return rows.some((row) => row.contype === "c" && predicate(row.definition, normalise(row.definition)));
 }
 
+function recordStoreVersionComponent(records) {
+  const candidates = records.filter((row) => row.contype === "c"
+    && normalise(row.definition).includes("storeversion"));
+  if (candidates.length !== 1) return "record-store-version-check";
+  const value = normalise(candidates[0].definition);
+  const clauses = [
+    ["record-store-version-json-type", "jsonb_typeofrecord->'storeversion'='number'"],
+    ["record-store-version-extract", "record->>'storeversion'"],
+    ["record-store-version-pattern", "'^[1-9][0-9]*$'"],
+    ["record-store-version-equality", "=store_version"],
+  ];
+  return clauses.find(([, fragment]) => !value.includes(fragment))?.[0] || "record-store-version-check";
+}
+
 async function verifyPocketSyncSchema(pool) {
   if (!pool || typeof pool.query !== "function") throw schemaError("columns-catalog");
   const columns = await query(pool,
@@ -106,7 +121,7 @@ async function verifyPocketSyncSchema(pool) {
       && value.includes("record->>'storeversion'")
       && value.includes("'^[1-9][0-9]*$'")
       && value.includes("=store_version");
-  })) throw schemaError("record-store-version-check");
+  })) throw schemaError(recordStoreVersionComponent(records));
 
   const version = await query(pool,
     "SELECT schema_version FROM public.pocket_sync_schema WHERE schema_name=$1", ["pocket-sync-store"], "schema-version-query");
