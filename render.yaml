@@ -1,0 +1,40 @@
+databases:
+  - name: pocket-postgres
+    region: singapore
+    plan: basic-256mb
+    postgresMajorVersion: "18"
+    ipAllowList: []
+
+services:
+  - type: web
+    name: pocket
+    runtime: node
+    plan: starter
+    region: singapore
+    repo: https://github.com/MSHND/notespace
+    branch: main
+    autoDeployTrigger: off
+    buildCommand: npm ci && npm run check && npm run sync:production:manifest >/dev/null
+    preDeployCommand: npm run sync:db:migrate
+    startCommand: npm run sync:production
+    domains:
+      - pocket.murrayhenderson.com.au
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: NODE_ENV
+        value: production
+      - key: POCKET_SYNC_TRUSTED_ORIGIN
+        value: https://pocket.murrayhenderson.com.au
+      - key: POCKET_SYNC_RP_ID
+        value: pocket.murrayhenderson.com.au
+      - key: POCKET_SYNC_RP_NAME
+        value: Pocket
+      - key: POCKET_SYNC_SERVICE_ROOT
+        value: /pocket-sync/v1
+      - key: POCKET_SYNC_DATABASE_URL
+        fromDatabase:
+          name: pocket-postgres
+          property: connectionString
+      - key: POCKET_ALPHA_ACCESS_SECRET
+        sync: false
