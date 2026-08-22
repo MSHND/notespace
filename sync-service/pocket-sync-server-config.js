@@ -43,6 +43,13 @@ function localPort(value) {
   return port;
 }
 
+function productionAlphaAccessSecret(environment) {
+  const value = required(environment, "POCKET_ALPHA_ACCESS_SECRET");
+  const length = Buffer.byteLength(value, "utf8");
+  if (length < 32 || length > 512) throw configError();
+  return value;
+}
+
 function trustedOriginAndRpId(origin, rpId) {
   let parsed;
   try { parsed = new URL(origin); } catch (_error) { throw configError(); }
@@ -134,6 +141,7 @@ function createProductionServerConfig(input) {
   return Object.freeze({
     runtime,
     application: runtime,
+    productionShell: Object.freeze({ alphaAccessSecret: productionAlphaAccessSecret(environment) }),
     listen: Object.freeze({ host: "0.0.0.0", port: localPort(required(environment, "PORT")) }),
   });
 }

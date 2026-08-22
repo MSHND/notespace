@@ -19,12 +19,14 @@ const { createSyncServerApplication } = require("../sync-service/pocket-sync-ser
 
 const ROOT = path.resolve(__dirname, "..");
 const SERVICE_ROOT = "/pocket-sync/v1";
+const TEST_ALPHA_SECRET = "test-only-alpha-access-code-0123456789";
 
 function baseEnvironment(overrides = {}) {
   return {
     POCKET_SYNC_DATABASE_URL: "postgres://operator:secret@127.0.0.1/pocket",
     POCKET_SYNC_TRUSTED_ORIGIN: "https://pocket.murrayhenderson.com.au",
     POCKET_SYNC_RP_ID: "pocket.murrayhenderson.com.au",
+    POCKET_ALPHA_ACCESS_SECRET: TEST_ALPHA_SECRET,
     PORT: "3000",
     ...overrides,
   };
@@ -159,6 +161,10 @@ test("P074 production listener validates 0.0.0.0 and closes the application cons
     browserRoot: ROOT,
     serviceRoot: SERVICE_ROOT,
     listen: { host: "0.0.0.0", port: 43123 },
+    privateAlpha: {
+      accessSecret: TEST_ALPHA_SECRET,
+      trustedOrigin: "https://pocket.murrayhenderson.com.au",
+    },
     http: { createServer() { return new ControlledServer(); } },
   });
   await server.listen();
@@ -171,5 +177,9 @@ test("P074 production listener validates 0.0.0.0 and closes the application cons
   assert.throws(() => createProductionServer({
     application, browserRoot: ROOT, serviceRoot: SERVICE_ROOT,
     listen: { host: "127.0.0.1", port: 43123 }, http: { createServer() {} },
+    privateAlpha: {
+      accessSecret: TEST_ALPHA_SECRET,
+      trustedOrigin: "https://pocket.murrayhenderson.com.au",
+    },
   }), (error) => error?.code === "sync-production-composition-failed");
 });
