@@ -34,6 +34,10 @@ function normalise(value) {
   return String(value).toLowerCase().replace(/[\s()]/g, "").replace(/::[a-z0-9_]+/g, "");
 }
 
+function normaliseBigintBounds(value) {
+  return normalise(String(value).replace(/'([+-]?\d+)'\s*::\s*bigint\b/gi, "$1"));
+}
+
 function quotedValues(definition) {
   return Array.from(String(definition).matchAll(/'([^']*)'/g), (match) => match[1]);
 }
@@ -90,7 +94,7 @@ async function verifyPocketSyncSchema(pool) {
     throw schemaError("record-key-check");
   }
   if (!hasCheck(records, (definition) => {
-    const value = normalise(definition);
+    const value = normaliseBigintBounds(definition);
     return value.includes("store_version>0") && value.includes("store_version<=9007199254740991");
   })) throw schemaError("store-version-bounds-check");
   if (!hasCheck(records, (definition) => normalise(definition).includes("jsonb_typeofrecord='object'"))) {
