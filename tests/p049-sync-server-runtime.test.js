@@ -412,57 +412,65 @@ test("P049b rejects metadata-only PostgreSQL schemas with an unsafe collection a
 test("P049c production schema verifier fails closed for every reviewed malformed catalog contract", async (t) => {
   await assert.doesNotReject(verifyPocketSyncSchema(schemaPool(validSchemaFixture())));
   const cases = [
-    ["missing records table", (fixture) => {
+    ["missing records table", "columns-contract", (fixture) => {
       fixture.columns = fixture.columns.filter((row) => row.table_name !== "pocket_sync_records");
       fixture.constraints = fixture.constraints.filter((row) => row.relation !== "public.pocket_sync_records");
     }],
-    ["wrong records column type", (fixture) => {
+    ["wrong records column type", "columns-contract", (fixture) => {
       fixture.columns.find((row) => row.column_name === "store_version").data_type = "integer";
     }],
-    ["nullable required column", (fixture) => {
+    ["nullable required column", "columns-contract", (fixture) => {
       fixture.columns.find((row) => row.column_name === "record_key").is_nullable = "YES";
     }],
-    ["wrong records primary key", (fixture) => {
+    ["wrong records primary key", "records-primary-key", (fixture) => {
       fixture.constraints.find((row) => row.relation === "public.pocket_sync_records" && row.contype === "p")
         .definition = "PRIMARY KEY (record_key)";
     }],
-    ["missing lower version bound", (fixture) => {
+    ["wrong metadata identity", "metadata-identity", (fixture) => {
+      fixture.constraints.find((row) => row.relation === "public.pocket_sync_schema" && row.contype === "p")
+        .definition = "PRIMARY KEY (schema_version)";
+    }],
+    ["missing record key check", "record-key-check", (fixture) => {
+      fixture.constraints = fixture.constraints.filter((row) => !row.definition.includes("length(record_key)>0"));
+    }],
+    ["missing lower version bound", "store-version-bounds-check", (fixture) => {
       fixture.constraints.find((row) => row.definition.includes("store_version>0"))
         .definition = "CHECK (store_version<=9007199254740991)";
     }],
-    ["missing upper version bound", (fixture) => {
+    ["missing upper version bound", "store-version-bounds-check", (fixture) => {
       fixture.constraints.find((row) => row.definition.includes("store_version>0"))
         .definition = "CHECK (store_version>0)";
     }],
-    ["missing approved collection", (fixture) => {
+    ["missing approved collection", "collection-check", (fixture) => {
       fixture.constraints.find((row) => row.definition.includes("collection IN"))
         .definition = "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies'))";
     }],
-    ["extra collection", (fixture) => {
+    ["extra collection", "collection-check", (fixture) => {
       fixture.constraints.find((row) => row.definition.includes("collection IN"))
         .definition = "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations','unsafeExtra'))";
     }],
-    ["missing JSON object check", (fixture) => {
+    ["missing JSON object check", "record-json-object-check", (fixture) => {
       fixture.constraints = fixture.constraints.filter((row) => !row.definition.includes("jsonb_typeof(record)='object'"));
     }],
-    ["weakened JSON store-version agreement", (fixture) => {
+    ["weakened JSON store-version agreement", "record-store-version-check", (fixture) => {
       fixture.constraints.find((row) => row.definition.includes("storeVersion") && row.definition.includes("NUMERIC"))
         .definition = "CHECK (jsonb_typeof(record->'storeVersion')='number')";
     }],
-    ["wrong metadata version", (fixture) => { fixture.version = 2; }],
-    ["malformed metadata table", (fixture) => {
+    ["wrong metadata version", "schema-version-value", (fixture) => { fixture.version = 2; }],
+    ["malformed metadata table", "columns-contract", (fixture) => {
       fixture.columns.find((row) => row.table_name === "pocket_sync_schema" && row.column_name === "schema_version")
         .data_type = "bigint";
     }],
-    ["non-public lookalike relation", (fixture) => {
+    ["non-public lookalike relation", "records-primary-key", (fixture) => {
       fixture.constraints.forEach((row) => { row.relation = row.relation.replace("public.", "other."); });
     }],
   ];
-  for (const [name, mutate] of cases) await t.test(name, async () => {
+  for (const [name, component, mutate] of cases) await t.test(name, async () => {
     const fixture = structuredClone(validSchemaFixture());
     mutate(fixture);
     await assert.rejects(verifyPocketSyncSchema(schemaPool(fixture)), (error) =>
-      error?.code === "sync-server-schema-invalid" && !error.message.includes("native")
+      error?.code === "sync-server-schema-invalid" && error?.component === component
+        && !error.message.includes("native")
     );
   });
 });

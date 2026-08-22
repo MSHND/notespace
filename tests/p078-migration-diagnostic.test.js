@@ -21,7 +21,10 @@ function loadMigration(dependencies) {
       return { readDatabaseConnection: dependencies.readDatabaseConnection };
     }
     if (name === "./pocket-sync-postgres-schema.js") {
-      return { verifyPocketSyncSchema: dependencies.verifyPocketSyncSchema };
+      return {
+        verifyPocketSyncSchema: dependencies.verifyPocketSyncSchema,
+        safeSchemaComponent: dependencies.safeSchemaComponent,
+      };
     }
     return originalLoad.call(this, name, parent, isMain);
   };
@@ -45,6 +48,9 @@ function successfulDependencies() {
     ended() { return ended; },
     readDatabaseConnection() { return "postgres://test-only"; },
     async verifyPocketSyncSchema() { return true; },
+    safeSchemaComponent(error) {
+      return ["columns-contract", "unknown"].includes(error?.component) ? error.component : "unknown";
+    },
   };
 }
 
@@ -75,7 +81,23 @@ test("P078 migration maps configuration, SQL and schema failures to safe stages"
     const { applyLocalMigration, migrationDiagnostic } = loadMigration(dependencies);
     await assert.rejects(applyLocalMigration("postgres://test-only"), (error) =>
       error?.code === "sync-server-migration-failed" && error.stage === "schema-verify"
-        && migrationDiagnostic(error) === "Pocket Sync migration failed: schema-verify\n"
+        && migrationDiagnostic(error) === "Pocket Sync migration failed: schema-verify/unknown\n"
+    );
+    assert.equal(dependencies.ended(), 1);
+  });
+
+  await t.test("schema verification component", async () => {
+    const dependencies = successfulDependencies();
+    dependencies.verifyPocketSyncSchema = async () => {
+      const error = new Error(SENTINEL);
+      error.component = "columns-contract";
+      throw error;
+    };
+    const { applyLocalMigration, migrationDiagnostic } = loadMigration(dependencies);
+    await assert.rejects(applyLocalMigration("postgres://test-only"), (error) =>
+      error?.code === "sync-server-migration-failed" && error.stage === "schema-verify"
+        && migrationDiagnostic(error) === "Pocket Sync migration failed: schema-verify/columns-contract\n"
+        && !migrationDiagnostic(error).includes(SENTINEL)
     );
     assert.equal(dependencies.ended(), 1);
   });

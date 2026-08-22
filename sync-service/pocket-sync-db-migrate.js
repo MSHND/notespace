@@ -4,19 +4,24 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Pool } = require("pg");
 const { readDatabaseConnection } = require("./pocket-sync-server-config.js");
-const { verifyPocketSyncSchema } = require("./pocket-sync-postgres-schema.js");
+const { verifyPocketSyncSchema, safeSchemaComponent } = require("./pocket-sync-postgres-schema.js");
 
 const MIGRATION_PATH = path.join(__dirname, "migrations", "001-pocket-sync-store.sql");
 const MIGRATION_STAGES = Object.freeze([
   "configuration", "migration-file", "migration-apply", "schema-verify", "unknown",
 ]);
 
-function migrationError(stage = "unknown") {
+function migrationError(stage = "unknown", component = "unknown") {
   const error = new Error("Pocket Sync migration failed.");
   error.code = "sync-server-migration-failed";
+  const safe = MIGRATION_STAGES.includes(stage) ? stage : "unknown";
   Object.defineProperty(error, "stage", {
     enumerable: false,
-    value: MIGRATION_STAGES.includes(stage) ? stage : "unknown",
+    value: safe,
+  });
+  if (safe === "schema-verify") Object.defineProperty(error, "component", {
+    enumerable: false,
+    value: safeSchemaComponent({ component }),
   });
   return error;
 }
@@ -27,7 +32,9 @@ function safeStage(error) {
 }
 
 function migrationDiagnostic(error) {
-  return `Pocket Sync migration failed: ${safeStage(error)}\n`;
+  const stage = safeStage(error);
+  const component = stage === "schema-verify" ? `/${safeSchemaComponent(error)}` : "";
+  return `Pocket Sync migration failed: ${stage}${component}\n`;
 }
 
 async function applyLocalMigration(connectionString) {
@@ -53,8 +60,8 @@ async function applyLocalMigration(connectionString) {
     }
     try {
       await verifyPocketSyncSchema(pool);
-    } catch (_error) {
-      throw migrationError("schema-verify");
+    } catch (error) {
+      throw migrationError("schema-verify", safeSchemaComponent(error));
     }
   } finally {
     try { await pool.end(); } catch (_error) {}
@@ -66,7 +73,10 @@ async function runMigration() {
   try { connectionString = readDatabaseConnection({ environment: process.env }); }
   catch (_error) { throw migrationError("configuration"); }
   try { await applyLocalMigration(connectionString); }
-  catch (error) { throw migrationError(safeStage(error)); }
+  catch (error) {
+    const stage = safeStage(error);
+    throw migrationError(stage, stage === "schema-verify" ? safeSchemaComponent(error) : "unknown");
+  }
 }
 
 if (require.main === module) {
