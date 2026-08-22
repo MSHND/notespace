@@ -5,7 +5,11 @@ const path = require("node:path");
 const { createProductionServerConfig } = require("./pocket-sync-server-config.js");
 const { createSyncServerApplication } = require("./pocket-sync-server-runtime.js");
 const { createPrivateAlphaGate } = require("./pocket-sync-private-alpha-gate.js");
-const { createReviewedStaticHandler } = require("./pocket-sync-static-assets.js");
+const { createProductionSecurityPolicy } = require("./pocket-sync-production-security-policy.js");
+const {
+  createReviewedStaticHandler,
+  createReviewedStaticManifest,
+} = require("./pocket-sync-static-assets.js");
 
 const BROWSER_ROOT = path.resolve(__dirname, "..");
 const LOCAL_MODULE_PATH = "/js/pocket-sync-local-integration.js";
@@ -25,6 +29,29 @@ function injectedIndex(index, serviceRoot) {
   return index.replace("</body>", `  ${PRODUCTION_MODULE_TAG.replace("%SERVICE_ROOT%", serviceRoot)}\n</body>`);
 }
 
+function validServiceRoot(value) {
+  return typeof value === "string" && value.length > 1 && value === value.trim()
+    && value.startsWith("/") && !value.startsWith("//") && !value.includes("//")
+    && !value.endsWith("/") && !/[:?#\\@%]/.test(value)
+    && !value.split("/").some((part, index) => index > 0 && ["", ".", ".."].includes(part));
+}
+
+function productionStaticInput(browserRoot, serviceRoot) {
+  return Object.freeze({
+    browserRoot,
+    additionalAssets: Object.freeze([
+      LOCAL_MODULE_PATH, ADDITIONAL_MODULE_PATH, RECOVERY_MODULE_PATH, PRODUCTION_BOOTSTRAP_PATH,
+    ]),
+    transformIndex(index) { return injectedIndex(index, serviceRoot); },
+  });
+}
+
+function createProductionReleaseManifest(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 2
+      || typeof input.browserRoot !== "string" || !validServiceRoot(input.serviceRoot)) throw productionError();
+  return createReviewedStaticManifest(productionStaticInput(input.browserRoot, input.serviceRoot));
+}
+
 function isApiPath(request, serviceRoot) {
   if (!request || typeof request.url !== "string" || !request.url.startsWith("/") || request.url.startsWith("//")) return false;
   let parsed;
@@ -35,17 +62,11 @@ function isApiPath(request, serviceRoot) {
 function createProductionIntegrationHandler(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)
       || Object.keys(input).length !== 3
-      || typeof input.browserRoot !== "string" || typeof input.serviceRoot !== "string"
+      || typeof input.browserRoot !== "string" || !validServiceRoot(input.serviceRoot)
       || !input.application || typeof input.application.handle !== "function") {
     throw productionError();
   }
-  const serveStatic = createReviewedStaticHandler({
-    browserRoot: input.browserRoot,
-    additionalAssets: [
-      LOCAL_MODULE_PATH, ADDITIONAL_MODULE_PATH, RECOVERY_MODULE_PATH, PRODUCTION_BOOTSTRAP_PATH,
-    ],
-    transformIndex(index) { return injectedIndex(index, input.serviceRoot); },
-  });
+  const serveStatic = createReviewedStaticHandler(productionStaticInput(input.browserRoot, input.serviceRoot));
   return async function handle(request, response) {
     if (isApiPath(request, input.serviceRoot)) return input.application.handle(request, response);
     return serveStatic(request, response);
@@ -72,12 +93,13 @@ function createProductionServer(input) {
   const integrationHandler = createProductionIntegrationHandler({
     application: input.application, browserRoot: input.browserRoot, serviceRoot: input.serviceRoot,
   });
-  const handler = createPrivateAlphaGate({
+  const privateAlphaHandler = createPrivateAlphaGate({
     accessSecret: input.privateAlpha.accessSecret,
     trustedOrigin: input.privateAlpha.trustedOrigin,
     serviceRoot: input.serviceRoot,
     handler: integrationHandler,
   });
+  const handler = createProductionSecurityPolicy(privateAlphaHandler);
   const server = (input.http || http).createServer(handler);
   if (!server || typeof server.listen !== "function" || typeof server.close !== "function") throw productionError();
   let started = false;
@@ -145,4 +167,9 @@ async function startProductionServer() {
 
 if (require.main === module) startProductionServer().catch(() => { process.exitCode = 1; });
 
-module.exports = Object.freeze({ createProductionIntegrationHandler, createProductionServer, startProductionServer });
+module.exports = Object.freeze({
+  createProductionIntegrationHandler,
+  createProductionReleaseManifest,
+  createProductionServer,
+  startProductionServer,
+});

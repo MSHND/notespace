@@ -1459,6 +1459,7 @@ test("package and production loader boundaries retain the P048/P049 server-only 
     "sync:server",
     "sync:local",
     "sync:production",
+    "sync:production:manifest",
   ]);
   assert.doesNotMatch(source("index.html"), /sync-service\//);
   assert.doesNotMatch(source("sw.js"), /sync-service\//);

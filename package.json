@@ -10,7 +10,8 @@
     "sync:db:migrate": "node sync-service/pocket-sync-db-migrate.js",
     "sync:server": "node sync-service/pocket-sync-server.js",
     "sync:local": "node sync-service/pocket-sync-local-integration-server.js",
-    "sync:production": "node sync-service/pocket-sync-production-server.js"
+    "sync:production": "node sync-service/pocket-sync-production-server.js",
+    "sync:production:manifest": "node sync-service/pocket-sync-production-manifest.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",

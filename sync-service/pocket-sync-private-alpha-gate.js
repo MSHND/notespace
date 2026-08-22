@@ -1,6 +1,7 @@
 "use strict";
 
 const { createHash, createHmac, randomBytes, timingSafeEqual } = require("node:crypto");
+const { PRIVATE_ALPHA_CSP } = require("./pocket-sync-production-security-policy.js");
 
 const COOKIE_NAME = "__Host-pocket-alpha-access";
 const ACCESS_PATH = "/pocket-alpha";
@@ -111,7 +112,7 @@ function formResponse(request, response, status = 200) {
   const body = Buffer.from(FORM_HTML, "utf8");
   response.statusCode = status;
   safeHeaders(response, "text/html; charset=utf-8");
-  response.setHeader("Content-Security-Policy", "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'");
+  response.setHeader("Content-Security-Policy", PRIVATE_ALPHA_CSP);
   response.setHeader("Content-Length", body.byteLength);
   if (request.method === "HEAD") response.end();
   else response.end(body);
