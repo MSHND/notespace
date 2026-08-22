@@ -32,7 +32,7 @@ function schemaError(component = "unknown") {
 }
 
 function normalise(value) {
-  return String(value).toLowerCase().replace(/[\s()]/g, "").replace(/::[a-z0-9_]+/g, "");
+  return String(value).toLowerCase().replace(/::[a-z0-9_]+/g, "").replace(/[\s()]/g, "");
 }
 
 function normaliseBigintBounds(value) {
