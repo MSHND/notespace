@@ -21,7 +21,7 @@ const PRIVATE_ALPHA_CSP = "default-src 'none'; form-action 'self'; base-uri 'non
 const REQUIRED_HEADERS = Object.freeze({
   "strict-transport-security": Object.freeze({ name: "Strict-Transport-Security", value: "max-age=31536000" }),
   "x-content-type-options": Object.freeze({ name: "X-Content-Type-Options", value: "nosniff" }),
-  "referrer-policy": Object.freeze({ name: "Referrer-Policy", value: "no-referrer" }),
+  "referrer-policy": Object.freeze({ name: "Referrer-Policy", value: "same-origin" }),
   "x-frame-options": Object.freeze({ name: "X-Frame-Options", value: "DENY" }),
   "cross-origin-opener-policy": Object.freeze({ name: "Cross-Origin-Opener-Policy", value: "same-origin" }),
   "cross-origin-resource-policy": Object.freeze({ name: "Cross-Origin-Resource-Policy", value: "same-origin" }),

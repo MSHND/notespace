@@ -67,7 +67,7 @@ function assertCommonHeaders(result, csp = PRODUCTION_CSP) {
   assert.equal(result.headers["strict-transport-security"], "max-age=31536000");
   assert.doesNotMatch(result.headers["strict-transport-security"], /includeSubDomains|preload/i);
   assert.equal(result.headers["x-content-type-options"], "nosniff");
-  assert.equal(result.headers["referrer-policy"], "no-referrer");
+  assert.equal(result.headers["referrer-policy"], "same-origin");
   assert.equal(result.headers["x-frame-options"], "DENY");
   assert.equal(result.headers["cross-origin-opener-policy"], "same-origin");
   assert.equal(result.headers["cross-origin-resource-policy"], "same-origin");

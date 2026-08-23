@@ -159,6 +159,26 @@ test("P075 doorway accepts only an exact-origin bounded form and never reveals t
     }),
     request("POST", "/pocket-alpha/access", {
       body: `accessCode=${encodeURIComponent(TEST_SECRET)}`,
+      headers: { Origin: "null", "Content-Type": "application/x-www-form-urlencoded" },
+    }),
+    request("POST", "/pocket-alpha/access", {
+      body: `accessCode=${encodeURIComponent(TEST_SECRET)}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    }),
+    request("POST", "/pocket-alpha/access", {
+      body: `accessCode=${encodeURIComponent(TEST_SECRET)}`,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      rawHeaders: [
+        "Origin", ORIGIN, "Origin", ORIGIN,
+        "Content-Type", "application/x-www-form-urlencoded",
+      ],
+    }),
+    request("POST", "/pocket-alpha/access", {
+      body: `accessCode=${encodeURIComponent(TEST_SECRET)}`,
+      headers: { Origin: "not-an-origin", "Content-Type": "application/x-www-form-urlencoded" },
+    }),
+    request("POST", "/pocket-alpha/access", {
+      body: `accessCode=${encodeURIComponent(TEST_SECRET)}`,
       headers: { Origin: ORIGIN, "Content-Type": "application/json" },
     }),
     request("POST", "/pocket-alpha/access", {
