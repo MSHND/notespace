@@ -216,6 +216,38 @@ test("P090 preserves only bounded rejected-status metadata", async () => {
   }
 });
 
+test("P093 preserves only allowlisted Recovery-begin server failure classes", async () => {
+  const { api } = loadProduction();
+  for (const [reason, failureClass] of [
+    ["service-state-invalid", "service-state-invalid"],
+    ["store-record-invalid", "storage-failed"],
+    ["store-version-conflict", "storage-failed"],
+    ["http-core-result-invalid", "server-contract-invalid"],
+    ["http-internal-error", "server-internal"],
+  ]) {
+    const transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
+      async fetch() { return fixtures.textResponse({ apiVersion: 1, ok: false, reason }, { status: 500 }); } });
+    await assert.rejects(transport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+      assert.deepEqual(Object.keys(error).sort(), ["code", "recoveryBeginFailureClass", "retryable", "status"]);
+      assert.equal(error.recoveryBeginFailureClass, failureClass);
+      assert.doesNotMatch(JSON.stringify(error), /provider detail/);
+      return true;
+    });
+  }
+  for (const body of [
+    { apiVersion: 1, ok: false, reason: "provider-detail" },
+    { apiVersion: 1, ok: false, reason: "service-state-invalid", detail: "provider detail" },
+    { apiVersion: 2, ok: false, reason: "service-state-invalid" },
+  ]) {
+    const transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
+      async fetch() { return fixtures.textResponse(body, { status: 500 }); } });
+    await assert.rejects(transport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+      assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"]);
+      return true;
+    });
+  }
+});
+
 test("P031 and P029 production contracts are mandatory without local fallback validators", () => {
   const loaded = loadProduction();
   const transport = validTransport(() => ({ status: 200, body: {} }));

@@ -55,11 +55,14 @@ persisting session state, retrying work, or changing a Pocket owner.
     "TextDecoder",
   ]);
 
-  function remoteError(code, retryable, status = null) {
+  function remoteError(code, retryable, status = null, recoveryBeginFailureClass = null) {
     const error = new Error(`Pocket Sync remote client ${code}.`);
     error.code = code;
     if (typeof retryable === "boolean") error.retryable = retryable;
     if (Number.isSafeInteger(status) && status >= 100 && status <= 599) error.status = status;
+    if (["service-state-invalid", "storage-failed", "server-contract-invalid", "server-internal"].includes(recoveryBeginFailureClass)) {
+      error.recoveryBeginFailureClass = recoveryBeginFailureClass;
+    }
     return error;
   }
 
@@ -289,13 +292,35 @@ persisting session state, retrying work, or changing a Pocket owner.
     return body;
   }
 
-  function rejectedStatus(status) {
+  function recoveryBeginFailureClass(body) {
+    if (!isObject(body)
+        || Object.keys(body).some((field) => !["apiVersion", "ok", "reason", "retryable"].includes(field))
+        || body.apiVersion !== 1 || body.ok !== false
+        || typeof body.reason !== "string"
+        || (Object.prototype.hasOwnProperty.call(body, "retryable") && body.retryable !== true)) {
+      return null;
+    }
+    if (body.reason === "service-state-invalid") return "service-state-invalid";
+    if ([
+      "store-collection-invalid", "store-duplicate", "store-key-invalid", "store-options-invalid",
+      "store-readonly-write", "store-record-invalid", "store-state-invalid", "store-storage-failed",
+      "store-transaction-expired", "store-transaction-invalid", "store-version-bounds-check",
+      "store-version-conflict", "store-version-invalid",
+    ].includes(body.reason)) {
+      return "storage-failed";
+    }
+    if (body.reason === "http-core-result-invalid") return "server-contract-invalid";
+    if (body.reason === "http-internal-error") return "server-internal";
+    return null;
+  }
+
+  function rejectedStatus(status, recoveryFailureClass = null) {
     if (status === 401) return remoteError("remote-authentication-required", false, status);
     if (status === 403) return remoteError("remote-authorisation-failed", false, status);
     if ([408, 502, 503, 504].includes(status)) return remoteError("remote-unavailable", true, status);
     if (status === 429) return remoteError("remote-rate-limited", true, status);
     if (status >= 300 && status < 400) return remoteError("remote-redirect-rejected", false, status);
-    return remoteError("remote-request-rejected", false, status);
+    return remoteError("remote-request-rejected", false, status, recoveryFailureClass);
   }
 
   function createBrowserJsonTransport(options = {}) {
@@ -336,7 +361,17 @@ persisting session state, retrying work, or changing a Pocket owner.
         throw remoteError("remote-redirect-rejected", false);
       }
       if (!Number.isSafeInteger(response.status)) throw remoteError("remote-response-invalid");
-      if (!limits.statuses.includes(response.status)) throw rejectedStatus(response.status);
+      if (!limits.statuses.includes(response.status)) {
+        let recoveryFailureClass = null;
+        if (routeName === "beginRecovery" && response.status >= 400 && response.status <= 599) {
+          try {
+            recoveryFailureClass = recoveryBeginFailureClass(
+              await readResponseBody(response, limits.response, encoder, Decoder)
+            );
+          } catch (_error) {}
+        }
+        throw rejectedStatus(response.status, recoveryFailureClass);
+      }
       const body = await readResponseBody(response, limits.response, encoder, Decoder);
       return Object.freeze({ status: response.status, body });
     }

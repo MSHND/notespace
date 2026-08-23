@@ -67,6 +67,10 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     "begin-attention-request-rejected",
     "begin-attention-authentication-rejected", "begin-attention-authorisation-rejected",
     "begin-attention-conflict", "begin-attention-response-invalid",
+    "begin-attention-service-state-invalid", "begin-attention-storage-failed",
+    "begin-attention-server-contract-invalid", "begin-attention-server-internal",
+    "begin-attention-http-shell-rejected", "begin-attention-redirect-rejected",
+    "begin-attention-unclassified-rejected",
   ]);
   const BEGIN_ATTENTION_OPERATIONS = Object.freeze({
     "recovery-begin-expired": "begin-attention-expired",
@@ -77,6 +81,13 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     "recovery-begin-authorisation-rejected": "begin-attention-authorisation-rejected",
     "recovery-begin-conflict": "begin-attention-conflict",
     "recovery-begin-response-invalid": "begin-attention-response-invalid",
+    "recovery-begin-service-state-invalid": "begin-attention-service-state-invalid",
+    "recovery-begin-storage-failed": "begin-attention-storage-failed",
+    "recovery-begin-server-contract-invalid": "begin-attention-server-contract-invalid",
+    "recovery-begin-server-internal": "begin-attention-server-internal",
+    "recovery-begin-http-shell-rejected": "begin-attention-http-shell-rejected",
+    "recovery-begin-redirect-rejected": "begin-attention-redirect-rejected",
+    "recovery-begin-rejected": "begin-attention-unclassified-rejected",
   });
   const BEGIN_ATTENTION_REASONS = Object.freeze({
     "begin-attention-expired": "recovery-begin-expired",
@@ -88,6 +99,13 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     "begin-attention-authorisation-rejected": "recovery-begin-authorisation-rejected",
     "begin-attention-conflict": "recovery-begin-conflict",
     "begin-attention-response-invalid": "recovery-begin-response-invalid",
+    "begin-attention-service-state-invalid": "recovery-begin-service-state-invalid",
+    "begin-attention-storage-failed": "recovery-begin-storage-failed",
+    "begin-attention-server-contract-invalid": "recovery-begin-server-contract-invalid",
+    "begin-attention-server-internal": "recovery-begin-server-internal",
+    "begin-attention-http-shell-rejected": "recovery-begin-http-shell-rejected",
+    "begin-attention-redirect-rejected": "recovery-begin-redirect-rejected",
+    "begin-attention-unclassified-rejected": "recovery-begin-rejected",
   });
   const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
@@ -531,7 +549,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
 
   function isLegacyPreAuthorityBeginAttention(draft) {
     return draft.stage === "begin-pending"
-      && draft.pendingOperation === "begin-attention-rejected"
+      && ["begin-attention-rejected", "begin-attention-generic-rejected"].includes(draft.pendingOperation)
       && draft.beginResponse === null
       && draft.finishRequest === null
       && draft.finishResponse === null
@@ -678,7 +696,25 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       if (error?.status === 409) {
         return persistBeginAttention("recovery-begin-conflict", execution);
       }
-      if (Number.isSafeInteger(error?.status) || error?.code === "remote-redirect-rejected") {
+      if ([405, 413, 415].includes(error?.status)) {
+        return persistBeginAttention("recovery-begin-http-shell-rejected", execution);
+      }
+      if (error?.code === "remote-redirect-rejected") {
+        return persistBeginAttention("recovery-begin-redirect-rejected", execution);
+      }
+      if (error?.recoveryBeginFailureClass === "service-state-invalid") {
+        return persistBeginAttention("recovery-begin-service-state-invalid", execution);
+      }
+      if (error?.recoveryBeginFailureClass === "storage-failed") {
+        return persistBeginAttention("recovery-begin-storage-failed", execution);
+      }
+      if (error?.recoveryBeginFailureClass === "server-contract-invalid") {
+        return persistBeginAttention("recovery-begin-server-contract-invalid", execution);
+      }
+      if (error?.status === 500 || error?.recoveryBeginFailureClass === "server-internal") {
+        return persistBeginAttention("recovery-begin-server-internal", execution);
+      }
+      if (Number.isSafeInteger(error?.status)) {
         return persistBeginAttention("recovery-begin-rejected", execution);
       }
       return persistBeginAttention("recovery-begin-response-invalid", execution);

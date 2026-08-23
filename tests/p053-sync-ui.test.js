@@ -351,6 +351,29 @@ test("P091 presents each bounded Recovery rejection as attention only", async ()
   }
 });
 
+test("P093 presents each bounded Recovery server failure as distinct local attention", async () => {
+  for (const [reason, expected] of [
+    ["recovery-begin-service-state-invalid", "The synced recovery service is not ready for this request."],
+    ["recovery-begin-storage-failed", "The synced recovery service could not safely read recovery storage."],
+    ["recovery-begin-server-contract-invalid", "The synced recovery service returned an invalid recovery result."],
+    ["recovery-begin-server-internal", "The synced recovery service had an internal recovery failure."],
+    ["recovery-begin-http-shell-rejected", "The synced recovery service rejected this recovery request at its HTTP boundary."],
+    ["recovery-begin-redirect-rejected", "Pocket rejected a redirected recovery request."],
+  ]) {
+    const harness = createUiHarness("none", { discoveryResult: {
+      ok: false, reason, locallyDurable: true, resumable: false,
+      recoveryAttemptId: "opaque-recovery-attempt",
+    } });
+    harness.topbar.fire("click");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent, expected);
+    assert.equal(harness.overlay.querySelector(".vaultDialogPrimary").hidden, true);
+    assert.equal(harness.overlay.querySelector(".vaultDialogRestart").hidden, true);
+    assert.equal(harness.recoveryCalls, 0);
+    assert.equal(harness.recoveryResumeCalls, 0);
+  }
+});
+
 test("P092 exposes Restart recovery only for the legacy generic attention marker", async () => {
   const restarted = createUiHarness("none", {
     discoveryResult: {
@@ -392,6 +415,9 @@ test("P092 exposes Restart recovery only for the legacy generic attention marker
     "recovery-begin-rejected", "recovery-begin-expired", "recovery-begin-not-found", "recovery-begin-response-invalid",
     "recovery-begin-request-rejected", "recovery-begin-authentication-rejected",
     "recovery-begin-authorisation-rejected", "recovery-begin-conflict",
+    "recovery-begin-service-state-invalid", "recovery-begin-storage-failed",
+    "recovery-begin-server-contract-invalid", "recovery-begin-server-internal",
+    "recovery-begin-http-shell-rejected", "recovery-begin-redirect-rejected",
   ]) {
     const blocked = createUiHarness("none", { discoveryResult: {
       ok: false, reason, locallyDurable: true, resumable: false,

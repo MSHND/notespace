@@ -17,6 +17,13 @@
     "begin-attention-authorisation-rejected": "recovery-begin-authorisation-rejected",
     "begin-attention-conflict": "recovery-begin-conflict",
     "begin-attention-response-invalid": "recovery-begin-response-invalid",
+    "begin-attention-service-state-invalid": "recovery-begin-service-state-invalid",
+    "begin-attention-storage-failed": "recovery-begin-storage-failed",
+    "begin-attention-server-contract-invalid": "recovery-begin-server-contract-invalid",
+    "begin-attention-server-internal": "recovery-begin-server-internal",
+    "begin-attention-http-shell-rejected": "recovery-begin-http-shell-rejected",
+    "begin-attention-redirect-rejected": "recovery-begin-redirect-rejected",
+    "begin-attention-unclassified-rejected": "recovery-begin-rejected",
   });
 
   function frozen(value) {
@@ -37,7 +44,7 @@
   function isLegacyRestartableDraft(draft, ownerKind) {
     return ownerKind === "none"
       && draft?.stage === "begin-pending"
-      && draft.pendingOperation === "begin-attention-rejected"
+      && ["begin-attention-rejected", "begin-attention-generic-rejected"].includes(draft.pendingOperation)
       && draft.beginResponse === null
       && draft.finishRequest === null
       && draft.finishResponse === null

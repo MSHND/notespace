@@ -1248,7 +1248,7 @@ test("P091 preserves bounded Recovery begin rejection classes", async (t) => {
       assert.equal(found.draft.pendingOperation, {
         "recovery-begin-expired": "begin-attention-expired",
         "recovery-begin-not-found": "begin-attention-not-found",
-        "recovery-begin-rejected": "begin-attention-generic-rejected",
+        "recovery-begin-rejected": "begin-attention-unclassified-rejected",
         "recovery-begin-request-rejected": "begin-attention-request-rejected",
         "recovery-begin-authentication-rejected": "begin-attention-authentication-rejected",
         "recovery-begin-authorisation-rejected": "begin-attention-authorisation-rejected",
@@ -1276,6 +1276,48 @@ test("P091 preserves bounded Recovery begin rejection classes", async (t) => {
       assert.equal(requests.length, 2);
       assert.equal(requests[1].options.body, requests[0].options.body);
     }
+  });
+});
+
+test("P093 persists bounded Recovery-begin server failure classes as attention", async (t) => {
+  const cases = [
+    ["service state", 500, "service-state-invalid", "recovery-begin-service-state-invalid", "begin-attention-service-state-invalid"],
+    ["storage", 500, "store-storage-failed", "recovery-begin-storage-failed", "begin-attention-storage-failed"],
+    ["server contract", 500, "http-core-result-invalid", "recovery-begin-server-contract-invalid", "begin-attention-server-contract-invalid"],
+    ["server internal", 500, "http-internal-error", "recovery-begin-server-internal", "begin-attention-server-internal"],
+    ["unknown 500", 500, "provider-detail", "recovery-begin-server-internal", "begin-attention-server-internal"],
+    ["http shell", 415, "http-internal-error", "recovery-begin-http-shell-rejected", "begin-attention-http-shell-rejected"],
+    ["redirect", 302, "http-internal-error", "recovery-begin-redirect-rejected", "begin-attention-redirect-rejected"],
+    ["unclassified", 418, "provider-detail", "recovery-begin-rejected", "begin-attention-unclassified-rejected"],
+  ];
+  for (const [name, status, reason, expectedReason, expectedPending] of cases) await t.test(name, async () => {
+    const harness = await createActivatedHarness();
+    let requests = 0;
+    const transport = harness.remote.createBrowserJsonTransport({
+      serviceRoot: "/sync/v1",
+      async fetch() {
+        requests += 1;
+        return fixtures.textResponse({ apiVersion: 1, ok: false, reason }, { status });
+      },
+    });
+    const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+      ...harness.recoveryConfig,
+      recoveryService: harness.remote.createRecoveryService({ transport, now: () => NOW }),
+    });
+    const result = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+      deviceId: `device-p093-${name.replaceAll(" ", "-")}`,
+    });
+    assert.equal(result.reason, expectedReason);
+    assert.equal(result.resumable, false);
+    const found = await harness.recoveryStore.readRecoveryAttempt(result.recoveryAttemptId);
+    assert.equal(found.draft.pendingOperation, expectedPending);
+    const resumed = await recoveryOrchestrator.resume(harness.recoveryDependencies, {
+      recoveryAttemptId: result.recoveryAttemptId,
+    });
+    assert.equal(resumed.reason, expectedReason);
+    assert.equal(resumed.resumable, false);
+    assert.equal(requests, 1);
+    assert.doesNotMatch(JSON.stringify(found), /provider-detail/);
   });
 });
 
@@ -1366,7 +1408,7 @@ async function replaceRecoveryDraftPendingOperation(harness, attemptId, pendingO
   return harness.recoveryStore.readRecoveryAttempt(attemptId);
 }
 
-test("P092a restarts only the encrypted legacy generic begin attention marker", async () => {
+test("P093 restarts only an encrypted obsolete pre-authority begin marker", async () => {
   const harness = await createActivatedHarness();
   const requests = [];
   const transport = harness.remote.createBrowserJsonTransport({
@@ -1387,11 +1429,11 @@ test("P092a restarts only the encrypted legacy generic begin attention marker", 
   assert.equal(requests.length, 1);
   const beforeRestart = await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId);
   assert.equal(beforeRestart.record.kind, harness.deviceStore.FORMAT.recoveryStagingKind);
-  assert.equal(beforeRestart.draft.pendingOperation, "begin-attention-generic-rejected");
+  assert.equal(beforeRestart.draft.pendingOperation, "begin-attention-unclassified-rejected");
   const legacy = await replaceRecoveryDraftPendingOperation(
-    harness, staged.recoveryAttemptId, "begin-attention-rejected"
+    harness, staged.recoveryAttemptId, "begin-attention-generic-rejected"
   );
-  assert.equal(legacy.draft.pendingOperation, "begin-attention-rejected");
+  assert.equal(legacy.draft.pendingOperation, "begin-attention-generic-rejected");
 
   const restarted = await recoveryOrchestrator.restartLegacyBeginAttention(
     harness.recoveryDependencies, { recoveryAttemptId: staged.recoveryAttemptId }
@@ -1410,7 +1452,7 @@ test("P092a restarts only the encrypted legacy generic begin attention marker", 
     "device-p092-fresh");
 });
 
-test("P092a fresh generic attention reloads locally without a Restart action", async () => {
+test("P093 fresh classified attention reloads locally without a Restart action", async () => {
   const harness = await createActivatedHarness();
   const requests = [];
   const transport = harness.remote.createBrowserJsonTransport({
@@ -1478,9 +1520,7 @@ test("P092a fresh generic attention reloads locally without a Restart action", a
   assert.ok(await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId));
   assert.equal(requests.length, 1);
 
-  await replaceRecoveryDraftPendingOperation(
-    harness, staged.recoveryAttemptId, "begin-attention-rejected"
-  );
+  await replaceRecoveryDraftPendingOperation(harness, staged.recoveryAttemptId, "begin-attention-generic-rejected");
   const legacyDiscovered = await reloaded.findRecoveryAttempt();
   assert.equal(legacyDiscovered.restartable, true);
   const restarted = await reloaded.restartLegacyRecovery({
