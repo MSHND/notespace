@@ -85,7 +85,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
     resume(input) { resumeCalls += 1; resumeInput = input; return Promise.resolve({ ok: false }); },
     ...(options.recovery === false ? {} : {
       recoverExisting() { recoveryCalls += 1; return new Promise((resolve) => { resolveRecovery = resolve; }); },
-      resumeRecovery(input) { recoveryResumeCalls += 1; recoveryResumeInput = input; return Promise.resolve({ ok: false }); },
+    resumeRecovery(input) { recoveryResumeCalls += 1; recoveryResumeInput = input; return Promise.resolve(options.resumeRecoveryResult || { ok: false }); },
     }),
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
@@ -142,7 +142,7 @@ test("P086 gives recovery-required its specific mobile guidance before generic o
 test("P086 keeps recovery picker cancellation and replacement-copy failure truthful", async () => {
   for (const [reason, expected] of [
     ["recovery-package-invalid", "Recovery copy could not be used. Your current Pocket is unchanged."],
-    ["replacement-recovery-copy-not-stored", "Save the replacement recovery copy, then continue recovery."],
+    ["replacement-recovery-copy-not-stored", "Save the replacement recovery copy, then continue recovery. Continue recovery will retry this same recovery attempt."],
   ]) {
     const harness = createUiHarness("none");
     harness.topbar.fire("click");
@@ -153,6 +153,47 @@ test("P086 keeps recovery picker cancellation and replacement-copy failure truth
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
     assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent, expected);
   }
+});
+
+test("P087 presents resumable recovery boundaries without exposing recovery internals", async () => {
+  for (const [reason, expected] of [
+    ["recovery-begin-unavailable", "Pocket could not start recovery with the synced service."],
+    ["recovery-finish-unavailable", "Pocket could not finish this device’s recovery passkey with the synced service."],
+    ["remote-content-unavailable", "Pocket could not read the synced content for recovery."],
+    ["device-finalisation-failed", "Pocket could not finalise recovery on this device."],
+  ]) {
+    const harness = createUiHarness("none");
+    harness.topbar.fire("click");
+    harness.overlay.querySelector(".vaultDialogRecovery").fire("click");
+    const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+    primary.fire("click");
+    harness.resolveRecovery({ ok: false, reason, resumable: true, recoveryAttemptId: "opaque-recovery-attempt" });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const status = harness.overlay.querySelector("#syncSetupStatus").textContent;
+    assert.equal(status, `${expected} Continue recovery will retry this same recovery attempt.`);
+    assert.equal(primary.textContent, "Continue recovery");
+    assert.equal(primary.dataset.mode, "recovery-continue");
+    assert.doesNotMatch(status, /opaque-recovery-attempt|recovery-begin-unavailable|credential|locator|proof/i);
+  }
+});
+
+test("P087 keeps non-resumable recovery failures out of Continue recovery", async () => {
+  const harness = createUiHarness("none", { resumeRecoveryResult: {
+    ok: false, reason: "recovery-begin-failed", resumable: false,
+  } });
+  harness.topbar.fire("click");
+  harness.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+  primary.fire("click");
+  harness.resolveRecovery({ ok: false, reason: "recovery-begin-unavailable", resumable: true,
+    recoveryAttemptId: "opaque-recovery-attempt" });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  primary.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(primary.textContent, "Use recovery copy");
+  assert.equal(primary.dataset.mode, "recovery");
+  assert.equal(harness.overlay.querySelector("h2").textContent, "Use recovery copy");
+  assert.doesNotMatch(harness.overlay.querySelector("#syncSetupStatus").textContent, /Continue recovery|Sync setup could not finish/);
 });
 
 test("P055a opens recovery only after explicit confirmation, and Cancel or idle Escape leave it untouched", () => {

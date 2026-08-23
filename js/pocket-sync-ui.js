@@ -2,6 +2,37 @@
 (function initialisePocketSyncUi(global) {
   "use strict";
   let refreshInstalled = () => {};
+  const RECOVERY_COPY = Object.freeze({
+    "recovery-required": "A recovery copy is needed to open this synced Pocket on this device.",
+    "recovery-package-invalid": "Recovery copy could not be used. Your current Pocket is unchanged.",
+    "recovery-begin-unavailable": "Pocket could not start recovery with the synced service.",
+    "recovery-begin-failed": "Recovery could not be started with this synced Pocket.",
+    "recovery-ceremony-expired": "The recovery passkey request expired. Start recovery again.",
+    "recovery-credential-cancelled": "Creating this device’s recovery passkey was cancelled.",
+    "recovery-credential-failed": "Pocket could not create this device’s recovery passkey.",
+    "recovery-proof-failed": "Pocket could not finish this device’s recovery passkey.",
+    "recovery-finish-unavailable": "Pocket could not finish this device’s recovery passkey with the synced service.",
+    "recovery-finish-failed": "This device’s recovery passkey could not be accepted.",
+    "remote-content-unavailable": "Pocket could not read the synced content for recovery.",
+    "remote-content-changed": "The synced content changed while recovery was reading it.",
+    "recovered-content-invalid": "The recovered synced content could not be validated.",
+    "recovery-envelope-open-failed": "Pocket could not open the recovery authority for this device.",
+    "device-envelope-failed": "Pocket could not add this device’s secure access.",
+    "device-envelope-conflict": "This device’s secure access could not be added safely.",
+    "recovery-rotation-failed": "Pocket could not rotate Recovery authority.",
+    "recovery-rotation-conflict": "Recovery authority changed and could not be rotated safely.",
+    "replacement-recovery-copy-not-stored": "Save the replacement recovery copy, then continue recovery.",
+    "device-finalisation-failed": "Pocket could not finalise recovery on this device.",
+    "recovery-adoption-failed": "Pocket could not finalise recovery on this device.",
+    "recovery-target-stale": "The current Pocket changed before recovery could be finalised.",
+    "recovery-target-changed": "The current Pocket changed before recovery could continue.",
+    "recovery-target-dirty": "Pocket has changes that need attention before recovery can continue.",
+    "recovery-state-invalid": "Recovery could not continue safely.",
+    "replacement-copy-destination-deferred": "Choose where to save the replacement recovery copy to begin recovery.",
+    "device-staging-failed": "Pocket could not prepare recovery safely on this device.",
+    "invalid-recovery-input": "Recovery could not be started safely.",
+    "unsupported-recovery-target": "Recovery is not available for the current Pocket.",
+  });
 
   function owner() {
     try { return global.capturePocketFileSaveSession?.() || null; } catch (_error) { return null; }
@@ -12,9 +43,11 @@
     if (result?.adopted === true && result?.sourceOwnerPreserved === false) {
       return "Sync setup hit a finalisation problem, but Synced Pocket is now the owner.";
     }
-    if (reason === "recovery-required") return "A recovery copy is needed to open this synced Pocket on this device.";
-    if (reason === "recovery-package-invalid") return "Recovery copy could not be used. Your current Pocket is unchanged.";
-    if (reason === "replacement-recovery-copy-not-stored") return "Save the replacement recovery copy, then continue recovery.";
+    if (Object.prototype.hasOwnProperty.call(RECOVERY_COPY, reason)) {
+      const copy = RECOVERY_COPY[reason];
+      return result?.resumable === true && reason !== "recovery-required"
+        ? `${copy} Continue recovery will retry this same recovery attempt.` : copy;
+    }
     if (result?.sourceOwnerPreserved !== true) {
       return "Sync setup could not finish. Check Storage & Sync before continuing.";
     }
@@ -153,6 +186,12 @@
         continuation = result.recoveryAttemptId;
         primary.dataset.mode = "recovery-continue";
         primary.textContent = "Continue recovery";
+      } else if (primary.dataset.mode === "recovery-continue") {
+        continuation = null;
+        primary.dataset.mode = "recovery";
+        primary.textContent = "Use recovery copy";
+        title.textContent = "Use recovery copy";
+        body.textContent = "Pocket will ask for your saved Recovery Copy, create a passkey for this device, then ask where to save the replacement Recovery Copy.";
       } else if (result?.resumable === true && typeof result.activationId === "string") {
         continuation = result.activationId;
         primary.dataset.mode = "continue";
