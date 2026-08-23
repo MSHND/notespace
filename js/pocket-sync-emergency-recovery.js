@@ -63,18 +63,28 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     null, "begin-recovery", "finish-recovery", "revision-read", "content-download",
     "device-envelope", "device-envelope-conflict", "recovery-rotation",
     "recovery-rotation-conflict", "begin-attention-expired", "begin-attention-not-found",
-    "begin-attention-rejected", "begin-attention-response-invalid",
+    "begin-attention-rejected", "begin-attention-request-rejected",
+    "begin-attention-authentication-rejected", "begin-attention-authorisation-rejected",
+    "begin-attention-conflict", "begin-attention-response-invalid",
   ]);
   const BEGIN_ATTENTION_OPERATIONS = Object.freeze({
     "recovery-begin-expired": "begin-attention-expired",
     "recovery-begin-not-found": "begin-attention-not-found",
     "recovery-begin-rejected": "begin-attention-rejected",
+    "recovery-begin-request-rejected": "begin-attention-request-rejected",
+    "recovery-begin-authentication-rejected": "begin-attention-authentication-rejected",
+    "recovery-begin-authorisation-rejected": "begin-attention-authorisation-rejected",
+    "recovery-begin-conflict": "begin-attention-conflict",
     "recovery-begin-response-invalid": "begin-attention-response-invalid",
   });
   const BEGIN_ATTENTION_REASONS = Object.freeze({
     "begin-attention-expired": "recovery-begin-expired",
     "begin-attention-not-found": "recovery-begin-not-found",
     "begin-attention-rejected": "recovery-begin-rejected",
+    "begin-attention-request-rejected": "recovery-begin-request-rejected",
+    "begin-attention-authentication-rejected": "recovery-begin-authentication-rejected",
+    "begin-attention-authorisation-rejected": "recovery-begin-authorisation-rejected",
+    "begin-attention-conflict": "recovery-begin-conflict",
     "begin-attention-response-invalid": "recovery-begin-response-invalid",
   });
   const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -623,6 +633,18 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       }
       if (error?.status === 404) {
         return persistBeginAttention("recovery-begin-not-found", execution);
+      }
+      if (error?.status === 400) {
+        return persistBeginAttention("recovery-begin-request-rejected", execution);
+      }
+      if (error?.status === 401) {
+        return persistBeginAttention("recovery-begin-authentication-rejected", execution);
+      }
+      if (error?.status === 403) {
+        return persistBeginAttention("recovery-begin-authorisation-rejected", execution);
+      }
+      if (error?.status === 409) {
+        return persistBeginAttention("recovery-begin-conflict", execution);
       }
       if (Number.isSafeInteger(error?.status) || error?.code === "remote-redirect-rejected") {
         return persistBeginAttention("recovery-begin-rejected", execution);

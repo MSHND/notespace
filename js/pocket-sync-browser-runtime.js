@@ -11,6 +11,10 @@
     "begin-attention-expired": "recovery-begin-expired",
     "begin-attention-not-found": "recovery-begin-not-found",
     "begin-attention-rejected": "recovery-begin-rejected",
+    "begin-attention-request-rejected": "recovery-begin-request-rejected",
+    "begin-attention-authentication-rejected": "recovery-begin-authentication-rejected",
+    "begin-attention-authorisation-rejected": "recovery-begin-authorisation-rejected",
+    "begin-attention-conflict": "recovery-begin-conflict",
     "begin-attention-response-invalid": "recovery-begin-response-invalid",
   });
 

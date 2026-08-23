@@ -326,6 +326,28 @@ test("P090a reopens durable Recovery attention without offering a new action", a
   assert.equal(harness.discoveryCalls, 2);
 });
 
+test("P091 presents each bounded Recovery rejection as attention only", async () => {
+  for (const [reason, expected] of [
+    ["recovery-begin-request-rejected", "Pocket could not accept this recovery request."],
+    ["recovery-begin-authentication-rejected", "Pocket could not authenticate this recovery request."],
+    ["recovery-begin-authorisation-rejected", "Pocket could not authorise this recovery request."],
+    ["recovery-begin-conflict", "This recovery request conflicts with existing recovery state."],
+  ]) {
+    const harness = createUiHarness("none", { discoveryResult: {
+      ok: false, reason, locallyDurable: true, resumable: false,
+      recoveryAttemptId: "opaque-recovery-attempt",
+    } });
+    harness.topbar.fire("click");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(harness.overlay.querySelector("h2").textContent, "Recovery needs attention");
+    assert.equal(harness.overlay.querySelector(".vaultDialogPrimary").hidden, true);
+    assert.equal(harness.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+    assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent, expected);
+    assert.equal(harness.recoveryCalls, 0);
+    assert.equal(harness.recoveryResumeCalls, 0);
+  }
+});
+
 test("P055a opens recovery only after explicit confirmation, and Cancel or idle Escape leave it untouched", () => {
   const cancel = createUiHarness("none", { paletteOpen: true });
   cancel.topbar.fire("click");

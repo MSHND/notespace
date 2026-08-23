@@ -1197,7 +1197,7 @@ test("P089 resumes a durable none target after its page-local continuity changes
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
 });
 
-test("P090 makes Recovery begin retryability follow the bounded remote-client result", async (t) => {
+test("P091 preserves bounded Recovery begin rejection classes", async (t) => {
   const cases = [
     { name: "network", fetch: async () => { throw new Error("network unavailable"); },
       reason: "recovery-begin-unavailable", resumable: true },
@@ -1205,9 +1205,11 @@ test("P090 makes Recovery begin retryability follow the bounded remote-client re
     { name: "429", status: 429, reason: "recovery-begin-unavailable", resumable: true },
     { name: "410", status: 410, reason: "recovery-begin-expired", resumable: false },
     { name: "404", status: 404, reason: "recovery-begin-not-found", resumable: false },
-    { name: "400", status: 400, reason: "recovery-begin-rejected", resumable: false },
-    { name: "401", status: 401, reason: "recovery-begin-rejected", resumable: false },
-    { name: "403", status: 403, reason: "recovery-begin-rejected", resumable: false },
+    { name: "400", status: 400, reason: "recovery-begin-request-rejected", resumable: false },
+    { name: "401", status: 401, reason: "recovery-begin-authentication-rejected", resumable: false },
+    { name: "403", status: 403, reason: "recovery-begin-authorisation-rejected", resumable: false },
+    { name: "409", status: 409, reason: "recovery-begin-conflict", resumable: false },
+    { name: "418", status: 418, reason: "recovery-begin-rejected", resumable: false },
     { name: "malformed success", status: 200, reason: "recovery-begin-response-invalid", resumable: false,
       body: { apiVersion: 1, ok: true, operationId: "wrong-operation" } },
   ];
@@ -1245,6 +1247,10 @@ test("P090 makes Recovery begin retryability follow the bounded remote-client re
         "recovery-begin-expired": "begin-attention-expired",
         "recovery-begin-not-found": "begin-attention-not-found",
         "recovery-begin-rejected": "begin-attention-rejected",
+        "recovery-begin-request-rejected": "begin-attention-request-rejected",
+        "recovery-begin-authentication-rejected": "begin-attention-authentication-rejected",
+        "recovery-begin-authorisation-rejected": "begin-attention-authorisation-rejected",
+        "recovery-begin-conflict": "begin-attention-conflict",
         "recovery-begin-response-invalid": "begin-attention-response-invalid",
       }[scenario.reason]);
       const storedRevision = found.record.storeRevision;
@@ -1271,14 +1277,14 @@ test("P090 makes Recovery begin retryability follow the bounded remote-client re
   });
 });
 
-test("P090a rediscovers durable begin attention without resuming Recovery", async () => {
+test("P091 rediscovers durable rejection attention without resuming Recovery", async () => {
   const harness = await createActivatedHarness();
   const requests = [];
   const transport = harness.remote.createBrowserJsonTransport({
     serviceRoot: "/sync/v1",
     async fetch(url, options) {
       requests.push({ url, options });
-      return fixtures.textResponse({ detail: "provider detail" }, { status: 410 });
+      return fixtures.textResponse({ detail: "provider detail" }, { status: 403 });
     },
   });
   const recoveryService = harness.remote.createRecoveryService({ transport, now: () => NOW });
@@ -1288,7 +1294,7 @@ test("P090a rediscovers durable begin attention without resuming Recovery", asyn
   const staged = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
     deviceId: "device-p090a-attention",
   });
-  assert.equal(staged.reason, "recovery-begin-expired");
+  assert.equal(staged.reason, "recovery-begin-authorisation-rejected");
   assert.equal(requests.length, 1);
 
   const context = harness.context;
@@ -1324,16 +1330,16 @@ test("P090a rediscovers durable begin attention without resuming Recovery", asyn
   });
   const runtime = createRuntime();
   const discovered = await runtime.findRecoveryAttempt();
-  assert.equal(discovered.reason, "recovery-begin-expired");
+  assert.equal(discovered.reason, "recovery-begin-authorisation-rejected");
   assert.equal(discovered.resumable, false);
   assert.equal(discovered.recoveryAttemptId, staged.recoveryAttemptId);
   assert.equal(requests.length, 1);
   const resumed = await runtime.resumeRecovery({ recoveryAttemptId: staged.recoveryAttemptId });
-  assert.equal(resumed.reason, "recovery-begin-expired");
+  assert.equal(resumed.reason, "recovery-begin-authorisation-rejected");
   assert.equal(resumed.resumable, false);
   assert.equal(requests.length, 1);
   const reloaded = await createRuntime().findRecoveryAttempt();
-  assert.equal(reloaded.reason, "recovery-begin-expired");
+  assert.equal(reloaded.reason, "recovery-begin-authorisation-rejected");
   assert.equal(reloaded.resumable, false);
   assert.equal(requests.length, 1);
 });
