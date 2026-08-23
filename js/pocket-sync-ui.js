@@ -69,6 +69,8 @@
     if (!(button instanceof global.HTMLButtonElement) || !(topbarButton instanceof global.HTMLButtonElement)) return false;
     global.PocketSyncUiInstalled = true;
     let busy = false;
+    let discovering = false;
+    let discoveryVersion = 0;
     let continuation = null;
     let returnFocus = null;
 
@@ -104,9 +106,9 @@
       const canOpen = eligibleOpen(session);
       const canActivate = eligibleActivation(session);
       button.hidden = !(canActivate || canOpen) || synced;
-      button.disabled = button.hidden || busy;
+      button.disabled = button.hidden || busy || discovering;
       topbarButton.hidden = !canOpen || synced;
-      topbarButton.disabled = topbarButton.hidden || busy;
+      topbarButton.disabled = topbarButton.hidden || busy || discovering;
       const label = button.querySelector("span");
       if (label) label.textContent = canOpen ? "Open synced Pocket…" : "Turn on Sync…";
       const hint = button.querySelector(".commandHint");
@@ -119,6 +121,8 @@
     }
     function close() {
       if (busy) return false;
+      discoveryVersion += 1;
+      discovering = false;
       overlay.hidden = true;
       continuation = null;
       returnFocus?.focus?.({ preventScroll: true });
@@ -150,6 +154,10 @@
         title.textContent = "Recovery needs attention";
         body.textContent = "Recovery on this device needs attention before it can continue.";
         primary.hidden = true;
+      } else if (mode === "recovery-discovery") {
+        title.textContent = "Checking Recovery";
+        body.textContent = "Checking whether this device has a recovery already in progress.";
+        primary.hidden = true;
       } else if (mode === "continue") {
         title.textContent = "Continue Sync setup";
         body.textContent = "Continue the setup already in progress for this Pocket.";
@@ -166,7 +174,7 @@
       return true;
     }
     async function run(mode) {
-      if (busy) return;
+      if (busy || discovering || ["recovery-discovery", "recovery-attention"].includes(mode)) return;
       busy = true;
       primary.disabled = true;
       cancel.disabled = true;
@@ -207,19 +215,30 @@
       refresh();
     }
     function begin() {
+      if (discovering) return;
       const session = owner();
       if (eligibleOpen(session)) {
-        if (!show("open") || typeof integration.findRecoveryAttempt !== "function") return;
+        if (typeof integration.findRecoveryAttempt !== "function") {
+          show("open");
+          return;
+        }
+        if (!show("recovery-discovery")) return;
+        discovering = true;
+        refresh();
+        const version = ++discoveryVersion;
         void (async () => {
           let found;
           try { found = await integration.findRecoveryAttempt(); }
           catch (_error) { found = { ok: false, reason: "recovery-discovery-needs-attention" }; }
           const current = owner();
-          if (overlay.hidden || busy || !eligibleOpen(current)
+          if (version !== discoveryVersion || overlay.hidden || busy || !eligibleOpen(current)
               || current?.ownerKind !== session.ownerKind || current?.id !== session.id) return;
+          discovering = false;
           if (found?.ok === true && typeof found.recoveryAttemptId === "string") {
             continuation = found.recoveryAttemptId;
             show("recovery-continue");
+          } else if (found?.ok === true) {
+            show("open");
           } else if (found?.ok !== true) {
             continuation = null;
             show("recovery-attention");
@@ -232,7 +251,7 @@
     button.addEventListener("click", begin);
     topbarButton.addEventListener("click", begin);
     primary.addEventListener("click", () => void run(primary.dataset.mode));
-    recovery.addEventListener("click", () => { if (!busy && eligibleOpen(owner())) show("recovery"); });
+    recovery.addEventListener("click", () => { if (!busy && !discovering && eligibleOpen(owner())) show("recovery"); });
     cancel.addEventListener("click", close);
     document.addEventListener("keydown", (event) => {
       if (!overlay.hidden && event.key === "Escape" && !busy) { event.preventDefault(); close(); }
