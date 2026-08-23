@@ -80,6 +80,7 @@
     let discovering = false;
     let discoveryVersion = 0;
     let continuation = null;
+    let restartEligible = false;
     let returnFocus = null;
 
     const overlay = document.createElement("div");
@@ -88,7 +89,7 @@
     overlay.innerHTML = '<section class="vaultDialogCard" role="dialog" aria-modal="true" aria-labelledby="syncSetupTitle" aria-describedby="syncSetupBody syncSetupStatus">'
       + '<header class="vaultDialogHeader"><h2 id="syncSetupTitle"></h2><p id="syncSetupBody"></p></header>'
       + '<p id="syncSetupStatus" class="vaultDialogError" role="status" aria-live="polite"></p>'
-      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
+      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
       + '</section>';
     document.body.appendChild(overlay);
     const title = overlay.querySelector("h2");
@@ -96,6 +97,7 @@
     const status = overlay.querySelector("#syncSetupStatus");
     const primary = overlay.querySelector(".vaultDialogPrimary");
     const recovery = overlay.querySelector(".vaultDialogRecovery");
+    const restart = overlay.querySelector(".vaultDialogRestart");
     const cancel = overlay.querySelector(".vaultDialogSecondary");
 
     function eligibleActivation(session) { return !!session && ["json", "vault"].includes(session.ownerKind); }
@@ -133,6 +135,7 @@
       discovering = false;
       overlay.hidden = true;
       continuation = null;
+      restartEligible = false;
       returnFocus?.focus?.({ preventScroll: true });
       return true;
     }
@@ -146,6 +149,7 @@
       overlay.hidden = false;
       status.textContent = "";
       primary.hidden = false;
+      restart.hidden = true;
       if (mode === "open") {
         title.textContent = "Open synced Pocket";
         body.textContent = "Open the encrypted Pocket already linked to your passkey on this device.";
@@ -162,6 +166,9 @@
         title.textContent = "Recovery needs attention";
         body.textContent = "Recovery on this device needs attention before it can continue.";
         primary.hidden = true;
+        restart.hidden = !(restartEligible === true
+          && typeof integration.restartLegacyRecovery === "function"
+          && typeof continuation === "string");
       } else if (mode === "recovery-discovery") {
         title.textContent = "Checking Recovery";
         body.textContent = "Checking whether this device has a recovery already in progress.";
@@ -186,18 +193,29 @@
       busy = true;
       primary.disabled = true;
       cancel.disabled = true;
+      restart.disabled = true;
       status.textContent = mode === "open" ? "Opening synced Pocket…"
-        : mode.startsWith("recovery") ? "Recovering synced Pocket…" : "Setting up Sync…";
+        : mode === "recovery-restart" ? "Restarting recovery…"
+          : mode.startsWith("recovery") ? "Recovering synced Pocket…" : "Setting up Sync…";
       let result;
       try {
         result = mode === "open" ? await integration.openExisting()
           : mode === "continue" ? await integration.resume({ activationId: continuation })
             : mode === "recovery-continue" ? await integration.resumeRecovery({ recoveryAttemptId: continuation })
-              : mode === "recovery" ? await integration.recoverExisting() : await integration.activate();
+              : mode === "recovery-restart" ? await integration.restartLegacyRecovery({ recoveryAttemptId: continuation })
+                : mode === "recovery" ? await integration.recoverExisting() : await integration.activate();
       } catch (_error) { result = { ok: false, reason: "sync-unavailable" }; }
       busy = false;
       primary.disabled = false;
       cancel.disabled = false;
+      restart.disabled = false;
+      if (result?.ok === true && result?.recoveryRestarted === true) {
+        continuation = null;
+        restartEligible = false;
+        show("recovery");
+        refresh();
+        return;
+      }
       if (result?.ok === true) {
         overlay.hidden = true;
         continuation = null;
@@ -210,7 +228,8 @@
         primary.textContent = "Continue recovery";
       } else if (result?.locallyDurable === true && result?.resumable === false
           && typeof result.recoveryAttemptId === "string") {
-        continuation = null;
+        continuation = result.recoveryAttemptId;
+        restartEligible = result.restartable === true;
         show("recovery-attention");
       } else if (primary.dataset.mode === "recovery-continue") {
         continuation = null;
@@ -247,12 +266,16 @@
               || current?.ownerKind !== session.ownerKind || current?.id !== session.id) return;
           discovering = false;
           if (found?.ok === true && typeof found.recoveryAttemptId === "string") {
+            restartEligible = false;
             continuation = found.recoveryAttemptId;
             show("recovery-continue");
           } else if (found?.ok === true) {
+            restartEligible = false;
             show("open");
           } else if (found?.ok !== true) {
-            continuation = null;
+            continuation = found?.restartable === true && typeof found?.recoveryAttemptId === "string"
+              ? found.recoveryAttemptId : null;
+            restartEligible = found?.restartable === true;
             show("recovery-attention");
             status.textContent = message(found);
           }
@@ -264,6 +287,7 @@
     topbarButton.addEventListener("click", begin);
     primary.addEventListener("click", () => void run(primary.dataset.mode));
     recovery.addEventListener("click", () => { if (!busy && !discovering && eligibleOpen(owner())) show("recovery"); });
+    restart.addEventListener("click", () => void run("recovery-restart"));
     cancel.addEventListener("click", close);
     document.addEventListener("keydown", (event) => {
       if (!overlay.hidden && event.key === "Escape" && !busy) { event.preventDefault(); close(); }

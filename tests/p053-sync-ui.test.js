@@ -47,6 +47,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
       this.children.set("#syncSetupStatus", new Element("syncSetupStatus"));
       this.children.set(".vaultDialogPrimary", new Button("syncPrimary"));
       this.children.set(".vaultDialogRecovery", new Button("syncRecovery"));
+      this.children.set(".vaultDialogRestart", new Button("syncRestart"));
       this.children.set(".vaultDialogSecondary", new Button("syncCancel"));
     }
   }
@@ -65,7 +66,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   let session = { ownerKind, id: 1 };
   let dirty = options.dirty === true;
-  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let discoveryCalls = 0; let resumeInput; let recoveryResumeInput; let resolveActivate; let resolveOpen; let resolveRecovery; let resolveDiscovery;
+  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let recoveryRestartCalls = 0; let discoveryCalls = 0; let resumeInput; let recoveryResumeInput; let recoveryRestartInput; let resolveActivate; let resolveOpen; let resolveRecovery; let resolveDiscovery;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
     capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
@@ -86,6 +87,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
     ...(options.recovery === false ? {} : {
       recoverExisting() { recoveryCalls += 1; return new Promise((resolve) => { resolveRecovery = resolve; }); },
     resumeRecovery(input) { recoveryResumeCalls += 1; recoveryResumeInput = input; return Promise.resolve(options.resumeRecoveryResult || { ok: false }); },
+    restartLegacyRecovery(input) { recoveryRestartCalls += 1; recoveryRestartInput = input; return Promise.resolve(options.restartRecoveryResult || { ok: false, reason: "recovery-state-invalid" }); },
     }),
     ...((Object.hasOwn(options, "discoveryResult") || options.discoveryPending === true) ? {
       findRecoveryAttempt() {
@@ -98,7 +100,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get discoveryCalls() { return discoveryCalls; }, get recoveryResumeInput() { return recoveryResumeInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, get resolveDiscovery() { return resolveDiscovery; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryRestartCalls() { return recoveryRestartCalls; }, get discoveryCalls() { return discoveryCalls; }, get recoveryResumeInput() { return recoveryResumeInput; }, get recoveryRestartInput() { return recoveryRestartInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, get resolveDiscovery() { return resolveDiscovery; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -342,9 +344,62 @@ test("P091 presents each bounded Recovery rejection as attention only", async ()
     assert.equal(harness.overlay.querySelector("h2").textContent, "Recovery needs attention");
     assert.equal(harness.overlay.querySelector(".vaultDialogPrimary").hidden, true);
     assert.equal(harness.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+    assert.equal(harness.overlay.querySelector(".vaultDialogRestart").hidden, true);
     assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent, expected);
     assert.equal(harness.recoveryCalls, 0);
     assert.equal(harness.recoveryResumeCalls, 0);
+  }
+});
+
+test("P092 exposes Restart recovery only for the legacy generic attention marker", async () => {
+  const restarted = createUiHarness("none", {
+    discoveryResult: {
+      ok: false, reason: "recovery-begin-rejected", locallyDurable: true,
+      resumable: false, restartable: true, recoveryAttemptId: "opaque-recovery-attempt",
+    },
+    restartRecoveryResult: { ok: true, recoveryRestarted: true },
+  });
+  restarted.topbar.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const restart = restarted.overlay.querySelector(".vaultDialogRestart");
+  assert.equal(restart.hidden, false);
+  assert.equal(restarted.overlay.querySelector(".vaultDialogPrimary").hidden, true);
+  assert.equal(restarted.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+  restart.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(restarted.recoveryRestartCalls, 1);
+  assert.equal(JSON.stringify(restarted.recoveryRestartInput),
+    '{"recoveryAttemptId":"opaque-recovery-attempt"}');
+  assert.equal(restarted.recoveryCalls, 0);
+  assert.equal(restarted.overlay.querySelector("h2").textContent, "Use recovery copy");
+  assert.equal(restarted.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "recovery");
+  assert.equal(restart.hidden, true);
+
+  const failed = createUiHarness("none", { discoveryResult: {
+    ok: false, reason: "recovery-begin-rejected", locallyDurable: true,
+    resumable: false, restartable: true, recoveryAttemptId: "opaque-recovery-attempt",
+  } });
+  failed.topbar.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  failed.overlay.querySelector(".vaultDialogRestart").fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(failed.recoveryRestartCalls, 1);
+  assert.equal(failed.recoveryCalls, 0);
+  assert.equal(failed.overlay.querySelector("h2").textContent, "Recovery needs attention");
+  assert.equal(failed.overlay.querySelector(".vaultDialogRestart").hidden, false);
+
+  for (const reason of [
+    "recovery-begin-expired", "recovery-begin-not-found", "recovery-begin-response-invalid",
+    "recovery-begin-request-rejected", "recovery-begin-authentication-rejected",
+    "recovery-begin-authorisation-rejected", "recovery-begin-conflict",
+  ]) {
+    const blocked = createUiHarness("none", { discoveryResult: {
+      ok: false, reason, locallyDurable: true, resumable: false,
+      recoveryAttemptId: "opaque-recovery-attempt",
+    } });
+    blocked.topbar.fire("click");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(blocked.overlay.querySelector(".vaultDialogRestart").hidden, true, reason);
   }
 });
 

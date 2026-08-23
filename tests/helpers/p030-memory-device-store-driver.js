@@ -95,6 +95,11 @@ function createMemoryDeviceStoreDriver(sharedState = createSharedDeviceStoreStat
         staged.set(key, clone(value));
         return key;
       },
+      async delete(key) {
+        if (mode !== "readwrite") throw driverError("readonly-write");
+        staged.delete(key);
+        return undefined;
+      },
       checkpoint(point) {
         trigger(point);
       },

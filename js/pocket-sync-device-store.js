@@ -902,6 +902,31 @@ and a narrow atomic transaction boundary without activating a synced owner.
       });
     }
 
+    async function discardRecoveryStaging(syncedPocketIdInput, expectedRevisionInput) {
+      requireOpen();
+      const syncedPocketId = identifier(syncedPocketIdInput, "device-state-identity-invalid");
+      const expectedRevision = positiveInteger(
+        expectedRevisionInput,
+        "device-store-revision-invalid"
+      );
+      return driver.transaction("readwrite", async (transaction) => {
+        if (typeof transaction.delete !== "function") {
+          throw deviceStoreError("device-store-driver-invalid");
+        }
+        const found = await transaction.get(syncedPocketId);
+        transaction.checkpoint("after-read-before-validation");
+        if (found === undefined) throw deviceStoreError("device-store-not-found");
+        const current = migrateRecoveryStagingRecord(found);
+        if (current.storeRevision !== expectedRevision) {
+          throw deviceStoreError("device-store-revision-conflict");
+        }
+        transaction.checkpoint("after-validation-before-write");
+        await transaction.delete(syncedPocketId);
+        transaction.checkpoint("after-write-before-commit");
+        return true;
+      });
+    }
+
     async function createPocket(input) {
       requireOpen();
       return driver.transaction("readwrite", async (transaction) => {
@@ -1034,6 +1059,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       replaceRecoveryStaging,
       reserveRecoveryStagingEncryptionUsage,
       promoteRecoveryStaging,
+      discardRecoveryStaging,
       close: closeStore,
     });
   }
@@ -1198,6 +1224,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
           getAll: () => requestResult(store, "getAll"),
           add: (value) => requestResult(store, "add", value),
           put: (value) => requestResult(store, "put", value),
+          delete: (key) => requestResult(store, "delete", key),
           checkpoint: () => {},
         });
         Promise.resolve()
@@ -1270,6 +1297,8 @@ and a narrow atomic transaction boundary without activating a synced owner.
       .reserveRecoveryStagingEncryptionUsage(syncedPocketId, expectedStoreRevision, expectedUsage, increment),
     promoteRecoveryStaging: (syncedPocketId, expectedStoreRevision, record) => getDefaultStore()
       .promoteRecoveryStaging(syncedPocketId, expectedStoreRevision, record),
+    discardRecoveryStaging: (syncedPocketId, expectedStoreRevision) => getDefaultStore()
+      .discardRecoveryStaging(syncedPocketId, expectedStoreRevision),
     close: () => getDefaultStore().close(),
   });
 })(typeof window !== "undefined" ? window : globalThis);

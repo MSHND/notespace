@@ -498,7 +498,9 @@ test("P041 is one dormant inert exact recovery boundary", () => {
 
 test("factory, dependency, option, target and package boundaries fail before effects", async () => {
   const harness = await createActivatedHarness({ deferDestination: true });
-  assert.deepEqual(Object.keys(harness.recoveryOrchestrator), ["recover", "resume"]);
+  assert.deepEqual(Object.keys(harness.recoveryOrchestrator), [
+    "recover", "resume", "restartLegacyBeginAttention",
+  ]);
   assert.equal(Object.isFrozen(harness.recoveryOrchestrator), true);
   assert.throws(
     () => harness.recovery.createRecoveryOrchestrator({ ...harness.recoveryConfig, extra: true }),
@@ -1342,6 +1344,222 @@ test("P091 rediscovers durable rejection attention without resuming Recovery", a
   assert.equal(reloaded.reason, "recovery-begin-authorisation-rejected");
   assert.equal(reloaded.resumable, false);
   assert.equal(requests.length, 1);
+});
+
+test("P092 restarts only the legacy generic begin attention locally", async () => {
+  const harness = await createActivatedHarness();
+  const requests = [];
+  const transport = harness.remote.createBrowserJsonTransport({
+    serviceRoot: "/sync/v1",
+    async fetch(url, options) {
+      requests.push({ url, options });
+      return fixtures.textResponse({ detail: "provider detail" }, { status: 418 });
+    },
+  });
+  const recoveryService = harness.remote.createRecoveryService({ transport, now: () => NOW });
+  const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+    ...harness.recoveryConfig, recoveryService,
+  });
+  const staged = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p092-attention",
+  });
+  assert.equal(staged.reason, "recovery-begin-rejected");
+  assert.equal(requests.length, 1);
+  const beforeRestart = await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId);
+  assert.equal(beforeRestart.record.kind, harness.deviceStore.FORMAT.recoveryStagingKind);
+  assert.equal(beforeRestart.draft.pendingOperation, "begin-attention-rejected");
+
+  const restarted = await recoveryOrchestrator.restartLegacyBeginAttention(
+    harness.recoveryDependencies, { recoveryAttemptId: staged.recoveryAttemptId }
+  );
+  assert.equal(restarted.ok, true);
+  assert.equal(restarted.recoveryRestarted, true);
+  assert.equal(requests.length, 1);
+  assert.equal(harness.recoveryState.records.size, 0);
+
+  const fresh = await harness.recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p092-fresh",
+  });
+  assert.equal(fresh.ok, true, JSON.stringify(fresh));
+  assert.notEqual(fresh.recoveryAttemptId, staged.recoveryAttemptId);
+  assert.equal((await harness.recoveryStore.readRecoveryAttempt(fresh.recoveryAttemptId)).draft.deviceId,
+    "device-p092-fresh");
+});
+
+test("P092 browser recovery restart is local and returns to the Recovery Copy doorway", async () => {
+  const harness = await createActivatedHarness();
+  const requests = [];
+  const transport = harness.remote.createBrowserJsonTransport({
+    serviceRoot: "/sync/v1",
+    async fetch(url, options) {
+      requests.push({ url, options });
+      return fixtures.textResponse({ detail: "provider detail" }, { status: 418 });
+    },
+  });
+  const recoveryService = harness.remote.createRecoveryService({ transport, now: () => NOW });
+  const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+    ...harness.recoveryConfig, recoveryService,
+  });
+  const staged = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p092-runtime",
+  });
+
+  const context = harness.context;
+  let ownerKind = "none";
+  let continuityId = 92;
+  const originalStoreApi = context.PocketSyncDeviceStore;
+  context.PocketSyncDeviceStore = Object.freeze({
+    ...originalStoreApi,
+    createIndexedDbDriver() { return Object.freeze({}); },
+    createStore() { return harness.recoveryStore; },
+  });
+  context.capturePocketFileSaveSession = () => ({ id: continuityId, ownerKind });
+  context.hasPocketUnsavedChanges = () => false;
+  context.PocketDeviceChanges = { fingerprintDocument(value) { return JSON.stringify(value); } };
+  const environment = {
+    crypto: webcrypto,
+    now: () => NOW,
+    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+    navigator: { credentials: { async create() { throw new Error("not used"); } } },
+  };
+  for (const file of [
+    "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
+  ]) vm.runInContext(source(file), context, { filename: file });
+  const runtime = context.PocketSyncBrowserRuntime.createRuntime({
+    accountService: context.PocketSyncRemoteClient.createAccountService({
+      transport: harness.transport, now: () => NOW,
+    }),
+    contentService: harness.contentService,
+    envelopeService: harness.envelopeService,
+    recoveryService,
+    environment,
+  });
+  const discovered = await runtime.findRecoveryAttempt();
+  assert.equal(discovered.reason, "recovery-begin-rejected");
+  assert.equal(discovered.restartable, true);
+  const restarted = await runtime.restartLegacyRecovery({
+    recoveryAttemptId: staged.recoveryAttemptId,
+  });
+  assert.equal(restarted.recoveryRestarted, true);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(plain(await runtime.findRecoveryAttempt()), { ok: true });
+});
+
+test("P092 refuses non-legacy, retryable, detached, changed and stale Recovery records", async (t) => {
+  for (const [name, setup] of [
+    ["P091 request attention", { status: 400 }],
+    ["P091 authentication attention", { status: 401 }],
+    ["P091 authorisation attention", { status: 403 }],
+    ["P091 conflict attention", { status: 409 }],
+    ["expired attention", { status: 410 }],
+    ["not-found attention", { status: 404 }],
+    ["invalid response attention", { status: null }],
+    ["retryable begin", { retryable: true }],
+    ["detached target", { status: 418, ownerKind: "detached" }],
+  ]) await t.test(name, async () => {
+    const harness = await createActivatedHarness({ ownerKind: setup.ownerKind || "none" });
+    let calls = 0;
+    const recoveryService = Object.freeze({
+      ...harness.recoveryService,
+      async beginRecovery() {
+        calls += 1;
+        if (setup.retryable) {
+          const error = new Error("retryable");
+          error.retryable = true;
+          throw error;
+        }
+        if (setup.status === null) return Object.freeze({});
+        const error = new Error("rejected");
+        error.status = setup.status;
+        throw error;
+      },
+    });
+    const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+      ...harness.recoveryConfig, recoveryService,
+    });
+    const staged = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+      deviceId: `device-p092-${name}`,
+    });
+    const before = await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId);
+    const restarted = await recoveryOrchestrator.restartLegacyBeginAttention(
+      harness.recoveryDependencies, { recoveryAttemptId: staged.recoveryAttemptId }
+    );
+    assert.equal(restarted.ok, false);
+    assert.equal(calls, 1);
+    assert.equal((await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId))
+      .record.storeRevision, before.record.storeRevision);
+  });
+
+  await t.test("changed target", async () => {
+    const harness = await createActivatedHarness();
+    const recoveryService = Object.freeze({
+      ...harness.recoveryService,
+      async beginRecovery() { const error = new Error("rejected"); error.status = 418; throw error; },
+    });
+    const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+      ...harness.recoveryConfig, recoveryService,
+    });
+    const staged = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+      deviceId: "device-p092-target-change",
+    });
+    let targetChecks = 0;
+    const restarted = await recoveryOrchestrator.restartLegacyBeginAttention(Object.freeze({
+      ...harness.recoveryDependencies,
+      isRecoveryTargetCurrent() { targetChecks += 1; return targetChecks === 1; },
+    }), { recoveryAttemptId: staged.recoveryAttemptId });
+    assert.equal(restarted.ok, false);
+    assert.ok(await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId));
+  });
+
+  await t.test("stale store revision", async () => {
+    const harness = await createActivatedHarness();
+    const recoveryService = Object.freeze({
+      ...harness.recoveryService,
+      async beginRecovery() { const error = new Error("rejected"); error.status = 418; throw error; },
+    });
+    const initialOrchestrator = harness.recovery.createRecoveryOrchestrator({
+      ...harness.recoveryConfig, recoveryService,
+    });
+    const staged = await initialOrchestrator.recover(harness.recoveryDependencies, {
+      deviceId: "device-p092-stale",
+    });
+    let changed = false;
+    const deviceStore = Object.freeze({
+      ...harness.recoveryStore,
+      async readRecoveryAttempt(attemptId) {
+        const found = await harness.recoveryStore.readRecoveryAttempt(attemptId);
+        if (!changed && found) {
+          changed = true;
+          const context = {
+            syncedPocketId: found.record.syncedPocketId,
+            revision: found.record.storeRevision + 1,
+            contentType: harness.crypto.FORMAT.contentType,
+          };
+          const encrypted = await harness.crypto.sealContent(
+            plain(found.draft), found.record.deviceWrappingKey, context
+          );
+          await harness.recoveryStore.replaceRecoveryStaging(
+            found.record.syncedPocketId, found.record.storeRevision, {
+              ...found.record,
+              storeRevision: context.revision,
+              recoveryDraft: { context, record: encrypted },
+            }
+          );
+        }
+        return found;
+      },
+    });
+    const staleOrchestrator = harness.recovery.createRecoveryOrchestrator({
+      ...harness.recoveryConfig, deviceStore, recoveryService,
+    });
+    const restarted = await staleOrchestrator.restartLegacyBeginAttention(
+      harness.recoveryDependencies, { recoveryAttemptId: staged.recoveryAttemptId }
+    );
+    assert.equal(restarted.ok, false);
+    const current = await harness.recoveryStore.readRecoveryAttempt(staged.recoveryAttemptId);
+    assert.equal(current.record.storeRevision, 4);
+  });
 });
 
 test("P090a fails closed when begin attention cannot be persisted", async () => {

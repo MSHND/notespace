@@ -190,8 +190,9 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       "validateContentContext", "validateMasterKeyEnvelope", "validateEnvelopeContext",
     ], "recovery-crypto-invalid");
     requireMethods(config.deviceStore, [
-      "open", "readStoredRecord", "readRecoveryAttempt", "createRecoveryStaging",
-      "replaceRecoveryStaging", "reserveRecoveryStagingEncryptionUsage", "promoteRecoveryStaging",
+      "open", "readStoredRecord", "readRecoveryAttempt", "findRecoveryAttempt",
+      "createRecoveryStaging", "replaceRecoveryStaging", "reserveRecoveryStagingEncryptionUsage",
+      "promoteRecoveryStaging", "discardRecoveryStaging",
     ], "recovery-device-store-invalid");
     requireMethods(config.accountContract, [
       "serializeRegistrationCredential", "validateFinishRegistrationRequest",
@@ -224,6 +225,13 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
   }
 
   function validateResumeOptions(input) {
+    const value = exactObject(input, ["recoveryAttemptId"], "invalid-recovery-input");
+    return Object.freeze({
+      recoveryAttemptId: identifier(value.recoveryAttemptId, "invalid-recovery-input"),
+    });
+  }
+
+  function validateRestartOptions(input) {
     const value = exactObject(input, ["recoveryAttemptId"], "invalid-recovery-input");
     return Object.freeze({
       recoveryAttemptId: identifier(value.recoveryAttemptId, "invalid-recovery-input"),
@@ -519,6 +527,28 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       ? BEGIN_ATTENTION_REASONS[draft.pendingOperation] || null : null;
   }
 
+  function isLegacyPreAuthorityBeginAttention(draft) {
+    return draft.stage === "begin-pending"
+      && draft.pendingOperation === "begin-attention-rejected"
+      && draft.beginResponse === null
+      && draft.finishRequest === null
+      && draft.finishResponse === null
+      && draft.confirmedRemoteRevision === 0
+      && draft.content === null
+      && draft.deviceEnvelope === null
+      && draft.replacementRecoveryRoot === null
+      && draft.replacementRecoveryVerifier === null
+      && draft.replacementRecoveryAuthorisation === null
+      && draft.replacementRecoveryEnvelope === null
+      && draft.replacementAccountLocator === null
+      && draft.replacementRecoveryPackage === null
+      && draft.account === null
+      && draft.keySetVersion === 0
+      && draft.recoveryVersion === 0
+      && draft.deviceGrant === null
+      && draft.replacementRecoveryCopyStored === false;
+  }
+
   function createRecoveryOrchestrator(configuration) {
     const config = validateFactory(configuration);
     const format = config.deviceStore.FORMAT || global.PocketSyncDeviceStore?.FORMAT;
@@ -681,6 +711,57 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         pendingOperation: null,
       }));
       return null;
+    }
+
+    async function restartLegacyBeginAttention(dependenciesInput, optionsInput) {
+      let dependencies;
+      let options;
+      try {
+        dependencies = validateDependencies(dependenciesInput);
+        options = validateRestartOptions(optionsInput);
+      } catch (_error) { return safeFailure("invalid-recovery-input"); }
+      const execution = {
+        dependencies, target: null, identity: null, destination: null, record: null, draft: null,
+      };
+      try {
+        execution.target = dependencies.captureRecoveryTarget();
+        execution.identity = targetIdentity(execution.target);
+        if (execution.identity.ownerKind !== "none") return safeFailure("recovery-state-invalid");
+        await ensureTarget(execution);
+        await config.deviceStore.open();
+        const matching = await config.deviceStore.findRecoveryAttempt({
+          targetOwnerKind: execution.identity.ownerKind,
+          targetContinuityId: execution.identity.continuityId,
+        });
+        if (matching?.state !== "match" || matching.recoveryAttemptId !== options.recoveryAttemptId) {
+          return safeFailure("recovery-state-invalid");
+        }
+        const found = await config.deviceStore.readRecoveryAttempt(options.recoveryAttemptId);
+        if (!found?.record || !found?.draft
+            || found.record.kind !== format.recoveryStagingKind) {
+          return safeFailure("recovery-state-invalid");
+        }
+        execution.record = found.record;
+        execution.draft = validateDraft(found.draft, config);
+        if (execution.draft.recoveryAttemptId !== options.recoveryAttemptId
+            || !recoveryTargetMatches(execution.identity, execution.draft)
+            || !isLegacyPreAuthorityBeginAttention(execution.draft)) {
+          return safeFailure("recovery-state-invalid");
+        }
+        await ensureTarget(execution);
+        await config.deviceStore.discardRecoveryStaging(
+          execution.record.syncedPocketId,
+          execution.record.storeRevision
+        );
+        return deepFreeze({ ok: true, recoveryRestarted: true, adopted: false,
+          sourceOwnerPreserved: true });
+      } catch (_error) {
+        return safeFailure("recovery-state-invalid", {
+          recoveryAttemptId: options.recoveryAttemptId,
+          locallyDurable: execution.record !== null,
+          resumable: false,
+        });
+      }
     }
 
     async function prepareFinish(execution) {
@@ -1397,7 +1478,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       }
     }
 
-    return Object.freeze({ recover, resume });
+    return Object.freeze({ recover, resume, restartLegacyBeginAttention });
   }
 
   global.PocketSyncEmergencyRecovery = Object.freeze({ POLICY, createRecoveryOrchestrator });

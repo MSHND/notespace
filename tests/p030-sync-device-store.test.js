@@ -405,6 +405,26 @@ test("P088 discovers only one validated local Recovery attempt for its exact tar
   assert.equal(sharedState.records.has("p088-one"), true);
 });
 
+test("P092 discards only one exact Recovery staging row with a matching revision", async () => {
+  const { store, sharedState } = await openMemoryStore(apis);
+  const first = await recoveryStagingRecord(apis, "p092-one", "p092-attempt-one", "none", "none:0");
+  const other = await recoveryStagingRecord(apis, "p092-other", "p092-attempt-other", "none", "none:0");
+  await store.createRecoveryStaging(first);
+  await store.createRecoveryStaging(other);
+  assert.equal(await store.discardRecoveryStaging("p092-one", 1), true);
+  assert.equal(sharedState.records.has("p092-one"), false);
+  assert.equal(sharedState.records.has("p092-other"), true);
+  await assert.rejects(store.discardRecoveryStaging("p092-other", 2),
+    (error) => error.code === "device-store-revision-conflict");
+  assert.equal(sharedState.records.has("p092-other"), true);
+  await assert.rejects(store.discardRecoveryStaging("p092-missing", 1),
+    (error) => error.code === "device-store-not-found");
+  await store.createPocket(initial.record);
+  await assert.rejects(store.discardRecoveryStaging(initial.record.syncedPocketId, 1),
+    (error) => error.code === "recovery-staging-schema-invalid");
+  assert.equal(sharedState.records.has(initial.record.syncedPocketId), true);
+});
+
 test("valid initial creation is insert-only and resolves only after transaction commit", async () => {
   const { store, driver, sharedState } = await openMemoryStore(apis);
   const release = driver.holdCommit();
