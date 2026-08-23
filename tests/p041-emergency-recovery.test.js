@@ -710,6 +710,90 @@ test("P054 explicitly composes P041 recovery into the existing document, owner a
   assert.equal(saved.confirmedRemoteRevision, 2);
 });
 
+test("P089a keeps no-Pocket reload continuity narrow at the recovered-document commit boundary", async (t) => {
+  const cases = [
+    { name: "none continuity can change", initialOwner: "none", nextOwner: "none", changeBeforeCommit: true, expectedOk: true },
+    { name: "detached continuity remains exact", initialOwner: "detached", nextOwner: "detached", changeBeforeCommit: false, expectedOk: true },
+    { name: "detached cannot become none", initialOwner: "detached", nextOwner: "none", changeBeforeCommit: true, expectedOk: false },
+    { name: "none cannot become detached", initialOwner: "none", nextOwner: "detached", changeBeforeCommit: true, expectedOk: false },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async () => {
+    const harness = await createActivatedHarness();
+    const context = harness.context;
+    let ownerKind = scenario.initialOwner;
+    let continuityId = 89;
+    let committedPayload = null;
+    const originalStoreApi = context.PocketSyncDeviceStore;
+    context.PocketSyncDeviceStore = Object.freeze({
+      ...originalStoreApi,
+      createIndexedDbDriver() { return Object.freeze({}); },
+      createStore() { return harness.recoveryStore; },
+    });
+    context.capturePocketFileSaveSession = () => ({ id: continuityId, ownerKind });
+    context.isPocketFileSaveSessionCurrent = (value) => !!value
+      && value.id === continuityId && value.ownerKind === ownerKind;
+    context.hasPocketUnsavedChanges = () => false;
+    context.isPocketPayloadShape = (value) => value?.schema === "portal.export.v1";
+    context.normaliseInput = (value) => value;
+    context.setPocketFileSession = (_handle, _name, options = {}) => {
+      ownerKind = options.ownerKind || "json";
+      continuityId += 1;
+    };
+    context.commitPreparedPocketDocument = (value, _metadata, guard) => {
+      if (scenario.changeBeforeCommit) {
+        ownerKind = scenario.nextOwner;
+        continuityId += 1;
+      }
+      if (guard.canContinue() !== true) return { ok: false };
+      committedPayload = plain(value);
+      context.setPocketFileSession(null, "Synced Pocket", {
+        ownerKind: "detached", detachedDeviceChanges: true, storagePrivate: "synced",
+        forceNewSession: true,
+      });
+      return { ok: true };
+    };
+    context.buildPocketPayload = () => plain(PAYLOAD);
+    context.PocketDeviceChanges = { fingerprintDocument(value) { return JSON.stringify(value); } };
+    const environment = {
+      crypto: webcrypto,
+      now: () => NOW,
+      PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+      navigator: { credentials: { async create() { return registrationCredential(189); } } },
+      async showOpenFilePicker() {
+        return [{ async getFile() { return { async text() { return JSON.stringify(harness.originalPackage); } }; } }];
+      },
+      async showSaveFilePicker() {
+        return { async createWritable() {
+          return { async write() {}, async close() {}, async abort() {} };
+        } };
+      },
+    };
+    for (const file of [
+      "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+      "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
+    ]) vm.runInContext(source(file), context, { filename: file });
+    const runtime = context.PocketSyncBrowserRuntime.createRuntime({
+      accountService: context.PocketSyncRemoteClient.createAccountService({
+        transport: harness.transport, now: () => NOW,
+      }),
+      contentService: harness.contentService,
+      envelopeService: harness.envelopeService,
+      recoveryService: harness.recoveryService,
+      environment,
+    });
+    const result = await runtime.recoverExisting();
+    assert.equal(result.ok, scenario.expectedOk, JSON.stringify(result));
+    if (scenario.expectedOk) {
+      assert.deepEqual(committedPayload, plain(PAYLOAD));
+      assert.equal(ownerKind, "synced");
+    } else {
+      assert.equal(result.reason, "recovery-target-stale");
+      assert.equal(committedPayload, null);
+      assert.equal(ownerKind, scenario.nextOwner);
+    }
+  });
+});
+
 test("P086 recovers through ephemeral phone file input and replacement download fallbacks", async () => {
   const harness = await createActivatedHarness();
   const context = harness.context;

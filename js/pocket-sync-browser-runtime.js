@@ -392,9 +392,10 @@
 
     function additionalTargetReplaceable(expected = null) {
       const target = additionalTarget();
-      if (!target || (expected !== null && target.ownerKind !== "none" && (target.ownerKind !== expected.ownerKind
-          || ![target.continuityId, `${target.ownerKind}:${target.continuityId}`]
-            .includes(expected.continuityId)))) return false;
+      if (!target || (expected !== null && (target.ownerKind !== expected.ownerKind
+          || (target.ownerKind !== "none"
+            && ![target.continuityId, `${target.ownerKind}:${target.continuityId}`]
+              .includes(expected.continuityId))))) return false;
       if (target.ownerKind === "none") return true;
       try {
         return typeof global.hasPocketUnsavedChanges === "function"
