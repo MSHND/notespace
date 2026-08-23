@@ -300,6 +300,32 @@ test("P090 holds a durable non-resumable Recovery attempt for attention", async 
   assert.equal(harness.overlay.hidden, true);
 });
 
+test("P090a reopens durable Recovery attention without offering a new action", async () => {
+  const harness = createUiHarness("none", { discoveryResult: {
+    ok: false, reason: "recovery-begin-not-found", locallyDurable: true,
+    resumable: false, recoveryAttemptId: "opaque-recovery-attempt",
+  } });
+  for (const close of ["cancel", "escape"]) {
+    harness.topbar.fire("click");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+    const recovery = harness.overlay.querySelector(".vaultDialogRecovery");
+    assert.equal(harness.overlay.querySelector("h2").textContent, "Recovery needs attention");
+    assert.equal(primary.hidden, true);
+    assert.equal(recovery.hidden, true);
+    assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent,
+      "This Recovery Copy is not available for this synced Pocket.");
+    primary.fire("click");
+    recovery.fire("click");
+    assert.equal(harness.recoveryCalls, 0);
+    assert.equal(harness.recoveryResumeCalls, 0);
+    if (close === "cancel") harness.overlay.querySelector(".vaultDialogSecondary").fire("click");
+    else harness.event("keydown", { key: "Escape" });
+    assert.equal(harness.overlay.hidden, true);
+  }
+  assert.equal(harness.discoveryCalls, 2);
+});
+
 test("P055a opens recovery only after explicit confirmation, and Cancel or idle Escape leave it untouched", () => {
   const cancel = createUiHarness("none", { paletteOpen: true });
   cancel.topbar.fire("click");

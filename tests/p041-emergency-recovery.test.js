@@ -1236,8 +1236,29 @@ test("P090 makes Recovery begin retryability follow the bounded remote-client re
     assert.equal(requests.length, 1);
     const found = await harness.recoveryStore.readRecoveryAttempt(result.recoveryAttemptId);
     assert.equal(found.draft.stage, "begin-pending");
-    assert.equal(found.draft.pendingOperation, "begin-recovery");
     assert.equal(requests[0].options.body, JSON.stringify(found.draft.beginRequest));
+    assert.doesNotMatch(JSON.stringify(Array.from(harness.recoveryState.records.values())), /provider detail/);
+    if (scenario.resumable) {
+      assert.equal(found.draft.pendingOperation, "begin-recovery");
+    } else {
+      assert.equal(found.draft.pendingOperation, {
+        "recovery-begin-expired": "begin-attention-expired",
+        "recovery-begin-not-found": "begin-attention-not-found",
+        "recovery-begin-rejected": "begin-attention-rejected",
+        "recovery-begin-response-invalid": "begin-attention-response-invalid",
+      }[scenario.reason]);
+      const storedRevision = found.record.storeRevision;
+      const resumed = await recoveryOrchestrator.resume(harness.recoveryDependencies, {
+        recoveryAttemptId: result.recoveryAttemptId,
+      });
+      assert.equal(resumed.reason, scenario.reason);
+      assert.equal(resumed.resumable, false);
+      assert.equal(resumed.locallyDurable, true);
+      assert.equal(resumed.recoveryAttemptId, result.recoveryAttemptId);
+      assert.equal(requests.length, 1);
+      assert.equal((await harness.recoveryStore.readRecoveryAttempt(result.recoveryAttemptId))
+        .record.storeRevision, storedRevision);
+    }
     if (scenario.name === "network") {
       const resumed = await recoveryOrchestrator.resume(harness.recoveryDependencies, {
         recoveryAttemptId: result.recoveryAttemptId,
@@ -1248,6 +1269,109 @@ test("P090 makes Recovery begin retryability follow the bounded remote-client re
       assert.equal(requests[1].options.body, requests[0].options.body);
     }
   });
+});
+
+test("P090a rediscovers durable begin attention without resuming Recovery", async () => {
+  const harness = await createActivatedHarness();
+  const requests = [];
+  const transport = harness.remote.createBrowserJsonTransport({
+    serviceRoot: "/sync/v1",
+    async fetch(url, options) {
+      requests.push({ url, options });
+      return fixtures.textResponse({ detail: "provider detail" }, { status: 410 });
+    },
+  });
+  const recoveryService = harness.remote.createRecoveryService({ transport, now: () => NOW });
+  const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+    ...harness.recoveryConfig, recoveryService,
+  });
+  const staged = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p090a-attention",
+  });
+  assert.equal(staged.reason, "recovery-begin-expired");
+  assert.equal(requests.length, 1);
+
+  const context = harness.context;
+  let ownerKind = "none";
+  let continuityId = 90;
+  const originalStoreApi = context.PocketSyncDeviceStore;
+  context.PocketSyncDeviceStore = Object.freeze({
+    ...originalStoreApi,
+    createIndexedDbDriver() { return Object.freeze({}); },
+    createStore() { return harness.recoveryStore; },
+  });
+  context.capturePocketFileSaveSession = () => ({ id: continuityId, ownerKind });
+  context.hasPocketUnsavedChanges = () => false;
+  context.PocketDeviceChanges = { fingerprintDocument(value) { return JSON.stringify(value); } };
+  const environment = {
+    crypto: webcrypto,
+    now: () => NOW,
+    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+    navigator: { credentials: { async create() { throw new Error("not used"); } } },
+  };
+  for (const file of [
+    "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
+  ]) vm.runInContext(source(file), context, { filename: file });
+  const createRuntime = () => context.PocketSyncBrowserRuntime.createRuntime({
+    accountService: context.PocketSyncRemoteClient.createAccountService({
+      transport: harness.transport, now: () => NOW,
+    }),
+    contentService: harness.contentService,
+    envelopeService: harness.envelopeService,
+    recoveryService,
+    environment,
+  });
+  const runtime = createRuntime();
+  const discovered = await runtime.findRecoveryAttempt();
+  assert.equal(discovered.reason, "recovery-begin-expired");
+  assert.equal(discovered.resumable, false);
+  assert.equal(discovered.recoveryAttemptId, staged.recoveryAttemptId);
+  assert.equal(requests.length, 1);
+  const resumed = await runtime.resumeRecovery({ recoveryAttemptId: staged.recoveryAttemptId });
+  assert.equal(resumed.reason, "recovery-begin-expired");
+  assert.equal(resumed.resumable, false);
+  assert.equal(requests.length, 1);
+  const reloaded = await createRuntime().findRecoveryAttempt();
+  assert.equal(reloaded.reason, "recovery-begin-expired");
+  assert.equal(reloaded.resumable, false);
+  assert.equal(requests.length, 1);
+});
+
+test("P090a fails closed when begin attention cannot be persisted", async () => {
+  const harness = await createActivatedHarness();
+  const requests = [];
+  const transport = harness.remote.createBrowserJsonTransport({
+    serviceRoot: "/sync/v1",
+    async fetch(url, options) {
+      requests.push({ url, options });
+      return fixtures.textResponse({ detail: "provider detail" }, { status: 410 });
+    },
+  });
+  const recoveryService = harness.remote.createRecoveryService({ transport, now: () => NOW });
+  let replacements = 0;
+  const deviceStore = Object.freeze({
+    ...harness.recoveryStore,
+    async replaceRecoveryStaging(...input) {
+      replacements += 1;
+      if (replacements === 2) throw new Error("attention storage failed");
+      return harness.recoveryStore.replaceRecoveryStaging(...input);
+    },
+  });
+  const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+    ...harness.recoveryConfig, deviceStore, recoveryService,
+  });
+  const result = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p090a-persist-failure",
+  });
+  assert.equal(result.reason, "recovery-state-invalid");
+  assert.equal(result.locallyDurable, true);
+  assert.equal(result.resumable, false);
+  assert.equal(requests.length, 1);
+  const found = await harness.recoveryStore.readRecoveryAttempt(result.recoveryAttemptId);
+  assert.equal(found.draft.stage, "begin-pending");
+  assert.equal(found.draft.pendingOperation, "begin-recovery");
+  assert.equal(JSON.stringify(found.draft.beginRequest), requests[0].options.body);
 });
 
 test("target replacement, malformed content and key-set conflicts stop safely", async (t) => {

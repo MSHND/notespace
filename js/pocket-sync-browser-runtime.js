@@ -7,6 +7,12 @@
     "accountService", "contentService", "envelopeService", "recoveryService",
   ]);
   const RECOVERY_FILENAME = "Pocket Recovery Copy.json";
+  const BEGIN_ATTENTION_REASONS = Object.freeze({
+    "begin-attention-expired": "recovery-begin-expired",
+    "begin-attention-not-found": "recovery-begin-not-found",
+    "begin-attention-rejected": "recovery-begin-rejected",
+    "begin-attention-response-invalid": "recovery-begin-response-invalid",
+  });
 
   function frozen(value) {
     return Object.freeze(value);
@@ -612,6 +618,13 @@
         });
         if (found?.state === "none") return frozen({ ok: true });
         if (found?.state === "match" && typeof found.recoveryAttemptId === "string") {
+          const attempt = await deviceStore.readRecoveryAttempt(found.recoveryAttemptId);
+          const reason = attempt?.draft?.stage === "begin-pending"
+            ? BEGIN_ATTENTION_REASONS[attempt.draft.pendingOperation] || null : null;
+          if (reason) return frozen({ ok: false, reason, adopted: false,
+            sourceOwnerPreserved: true, locallyDurable: true, resumable: false,
+            recoveryAttemptId: found.recoveryAttemptId });
+          if (!attempt?.record || !attempt?.draft) throw new Error("recovery-attempt-missing");
           return frozen({ ok: true, recoveryAttemptId: found.recoveryAttemptId });
         }
       } catch (_error) {}

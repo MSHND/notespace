@@ -62,8 +62,21 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
   const PENDING = Object.freeze([
     null, "begin-recovery", "finish-recovery", "revision-read", "content-download",
     "device-envelope", "device-envelope-conflict", "recovery-rotation",
-    "recovery-rotation-conflict",
+    "recovery-rotation-conflict", "begin-attention-expired", "begin-attention-not-found",
+    "begin-attention-rejected", "begin-attention-response-invalid",
   ]);
+  const BEGIN_ATTENTION_OPERATIONS = Object.freeze({
+    "recovery-begin-expired": "begin-attention-expired",
+    "recovery-begin-not-found": "begin-attention-not-found",
+    "recovery-begin-rejected": "begin-attention-rejected",
+    "recovery-begin-response-invalid": "begin-attention-response-invalid",
+  });
+  const BEGIN_ATTENTION_REASONS = Object.freeze({
+    "begin-attention-expired": "recovery-begin-expired",
+    "begin-attention-not-found": "recovery-begin-not-found",
+    "begin-attention-rejected": "recovery-begin-rejected",
+    "begin-attention-response-invalid": "recovery-begin-response-invalid",
+  });
   const BASE64URL = /^[A-Za-z0-9_-]+$/;
 
   function recoveryError(code) {
@@ -353,6 +366,8 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
         || !Object.prototype.hasOwnProperty.call(STAGES, draft.stage)
         || !POLICY.allowedRecoveryTargetOwners.includes(draft.targetOwnerKind)
         || !PENDING.includes(draft.pendingOperation)
+        || (BEGIN_ATTENTION_REASONS[draft.pendingOperation]
+          && draft.stage !== "begin-pending")
         || typeof draft.replacementRecoveryCopyStored !== "boolean"
         || !canonicalTime(draft.createdAt) || !canonicalTime(draft.updatedAt)) {
       throw recoveryError("recovery-state-invalid");
@@ -489,6 +504,11 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     });
   }
 
+  function beginAttentionReason(draft) {
+    return draft.stage === "begin-pending"
+      ? BEGIN_ATTENTION_REASONS[draft.pendingOperation] || null : null;
+  }
+
   function createRecoveryOrchestrator(configuration) {
     const config = validateFactory(configuration);
     const format = config.deviceStore.FORMAT || global.PocketSyncDeviceStore?.FORMAT;
@@ -575,18 +595,39 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       }, extra || {}));
     }
 
-    function beginFailure(error, execution) {
+    async function persistBeginAttention(reason, execution) {
+      const pendingOperation = BEGIN_ATTENTION_OPERATIONS[reason];
+      if (!pendingOperation) return safeFailure("recovery-state-invalid", {
+        recoveryAttemptId: execution.draft.recoveryAttemptId,
+        locallyDurable: execution.record !== null,
+        remotelyCommitted: false,
+        resumable: false,
+      });
+      try {
+        await persistDraft(execution, changedDraft(execution.draft, { pendingOperation }));
+      } catch (_error) {
+        return safeFailure("recovery-state-invalid", {
+          recoveryAttemptId: execution.draft.recoveryAttemptId,
+          locallyDurable: execution.record !== null,
+          remotelyCommitted: false,
+          resumable: false,
+        });
+      }
+      return remoteFailure(reason, execution, { resumable: false });
+    }
+
+    async function beginFailure(error, execution) {
       if (error?.retryable === true) return remoteFailure("recovery-begin-unavailable", execution);
       if (error?.status === 410) {
-        return remoteFailure("recovery-begin-expired", execution, { resumable: false });
+        return persistBeginAttention("recovery-begin-expired", execution);
       }
       if (error?.status === 404) {
-        return remoteFailure("recovery-begin-not-found", execution, { resumable: false });
+        return persistBeginAttention("recovery-begin-not-found", execution);
       }
       if (Number.isSafeInteger(error?.status) || error?.code === "remote-redirect-rejected") {
-        return remoteFailure("recovery-begin-rejected", execution, { resumable: false });
+        return persistBeginAttention("recovery-begin-rejected", execution);
       }
-      return remoteFailure("recovery-begin-response-invalid", execution, { resumable: false });
+      return persistBeginAttention("recovery-begin-response-invalid", execution);
     }
 
     async function beginRecovery(execution) {
@@ -611,7 +652,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       if (response.operationId !== request.operationId
           || response.recoveryVersion < 1
           || !Number.isSafeInteger(response.keySetVersion) || response.keySetVersion < 1) {
-        return remoteFailure("recovery-begin-response-invalid", execution, { resumable: false });
+        return persistBeginAttention("recovery-begin-response-invalid", execution);
       }
       await persistDraft(execution, changedDraft(execution.draft, {
         stage: "ceremony-ready", beginResponse: response, recoveryVersion: response.recoveryVersion,
@@ -1306,6 +1347,10 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
           return safeFailure("recovery-state-invalid");
         }
         if (execution.draft.stage === "ready-for-adoption") return successResult(execution.draft);
+        const attentionReason = beginAttentionReason(execution.draft);
+        if (attentionReason) {
+          return remoteFailure(attentionReason, execution, { resumable: false });
+        }
         try {
           execution.target = dependencies.captureRecoveryTarget();
           execution.identity = targetIdentity(execution.target);
