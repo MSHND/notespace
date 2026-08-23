@@ -248,6 +248,97 @@ test("P093 preserves only allowlisted Recovery-begin server failure classes", as
   }
 });
 
+test("P093a bounds malformed and oversized rejected Recovery-begin bodies before classification", async () => {
+  const { api } = loadProduction();
+  const providerText = "provider rejected-body detail that must not escape";
+  const cases = [
+    ["malformed JSON", fixtures.textResponse(`{${providerText}`, { status: 500 })],
+    ["wrong content type", fixtures.textResponse(providerText, { status: 500, contentType: "text/plain" })],
+  ];
+  for (const [name, response] of cases) {
+    const transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1", async fetch() { return response; } });
+    await assert.rejects(transport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+      assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"], name);
+      assert.equal(error.status, 500, name);
+      assert.doesNotMatch(error.message, new RegExp(providerText), name);
+      assert.doesNotMatch(JSON.stringify(error), new RegExp(providerText), name);
+      return true;
+    });
+  }
+
+  let declaredReads = 0;
+  const declared = fixtures.textResponse(providerText, { status: 500, contentLength: 262145 });
+  declared.text = async () => { declaredReads += 1; return providerText; };
+  const declaredTransport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
+    async fetch() { return declared; } });
+  await assert.rejects(declaredTransport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+    assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"]);
+    assert.equal(error.status, 500);
+    return true;
+  });
+  assert.equal(declaredReads, 0);
+
+  const actualTransport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
+    async fetch() { return fixtures.textResponse(`{"detail":"${"x".repeat(262144)}"}`, { status: 500 }); } });
+  await assert.rejects(actualTransport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+    assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"]);
+    assert.equal(error.status, 500);
+    return true;
+  });
+
+  let streamReads = 0;
+  let streamCancels = 0;
+  const streamedTransport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1", async fetch() {
+    return {
+      status: 500,
+      redirected: false,
+      headers: fixtures.headers({ "Content-Type": "application/json" }),
+      body: { getReader() { return {
+        async read() { streamReads += 1; return { done: false, value: new Uint8Array(262145) }; },
+        async cancel() { streamCancels += 1; },
+      }; } },
+    };
+  } });
+  await assert.rejects(streamedTransport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+    assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"]);
+    assert.equal(error.status, 500);
+    return true;
+  });
+  assert.equal(streamReads, 1);
+  assert.equal(streamCancels, 1);
+
+  let invalidUtf8Reads = 0;
+  const invalidUtf8Transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1", async fetch() {
+    return {
+      status: 500,
+      redirected: false,
+      headers: fixtures.headers({ "Content-Type": "application/json" }),
+      body: { getReader() { return {
+        async read() {
+          invalidUtf8Reads += 1;
+          return invalidUtf8Reads === 1
+            ? { done: false, value: new Uint8Array([0xc3, 0x28]) } : { done: true };
+        },
+      }; } },
+    };
+  } });
+  await assert.rejects(invalidUtf8Transport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+    assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"]);
+    assert.equal(error.status, 500);
+    return true;
+  });
+  assert.equal(invalidUtf8Reads, 2);
+
+  const shellTransport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
+    async fetch() { return fixtures.textResponse(providerText, { status: 415, contentLength: 262145 }); } });
+  await assert.rejects(shellTransport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+    assert.equal(error.code, "remote-request-rejected");
+    assert.equal(error.status, 415);
+    assert.equal(Object.hasOwn(error, "recoveryBeginFailureClass"), false);
+    return true;
+  });
+});
+
 test("P031 and P029 production contracts are mandatory without local fallback validators", () => {
   const loaded = loadProduction();
   const transport = validTransport(() => ({ status: 200, body: {} }));

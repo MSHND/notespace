@@ -354,7 +354,7 @@ test("P091 presents each bounded Recovery rejection as attention only", async ()
 test("P093 presents each bounded Recovery server failure as distinct local attention", async () => {
   for (const [reason, expected] of [
     ["recovery-begin-service-state-invalid", "The synced recovery service is not ready for this request."],
-    ["recovery-begin-storage-failed", "The synced recovery service could not safely read recovery storage."],
+    ["recovery-begin-storage-failed", "The synced recovery service could not safely access recovery storage."],
     ["recovery-begin-server-contract-invalid", "The synced recovery service returned an invalid recovery result."],
     ["recovery-begin-server-internal", "The synced recovery service had an internal recovery failure."],
     ["recovery-begin-http-shell-rejected", "The synced recovery service rejected this recovery request at its HTTP boundary."],

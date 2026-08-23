@@ -15,7 +15,7 @@
     "recovery-begin-conflict": "This recovery request conflicts with existing recovery state.",
     "recovery-begin-response-invalid": "Pocket could not safely confirm the recovery request.",
     "recovery-begin-service-state-invalid": "The synced recovery service is not ready for this request.",
-    "recovery-begin-storage-failed": "The synced recovery service could not safely read recovery storage.",
+    "recovery-begin-storage-failed": "The synced recovery service could not safely access recovery storage.",
     "recovery-begin-server-contract-invalid": "The synced recovery service returned an invalid recovery result.",
     "recovery-begin-server-internal": "The synced recovery service had an internal recovery failure.",
     "recovery-begin-http-shell-rejected": "The synced recovery service rejected this recovery request at its HTTP boundary.",

@@ -1321,6 +1321,41 @@ test("P093 persists bounded Recovery-begin server failure classes as attention",
   });
 });
 
+test("P093a persists a malformed rejected Recovery-begin body as local server-internal attention", async () => {
+  const harness = await createActivatedHarness();
+  let requests = 0;
+  const providerText = "provider malformed detail that must not escape";
+  const transport = harness.remote.createBrowserJsonTransport({
+    serviceRoot: "/sync/v1",
+    async fetch() {
+      requests += 1;
+      return fixtures.textResponse(`{${providerText}`, { status: 500 });
+    },
+  });
+  const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+    ...harness.recoveryConfig,
+    recoveryService: harness.remote.createRecoveryService({ transport, now: () => NOW }),
+  });
+  const result = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p093a-malformed-rejected-body",
+  });
+  assert.equal(result.reason, "recovery-begin-server-internal");
+  assert.equal(result.resumable, false);
+  const found = await harness.recoveryStore.readRecoveryAttempt(result.recoveryAttemptId);
+  assert.equal(found.draft.pendingOperation, "begin-attention-server-internal");
+  assert.doesNotMatch(JSON.stringify(found), new RegExp(providerText));
+  const reloaded = harness.recovery.createRecoveryOrchestrator({
+    ...harness.recoveryConfig,
+    recoveryService: harness.remote.createRecoveryService({ transport, now: () => NOW }),
+  });
+  const resumed = await reloaded.resume(harness.recoveryDependencies, {
+    recoveryAttemptId: result.recoveryAttemptId,
+  });
+  assert.equal(resumed.reason, "recovery-begin-server-internal");
+  assert.equal(resumed.resumable, false);
+  assert.equal(requests, 1);
+});
+
 test("P091 rediscovers durable rejection attention without resuming Recovery", async () => {
   const harness = await createActivatedHarness();
   const requests = [];
