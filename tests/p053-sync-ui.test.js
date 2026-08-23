@@ -129,6 +129,32 @@ test("P053a exposes fresh-device open directly and updates after an owner transi
   assert.equal(harness.source.textContent, "Synced Pocket");
 });
 
+test("P086 gives recovery-required its specific mobile guidance before generic ownership copy", async () => {
+  const harness = createUiHarness("none", { holdOpen: true });
+  harness.topbar.fire("click");
+  harness.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  harness.resolveOpen({ ok: false, reason: "recovery-required", adopted: false });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent,
+    "A recovery copy is needed to open this synced Pocket on this device.");
+});
+
+test("P086 keeps recovery picker cancellation and replacement-copy failure truthful", async () => {
+  for (const [reason, expected] of [
+    ["recovery-package-invalid", "Recovery copy could not be used. Your current Pocket is unchanged."],
+    ["replacement-recovery-copy-not-stored", "Save the replacement recovery copy, then continue recovery."],
+  ]) {
+    const harness = createUiHarness("none");
+    harness.topbar.fire("click");
+    harness.overlay.querySelector(".vaultDialogRecovery").fire("click");
+    harness.overlay.querySelector(".vaultDialogPrimary").fire("click");
+    harness.resolveRecovery({ ok: false, reason, resumable: reason === "replacement-recovery-copy-not-stored",
+      recoveryAttemptId: "opaque-recovery-attempt" });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent, expected);
+  }
+});
+
 test("P055a opens recovery only after explicit confirmation, and Cancel or idle Escape leave it untouched", () => {
   const cancel = createUiHarness("none", { paletteOpen: true });
   cancel.topbar.fire("click");

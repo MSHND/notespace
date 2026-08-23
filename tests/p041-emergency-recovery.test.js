@@ -710,6 +710,155 @@ test("P054 explicitly composes P041 recovery into the existing document, owner a
   assert.equal(saved.confirmedRemoteRevision, 2);
 });
 
+test("P086 recovers through ephemeral phone file input and replacement download fallbacks", async () => {
+  const harness = await createActivatedHarness();
+  const context = harness.context;
+  let ownerKind = "none";
+  let continuityId = 86;
+  let committedPayload = null;
+  const originalStoreApi = context.PocketSyncDeviceStore;
+  context.PocketSyncDeviceStore = Object.freeze({
+    ...originalStoreApi,
+    createIndexedDbDriver() { return Object.freeze({}); },
+    createStore() { return harness.recoveryStore; },
+  });
+  context.capturePocketFileSaveSession = () => ({ id: continuityId, ownerKind });
+  context.hasPocketUnsavedChanges = () => false;
+  context.isPocketPayloadShape = (value) => value?.schema === "portal.export.v1";
+  context.normaliseInput = (value) => value;
+  context.commitPreparedPocketDocument = (value, _metadata, guard) => {
+    if (guard.canContinue() !== true) return { ok: false };
+    committedPayload = plain(value);
+    ownerKind = "detached"; continuityId += 1;
+    return { ok: true };
+  };
+  context.setPocketFileSession = (_handle, _name, options = {}) => { ownerKind = options.ownerKind || "json"; continuityId += 1; };
+  context.buildPocketPayload = () => plain(PAYLOAD);
+  context.PocketDeviceChanges = { fingerprintDocument(value) { return JSON.stringify(value); } };
+  const attached = [];
+  const downloads = [];
+  const revoked = [];
+  let downloadFails = true;
+  const document = {
+    body: { appendChild(value) { attached.push(value); return value; } },
+    createElement(tag) {
+      const listeners = new Map();
+      const element = {
+        tag, hidden: false, value: "", files: null,
+        addEventListener(name, listener) { listeners.set(name, listener); },
+        remove() { const index = attached.indexOf(element); if (index >= 0) attached.splice(index, 1); },
+      };
+      if (tag === "input") {
+        element.click = () => queueMicrotask(() => {
+          element.files = [{ name: "Pocket Recovery Copy.json", type: "application/json",
+            async text() { return JSON.stringify(harness.originalPackage); } }];
+          listeners.get("change")?.();
+        });
+      } else if (tag === "a") {
+        element.click = () => {
+          if (downloadFails) throw new Error("download handoff failed");
+          downloads.push({ href: element.href, name: element.download, blob: urls.get(element.href) });
+        };
+      }
+      return element;
+    },
+  };
+  const urls = new Map();
+  class Blob { constructor(parts, options) { this.parts = parts; this.type = options.type; } }
+  const environment = {
+    crypto: webcrypto, now: () => NOW, document, Blob,
+    URL: { createObjectURL(blob) { const value = `blob:p086-${urls.size + 1}`; urls.set(value, blob); return value; },
+      revokeObjectURL(value) { revoked.push(value); urls.delete(value); } },
+    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+    navigator: { credentials: { async create() { return registrationCredential(186); } } },
+  };
+  for (const file of [
+    "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
+  ]) vm.runInContext(source(file), context, { filename: file });
+  const runtime = context.PocketSyncBrowserRuntime.createRuntime({
+    accountService: context.PocketSyncRemoteClient.createAccountService({ transport: harness.transport, now: () => NOW }),
+    contentService: harness.contentService, envelopeService: harness.envelopeService,
+    recoveryService: harness.recoveryService, environment,
+  });
+  const paused = await runtime.recoverExisting();
+  assert.equal(paused.ok, false, JSON.stringify(paused));
+  assert.equal(paused.resumable, true);
+  assert.equal(ownerKind, "none");
+  assert.equal(downloads.length, 0);
+  const remoteCallsBeforeRetry = harness.remoteCalls.length;
+  downloadFails = false;
+  const result = await runtime.resumeRecovery({ recoveryAttemptId: paused.recoveryAttemptId });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(committedPayload, plain(PAYLOAD));
+  assert.equal(ownerKind, "synced");
+  assert.equal(downloads.length, 1);
+  assert.equal(downloads[0].name, "Pocket Recovery Copy.json");
+  assert.equal(downloads[0].blob.type, "application/json");
+  const replacement = JSON.parse(downloads[0].blob.parts.join(""));
+  assert.equal(replacement.kind, "pocket-recovery-package");
+  assert.equal(replacement.localOnly, true);
+  assert.equal(replacement.remoteUploadAllowed, false);
+  assert.equal(attached.length, 0);
+  assert.deepEqual(revoked, ["blob:p086-1", "blob:p086-1"]);
+  assert.equal(harness.remoteCalls.length, remoteCallsBeforeRetry);
+  assert.equal(JSON.stringify({ attached, downloads: downloads.map(({ href, name }) => ({ href, name })), urls }),
+    '{"attached":[],"downloads":[{"href":"blob:p086-1","name":"Pocket Recovery Copy.json"}],"urls":{}}');
+});
+
+test("P086 cancelling the phone Recovery Copy input reaches no remote recovery operation", async () => {
+  const harness = await createActivatedHarness();
+  const context = harness.context;
+  let chosen = "not-called";
+  const originalStoreApi = context.PocketSyncDeviceStore;
+  context.PocketSyncDeviceStore = Object.freeze({
+    ...originalStoreApi,
+    createIndexedDbDriver() { return Object.freeze({}); },
+    createStore() { return harness.recoveryStore; },
+  });
+  context.capturePocketFileSaveSession = () => ({ id: 87, ownerKind: "none" });
+  context.hasPocketUnsavedChanges = () => false;
+  context.isPocketPayloadShape = (value) => value?.schema === "portal.export.v1";
+  context.normaliseInput = (value) => value;
+  context.PocketSyncEmergencyRecovery = Object.freeze({
+    createRecoveryOrchestrator() { return Object.freeze({ async recover(dependencies) {
+      chosen = await dependencies.readRecoveryPackage();
+      return { ok: false, reason: "recovery-package-invalid" };
+    }, async resume() { throw new Error("not used"); } }); },
+  });
+  const attached = [];
+  const document = {
+    body: { appendChild(value) { attached.push(value); return value; } },
+    createElement() {
+      const listeners = new Map();
+      const input = { addEventListener(name, listener) { listeners.set(name, listener); },
+        remove() { const index = attached.indexOf(input); if (index >= 0) attached.splice(index, 1); },
+        click() { queueMicrotask(() => listeners.get("cancel")?.()); } };
+      return input;
+    },
+  };
+  const environment = {
+    crypto: webcrypto, now: () => NOW, document,
+    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+    navigator: { credentials: { async create() { throw new Error("not used"); } } },
+  };
+  for (const file of [
+    "js/pocket-sync-owner-controller.js", "js/pocket-owner-save-boundary.js",
+    "js/pocket-sync-activation-owner-bridge.js", "js/pocket-sync-browser-runtime.js",
+  ]) vm.runInContext(source(file), context, { filename: file });
+  const runtime = context.PocketSyncBrowserRuntime.createRuntime({
+    accountService: context.PocketSyncRemoteClient.createAccountService({ transport: harness.transport, now: () => NOW }),
+    contentService: harness.contentService, envelopeService: harness.envelopeService,
+    recoveryService: harness.recoveryService, environment,
+  });
+  const before = harness.remoteCalls.length;
+  const result = await runtime.recoverExisting();
+  assert.equal(result.reason, "recovery-package-invalid");
+  assert.equal(chosen, null);
+  assert.equal(harness.remoteCalls.length, before);
+  assert.deepEqual(attached, []);
+});
+
 test("P052a refuses missing device-grant metadata before emergency recovery is ready", async () => {
   const harness = await createActivatedHarness({ omitRecoveryDeviceGrant: true });
   const result = await harness.recoveryOrchestrator.recover(harness.recoveryDependencies, {

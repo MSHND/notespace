@@ -12,13 +12,15 @@
     if (result?.adopted === true && result?.sourceOwnerPreserved === false) {
       return "Sync setup hit a finalisation problem, but Synced Pocket is now the owner.";
     }
+    if (reason === "recovery-required") return "A recovery copy is needed to open this synced Pocket on this device.";
+    if (reason === "recovery-package-invalid") return "Recovery copy could not be used. Your current Pocket is unchanged.";
+    if (reason === "replacement-recovery-copy-not-stored") return "Save the replacement recovery copy, then continue recovery.";
     if (result?.sourceOwnerPreserved !== true) {
       return "Sync setup could not finish. Check Storage & Sync before continuing.";
     }
     if (["additional-device-target-dirty", "source-has-unsaved-changes"].includes(reason)) {
       return "Pocket has changes that need attention before Sync can continue.";
     }
-    if (reason === "recovery-required") return "A recovery copy is needed to open this synced Pocket on this device.";
     if (reason === "source-session-changed") return "This Pocket changed while setup was running. Nothing was switched.";
     if (["recovery-copy-destination-deferred", "source-save-cancelled"].includes(reason)) return "Setup was cancelled. Your current Pocket is unchanged.";
     return "Sync setup could not finish. Your current Pocket is unchanged.";

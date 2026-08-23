@@ -122,7 +122,15 @@
   function recoveryPicker(environment) {
     return async () => {
       const select = environment.showSaveFilePicker || global.showSaveFilePicker;
-      if (typeof select !== "function") return frozen({ ok: false });
+      if (typeof select !== "function") {
+        const document = environment.document || global.document;
+        const Blob = environment.Blob || global.Blob;
+        const URL = environment.URL || global.URL;
+        if (!document?.createElement || !document.body?.appendChild
+            || typeof Blob !== "function" || typeof URL?.createObjectURL !== "function"
+            || typeof URL.revokeObjectURL !== "function") return frozen({ ok: false });
+        return frozen({ ok: true, destination: frozen({ kind: "browser-download" }) });
+      }
       try {
         const destination = await select.call(environment, {
           suggestedName: RECOVERY_FILENAME,
@@ -141,7 +149,34 @@
   function recoveryPackagePicker(environment) {
     return async () => {
       const select = environment.showOpenFilePicker || global.showOpenFilePicker;
-      if (typeof select !== "function") return null;
+      if (typeof select !== "function") {
+        const document = environment.document || global.document;
+        if (!document?.createElement || !document.body?.appendChild) return null;
+        return new Promise((resolve) => {
+          const input = document.createElement("input");
+          let settled = false;
+          const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            try { input.value = ""; input.remove?.(); } catch (_error) {}
+            resolve(value);
+          };
+          input.type = "file";
+          input.accept = ".json,application/json";
+          input.multiple = false;
+          input.hidden = true;
+          input.addEventListener?.("cancel", () => finish(null), { once: true });
+          input.addEventListener?.("change", async () => {
+            const file = input.files?.length === 1 ? input.files[0] : null;
+            if (!file || (file.type !== "application/json" && !file.name?.toLowerCase().endsWith(".json"))
+                || typeof file.text !== "function") return finish(null);
+            try { return finish(JSON.parse(await file.text())); }
+            catch (_error) { return finish(null); }
+          }, { once: true });
+          document.body.appendChild(input);
+          try { input.click(); } catch (_error) { finish(null); }
+        });
+      }
       try {
         const handles = await select.call(environment, {
           multiple: false,
@@ -161,22 +196,54 @@
     };
   }
 
-  async function writeRecoveryCopy(input) {
-    if (!input || !input.destination || !input.recoveryPackage
-        || typeof input.destination.createWritable !== "function") return frozen({ ok: false });
-    let writable;
-    try {
-      writable = await input.destination.createWritable();
-      if (!writable || typeof writable.write !== "function" || typeof writable.close !== "function") {
-        throw new Error("recovery-writer-invalid");
+  function writeRecoveryCopy(environment) {
+    return async (input) => {
+      if (!input || !input.destination || !input.recoveryPackage) return frozen({ ok: false });
+      if (input.destination.kind === "browser-download") {
+        const document = environment.document || global.document;
+        const Blob = environment.Blob || global.Blob;
+        const URL = environment.URL || global.URL;
+        if (!document?.createElement || !document.body?.appendChild || typeof Blob !== "function"
+            || typeof URL?.createObjectURL !== "function" || typeof URL.revokeObjectURL !== "function") {
+          return frozen({ ok: false });
+        }
+        let link;
+        let objectUrl;
+        try {
+          const blob = new Blob([`${JSON.stringify(input.recoveryPackage, null, 2)}\n`], {
+            type: "application/json",
+          });
+          objectUrl = URL.createObjectURL(blob);
+          link = document.createElement("a");
+          link.href = objectUrl;
+          link.download = RECOVERY_FILENAME;
+          link.hidden = true;
+          document.body.appendChild(link);
+          if (typeof link.click !== "function") throw new Error("recovery-download-unavailable");
+          link.click();
+          return frozen({ ok: true });
+        } catch (_error) {
+          return frozen({ ok: false });
+        } finally {
+          try { link?.remove?.(); } catch (_removeError) {}
+          try { if (objectUrl) URL.revokeObjectURL(objectUrl); } catch (_revokeError) {}
+        }
       }
-      await writable.write(`${JSON.stringify(input.recoveryPackage, null, 2)}\n`);
-      await writable.close();
-      return frozen({ ok: true });
-    } catch (_error) {
-      try { await writable?.abort?.(); } catch (_abortError) {}
-      return frozen({ ok: false });
-    }
+      if (typeof input.destination.createWritable !== "function") return frozen({ ok: false });
+      let writable;
+      try {
+        writable = await input.destination.createWritable();
+        if (!writable || typeof writable.write !== "function" || typeof writable.close !== "function") {
+          throw new Error("recovery-writer-invalid");
+        }
+        await writable.write(`${JSON.stringify(input.recoveryPackage, null, 2)}\n`);
+        await writable.close();
+        return frozen({ ok: true });
+      } catch (_error) {
+        try { await writable?.abort?.(); } catch (_abortError) {}
+        return frozen({ ok: false });
+      }
+    };
   }
 
   function freezePocketPayload(snapshot, now) {
@@ -332,7 +399,7 @@
         readRecoveryPackage: recoveryPackagePicker(environment),
         prepareReplacementRecoveryCopyDestination: recoveryPicker(environment),
         buildRecoveryPackage: (input) => buildRecoveryPackage(security, crypto, environment, input),
-        writeReplacementRecoveryCopy: writeRecoveryCopy,
+        writeReplacementRecoveryCopy: writeRecoveryCopy(environment),
         validateRecoveredPayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
       });
     }
@@ -438,7 +505,7 @@
         freezePayload: freezePocketPayload(snapshot, now),
         prepareRecoveryCopyDestination: recoveryPicker(environment),
         buildRecoveryPackage: (input) => buildRecoveryPackage(security, crypto, environment, input),
-        writeRecoveryCopy,
+        writeRecoveryCopy: writeRecoveryCopy(environment),
         adoptSyncedOwner: ownerBridge.adoptSyncedOwner,
       });
     }
