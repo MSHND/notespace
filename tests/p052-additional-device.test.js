@@ -210,6 +210,32 @@ async function createBrowserJourney(options = {}) {
   assert.equal(created.ok, true, JSON.stringify(created));
 
   const idb = createIndexedDb();
+  const activationRecord = options.sameDeviceReopen === true || options.advanceRemoteBeforeOpen === true
+    ? await aDeviceStore.readPocket(created.owner.syncedPocketId)
+    : null;
+  if (options.sameDeviceReopen === true) {
+    idb.records.set(activationRecord.syncedPocketId, activationRecord);
+  }
+  if (options.unrelatedPartial === true) {
+    idb.records.set("unrelated-partial", { kind: "pocket.sync.device-state", schemaVersion: 5 });
+  }
+  if (options.advanceRemoteBeforeOpen === true) {
+    const owner = a.PocketSyncOwnerController.createSyncedOwnerController({
+      crypto: a.PocketSyncCrypto, deviceStore: aDeviceStore,
+      contentService: aRemote.createContentService({ transport: aTransport }),
+      randomBytes(length) { return bytes(length, 219); },
+    });
+    const bundle = await a.PocketSyncCrypto.openMasterKeyBundle(
+      activationRecord.deviceEnvelope.record, activationRecord.deviceWrappingKey,
+      activationRecord.deviceEnvelope.context, []
+    );
+    assert.equal((await owner.adoptSyncedOwner({
+      syncedPocketId: activationRecord.syncedPocketId, masterKey: bundle.masterKey,
+    })).ok, true);
+    assert.equal((await owner.saveSyncedOwner({ async freezePayload() {
+      return { schema: "portal.export.v1", notes: ["P085 refreshed remote content"] };
+    } })).ok, true);
+  }
   let ownerKind = options.ownerKind || "detached";
   let continuity = 61;
   let visible = null;
@@ -309,7 +335,7 @@ test("P052 remains dormant until explicitly created and a new device without PRF
   assert.deepEqual(calls, []);
   const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
     crypto: { FORMAT: { contentType: "portal.export.v1+json" }, generateDeviceWrappingKey() {}, deriveWrappingKey() {}, openMasterKeyBundle() {}, openContent() {}, sealContent() {}, encodeBase64Url() { return "opaque"; }, validateNonExtractableAesKey() {} },
-    deviceStore: { open() {}, readPocket() {}, createPocket() {}, replacePocket() {} },
+    deviceStore: { open() {}, readPocket() {}, createPocket() {}, replacePocket() {}, reservePocketEncryptionUsage() {} },
     accountClient: { async authenticatePasskey() { calls.push("authenticate"); return { ok: true, accountAuthenticated: true, contentUnlocked: false, accountId: "account", credentialId: "credential", prf: { status: "unavailable" } }; } },
     discoveryService: { async readSyncedPocket() { calls.push("discovery"); return { status: "ready", syncedPocketId: "pocket" }; } },
     contentService: { async readRevision() {}, async downloadEncryptedRecord() {} },
@@ -361,7 +387,7 @@ test("P052i1 rejects a bootstrap account mismatch before discovery or local muta
     crypto: { FORMAT: { contentType: "portal.export.v1+json" }, generateDeviceWrappingKey() {}, deriveWrappingKey() {},
       openMasterKeyBundle() {}, openContent() {}, sealContent() {}, encodeBase64Url() { return "opaque"; },
       validateNonExtractableAesKey() {} },
-    deviceStore: { open() { calls.push("open"); }, readPocket() {}, createPocket() {}, replacePocket() {} },
+    deviceStore: { open() { calls.push("open"); }, readPocket() {}, createPocket() {}, replacePocket() {}, reservePocketEncryptionUsage() {} },
     accountClient: { async authenticatePasskey() {
       calls.push("authenticate");
       return calls.filter((value) => value === "authenticate").length === 1
@@ -420,7 +446,8 @@ test("P052a opens a real P029 content record with its authenticated content cont
     deviceStore: { open: () => store.open(), readPocket: (value) => store.readPocket(value),
       createPocket: async (value) => { try { return await store.createPocket(value); }
         catch (error) { throw new Error(`create:${error.code}`); } },
-      replacePocket: (id, revision, value) => store.replacePocket(id, revision, value) },
+      replacePocket: (id, revision, value) => store.replacePocket(id, revision, value),
+      reservePocketEncryptionUsage: (...input) => store.reservePocketEncryptionUsage(...input) },
     accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
       contentUnlocked: false, accountId: "account-p052a-real", credentialId,
       prf: { status: "available", outputBytes: Uint8Array.from(prf) } }; } },
@@ -484,7 +511,7 @@ test("P052a replays an ambiguous durable device-envelope mutation exactly once",
       async replacePocket(_id, _revision, value) {
         if (failGrantPersistence) { failGrantPersistence = false; throw new Error("local persistence unavailable"); }
         record = value; return value;
-      } },
+      }, async reservePocketEncryptionUsage() {} },
     accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
       contentUnlocked: false, accountId: "account", credentialId: "credential",
       prf: { status: "available", outputBytes: new Uint8Array(32) } }; } },
@@ -529,7 +556,7 @@ test("P052b maps a wrong real P029 PRF unlock to recovery-required before device
   let mutations = 0;
   const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
     crypto,
-    deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; } },
+    deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; }, async reservePocketEncryptionUsage() {} },
     accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
       contentUnlocked: false, accountId: "account-p052b-prf", credentialId: "credential-p052b-prf",
       prf: { status: "available", outputBytes: wrongPrf } }; } },
@@ -564,7 +591,7 @@ test("P052c keeps tampered PRF envelopes recoverable but local derivation failur
     let mutations = 0;
     const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
       crypto: cryptoInput,
-      deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; } },
+      deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; }, async reservePocketEncryptionUsage() {} },
       accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
         contentUnlocked: false, accountId: "account-p052c-prf", credentialId,
         prf: { status: "available", outputBytes: Uint8Array.from(prf) } }; } },
@@ -610,7 +637,7 @@ test("P052b preserves a reviewed irreversible adoption partial state", async () 
   let record = null;
   const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({ crypto,
     deviceStore: { async open() {}, async readPocket() { return record; }, async createPocket(value) { record = value; },
-      async replacePocket(_id, _revision, value) { record = value; return value; } },
+      async replacePocket(_id, _revision, value) { record = value; return value; }, async reservePocketEncryptionUsage() {} },
     accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true, contentUnlocked: false,
       accountId: "account", credentialId: "credential", prf: { status: "available", outputBytes: new Uint8Array(32) } }; } },
     discoveryService: { async readSyncedPocket() { return { status: "ready", syncedPocketId: "pocket" }; } },
@@ -766,6 +793,68 @@ test("P052c public browser Device B adoption joins visible truth, owner authorit
   assert.doesNotMatch(remoteText, /P052c readable Device A content|P052c Device B boundary Save|"masterKey":|"deviceWrappingKey":/);
   assert.doesNotMatch(requests, /P052c readable Device A content|P052c Device B boundary Save/);
   assert.deepEqual(Object.keys(plain(journey.opened)), ["ok", "reason", "confirmedRemoteRevision"]);
+});
+
+test("P085 reopens the same adopted device record after refresh without another Sync mutation", async () => {
+  const journey = await createBrowserJourney({ sameDeviceReopen: true, unrelatedPartial: true, ownerKind: "none" });
+  assert.deepEqual(plain(journey.opened), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
+  });
+  assert.equal(journey.ownerKind, "synced");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
+  assert.equal(journey.remoteCalls.filter((call) => ["beginRegistration", "finishRegistration"].includes(call.route)).length, 2);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "conditionalUpload").length, 1);
+});
+
+test("P085 rejects corrupt, pre-adoption, pending, and mismatched adopted-draft candidates", async () => {
+  for (const mutate of [
+    (record) => Object.assign({}, record, { activationDraft: Object.assign({}, record.activationDraft, {
+      record: Object.assign({}, record.activationDraft.record, { ciphertext: "corrupt" }),
+    }) }),
+    async (record, crypto) => {
+      const draft = await crypto.openContent(record.activationDraft.record,
+        record.deviceWrappingKey, record.activationDraft.context);
+      Object.assign(draft, { stage: "ready-for-adoption", adopted: false });
+      return Object.assign({}, record, { activationDraft: { context: record.activationDraft.context,
+        record: await crypto.sealContent(draft, record.deviceWrappingKey, record.activationDraft.context) } });
+    },
+    async (record, crypto) => {
+      const draft = await crypto.openContent(record.activationDraft.record,
+        record.deviceWrappingKey, record.activationDraft.context);
+      draft.pendingOperation = "content-upload";
+      return Object.assign({}, record, { activationDraft: { context: record.activationDraft.context,
+        record: await crypto.sealContent(draft, record.deviceWrappingKey, record.activationDraft.context) } });
+    },
+    async (record, crypto) => {
+      const draft = await crypto.openContent(record.activationDraft.record,
+        record.deviceWrappingKey, record.activationDraft.context);
+      draft.deviceId = "mismatched-device";
+      return Object.assign({}, record, { activationDraft: { context: record.activationDraft.context,
+        record: await crypto.sealContent(draft, record.deviceWrappingKey, record.activationDraft.context) } });
+    },
+  ]) {
+    const journey = await createBrowserJourney({ sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true });
+    const beforeMutations = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+    const [record] = [...journey.idb.records.values()];
+    journey.idb.records.set(record.syncedPocketId, await mutate(record, journey.b.PocketSyncCrypto));
+    const rejected = await journey.openExisting();
+    assert.equal(rejected.ok, false);
+    assert.equal(journey.ownerKind, "none");
+    assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+    assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, beforeMutations);
+  }
+});
+
+test("P085 refreshes the existing adopted record without creating another device identity", async () => {
+  const journey = await createBrowserJourney({ sameDeviceReopen: true, advanceRemoteBeforeOpen: true, ownerKind: "none" });
+  assert.deepEqual(plain(journey.opened), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 2,
+  });
+  const [record] = [...journey.idb.records.values()];
+  assert.equal(record.remote.confirmedRevision, 2);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, 2);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "conditionalUpload").length, 2);
 });
 
 test("P052h1 public Device B adoption uses production browser storage privacy through ordinary Save", async () => {
@@ -1095,7 +1184,7 @@ test("P052d rejects listed/downloaded PRF metadata drift before Device B mutatio
       crypto: { FORMAT: { contentType: "portal.export.v1+json" }, encodeBase64Url: () => "id",
         async generateDeviceWrappingKey() {}, async deriveWrappingKey() {}, async openMasterKeyBundle() {},
         async openContent() {}, async sealContent() {}, validateNonExtractableAesKey() {} },
-      deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; } },
+      deviceStore: { async open() {}, async readPocket() { return null; }, async createPocket() { mutations += 1; }, async replacePocket() { mutations += 1; }, async reservePocketEncryptionUsage() {} },
       accountClient: { async authenticatePasskey() { return { ok: true, accountAuthenticated: true,
         contentUnlocked: false, accountId: "account", credentialId: "credential",
         prf: { status: "available", outputBytes: new Uint8Array(32) } }; } },

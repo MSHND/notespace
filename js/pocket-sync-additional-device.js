@@ -5,6 +5,15 @@
   const LIMIT = 2 ** 20;
   const FACTORY = ["crypto", "deviceStore", "accountClient", "discoveryService", "contentService", "envelopeService", "randomBytes", "now"];
   const DEPENDENCIES = ["captureTarget", "isTargetCurrent", "validatePayload", "adoptOpenedPocket"];
+  const ACTIVATION_DRAFT_FIELDS = Object.freeze([
+    "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
+    "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
+    "deviceEnvelope", "prfEnvelope", "prfStatus", "recoveryEnvelope",
+    "recoveryVerifier", "recoveryAuthorisation", "recoveryRoot", "recoveryPackage",
+    "registrationContinuation", "account", "confirmedRemoteRevision",
+    "keySetVersion", "recoveryVersion", "accountLocator", "pendingOperation",
+    "sourceSaved", "recoveryCopyStored", "adopted", "createdAt", "updatedAt",
+  ]);
   const fail = (reason, extra = {}) => Object.freeze(Object.assign({ ok: false, reason, adopted: false }, extra));
   const object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
   const id = (value) => typeof value === "string" && value.length > 0 && value.length <= 160 && value === value.trim();
@@ -15,7 +24,7 @@
         || FACTORY.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) return null;
     const required = {
       crypto: ["generateDeviceWrappingKey", "deriveWrappingKey", "openMasterKeyBundle", "openContent", "sealContent", "encodeBase64Url", "validateNonExtractableAesKey"],
-      deviceStore: ["open", "readPocket", "createPocket", "replacePocket"],
+      deviceStore: ["open", "readPocket", "createPocket", "replacePocket", "reservePocketEncryptionUsage"],
       accountClient: ["authenticatePasskey"],
       discoveryService: ["readSyncedPocket"],
       contentService: ["readRevision", "downloadEncryptedRecord"],
@@ -78,13 +87,42 @@
     return { content, revision: revision.revision, payload };
   }
 
-  function completedDeviceRecord(record, syncedPocketId) {
+  async function completedActivationDraft(config, record) {
+    if (record.activationDraft === null) return true;
+    let draft;
+    try {
+      draft = await config.crypto.openContent(record.activationDraft.record,
+        record.deviceWrappingKey, record.activationDraft.context);
+    } catch (_error) { return false; }
+    return object(draft) && Object.keys(draft).length === ACTIVATION_DRAFT_FIELDS.length
+      && ACTIVATION_DRAFT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(draft, field))
+      && draft.kind === "pocket.sync.activation-draft" && draft.schemaVersion === 1
+      && id(draft.activationId) && ["json", "vault"].includes(draft.sourceOwnerKind)
+      && id(draft.sourceContinuityId) && draft.syncedPocketId === record.syncedPocketId
+      && draft.deviceId === record.deviceId && draft.stage === "adopted"
+      && draft.adopted === true && draft.sourceSaved === true && draft.recoveryCopyStored === true
+      && draft.pendingOperation === null && draft.recoveryRoot === null
+      && draft.recoveryPackage === null && draft.registrationContinuation === null
+      && object(draft.ids) && Object.keys(draft.ids).length === 12 && Object.values(draft.ids).every(id)
+      && object(draft.account) && id(draft.account.accountId) && id(draft.account.credentialId)
+      && Number.isSafeInteger(draft.account.credentialVersion) && draft.account.credentialVersion >= 1
+      && Number.isSafeInteger(draft.account.accountPolicyVersion) && draft.account.accountPolicyVersion >= 1
+      && object(draft.content)
+      && draft.content.context?.syncedPocketId === record.syncedPocketId
+      && draft.content.context?.revision === 1
+      && Number.isSafeInteger(draft.confirmedRemoteRevision)
+      && draft.confirmedRemoteRevision === 1 && record.remote.confirmedRevision >= 1
+      && Number.isSafeInteger(draft.keySetVersion) && draft.keySetVersion >= 2
+      && draft.recoveryVersion === 1 && id(draft.accountLocator);
+  }
+
+  async function completedDeviceRecord(config, record, syncedPocketId) {
     const metadata = record?.deviceEnvelope?.metadata;
     const context = record?.deviceEnvelope?.context;
-    return !!record && record.kind === "pocket.sync.device-state" && record.schemaVersion === 5
+    const structurallyCompleted = !!record && record.kind === "pocket.sync.device-state" && record.schemaVersion === 5
       && record.syncedPocketId === syncedPocketId && id(record.deviceId)
       && Number.isSafeInteger(record.storeRevision) && record.storeRevision >= 1
-      && record.additionalDeviceDraft === null && record.activationDraft === null && record.recoveryDraft === null
+      && record.additionalDeviceDraft === null && record.recoveryDraft === null
       && record.usage?.masterKeyGeneration === 1
       && Number.isSafeInteger(record.usage?.masterKeyContentEncryptions)
       && record.usage.masterKeyContentEncryptions >= 0
@@ -100,6 +138,25 @@
       && id(metadata.envelopeId) && context?.syncedPocketId === syncedPocketId
       && context.envelopeId === metadata.envelopeId && context.envelopeKind === "device"
       && context.envelopeVersion === 1;
+    return structurallyCompleted && completedActivationDraft(config, record);
+  }
+
+  async function nextActivationDraft(config, current, storeRevision) {
+    if (current.activationDraft === null) return null;
+    const draft = await config.crypto.openContent(
+      current.activationDraft.record,
+      current.deviceWrappingKey,
+      current.activationDraft.context
+    );
+    const context = {
+      syncedPocketId: current.syncedPocketId,
+      revision: storeRevision,
+      contentType: config.crypto.FORMAT.contentType,
+    };
+    return {
+      context,
+      record: await config.crypto.sealContent(draft, current.deviceWrappingKey, context),
+    };
   }
 
   function listedDeviceEnvelope(record, listed) {
@@ -117,10 +174,17 @@
     if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
     if (latest.revision !== record.remote.confirmedRevision) {
       const stored = await config.deviceStore.readPocket(syncedPocketId);
-      if (!completedDeviceRecord(stored, syncedPocketId)) return fail("additional-device-state-invalid");
-      const refreshed = Object.assign({}, stored, { storeRevision: stored.storeRevision + 1,
+      if (!(await completedDeviceRecord(config, stored, syncedPocketId))) return fail("additional-device-state-invalid");
+      const current = stored.activationDraft === null ? stored : await config.deviceStore.reservePocketEncryptionUsage(
+        syncedPocketId,
+        stored.storeRevision,
+        stored.usage,
+        { masterKeyContentEncryptions: 0, deviceWrappingKeyEncryptions: 1 }
+      );
+      const refreshed = Object.assign({}, current, { storeRevision: current.storeRevision + 1,
         content: latest.content, remote: { confirmedRevision: latest.revision, pending: null, conflict: null } });
-      record = await config.deviceStore.replacePocket(syncedPocketId, stored.storeRevision, refreshed);
+      refreshed.activationDraft = await nextActivationDraft(config, current, refreshed.storeRevision);
+      record = await config.deviceStore.replacePocket(syncedPocketId, current.storeRevision, refreshed);
     }
     if (dependencies.isTargetCurrent() !== true) return fail("additional-device-target-stale");
     const adopted = await dependencies.adoptOpenedPocket({ syncedPocketId, masterKey, payload: latest.payload,
@@ -137,7 +201,7 @@
   }
 
   async function openCompletedDevice(config, dependencies, captured, syncedPocketId, record) {
-    if (!completedDeviceRecord(record, syncedPocketId)) return fail("additional-device-state-invalid");
+    if (!(await completedDeviceRecord(config, record, syncedPocketId))) return fail("additional-device-state-invalid");
     const listed = await config.envelopeService.listEnvelopes({ apiVersion: 1,
       operationId: randomId(config), syncedPocketId });
     if (!Number.isSafeInteger(listed?.keySetVersion) || listed.keySetVersion < 1
