@@ -190,6 +190,32 @@ test("browser transport permits 409 only for mutation routes and requires the sm
   }
 });
 
+test("P090 preserves only bounded rejected-status metadata", async () => {
+  const { api } = loadProduction();
+  const providerText = "provider detail that must not escape";
+  for (const [status, code, retryable] of [
+    [503, "remote-unavailable", true],
+    [429, "remote-rate-limited", true],
+    [410, "remote-request-rejected", false],
+    [404, "remote-request-rejected", false],
+    [400, "remote-request-rejected", false],
+    [401, "remote-authentication-required", false],
+    [403, "remote-authorisation-failed", false],
+  ]) {
+    const transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
+      async fetch() { return fixtures.textResponse({ detail: providerText }, { status }); } });
+    await assert.rejects(transport.request("beginRecovery", { apiVersion: 1 }), (error) => {
+      assert.deepEqual(Object.keys(error).sort(), ["code", "retryable", "status"]);
+      assert.equal(error.code, code);
+      assert.equal(error.retryable, retryable);
+      assert.equal(error.status, status);
+      assert.doesNotMatch(error.message, new RegExp(providerText));
+      assert.doesNotMatch(JSON.stringify(error), new RegExp(providerText));
+      return true;
+    });
+  }
+});
+
 test("P031 and P029 production contracts are mandatory without local fallback validators", () => {
   const loaded = loadProduction();
   const transport = validTransport(() => ({ status: 200, body: {} }));

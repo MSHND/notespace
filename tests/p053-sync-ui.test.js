@@ -277,6 +277,29 @@ test("P087 keeps non-resumable recovery failures out of Continue recovery", asyn
   assert.doesNotMatch(harness.overlay.querySelector("#syncSetupStatus").textContent, /Continue recovery|Sync setup could not finish/);
 });
 
+test("P090 holds a durable non-resumable Recovery attempt for attention", async () => {
+  const harness = createUiHarness("none");
+  harness.topbar.fire("click");
+  harness.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+  const recovery = harness.overlay.querySelector(".vaultDialogRecovery");
+  primary.fire("click");
+  harness.resolveRecovery({ ok: false, reason: "recovery-begin-expired", locallyDurable: true,
+    resumable: false, recoveryAttemptId: "opaque-recovery-attempt" });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.overlay.querySelector("h2").textContent, "Recovery needs attention");
+  assert.equal(primary.hidden, true);
+  assert.equal(recovery.hidden, true);
+  assert.equal(harness.overlay.querySelector("#syncSetupStatus").textContent,
+    "The saved recovery request expired and needs attention.");
+  primary.fire("click");
+  recovery.fire("click");
+  assert.equal(harness.recoveryCalls, 1);
+  assert.equal(harness.recoveryResumeCalls, 0);
+  harness.event("keydown", { key: "Escape" });
+  assert.equal(harness.overlay.hidden, true);
+});
+
 test("P055a opens recovery only after explicit confirmation, and Cancel or idle Escape leave it untouched", () => {
   const cancel = createUiHarness("none", { paletteOpen: true });
   cancel.topbar.fire("click");

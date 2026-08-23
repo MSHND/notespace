@@ -575,6 +575,20 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       }, extra || {}));
     }
 
+    function beginFailure(error, execution) {
+      if (error?.retryable === true) return remoteFailure("recovery-begin-unavailable", execution);
+      if (error?.status === 410) {
+        return remoteFailure("recovery-begin-expired", execution, { resumable: false });
+      }
+      if (error?.status === 404) {
+        return remoteFailure("recovery-begin-not-found", execution, { resumable: false });
+      }
+      if (Number.isSafeInteger(error?.status) || error?.code === "remote-redirect-rejected") {
+        return remoteFailure("recovery-begin-rejected", execution, { resumable: false });
+      }
+      return remoteFailure("recovery-begin-response-invalid", execution, { resumable: false });
+    }
+
     async function beginRecovery(execution) {
       if (STAGES[execution.draft.stage] >= STAGES["ceremony-ready"]) return null;
       const request = execution.draft.beginRequest || {
@@ -592,12 +606,12 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
       try { response = await checked(execution, config.recoveryService.beginRecovery(request)); }
       catch (error) {
         if (error?.code === "recovery-target-changed") throw error;
-        return remoteFailure("recovery-begin-unavailable", execution);
+        return beginFailure(error, execution);
       }
       if (response.operationId !== request.operationId
           || response.recoveryVersion < 1
           || !Number.isSafeInteger(response.keySetVersion) || response.keySetVersion < 1) {
-        return remoteFailure("recovery-begin-failed", execution, { resumable: false });
+        return remoteFailure("recovery-begin-response-invalid", execution, { resumable: false });
       }
       await persistDraft(execution, changedDraft(execution.draft, {
         stage: "ceremony-ready", beginResponse: response, recoveryVersion: response.recoveryVersion,

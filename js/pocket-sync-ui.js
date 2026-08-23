@@ -6,6 +6,10 @@
     "recovery-required": "A recovery copy is needed to open this synced Pocket on this device.",
     "recovery-package-invalid": "Recovery copy could not be used. Your current Pocket is unchanged.",
     "recovery-begin-unavailable": "Pocket could not start recovery with the synced service.",
+    "recovery-begin-expired": "The saved recovery request expired and needs attention.",
+    "recovery-begin-not-found": "This Recovery Copy is not available for this synced Pocket.",
+    "recovery-begin-rejected": "Pocket could not start recovery with this synced Pocket.",
+    "recovery-begin-response-invalid": "Pocket could not safely confirm the recovery request.",
     "recovery-begin-failed": "Recovery could not be started with this synced Pocket.",
     "recovery-ceremony-expired": "The recovery passkey request expired. Start recovery again.",
     "recovery-credential-cancelled": "Creating this device’s recovery passkey was cancelled.",
@@ -200,6 +204,10 @@
         continuation = result.recoveryAttemptId;
         primary.dataset.mode = "recovery-continue";
         primary.textContent = "Continue recovery";
+      } else if (result?.locallyDurable === true && result?.resumable === false
+          && typeof result.recoveryAttemptId === "string") {
+        continuation = null;
+        show("recovery-attention");
       } else if (primary.dataset.mode === "recovery-continue") {
         continuation = null;
         primary.dataset.mode = "recovery";

@@ -55,10 +55,11 @@ persisting session state, retrying work, or changing a Pocket owner.
     "TextDecoder",
   ]);
 
-  function remoteError(code, retryable) {
+  function remoteError(code, retryable, status = null) {
     const error = new Error(`Pocket Sync remote client ${code}.`);
     error.code = code;
     if (typeof retryable === "boolean") error.retryable = retryable;
+    if (Number.isSafeInteger(status) && status >= 100 && status <= 599) error.status = status;
     return error;
   }
 
@@ -289,12 +290,12 @@ persisting session state, retrying work, or changing a Pocket owner.
   }
 
   function rejectedStatus(status) {
-    if (status === 401) return remoteError("remote-authentication-required", false);
-    if (status === 403) return remoteError("remote-authorisation-failed", false);
-    if ([408, 502, 503, 504].includes(status)) return remoteError("remote-unavailable", true);
-    if (status === 429) return remoteError("remote-rate-limited", true);
-    if (status >= 300 && status < 400) return remoteError("remote-redirect-rejected", false);
-    return remoteError("remote-request-rejected", false);
+    if (status === 401) return remoteError("remote-authentication-required", false, status);
+    if (status === 403) return remoteError("remote-authorisation-failed", false, status);
+    if ([408, 502, 503, 504].includes(status)) return remoteError("remote-unavailable", true, status);
+    if (status === 429) return remoteError("remote-rate-limited", true, status);
+    if (status >= 300 && status < 400) return remoteError("remote-redirect-rejected", false, status);
+    return remoteError("remote-request-rejected", false, status);
   }
 
   function createBrowserJsonTransport(options = {}) {

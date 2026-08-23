@@ -1197,6 +1197,59 @@ test("P089 resumes a durable none target after its page-local continuity changes
   assert.equal(resumed.ok, true, JSON.stringify(resumed));
 });
 
+test("P090 makes Recovery begin retryability follow the bounded remote-client result", async (t) => {
+  const cases = [
+    { name: "network", fetch: async () => { throw new Error("network unavailable"); },
+      reason: "recovery-begin-unavailable", resumable: true },
+    { name: "503", status: 503, reason: "recovery-begin-unavailable", resumable: true },
+    { name: "429", status: 429, reason: "recovery-begin-unavailable", resumable: true },
+    { name: "410", status: 410, reason: "recovery-begin-expired", resumable: false },
+    { name: "404", status: 404, reason: "recovery-begin-not-found", resumable: false },
+    { name: "400", status: 400, reason: "recovery-begin-rejected", resumable: false },
+    { name: "401", status: 401, reason: "recovery-begin-rejected", resumable: false },
+    { name: "403", status: 403, reason: "recovery-begin-rejected", resumable: false },
+    { name: "malformed success", status: 200, reason: "recovery-begin-response-invalid", resumable: false,
+      body: { apiVersion: 1, ok: true, operationId: "wrong-operation" } },
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async () => {
+    const harness = await createActivatedHarness();
+    const requests = [];
+    const transport = harness.remote.createBrowserJsonTransport({
+      serviceRoot: "/sync/v1",
+      async fetch(url, options) {
+        requests.push({ url, options });
+        if (scenario.fetch) return scenario.fetch();
+        return fixtures.textResponse(scenario.body || { detail: "provider detail" }, { status: scenario.status });
+      },
+    });
+    const recoveryService = harness.remote.createRecoveryService({ transport, now: () => NOW });
+    const recoveryOrchestrator = harness.recovery.createRecoveryOrchestrator({
+      ...harness.recoveryConfig, recoveryService,
+    });
+    const result = await recoveryOrchestrator.recover(harness.recoveryDependencies, {
+      deviceId: `device-p090-${scenario.name.replaceAll(" ", "-")}`,
+    });
+    assert.equal(result.reason, scenario.reason, JSON.stringify(result));
+    assert.equal(result.resumable, scenario.resumable);
+    assert.equal(result.locallyDurable, true);
+    assert.equal(typeof result.recoveryAttemptId, "string");
+    assert.equal(requests.length, 1);
+    const found = await harness.recoveryStore.readRecoveryAttempt(result.recoveryAttemptId);
+    assert.equal(found.draft.stage, "begin-pending");
+    assert.equal(found.draft.pendingOperation, "begin-recovery");
+    assert.equal(requests[0].options.body, JSON.stringify(found.draft.beginRequest));
+    if (scenario.name === "network") {
+      const resumed = await recoveryOrchestrator.resume(harness.recoveryDependencies, {
+        recoveryAttemptId: result.recoveryAttemptId,
+      });
+      assert.equal(resumed.reason, "recovery-begin-unavailable");
+      assert.equal(resumed.recoveryAttemptId, result.recoveryAttemptId);
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1].options.body, requests[0].options.body);
+    }
+  });
+});
+
 test("target replacement, malformed content and key-set conflicts stop safely", async (t) => {
   await t.test("target changed", async () => {
     const harness = await createActivatedHarness();
