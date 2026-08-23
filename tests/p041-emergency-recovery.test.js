@@ -1094,6 +1094,25 @@ test("replacement-copy failure resumes locally with the exact package and no rem
   assert.equal(ready.draft.replacementRecoveryPackage, null);
 });
 
+test("P089 resumes a durable none target after its page-local continuity changes", async () => {
+  const harness = await createActivatedHarness({ replacementCopyFails: true });
+  const first = await harness.recoveryOrchestrator.recover(harness.recoveryDependencies, {
+    deviceId: "device-p089-none-reload",
+  });
+  assert.equal(first.reason, "replacement-recovery-copy-not-stored");
+  const reloadedTarget = Object.freeze({ ownerKind: "none", continuityId: "p041-reloaded" });
+  const resumedDependencies = Object.freeze({
+    ...harness.recoveryDependencies,
+    captureRecoveryTarget() { return reloadedTarget; },
+    isRecoveryTargetCurrent(target) { return target === reloadedTarget; },
+  });
+  harness.allowReplacementCopy();
+  const resumed = await harness.recoveryOrchestrator.resume(resumedDependencies, {
+    recoveryAttemptId: first.recoveryAttemptId,
+  });
+  assert.equal(resumed.ok, true, JSON.stringify(resumed));
+});
+
 test("target replacement, malformed content and key-set conflicts stop safely", async (t) => {
   await t.test("target changed", async () => {
     const harness = await createActivatedHarness();

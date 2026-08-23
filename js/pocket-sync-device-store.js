@@ -792,7 +792,8 @@ and a narrow atomic transaction boundary without activating a synced owner.
           throw deviceStoreError("recovery-staging-draft-invalid");
         }
         if (draft.targetOwnerKind !== target.targetOwnerKind
-            || draft.targetContinuityId !== target.targetContinuityId) continue;
+            || (target.targetOwnerKind !== "none"
+              && draft.targetContinuityId !== target.targetContinuityId)) continue;
         if (match !== null) return Object.freeze({ state: "ambiguous" });
         match = draft.recoveryAttemptId;
       }

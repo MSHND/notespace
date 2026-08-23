@@ -222,6 +222,11 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
     });
   }
 
+  function recoveryTargetMatches(identity, draft) {
+    return identity.ownerKind === draft.targetOwnerKind
+      && (identity.ownerKind === "none" || identity.continuityId === draft.targetContinuityId);
+  }
+
   function timestamp(now) {
     let value;
     try { value = now(); } catch (_error) { throw recoveryError("recovery-state-invalid"); }
@@ -1295,8 +1300,7 @@ new device without adding UI, ownership, Save integration or a proof algorithm.
             ? error.code : "invalid-recovery-input");
         }
         await ensureTarget(execution);
-        if (execution.identity.ownerKind !== execution.draft.targetOwnerKind
-            || execution.identity.continuityId !== execution.draft.targetContinuityId) {
+        if (!recoveryTargetMatches(execution.identity, execution.draft)) {
           return safeFailure("recovery-target-changed", {
             recoveryAttemptId: options.recoveryAttemptId, locallyDurable: true, resumable: true,
           });

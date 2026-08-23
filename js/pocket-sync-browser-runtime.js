@@ -385,13 +385,14 @@
     function additionalTargetCurrent(expected = null) {
       const target = additionalTarget();
       return !!target && (expected === null || (target.ownerKind === expected.ownerKind
+        && target.ownerKind === "none") || (target.ownerKind === expected.ownerKind
         && [target.continuityId, `${target.ownerKind}:${target.continuityId}`]
           .includes(expected.continuityId)));
     }
 
     function additionalTargetReplaceable(expected = null) {
       const target = additionalTarget();
-      if (!target || (expected !== null && (target.ownerKind !== expected.ownerKind
+      if (!target || (expected !== null && target.ownerKind !== "none" && (target.ownerKind !== expected.ownerKind
           || ![target.continuityId, `${target.ownerKind}:${target.continuityId}`]
             .includes(expected.continuityId)))) return false;
       if (target.ownerKind === "none") return true;
@@ -419,7 +420,8 @@
       const target = additionalTarget();
       if (!found?.record || !found?.draft || !target
           || found.draft.targetOwnerKind !== target.ownerKind
-          || found.draft.targetContinuityId !== `${target.ownerKind}:${target.continuityId}`
+          || (target.ownerKind !== "none"
+            && found.draft.targetContinuityId !== `${target.ownerKind}:${target.continuityId}`)
           || !additionalTargetReplaceable(target)) return safeFailure("recovery-target-stale");
       const bundle = await crypto.openMasterKeyBundle(
         found.record.deviceEnvelope.record,

@@ -381,6 +381,15 @@ test("P088 discovers only one validated local Recovery attempt for its exact tar
   });
   assert.deepEqual(plain(await store.findRecoveryAttempt({
     targetOwnerKind: "none", targetContinuityId: "none:1",
+  })), { state: "match", recoveryAttemptId: "p088-attempt-one" });
+  assert.deepEqual(plain(await store.findRecoveryAttempt({
+    targetOwnerKind: "detached", targetContinuityId: "detached:1",
+  })), { state: "none" });
+  await store.createRecoveryStaging(await recoveryStagingRecord(
+    apis, "p089-detached", "p089-detached-attempt", "detached", "detached:0"
+  ));
+  assert.deepEqual(plain(await store.findRecoveryAttempt({
+    targetOwnerKind: "detached", targetContinuityId: "detached:1",
   })), { state: "none" });
   await store.createRecoveryStaging(await recoveryStagingRecord(
     apis, "p088-two", "p088-attempt-two", target.targetOwnerKind, target.targetContinuityId
