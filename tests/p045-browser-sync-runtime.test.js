@@ -321,6 +321,17 @@ test("P054 keeps recovery explicit, rejects dirty detached work and leaves stati
   assert.doesNotMatch(source("index.html"), /pocket-sync-emergency-recovery\.js/);
 });
 
+test("P088 local Recovery discovery performs no remote, passkey, adoption or Save work", async () => {
+  const harness = createHarness({ ownerKind: "none" });
+  const result = await harness.runtime.findRecoveryAttempt();
+  assert.deepEqual(plain(result), { ok: true });
+  assert.equal(harness.idb.observations.opens, 1);
+  assert.equal(harness.remoteCalls.length, 0);
+  assert.equal(harness.passkeyCalls, 0);
+  assert.equal(harness.saveCalls, 0);
+  assert.equal(harness.ownerKind, "none");
+});
+
 test("P045 explicitly composes browser activation, encrypted remote state and the live synced owner", async () => {
   const harness = createHarness({ dirty: true });
   const result = await harness.runtime.activate();

@@ -32,6 +32,7 @@
     "device-staging-failed": "Pocket could not prepare recovery safely on this device.",
     "invalid-recovery-input": "Recovery could not be started safely.",
     "unsupported-recovery-target": "Recovery is not available for the current Pocket.",
+    "recovery-discovery-needs-attention": "Recovery on this device needs attention before it can continue.",
   });
 
   function owner() {
@@ -132,6 +133,7 @@
       returnFocus = paletteClosed ? (document.getElementById("btnMore") || topbarButton) : document.activeElement;
       overlay.hidden = false;
       status.textContent = "";
+      primary.hidden = false;
       if (mode === "open") {
         title.textContent = "Open synced Pocket";
         body.textContent = "Open the encrypted Pocket already linked to your passkey on this device.";
@@ -144,6 +146,10 @@
         title.textContent = "Continue recovery";
         body.textContent = "Continue the recovery already in progress for this Pocket.";
         primary.textContent = "Continue recovery";
+      } else if (mode === "recovery-attention") {
+        title.textContent = "Recovery needs attention";
+        body.textContent = "Recovery on this device needs attention before it can continue.";
+        primary.hidden = true;
       } else if (mode === "continue") {
         title.textContent = "Continue Sync setup";
         body.textContent = "Continue the setup already in progress for this Pocket.";
@@ -202,7 +208,25 @@
     }
     function begin() {
       const session = owner();
-      if (eligibleOpen(session)) show("open");
+      if (eligibleOpen(session)) {
+        if (!show("open") || typeof integration.findRecoveryAttempt !== "function") return;
+        void (async () => {
+          let found;
+          try { found = await integration.findRecoveryAttempt(); }
+          catch (_error) { found = { ok: false, reason: "recovery-discovery-needs-attention" }; }
+          const current = owner();
+          if (overlay.hidden || busy || !eligibleOpen(current)
+              || current?.ownerKind !== session.ownerKind || current?.id !== session.id) return;
+          if (found?.ok === true && typeof found.recoveryAttemptId === "string") {
+            continuation = found.recoveryAttemptId;
+            show("recovery-continue");
+          } else if (found?.ok !== true) {
+            continuation = null;
+            show("recovery-attention");
+            status.textContent = message(found);
+          }
+        })();
+      }
       else if (eligibleActivation(session)) show(continuation ? "continue" : "activate");
     }
     button.addEventListener("click", begin);

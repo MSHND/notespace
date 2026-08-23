@@ -152,6 +152,35 @@ async function openMemoryStore(apis, sharedState = createSharedDeviceStoreState(
   return { store, driver, sharedState };
 }
 
+async function recoveryStagingRecord(apis, syncedPocketId, recoveryAttemptId, targetOwnerKind, targetContinuityId) {
+  const deviceWrappingKey = await apis.crypto.generateDeviceWrappingKey();
+  const context = {
+    syncedPocketId,
+    revision: 1,
+    contentType: apis.crypto.FORMAT.contentType,
+  };
+  return {
+    kind: "pocket.sync.recovery-staging",
+    schemaVersion: 2,
+    storeRevision: 1,
+    syncedPocketId,
+    deviceId: `device-${syncedPocketId}`,
+    deviceWrappingKey,
+    recoveryDraft: {
+      context,
+      record: await apis.crypto.sealContent({
+        kind: "pocket.sync.emergency-recovery-draft",
+        schemaVersion: 1,
+        stage: "begin-pending",
+        recoveryAttemptId,
+        targetOwnerKind,
+        targetContinuityId,
+      }, deviceWrappingKey, context),
+    },
+    usage: { deviceWrappingKeyEncryptions: 1 },
+  };
+}
+
 function committedRecord(base, overrides = {}) {
   const next = clone(base);
   next.storeRevision = overrides.storeRevision || base.storeRevision + 1;
@@ -339,6 +368,32 @@ test("memory driver receives the same one-store schema and stays separate from r
   assert.match(source("js/pocket-state.js"), /RECENT_POCKET_FILE_STORE\s*=\s*"recentFile"/);
   assert.notEqual(sharedState.configuration.databaseName, "pocketLite.recentFile.v1");
   assert.notEqual(sharedState.configuration.objectStoreName, "recentFile");
+});
+
+test("P088 discovers only one validated local Recovery attempt for its exact target", async () => {
+  const { store, sharedState } = await openMemoryStore(apis);
+  const target = { targetOwnerKind: "none", targetContinuityId: "none:0" };
+  await store.createRecoveryStaging(await recoveryStagingRecord(
+    apis, "p088-one", "p088-attempt-one", target.targetOwnerKind, target.targetContinuityId
+  ));
+  assert.deepEqual(plain(await store.findRecoveryAttempt(target)), {
+    state: "match", recoveryAttemptId: "p088-attempt-one",
+  });
+  assert.deepEqual(plain(await store.findRecoveryAttempt({
+    targetOwnerKind: "none", targetContinuityId: "none:1",
+  })), { state: "none" });
+  await store.createRecoveryStaging(await recoveryStagingRecord(
+    apis, "p088-two", "p088-attempt-two", target.targetOwnerKind, target.targetContinuityId
+  ));
+  assert.deepEqual(plain(await store.findRecoveryAttempt(target)), { state: "ambiguous" });
+  const corrupt = sharedState.records.get("p088-one");
+  sharedState.records.set("p088-one", Object.assign({}, corrupt, {
+    recoveryDraft: Object.assign({}, corrupt.recoveryDraft, {
+      record: Object.assign({}, corrupt.recoveryDraft.record, { ciphertext: "not-a-valid-record" }),
+    }),
+  }));
+  await expectCode(store.findRecoveryAttempt(target), "device-content-invalid");
+  assert.equal(sharedState.records.has("p088-one"), true);
 });
 
 test("valid initial creation is insert-only and resolves only after transaction commit", async () => {

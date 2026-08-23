@@ -65,7 +65,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   let session = { ownerKind, id: 1 };
   let dirty = options.dirty === true;
-  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let resumeInput; let recoveryResumeInput; let resolveActivate; let resolveOpen; let resolveRecovery;
+  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let discoveryCalls = 0; let resumeInput; let recoveryResumeInput; let resolveActivate; let resolveOpen; let resolveRecovery;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
     capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
@@ -87,10 +87,11 @@ function createUiHarness(ownerKind = "json", options = {}) {
       recoverExisting() { recoveryCalls += 1; return new Promise((resolve) => { resolveRecovery = resolve; }); },
     resumeRecovery(input) { recoveryResumeCalls += 1; recoveryResumeInput = input; return Promise.resolve(options.resumeRecoveryResult || { ok: false }); },
     }),
+    findRecoveryAttempt() { discoveryCalls += 1; return Promise.resolve(options.discoveryResult || { ok: true }); },
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryResumeInput() { return recoveryResumeInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get discoveryCalls() { return discoveryCalls; }, get recoveryResumeInput() { return recoveryResumeInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -127,6 +128,43 @@ test("P053a exposes fresh-device open directly and updates after an owner transi
   assert.equal(harness.command.hidden, true);
   assert.equal(harness.topbar.hidden, true);
   assert.equal(harness.source.textContent, "Synced Pocket");
+});
+
+test("P088 offers one locally discovered Recovery attempt without starting it", async () => {
+  const harness = createUiHarness("none", { discoveryResult: {
+    ok: true, recoveryAttemptId: "opaque-recovery-after-reload",
+  } });
+  harness.topbar.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const primary = harness.overlay.querySelector(".vaultDialogPrimary");
+  assert.equal(harness.discoveryCalls, 1);
+  assert.equal(primary.textContent, "Continue recovery");
+  assert.equal(primary.dataset.mode, "recovery-continue");
+  assert.equal(harness.openCalls, 0);
+  assert.equal(harness.recoveryCalls, 0);
+  primary.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.recoveryResumeCalls, 1);
+  assert.equal(JSON.stringify(harness.recoveryResumeInput),
+    '{"recoveryAttemptId":"opaque-recovery-after-reload"}');
+});
+
+test("P088 leaves zero matches ordinary and fails ambiguous local Recovery closed", async () => {
+  const none = createUiHarness("none");
+  none.topbar.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(none.overlay.querySelector(".vaultDialogPrimary").textContent, "Open synced Pocket");
+  assert.equal(none.overlay.querySelector(".vaultDialogRecovery").hidden, false);
+  const ambiguous = createUiHarness("none", { discoveryResult: {
+    ok: false, reason: "recovery-discovery-needs-attention",
+  } });
+  ambiguous.topbar.fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(ambiguous.overlay.querySelector("h2").textContent, "Recovery needs attention");
+  assert.equal(ambiguous.overlay.querySelector(".vaultDialogPrimary").hidden, true);
+  assert.equal(ambiguous.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+  assert.equal(ambiguous.overlay.querySelector("#syncSetupStatus").textContent,
+    "Recovery on this device needs attention before it can continue.");
 });
 
 test("P086 gives recovery-required its specific mobile guidance before generic ownership copy", async () => {

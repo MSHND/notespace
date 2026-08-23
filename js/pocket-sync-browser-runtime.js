@@ -596,7 +596,26 @@
       catch (_error) { return safeFailure("recovery-adoption-failed"); }
     }
 
-    return frozen({ activate, resume, openExisting, recoverExisting, resumeRecovery });
+    async function findRecoveryAttempt() {
+      const target = additionalTarget();
+      if (!target || !additionalTargetReplaceable(target)) {
+        return safeFailure("recovery-discovery-needs-attention");
+      }
+      try {
+        await deviceStore.open();
+        const found = await deviceStore.findRecoveryAttempt({
+          targetOwnerKind: target.ownerKind,
+          targetContinuityId: `${target.ownerKind}:${target.continuityId}`,
+        });
+        if (found?.state === "none") return frozen({ ok: true });
+        if (found?.state === "match" && typeof found.recoveryAttemptId === "string") {
+          return frozen({ ok: true, recoveryAttemptId: found.recoveryAttemptId });
+        }
+      } catch (_error) {}
+      return safeFailure("recovery-discovery-needs-attention");
+    }
+
+    return frozen({ activate, resume, openExisting, recoverExisting, resumeRecovery, findRecoveryAttempt });
   }
 
   global.PocketSyncBrowserRuntime = frozen({ createRuntime });

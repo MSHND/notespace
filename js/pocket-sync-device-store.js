@@ -93,6 +93,12 @@ and a narrow atomic transaction boundary without activating a synced owner.
   const VERSION_THREE_USAGE_FIELDS = Object.freeze([
     "masterKeyGeneration", "contentEncryptionsOnDevice", "envelopeEncryptionsOnDevice",
   ]);
+  const RECOVERY_DISCOVERY_STAGES = Object.freeze([
+    "package-staged", "begin-pending", "ceremony-ready", "finish-ready", "finish-pending",
+    "recovery-authenticated", "content-ready", "device-envelope-pending",
+    "device-envelope-committed", "rotation-pending", "recovery-rotated",
+    "replacement-copy-pending", "ready-for-adoption",
+  ]);
 
   function deviceStoreError(code) {
     const error = new Error(`Pocket Sync device store ${code}.`);
@@ -181,6 +187,32 @@ and a narrow atomic transaction boundary without activating a synced owner.
     } catch (_error) {
       throw deviceStoreError("device-wrapping-key-invalid");
     }
+  }
+
+  function validateRecoveryDiscoveryTarget(input) {
+    const target = exactObject(input, ["targetOwnerKind", "targetContinuityId"],
+      "recovery-target-invalid");
+    if (!["none", "detached"].includes(target.targetOwnerKind)) {
+      throw deviceStoreError("recovery-target-invalid");
+    }
+    return Object.freeze({
+      targetOwnerKind: target.targetOwnerKind,
+      targetContinuityId: identifier(target.targetContinuityId, "recovery-target-invalid"),
+    });
+  }
+
+  function validateRecoveryDiscoveryDraft(input) {
+    if (!input || typeof input !== "object" || Array.isArray(input)
+        || input.kind !== "pocket.sync.emergency-recovery-draft" || input.schemaVersion !== 1
+        || !RECOVERY_DISCOVERY_STAGES.includes(input.stage)
+        || !["none", "detached"].includes(input.targetOwnerKind)) {
+      throw deviceStoreError("recovery-staging-draft-invalid");
+    }
+    return Object.freeze({
+      recoveryAttemptId: identifier(input.recoveryAttemptId, "recovery-staging-draft-invalid"),
+      targetOwnerKind: input.targetOwnerKind,
+      targetContinuityId: identifier(input.targetContinuityId, "recovery-staging-draft-invalid"),
+    });
   }
 
   function freezeValue(value, cryptoKey) {
@@ -731,6 +763,44 @@ and a narrow atomic transaction boundary without activating a synced owner.
       return match;
     }
 
+    async function findRecoveryAttempt(targetInput) {
+      requireOpen();
+      const target = validateRecoveryDiscoveryTarget(targetInput);
+      const records = await driver.transaction("readonly", async (transaction) => {
+        if (typeof transaction.getAll !== "function") {
+          throw deviceStoreError("device-store-driver-invalid");
+        }
+        const found = await transaction.getAll();
+        transaction.checkpoint("after-read-before-validation");
+        if (!Array.isArray(found)) throw deviceStoreError("device-store-read-invalid");
+        return found.map((record) => validateStoredRecord(record));
+      });
+      let match = null;
+      for (const record of records) {
+        const encryptedDraft = record.kind === FORMAT.recoveryStagingKind
+          ? record.recoveryDraft
+          : record.kind === FORMAT.recordKind ? record.recoveryDraft : null;
+        if (encryptedDraft === null) continue;
+        let draft;
+        try {
+          draft = validateRecoveryDiscoveryDraft(await cryptoContract().openContent(
+            encryptedDraft.record,
+            record.deviceWrappingKey,
+            encryptedDraft.context
+          ));
+        } catch (_error) {
+          throw deviceStoreError("recovery-staging-draft-invalid");
+        }
+        if (draft.targetOwnerKind !== target.targetOwnerKind
+            || draft.targetContinuityId !== target.targetContinuityId) continue;
+        if (match !== null) return Object.freeze({ state: "ambiguous" });
+        match = draft.recoveryAttemptId;
+      }
+      return match === null
+        ? Object.freeze({ state: "none" })
+        : Object.freeze({ state: "match", recoveryAttemptId: match });
+    }
+
     async function readAdditionalDeviceAttempt(attemptIdInput) {
       requireOpen();
       const attemptId = identifier(attemptIdInput, "additional-device-attempt-invalid");
@@ -954,6 +1024,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       readActivation,
       readStoredRecord,
       readRecoveryAttempt,
+      findRecoveryAttempt,
       readAdditionalDeviceAttempt,
       createPocket,
       replacePocket,
@@ -1183,6 +1254,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     readStoredRecord: (syncedPocketId) => getDefaultStore().readStoredRecord(syncedPocketId),
     readRecoveryAttempt: (recoveryAttemptId) => getDefaultStore()
       .readRecoveryAttempt(recoveryAttemptId),
+    findRecoveryAttempt: (target) => getDefaultStore().findRecoveryAttempt(target),
     readAdditionalDeviceAttempt: (attemptId) => getDefaultStore()
       .readAdditionalDeviceAttempt(attemptId),
     createPocket: (record) => getDefaultStore().createPocket(record),

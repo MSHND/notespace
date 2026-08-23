@@ -91,6 +91,7 @@ test("P054 local integration is inert until create and returns only explicit pro
           async resume() { return { ok: false }; },
           async recoverExisting() { return { ok: false, reason: "recovery-package-invalid" }; },
           async resumeRecovery(input) { return { ok: false, recoveryAttemptId: input.recoveryAttemptId }; },
+          async findRecoveryAttempt() { return { ok: true }; },
         };
       },
     },
@@ -103,7 +104,7 @@ test("P054 local integration is inert until create and returns only explicit pro
   assert.deepEqual(Object.keys(context.PocketSyncLocalIntegration), ["create"]);
   assert.equal(Object.isFrozen(context.PocketSyncLocalIntegration), true);
   const integration = context.PocketSyncLocalIntegration.create();
-  assert.deepEqual(Object.keys(integration), ["activate", "resume", "openExisting", "recoverExisting", "resumeRecovery", "verifyRoundTrip"]);
+  assert.deepEqual(Object.keys(integration), ["activate", "resume", "openExisting", "recoverExisting", "resumeRecovery", "findRecoveryAttempt", "verifyRoundTrip"]);
   assert.equal(Object.isFrozen(integration), true);
   assert.deepEqual(JSON.parse(JSON.stringify(await integration.verifyRoundTrip())), { ok: false, reason: "sync-not-activated" });
   assert.equal((await integration.activate()).ok, true);
