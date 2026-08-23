@@ -11,6 +11,7 @@
     "begin-attention-expired": "recovery-begin-expired",
     "begin-attention-not-found": "recovery-begin-not-found",
     "begin-attention-rejected": "recovery-begin-rejected",
+    "begin-attention-generic-rejected": "recovery-begin-rejected",
     "begin-attention-request-rejected": "recovery-begin-request-rejected",
     "begin-attention-authentication-rejected": "recovery-begin-authentication-rejected",
     "begin-attention-authorisation-rejected": "recovery-begin-authorisation-rejected",
@@ -31,6 +32,29 @@
 
   function safeFailure(reason) {
     return frozen({ ok: false, reason, adopted: false, sourceOwnerPreserved: true });
+  }
+
+  function isLegacyRestartableDraft(draft, ownerKind) {
+    return ownerKind === "none"
+      && draft?.stage === "begin-pending"
+      && draft.pendingOperation === "begin-attention-rejected"
+      && draft.beginResponse === null
+      && draft.finishRequest === null
+      && draft.finishResponse === null
+      && draft.confirmedRemoteRevision === 0
+      && draft.content === null
+      && draft.deviceEnvelope === null
+      && draft.replacementRecoveryRoot === null
+      && draft.replacementRecoveryVerifier === null
+      && draft.replacementRecoveryAuthorisation === null
+      && draft.replacementRecoveryEnvelope === null
+      && draft.replacementAccountLocator === null
+      && draft.replacementRecoveryPackage === null
+      && draft.account === null
+      && draft.keySetVersion === 0
+      && draft.recoveryVersion === 0
+      && draft.deviceGrant === null
+      && draft.replacementRecoveryCopyStored === false;
   }
 
   function browserEnvironment(value) {
@@ -590,11 +614,7 @@
       if (!additionalTargetReplaceable()) return safeFailure("recovery-target-dirty");
       const deviceId = crypto.encodeBase64Url(browserRandom(environment)(32));
       const recovered = await recoveryOrchestrator.recover(recoveryDependencies(), { deviceId });
-      if (!recovered?.ok || recovered.readyForAdoption !== true) {
-        return recovered?.reason === "recovery-begin-rejected"
-          && additionalTarget()?.ownerKind === "none"
-          ? frozen(Object.assign({}, recovered, { restartable: true })) : recovered;
-      }
+      if (!recovered?.ok || recovered.readyForAdoption !== true) return recovered;
       try { return adoptRecoveredPocket(recovered); }
       catch (_error) { return safeFailure("recovery-adoption-failed"); }
     }
@@ -646,7 +666,7 @@
           if (reason) return frozen({ ok: false, reason, adopted: false,
             sourceOwnerPreserved: true, locallyDurable: true, resumable: false,
             recoveryAttemptId: found.recoveryAttemptId,
-            restartable: target.ownerKind === "none" && reason === "recovery-begin-rejected" });
+            restartable: isLegacyRestartableDraft(attempt.draft, target.ownerKind) });
           if (!attempt?.record || !attempt?.draft) throw new Error("recovery-attempt-missing");
           return frozen({ ok: true, recoveryAttemptId: found.recoveryAttemptId });
         }

@@ -389,7 +389,7 @@ test("P092 exposes Restart recovery only for the legacy generic attention marker
   assert.equal(failed.overlay.querySelector(".vaultDialogRestart").hidden, false);
 
   for (const reason of [
-    "recovery-begin-expired", "recovery-begin-not-found", "recovery-begin-response-invalid",
+    "recovery-begin-rejected", "recovery-begin-expired", "recovery-begin-not-found", "recovery-begin-response-invalid",
     "recovery-begin-request-rejected", "recovery-begin-authentication-rejected",
     "recovery-begin-authorisation-rejected", "recovery-begin-conflict",
   ]) {
