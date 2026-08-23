@@ -209,6 +209,7 @@
         }
         let link;
         let objectUrl;
+        let deferredCleanup = false;
         try {
           const blob = new Blob([`${JSON.stringify(input.recoveryPackage, null, 2)}\n`], {
             type: "application/json",
@@ -221,12 +222,21 @@
           document.body.appendChild(link);
           if (typeof link.click !== "function") throw new Error("recovery-download-unavailable");
           link.click();
+          const schedule = environment.setTimeout || global.setTimeout;
+          if (typeof schedule !== "function") throw new Error("recovery-download-cleanup-unavailable");
+          schedule(() => {
+            try { link?.remove?.(); } catch (_removeError) {}
+            try { if (objectUrl) URL.revokeObjectURL(objectUrl); } catch (_revokeError) {}
+          }, 1000);
+          deferredCleanup = true;
           return frozen({ ok: true });
         } catch (_error) {
           return frozen({ ok: false });
         } finally {
-          try { link?.remove?.(); } catch (_removeError) {}
-          try { if (objectUrl) URL.revokeObjectURL(objectUrl); } catch (_revokeError) {}
+          if (!deferredCleanup) {
+            try { link?.remove?.(); } catch (_removeError) {}
+            try { if (objectUrl) URL.revokeObjectURL(objectUrl); } catch (_revokeError) {}
+          }
         }
       }
       if (typeof input.destination.createWritable !== "function") return frozen({ ok: false });

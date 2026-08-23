@@ -738,6 +738,7 @@ test("P086 recovers through ephemeral phone file input and replacement download 
   const attached = [];
   const downloads = [];
   const revoked = [];
+  const timers = [];
   let downloadFails = true;
   const document = {
     body: { appendChild(value) { attached.push(value); return value; } },
@@ -767,6 +768,7 @@ test("P086 recovers through ephemeral phone file input and replacement download 
   class Blob { constructor(parts, options) { this.parts = parts; this.type = options.type; } }
   const environment = {
     crypto: webcrypto, now: () => NOW, document, Blob,
+    setTimeout(callback, delay) { timers.push({ callback, delay }); return timers.length; },
     URL: { createObjectURL(blob) { const value = `blob:p086-${urls.size + 1}`; urls.set(value, blob); return value; },
       revokeObjectURL(value) { revoked.push(value); urls.delete(value); } },
     PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
@@ -799,9 +801,13 @@ test("P086 recovers through ephemeral phone file input and replacement download 
   assert.equal(replacement.kind, "pocket-recovery-package");
   assert.equal(replacement.localOnly, true);
   assert.equal(replacement.remoteUploadAllowed, false);
+  assert.equal(attached.length, 1);
+  assert.deepEqual(revoked, ["blob:p086-1"]);
+  assert.deepEqual(timers.map(({ delay }) => delay), [1000]);
+  assert.equal(harness.remoteCalls.length, remoteCallsBeforeRetry);
+  timers[0].callback();
   assert.equal(attached.length, 0);
   assert.deepEqual(revoked, ["blob:p086-1", "blob:p086-1"]);
-  assert.equal(harness.remoteCalls.length, remoteCallsBeforeRetry);
   assert.equal(JSON.stringify({ attached, downloads: downloads.map(({ href, name }) => ({ href, name })), urls }),
     '{"attached":[],"downloads":[{"href":"blob:p086-1","name":"Pocket Recovery Copy.json"}],"urls":{}}');
 });
