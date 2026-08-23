@@ -7,7 +7,14 @@
     try { return global.capturePocketFileSaveSession?.() || null; } catch (_error) { return null; }
   }
 
-  function message(reason) {
+  function message(result) {
+    const reason = result?.reason;
+    if (result?.adopted === true && result?.sourceOwnerPreserved === false) {
+      return "Sync setup hit a finalisation problem, but Synced Pocket is now the owner.";
+    }
+    if (result?.sourceOwnerPreserved !== true) {
+      return "Sync setup could not finish. Check Storage & Sync before continuing.";
+    }
     if (["additional-device-target-dirty", "source-has-unsaved-changes"].includes(reason)) {
       return "Pocket has changes that need attention before Sync can continue.";
     }
@@ -149,7 +156,7 @@
         primary.dataset.mode = "continue";
         primary.textContent = "Continue setup";
       }
-      status.textContent = message(result?.reason);
+      status.textContent = message(result);
       refresh();
     }
     function begin() {

@@ -41,6 +41,17 @@ function createContext() {
     isPocketEditorSourceIdentityCurrent(identity) {
       return !!identity && identity.id === sessionId;
     },
+    capturePocketFileOwnerForAdoption() {
+      return { ownerKind, sessionId };
+    },
+    restorePocketFileOwnerAfterFailedAdoption(snapshot) {
+      if (!snapshot || !Number.isSafeInteger(snapshot.sessionId)
+          || typeof snapshot.ownerKind !== "string") return false;
+      ownerKind = snapshot.ownerKind;
+      sessionId = snapshot.sessionId;
+      calls.restore = (calls.restore || 0) + 1;
+      return true;
+    },
     async writeTruthFile(payload) {
       calls.file.push(payload);
       return { ok: true, target: "opened-file" };
@@ -146,6 +157,25 @@ test("P043 delegates synced Save exactly once to the injected P042 controller", 
   assert.deepEqual(observed, { sentinel: SENTINEL });
   assert.equal(context.__calls.file.length, 0);
   assert.equal(context.__calls.vault.length, 0);
+});
+
+test("P084 restores the exact local owner when synced installation cannot prove both owner halves", () => {
+  for (const kind of ["throws after clearing local owner", "leaves local owner unchanged"]) {
+    const context = createContext();
+    const before = context.capturePocketFileSaveSession();
+    const controller = fakeSyncedController();
+    context.setPocketFileSession = () => {
+      if (kind === "throws after clearing local owner") {
+        context.__setOwner("none");
+        throw new Error("synthetic partial owner switch");
+      }
+    };
+    assert.equal(context.PocketOwnerSaveBoundary.installSyncedOwnerForSave(controller), false, kind);
+    assert.deepEqual(context.capturePocketFileSaveSession(), before, kind);
+    assert.equal(context.PocketOwnerSaveBoundary.hasSyncedOwner(), false, kind);
+    assert.equal(controller.captureSyncedOwnerSaveSession(), null, kind);
+    assert.equal(context.__calls.restore, 1, kind);
+  }
 });
 
 test("P043 preserves P042 non-success results and never acknowledges a replacement owner", async () => {

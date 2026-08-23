@@ -257,6 +257,25 @@ test("P053c idle Escape restores visible focus and busy Escape keeps Sync truthf
   assert.equal(idle.overlay.hidden, false);
 });
 
+test("P084 only claims the source survived when the activation result proves it", async () => {
+  const finalised = createUiHarness("json");
+  finalised.command.fire("click");
+  finalised.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  finalised.resolveActivate({ ok: false, reason: "owner-adoption-finalisation-failed",
+    adopted: true, sourceOwnerPreserved: false });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  const finalisedCopy = finalised.overlay.querySelector("#syncSetupStatus").textContent;
+  assert.match(finalisedCopy, /Synced Pocket is now the owner/);
+  assert.doesNotMatch(finalisedCopy, /unchanged/);
+
+  const unknown = createUiHarness("json");
+  unknown.command.fire("click");
+  unknown.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  unknown.resolveActivate({ ok: false, reason: "sync-unavailable" });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.doesNotMatch(unknown.overlay.querySelector("#syncSetupStatus").textContent, /unchanged/);
+});
+
 test("P053b blocking overlays prevent Sync stacking and owner events refresh immediately", () => {
   for (const blocker of ["recovery", "permission", "device", "vault"]) {
     const harness = createUiHarness("json", { blocker });

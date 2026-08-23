@@ -55,6 +55,43 @@
     return { ok: false, reason: "stale-owner-session", ownerKind };
   }
 
+  function captureOwnerForAdoption() {
+    try {
+      const snapshot = global.capturePocketFileOwnerForAdoption?.();
+      return snapshot && typeof snapshot === "object" ? snapshot : null;
+    } catch (_error) { return null; }
+  }
+
+  function restoreOwnerAfterFailedAdoption(snapshot) {
+    if (!snapshot || typeof global.restorePocketFileOwnerAfterFailedAdoption !== "function") {
+      return false;
+    }
+    try { return global.restorePocketFileOwnerAfterFailedAdoption(snapshot) === true; }
+    catch (_error) { return false; }
+  }
+
+  function syncedOwnerInstalled(controller) {
+    let localSession;
+    let controllerSession;
+    try {
+      localSession = global.capturePocketFileSaveSession?.();
+      controllerSession = controller.captureSyncedOwnerSaveSession();
+    } catch (_error) { return false; }
+    return localSession?.ownerKind === "synced"
+      && syncedController === controller
+      && controllerSession !== null;
+  }
+
+  function abandonSyncedOwnerInstall(controller, previousOwner) {
+    if (syncedController === controller) {
+      syncedController = null;
+      syncedGeneration += 1;
+    }
+    try { controller.releaseSyncedOwner?.(); } catch (_error) {}
+    restoreOwnerAfterFailedAdoption(previousOwner);
+    return false;
+  }
+
   async function save(input = {}) {
     if (typeof input.freezePayload !== "function") {
       return { ok: false, reason: "save-input-invalid" };
@@ -128,6 +165,7 @@
     if (!isSyncedController(controller)
         || controller.captureSyncedOwnerSaveSession() === null
         || !global.setPocketFileSession) return false;
+    const previousOwner = captureOwnerForAdoption();
     retireSyncedOwner();
     syncedGeneration += 1;
     syncedController = controller;
@@ -137,11 +175,9 @@
         forceNewSession: true,
       });
     } catch (_error) {
-      syncedController = null;
-      syncedGeneration += 1;
-      try { controller.releaseSyncedOwner?.(); } catch (_releaseError) {}
-      return false;
+      return abandonSyncedOwnerInstall(controller, previousOwner);
     }
+    if (!syncedOwnerInstalled(controller)) return abandonSyncedOwnerInstall(controller, previousOwner);
     return true;
   }
 
