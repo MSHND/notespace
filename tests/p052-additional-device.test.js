@@ -278,28 +278,31 @@ async function createBrowserJourney(options = {}) {
     };
   }
   const bRemote = b.PocketSyncRemoteClient;
-  const environment = {
-    crypto: webcrypto, indexedDB: idb.indexedDB, now: () => now,
-    PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
-    navigator: { credentials: { async create() {
-      if (options.recovery === true) return recoveryRegistrationCredential();
-      throw new Error("not used"); },
-      async get() {
-        if (!prfUnavailable) return fixtures.nativeAuthenticationCredential();
-        const credential = fixtures.nativeAuthenticationCredential();
-        return { getClientExtensionResults() { return {}; }, toJSON() {
-          const json = credential.toJSON(); json.clientExtensionResults = {}; return json;
-        } };
-      } } },
-    async showOpenFilePicker() {
-      if (options.recovery !== true) throw new Error("not used");
-      return [{ async getFile() { return { async text() { return JSON.stringify(recoveryPackages[0]); } }; } }];
-    },
-    async showSaveFilePicker() {
-      if (options.recovery !== true) throw new Error("not used");
-      return { async createWritable() { return { async write() {}, async close() {}, async abort() {} }; } };
-    },
-  };
+  function createBrowserEnvironment() {
+    return {
+      crypto: webcrypto, indexedDB: idb.indexedDB, now: () => now,
+      PublicKeyCredential: { parseCreationOptionsFromJSON(value) { return value; } },
+      navigator: { credentials: { async create() {
+        if (options.recovery === true) return recoveryRegistrationCredential();
+        throw new Error("not used"); },
+        async get() {
+          if (!prfUnavailable) return fixtures.nativeAuthenticationCredential();
+          const credential = fixtures.nativeAuthenticationCredential();
+          return { getClientExtensionResults() { return {}; }, toJSON() {
+            const json = credential.toJSON(); json.clientExtensionResults = {}; return json;
+          } };
+        } } },
+      async showOpenFilePicker() {
+        if (options.recovery !== true) throw new Error("not used");
+        return [{ async getFile() { return { async text() { return JSON.stringify(recoveryPackages[0]); } }; } }];
+      },
+      async showSaveFilePicker() {
+        if (options.recovery !== true) throw new Error("not used");
+        return { async createWritable() { return { async write() {}, async close() {}, async abort() {} }; } };
+      },
+    };
+  }
+  const environment = createBrowserEnvironment();
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
     accountService: bRemote.createAccountService({ transport: bTransport, now: () => now }),
     contentService: bRemote.createContentService({ transport: bTransport }), envelopeService: bRemote.createEnvelopeService({ transport: bTransport }),
@@ -323,7 +326,29 @@ async function createBrowserJourney(options = {}) {
     get commits() { return commits; },
     get aSessionId() { return aSessionId; },
     get bSessionId() { return bSessionId; },
-    get bSessionBeforeOpen() { return bSessionBeforeOpen; } };
+    get bSessionBeforeOpen() { return bSessionBeforeOpen; },
+    createFreshBrowserRuntime() {
+      const fresh = loadProduction({ browserPersistence: true, captureSessionTransitions: true });
+      let freshSessionId = null;
+      const freshTransport = transportFor(() => freshSessionId, (value) => { freshSessionId = value; });
+      const freshRemote = fresh.PocketSyncRemoteClient;
+      const freshRuntime = fresh.PocketSyncBrowserRuntime.createRuntime({
+        accountService: freshRemote.createAccountService({ transport: freshTransport, now: () => now }),
+        contentService: freshRemote.createContentService({ transport: freshTransport }),
+        envelopeService: freshRemote.createEnvelopeService({ transport: freshTransport }),
+        recoveryService: freshRemote.createRecoveryService({ transport: freshTransport, now: () => now }),
+        discoveryService: freshRemote.createPocketDiscoveryService({ transport: freshTransport }),
+        environment: createBrowserEnvironment(),
+      });
+      return {
+        context: fresh,
+        openExisting: () => freshRuntime.openExisting(),
+        readRemoteRevision: () => freshRemote.createContentService({ transport: freshTransport }).readRevision({
+          apiVersion: 1, operationId: "p103-read-revision", syncedPocketId: "pocket-p052c-browser",
+        }),
+        get sessionId() { return freshSessionId; },
+      };
+    } };
 }
 
 test("P052 remains dormant until explicitly created and a new device without PRF requires recovery before mutation", async () => {
@@ -925,6 +950,91 @@ test("P052h1 public Device B adoption uses production browser storage privacy th
   assert.equal(journey.b.__localStorage.values.get("pocketLite.localSafety.trail.v1"), legacySentinel);
   assert.equal(journey.b.__localStorage.values.get("pocketLite.pipSnapshot.v1"), legacySentinel);
   assert.equal(journey.b.__localStorage.values.get("pocketLite.autoCache.v1"), legacySentinel);
+});
+
+test("P103 desktop Synced Pocket saves through exportTree and reopens the same durable device truth", async () => {
+  const remoteSentinel = "P103 REMOTE START";
+  const firstEdit = "P103 FIRST DESKTOP EDIT";
+  const secondEdit = "P103 SECOND DESKTOP EDIT";
+  const journey = await createBrowserJourney({
+    browserPersistence: true, captureSessionTransitions: true, sameDeviceReopen: true,
+    ownerKind: "none", remoteSentinel,
+  });
+  assert.deepEqual(plain(journey.opened), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
+  });
+  assert.equal(journey.ownerKind, "synced");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  assert.equal(journey.b.hasPocketUnsavedChanges(), false);
+  assert.equal(journey.visible.some((node) => node.label === remoteSentinel), true);
+  const [openedRecord] = [...journey.idb.records.values()];
+  assert.equal(openedRecord.remote.confirmedRevision, 1);
+  assert.equal(openedRecord.remote.pending, null);
+  assert.equal(openedRecord.remote.conflict, null);
+  const deviceId = openedRecord.deviceId;
+  const deviceEnvelopeMetadata = plain(openedRecord.deviceEnvelope.metadata);
+  const grantsBeforeSave = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+
+  const firstState = vm.runInContext("state", journey.b);
+  firstState.nodes.push({ id: "p103-first-edit", label: firstEdit, children: [] });
+  journey.b.recordOp({ type: "p103-first-edit", id: "p103-first-edit", changed: firstEdit });
+  assert.equal(journey.b.hasPocketUnsavedChanges(), true);
+  assert.equal(JSON.stringify(plain(journey.b.buildPocketPayload())).includes(firstEdit), true);
+  const firstSaved = await journey.b.exportTree({ returnDetails: true, downloadFallback: false });
+  assert.deepEqual(plain(firstSaved), {
+    ok: true, reason: "synced-save", target: "synced", sourceIdentity: plain(firstSaved.sourceIdentity),
+  });
+  assert.equal(journey.b.hasPocketUnsavedChanges(), false);
+  const [savedRecord] = [...journey.idb.records.values()];
+  assert.equal(savedRecord.remote.confirmedRevision, 2);
+  assert.equal(savedRecord.remote.pending, null);
+  assert.equal(savedRecord.remote.conflict, null);
+  assert.equal((await journey.readRemoteRevision()).revision, 2);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeSave);
+  assert.doesNotMatch(JSON.stringify(journey.serviceDriver.snapshot()), new RegExp(`${remoteSentinel}|${firstEdit}`));
+  assert.doesNotMatch(JSON.stringify(journey.remoteCalls), new RegExp(`${remoteSentinel}|${firstEdit}`));
+
+  const fresh = journey.createFreshBrowserRuntime();
+  assert.equal(fresh.context.capturePocketFileSaveSession().ownerKind, "none");
+  assert.equal(fresh.context.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  const recoveryCallsBeforeReopen = journey.remoteCalls.filter((call) => /recovery/i.test(call.route)).length;
+  const reopened = await fresh.openExisting();
+  assert.deepEqual(plain(reopened), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 2,
+  });
+  assert.notEqual(fresh.sessionId, null);
+  assert.equal(fresh.context.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(fresh.context.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  assert.equal(fresh.context.hasPocketUnsavedChanges(), false);
+  assert.equal(plain(vm.runInContext("state.nodes", fresh.context)).some((node) => node.label === firstEdit), true);
+  assert.equal(JSON.stringify(plain(fresh.context.buildPocketPayload())).includes(firstEdit), true);
+  const [reopenedRecord] = [...journey.idb.records.values()];
+  assert.equal(reopenedRecord.deviceId, deviceId);
+  assert.deepEqual(plain(reopenedRecord.deviceEnvelope.metadata), deviceEnvelopeMetadata);
+  assert.equal(reopenedRecord.remote.confirmedRevision, 2);
+  assert.equal(reopenedRecord.remote.pending, null);
+  assert.equal(reopenedRecord.remote.conflict, null);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeSave);
+  assert.equal(journey.remoteCalls.filter((call) => /recovery/i.test(call.route)).length, recoveryCallsBeforeReopen);
+
+  const secondState = vm.runInContext("state", fresh.context);
+  secondState.nodes.push({ id: "p103-second-edit", label: secondEdit, children: [] });
+  fresh.context.recordOp({ type: "p103-second-edit", id: "p103-second-edit", changed: secondEdit });
+  assert.equal(fresh.context.hasPocketUnsavedChanges(), true);
+  const secondSaved = await fresh.context.exportTree({ returnDetails: true, downloadFallback: false });
+  assert.equal(secondSaved.ok, true, JSON.stringify(secondSaved));
+  assert.equal(secondSaved.reason, "synced-save");
+  assert.equal(secondSaved.target, "synced");
+  assert.equal(fresh.context.hasPocketUnsavedChanges(), false);
+  assert.equal((await fresh.readRemoteRevision()).revision, 3);
+  const [finalRecord] = [...journey.idb.records.values()];
+  assert.equal(finalRecord.deviceId, deviceId);
+  assert.equal(finalRecord.remote.confirmedRevision, 3);
+  assert.equal(finalRecord.remote.pending, null);
+  assert.equal(finalRecord.remote.conflict, null);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeSave);
+  assert.doesNotMatch(JSON.stringify(journey.serviceDriver.snapshot()), new RegExp(`${remoteSentinel}|${firstEdit}|${secondEdit}`));
+  assert.doesNotMatch(JSON.stringify(journey.remoteCalls), new RegExp(`${remoteSentinel}|${firstEdit}|${secondEdit}`));
 });
 
 test("P052c production browser adoption keeps visible truth and authority coherent across final transition failures", async () => {
