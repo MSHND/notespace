@@ -60,17 +60,22 @@ class SyntheticPopup {
     this.dirty = false;
     this.autoSession = options.autoSession !== false;
     this.windowListeners = new Map();
+    this.lifecycleOrder = [];
     const popup = this;
     this.document = {
       open() {
         popup.calls.documentOpen += 1;
+        popup.lifecycleOrder.push("document.open");
+        popup.windowListeners.clear();
       },
       write(value) {
         popup.calls.documentWrite += 1;
+        popup.lifecycleOrder.push("document.write");
         popup.html += String(value);
       },
       close() {
         popup.calls.documentClose += 1;
+        popup.lifecycleOrder.push("document.close");
         if (popup.autoSession) popup.installSession();
         popup.dispatchLifecycle("load");
       },
@@ -78,6 +83,7 @@ class SyntheticPopup {
   }
 
   addEventListener(type, handler, options = {}) {
+    if (type === "load") this.lifecycleOrder.push("load-listener");
     if (!this.windowListeners.has(type)) this.windowListeners.set(type, []);
     this.windowListeners.get(type).push({ handler, once: options?.once === true });
   }
@@ -462,7 +468,7 @@ test("P018 uses random bytes when crypto.randomUUID is unavailable", () => {
   assert.equal(randomCall, 2);
 });
 
-test("P094b keeps generated hostile external-runtime startup pending until its lifecycle readiness signal", async () => {
+test("P094c keeps generated hostile external-runtime startup pending until its lifecycle readiness signal", async () => {
   const broker = createPopupBroker();
   const page = createMainPage(broker, "p094", { pageUrl: "https://example.github.io/notespace/" });
   const hostile = editorPayload("p094-hostile", {
@@ -481,6 +487,7 @@ test("P094b keeps generated hostile external-runtime startup pending until its l
   assert.equal(page.context.PocketNodePopoutWindow.open(hostile), true);
   assert.equal(popup.PocketNodePopoutSession, null);
   assert.equal(popup.listenerCount("load"), 1);
+  assert.deepEqual(popup.lifecycleOrder.slice(0, 3), ["document.open", "load-listener", "document.write"]);
   assert.equal(popup.closed, false);
   const html = popup.html;
   assert.match(html, /<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">/);
@@ -541,6 +548,19 @@ test("P094b keeps generated hostile external-runtime startup pending until its l
   assert.equal(popup.autoSession, false);
   popup.completeLifecycle();
   assert.equal(page.metrics.truthWrites, 1);
+});
+
+test("P094c synthetic document.open erases pre-open Window listeners while post-open listeners survive", () => {
+  const popup = new SyntheticPopup(null, { autoSession: false });
+  let preOpenCalls = 0;
+  let postOpenCalls = 0;
+  popup.addEventListener("load", () => { preOpenCalls += 1; }, { once: true });
+  popup.document.open();
+  popup.dispatchLifecycle("load");
+  assert.equal(preOpenCalls, 0);
+  popup.addEventListener("load", () => { postOpenCalls += 1; }, { once: true });
+  popup.dispatchLifecycle("load");
+  assert.equal(postOpenCalls, 1);
 });
 
 test("P094b closes failed external startup only at lifecycle completion", async () => {

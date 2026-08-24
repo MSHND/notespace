@@ -252,14 +252,20 @@
 
   function writeFreshPopup(record, payload, helpers) {
     if (!record || !livePopups.has(record) || !freshPopupIsOwned(record.window)) return false;
+    try {
+      record.window.name = record.targetName;
+      record.window.document.open();
+    } catch (_error) {
+      closeFreshPopup(record);
+      unregisterPopup(record);
+      return false;
+    }
     if (!beginPendingStartup(record, helpers)) {
       closeFreshPopup(record);
       unregisterPopup(record);
       return false;
     }
     try {
-      record.window.name = record.targetName;
-      record.window.document.open();
       record.window.document.write(editorHtml(payload, helpers, record.popupToken));
       record.window.document.close();
     } catch (_error) {
