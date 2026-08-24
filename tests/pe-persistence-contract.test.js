@@ -2806,6 +2806,104 @@ test("main-tree Enter remains owned only by handleTreeKeydown in the active scri
   assert.match(guard, /Enter capture disabled/);
 });
 
+test("P095 routes the real Main-tree plain Enter boundary through canonical editor ownership", () => {
+  class KeyboardElement {
+    constructor(tagName = "div") {
+      this.tagName = String(tagName).toUpperCase();
+      this.isContentEditable = false;
+    }
+  }
+  let phoneMode = false;
+  const context = createFullContractContext({
+    HTMLElement: KeyboardElement,
+    document: {
+      body: { classList: { contains(name) { return phoneMode && name === "phoneMode"; } } },
+      activeElement: null,
+      getElementById() { return null; },
+      addEventListener() {},
+    },
+  });
+  const ordinary = syntheticNode("p095_ordinary", { label: "Ordinary" });
+  const copyRoot = syntheticNode("p095_copy_root", { label: "Copy Templates" });
+  const copyLeaf = syntheticNode("p095_copy_leaf", { label: "Copy me", parentId: copyRoot.id });
+  const state = resetState(context, [ordinary, copyRoot, copyLeaf]);
+  runScript(context, "js/pocket-tree-actions.js");
+
+  context.isDetailsEditorOpen = () => false;
+  context.isControlsHelpOpen = () => false;
+  context.isCommandPaletteOpen = () => false;
+  context.isPocketVaultRecoveryFlowOpen = () => false;
+  context.isPocketDeviceChangesDecisionOpen = () => false;
+  context.copyText = () => { copyCalls += 1; return Promise.resolve(true); };
+  context.showCopiedFeedback = () => {};
+  context.openPocketPeEditor = () => { legacyCalls += 1; return true; };
+  context.PocketPeEditor = { open() { legacyCalls += 1; return true; } };
+  let canonicalResult = true;
+  let canonicalCalls = [];
+  let legacyCalls = 0;
+  let copyCalls = 0;
+  context.openPocketNodeEditor = (id) => {
+    canonicalCalls.push({ id, phone: phoneMode });
+    return canonicalResult;
+  };
+  context.commitPendingPathImport = () => { pendingImportCommits += 1; };
+  let pendingImportCommits = 0;
+  vm.runInContext("state.inlineEdit.id = ''; state.detailsEdit.id = '';", context);
+
+  const dispatch = (key, extras = {}) => {
+    const event = {
+      key,
+      code: "",
+      ctrlKey: extras.ctrlKey === true,
+      metaKey: extras.metaKey === true,
+      altKey: extras.altKey === true,
+      shiftKey: extras.shiftKey === true,
+      target: extras.target || new KeyboardElement("div"),
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    context.handleTreeKeydown(event);
+    return event;
+  };
+
+  state.selectedId = ordinary.id;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.deepEqual(canonicalCalls, [{ id: ordinary.id, phone: false }]);
+  canonicalResult = false;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.equal(canonicalCalls.length, 2);
+  assert.equal(legacyCalls, 0);
+
+  state.selectedId = copyRoot.id;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  state.selectedId = copyLeaf.id;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.equal(copyCalls, 2);
+  assert.equal(canonicalCalls.length, 2);
+
+  state.selectedId = ordinary.id;
+  assert.equal(dispatch("Enter", { target: new KeyboardElement("input") }).defaultPrevented, false);
+  state.inlineEdit.id = ordinary.id;
+  assert.equal(dispatch("Enter").defaultPrevented, false);
+  state.inlineEdit.id = "";
+  state.moveMode = true;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.equal(canonicalCalls.length, 2);
+  state.moveMode = false;
+  vm.runInContext("pendingPathImport = { path: 'pending.json' };", context);
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.equal(pendingImportCommits, 1);
+  assert.equal(canonicalCalls.length, 2);
+  vm.runInContext("pendingPathImport = null;", context);
+
+  assert.equal(dispatch("Enter", { ctrlKey: true }).defaultPrevented, false);
+  phoneMode = true;
+  canonicalResult = true;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.deepEqual(canonicalCalls.at(-1), { id: ordinary.id, phone: true });
+  assert.equal(legacyCalls, 0);
+});
+
 test("P056 main-tree collapse and expand shortcuts respect keyboard ownership and preserve arrow shortcuts", () => {
   class KeyboardElement {
     constructor(tagName = "div") { this.tagName = String(tagName).toUpperCase(); this.isContentEditable = false; }

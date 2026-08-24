@@ -948,17 +948,14 @@ function openPeFromTreeEnter(node) {
   const id = cleanText(node?.id, 80);
   if (!id) return false;
   cancelPendingCopyClick();
+  if (typeof window.openPocketNodeEditor === "function") {
+    return window.openPocketNodeEditor(id) === true;
+  }
   if (typeof window.openPocketPeEditor === "function") {
-    window.openPocketPeEditor(id);
-    return true;
+    return window.openPocketPeEditor(id) === true;
   }
   if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") {
-    window.PocketPeEditor.open(id);
-    return true;
-  }
-  if (typeof window.openPocketNodeEditor === "function") {
-    window.openPocketNodeEditor(id);
-    return true;
+    return window.PocketPeEditor.open(id) === true;
   }
   return false;
 }
