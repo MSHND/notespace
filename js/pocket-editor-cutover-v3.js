@@ -1,25 +1,21 @@
 /* Editor cutover v3.
    Route Edit/double-click/right-click Edit into the standalone item details editor.
    Enter is left available for copy/row behaviours and must not open editors.
-   The old inline/details popout path is kept only as a fallback. */
+   Phone mode retains the in-page details owner; desktop routes use the canonical editor. */
 
 (function initialisePocketEditorCutoverV3(global) {
   "use strict";
 
   console.info("[editor cutover v3] loaded");
 
-  // Preserve the original details opener for fallback only. The main route is now
-  // PocketPeEditor.open(node.id), which writes the standalone item details window.
+  // Preserve the original details opener for Phone mode only. Desktop uses the
+  // canonical PocketPeEditor.open(node.id) standalone item details window.
   const legacyOpenDetailsForSelectedNode = typeof global.openDetailsEditorForSelectedNode === "function"
     ? global.openDetailsEditorForSelectedNode.bind(global)
     : null;
 
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
-  }
-
-  function detailText(value, max = 4000) {
-    return typeof normaliseDetails === "function" ? normaliseDetails(value, max) : String(value || "").replace(/\r/g, "").trim().slice(0, max);
   }
 
   function mapNode(id) {
@@ -55,57 +51,11 @@
     } catch (_error) {}
   }
 
-  function forceInlineBridgeToNode(node) {
-    if (!node || !global.state) return false;
-    global.state.selectedId = node.id;
-    if (global.state.detailsEdit) {
-      global.state.detailsEdit.id = node.id;
-      global.state.detailsEdit.originalLabel = clean(node.label, 220);
-      global.state.detailsEdit.originalDetails = detailText(node.details, 4000);
-      global.state.detailsEdit.originalUrgent = node.urgent === true;
-      global.state.detailsEdit.originalCopyContext = node.copyContext === true;
-    }
-    if (global.el?.detailEditorLabel instanceof HTMLInputElement) global.el.detailEditorLabel.value = clean(node.label, 220);
-    if (global.el?.detailEditorBody instanceof HTMLTextAreaElement) global.el.detailEditorBody.value = detailText(node.details, 4000);
-    if (global.el?.detailEditorPath instanceof HTMLElement && typeof getPath === "function") global.el.detailEditorPath.textContent = getPath(node.id);
-    if (global.el?.detailEditorUrgent instanceof HTMLInputElement) global.el.detailEditorUrgent.checked = node.urgent === true;
-    if (global.el?.detailEditorCopyContext instanceof HTMLInputElement) global.el.detailEditorCopyContext.checked = node.copyContext === true;
-    return true;
-  }
-
   function openStandalone(node) {
     if (!global.PocketPeEditor || typeof global.PocketPeEditor.open !== "function") return false;
     clearDraftsFor(node.id);
     hideInlineEditor();
     return !!global.PocketPeEditor.open(node.id);
-  }
-
-  function openLegacyFallback(node) {
-    clearDraftsFor(node.id);
-    forceInlineBridgeToNode(node);
-
-    try {
-      if (legacyOpenDetailsForSelectedNode) legacyOpenDetailsForSelectedNode();
-      forceInlineBridgeToNode(node);
-    } catch (error) {
-      console.warn("[editor cutover v3] legacy details bridge failed", error);
-    }
-
-    let ok = false;
-    try {
-      ok = !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function" && global.PocketEditorPopout.open());
-    } catch (error) {
-      console.error("[editor cutover v3] fallback popout open failed", error);
-      ok = false;
-    }
-
-    window.setTimeout(() => {
-      forceInlineBridgeToNode(node);
-      hideInlineEditor();
-    }, 0);
-    window.setTimeout(hideInlineEditor, 80);
-    window.setTimeout(hideInlineEditor, 240);
-    return ok;
   }
 
   function requiresReadOnlyCompatibility(node) {
