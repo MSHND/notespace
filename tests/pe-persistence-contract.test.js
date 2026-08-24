@@ -3293,6 +3293,100 @@ test("P069a dirty structural state supersedes a saved flash while clean flashes 
   assert.equal(refreshMetaCalls, 1);
 });
 
+test("P097 Save-chip state is event-driven without the normalise watchdog", () => {
+  assert.doesNotMatch(source("index.html"), /pocket-save-chip-normalise/);
+  assert.equal(fs.existsSync(path.join(REPO_ROOT, "js/pocket-save-chip-normalise.js")), false);
+  assert.doesNotMatch(source("js/pocket-history-status.js"), /setInterval\s*\(/);
+
+  const classes = new Set();
+  const saveButton = {
+    textContent: "save",
+    disabled: false,
+    title: "",
+    attributes: {},
+    classList: {
+      add(name) { classes.add(name); },
+      remove(...names) { names.forEach((name) => classes.delete(name)); },
+      contains(name) { return classes.has(name); },
+    },
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const context = createBrowserContext({
+    document: {
+      body: { classList },
+      activeElement: null,
+      getElementById(id) { return id === "btnExportTree" ? saveButton : null; },
+      addEventListener() {},
+    },
+  });
+  loadScriptsInIndexOrder(context, FULL_CONTRACT_SCRIPTS);
+  let vaultActive = false;
+  context.isPocketVaultOwnerActive = () => vaultActive;
+  let nextTimer = 0;
+  const timers = new Map();
+  context.setTimeout = (callback) => {
+    const id = ++nextTimer;
+    timers.set(id, callback);
+    return id;
+  };
+  context.clearTimeout = (id) => timers.delete(id);
+  const state = resetState(context, []);
+
+  context.refreshSaveState();
+  assert.equal(saveButton.disabled, true);
+  assert.equal(saveButton.textContent, "save");
+  assert.equal(saveButton.attributes["aria-label"], "Save Pocket file");
+
+  state.nodes = [syntheticNode("p097_a")];
+  state.ops = [{ type: "rename" }];
+  context.refreshSaveState();
+  assert.equal(saveButton.disabled, false);
+  assert.equal(saveButton.textContent, "save*");
+  assert.equal(classes.has("safetyNeed"), true);
+
+  context.flashSaveChip("save*");
+  const dirtyFlashTimer = nextTimer;
+  assert.equal(saveButton.textContent, "save*");
+  assert.equal(classes.has("safetyNeed"), true);
+  assert.equal(classes.has("on"), true);
+
+  state.ops = [];
+  context.refreshMeta = () => context.refreshSaveState();
+  timers.get(dirtyFlashTimer)();
+  state.conflictGuard = { active: true, reason: "", loadedAt: "", newerAt: "" };
+  context.refreshSaveState();
+  assert.equal(saveButton.textContent, "check");
+  assert.equal(classes.has("safetyCheck"), true);
+  assert.equal(saveButton.title, "This file looks older than a local/saved copy; save carefully");
+
+  state.conflictGuard.active = false;
+  vaultActive = true;
+  context.refreshSaveState();
+  assert.equal(saveButton.title, "Save encrypted Vault");
+  assert.equal(saveButton.attributes["aria-label"], "Save encrypted Vault");
+
+  state.saveInProgress = true;
+  context.refreshSaveState();
+  assert.equal(saveButton.disabled, true);
+  assert.equal(saveButton.textContent, "saving...");
+  assert.equal(saveButton.title, "Writing encrypted Vault");
+
+  state.saveInProgress = false;
+  vaultActive = false;
+  context.flashSaveChip("saved");
+  const flashTimer = nextTimer;
+  assert.equal(saveButton.textContent, "saved");
+  assert.equal(saveButton.disabled, false);
+  assert.equal(classes.has("safetyNeed"), false);
+  assert.equal(classes.has("safetyCheck"), false);
+  assert.equal(classes.has("on"), true);
+  assert.equal(saveButton.title, "Save a portable pocket copy");
+  timers.get(flashTimer)();
+  assert.equal(saveButton.textContent, "save");
+  assert.equal(classes.has("on"), false);
+});
+
 test("P060 main-tree disclosure owns selection and navigation while leaf gutters keep a structural marker", () => {
   const harness = createTreeRenderHarness([
     syntheticNode("p060_parent", { label: "Parent", parentId: "root", order: 1001 }),

@@ -426,11 +426,15 @@ function markVaultSavedNow() {
 
 function flashSaveChip(label = "saved") {
   if (!el.btnExportTree) return;
-  const nextLabel = cleanText(label, 40) || "saved";
   if (saveChipTimer) {
     clearTimeout(saveChipTimer);
     saveChipTimer = null;
   }
+  // Re-establish the current Save semantics before applying the short-lived
+  // acknowledgement label. This keeps title, aria, disabled state and the
+  // dirty/check classes event-driven rather than relying on a watchdog.
+  refreshSaveState();
+  const nextLabel = cleanText(label, 40) || "saved";
   el.btnExportTree.textContent = nextLabel;
   el.btnExportTree.classList.add("on");
   const timer = window.setTimeout(() => {

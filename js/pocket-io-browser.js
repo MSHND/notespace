@@ -1624,8 +1624,8 @@ async function exportTree(options = {}) {
       } else {
         setStatus(backupProofLabel(), "ok", { durationMs: 5200 });
       }
-      flashSaveChip(newerSafetyStored ? "Safe" : "Check");
       clearConflictGuard();
+      flashSaveChip(newerSafetyStored ? "Safe" : "Check");
       if (!["vault", "synced"].includes(saveSession.ownerKind)) persistPipSnapshot();
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, true, saveSession.ownerKind === "vault" ? "vault-truth-file"
