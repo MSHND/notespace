@@ -12,6 +12,10 @@ function source(relativePath) {
   return fs.readFileSync(path.join(REPO_ROOT, relativePath), "utf8");
 }
 
+function plain(value) {
+  return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+}
+
 function runScript(context, relativePath) {
   vm.runInContext(source(relativePath), context, { filename: relativePath });
 }
@@ -130,13 +134,156 @@ class SyntheticPopup {
   }
 }
 
+function decodeCarrierText(value) {
+  return String(value).replace(/&(amp|lt|gt|quot);/g, (_match, name) => ({
+    amp: "&", lt: "<", gt: ">", quot: "\"",
+  })[name]);
+}
+
+function carrierTextFromGeneratedHtml(html) {
+  const match = String(html).match(/<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">([\s\S]*?)<\/textarea>/);
+  return match ? decodeCarrierText(match[1]) : null;
+}
+
+function popupControl(id, tagName = "div") {
+  const classes = new Set();
+  const attributes = new Map();
+  return {
+    id,
+    tagName: String(tagName).toUpperCase(),
+    style: {},
+    value: "",
+    textContent: "",
+    hidden: false,
+    disabled: false,
+    readOnly: false,
+    classList: {
+      add(...names) { names.forEach((name) => classes.add(name)); },
+      remove(...names) { names.forEach((name) => classes.delete(name)); },
+      contains(name) { return classes.has(name); },
+      toggle(name, force) {
+        const next = force === undefined ? !classes.has(name) : !!force;
+        if (next) classes.add(name);
+        else classes.delete(name);
+        return next;
+      },
+    },
+    setAttribute(name, value) { attributes.set(String(name), String(value)); },
+    getAttribute(name) { return attributes.get(String(name)) || null; },
+    addEventListener() {},
+    appendChild() {},
+    removeChild() {},
+    querySelectorAll() { return []; },
+    querySelector() { return null; },
+    closest() { return null; },
+    contains() { return false; },
+    focus() {},
+    select() {},
+  };
+}
+
+function runtimeDocumentForCarrier(carrier) {
+  const bodyClasses = new Set(["textMode"]);
+  const controls = new Map();
+  for (const [id, tagName] of Object.entries({
+    titleInput: "input",
+    bodyInput: "textarea",
+    outlinePane: "div",
+    textModeBtn: "button",
+    outlineModeBtn: "button",
+    saveState: "span",
+    saveBtn: "button",
+    saveCloseBtn: "button",
+    outlineContextMenu: "div",
+    unsavedDialog: "div",
+    unsavedSaveBtn: "button",
+    unsavedDiscardBtn: "button",
+    unsavedCancelBtn: "button",
+    closeBtn: "button",
+  })) controls.set(id, popupControl(id, tagName));
+  controls.get("outlineContextMenu").hidden = true;
+  controls.get("unsavedDialog").hidden = true;
+  if (carrier) controls.set("pocketNodePopoutPayload", carrier);
+  return {
+    activeElement: null,
+    body: { classList: {
+      add(...names) { names.forEach((name) => bodyClasses.add(name)); },
+      remove(...names) { names.forEach((name) => bodyClasses.delete(name)); },
+      contains(name) { return bodyClasses.has(name); },
+      toggle(name, force) {
+        const next = force === undefined ? !bodyClasses.has(name) : !!force;
+        if (next) bodyClasses.add(name);
+        else bodyClasses.delete(name);
+        return next;
+      },
+    } },
+    getElementById(id) { return controls.get(id) || null; },
+    addEventListener() {},
+    createElement(tagName) { return popupControl("", tagName); },
+  };
+}
+
+class ExternalRuntimePopup extends SyntheticPopup {
+  constructor(opener, options = {}) {
+    super(opener, { autoSession: false });
+    this.carrierMode = options.carrierMode || "valid";
+    const popup = this;
+    this.document.close = function () {
+      popup.calls.documentClose += 1;
+      popup.runExternalRuntime();
+    };
+  }
+
+  runExternalRuntime() {
+    let value = carrierTextFromGeneratedHtml(this.html);
+    let carrier = value === null ? null : { tagName: "TEXTAREA", value };
+    if (this.carrierMode === "missing") carrier = null;
+    if (this.carrierMode === "wrong-element" && carrier) carrier.tagName = "DIV";
+    if (this.carrierMode === "malformed" && carrier) carrier.value = "{not-json";
+    if (this.carrierMode === "invalid-identity" && carrier) {
+      const payload = JSON.parse(carrier.value);
+      payload.popupOwnerToken = "";
+      carrier.value = JSON.stringify(payload);
+    }
+    this.startupCarrier = carrier && { tagName: carrier.tagName, value: carrier.value };
+    this.document = runtimeDocumentForCarrier(carrier);
+    this.navigator = { clipboard: {} };
+    this.console = { log() {}, info() {}, warn() {}, error() {} };
+    this.setTimeout = (handler) => { if (typeof handler === "function") handler(); return 1; };
+    this.clearTimeout = () => {};
+    this.requestAnimationFrame = (handler) => { if (typeof handler === "function") handler(); return 1; };
+    this.addEventListener = () => {};
+    const nativeParse = JSON.parse;
+    const runtimeJson = Object.create(JSON);
+    runtimeJson.parse = (text) => {
+      const parsed = nativeParse(text);
+      this.startupPayload = plain(parsed);
+      return parsed;
+    };
+    const runtimeContext = {
+      JSON: runtimeJson,
+      console: this.console,
+      document: this.document,
+      navigator: this.navigator,
+      setTimeout: this.setTimeout,
+      clearTimeout: this.clearTimeout,
+      requestAnimationFrame: this.requestAnimationFrame,
+      window: this,
+    };
+    vm.createContext(runtimeContext);
+    runScript(runtimeContext, "js/pocket-node-popout-runtime.js");
+  }
+}
+
 function createPopupBroker() {
   const broker = {
     openCalls: [],
     popups: [],
     nextPopup: null,
     open(opener, url, target, features) {
-      const popup = broker.nextPopup || new SyntheticPopup(opener);
+      const popup = typeof broker.nextPopup === "function"
+        ? broker.nextPopup(opener)
+        : (broker.nextPopup || new SyntheticPopup(opener));
       broker.nextPopup = null;
       broker.openCalls.push({ opener, url, target, features, popup });
       broker.popups.push(popup);
@@ -288,25 +435,84 @@ test("P018 uses random bytes when crypto.randomUUID is unavailable", () => {
   assert.equal(randomCall, 2);
 });
 
-test("P094 renders one same-origin external PE runtime and inert escaped payload data", () => {
+test("P094a starts the generated hostile carrier through the real external runtime before opener acceptance", async () => {
   const broker = createPopupBroker();
   const page = createMainPage(broker, "p094", { pageUrl: "https://example.github.io/notespace/" });
   const hostile = editorPayload("p094-hostile", {
     title: "<script>window.pwned=1</script> \" & unicode ✓",
-    body: "</textarea><script>window.pwned=2</script> & \" ✓",
+    body: "Notes </textarea><script>window.pwned=2</script> & \" ✓",
     outline: [{ id: "row", text: "</textarea><script>window.pwned=3</script>", depth: 0 }],
-    mode: "outline",
+    mode: "text",
+    sourceOwnerKind: "json",
+    sourceVaultSessionId: "",
   });
+  let popup = null;
+  broker.nextPopup = (opener) => {
+    popup = new ExternalRuntimePopup(opener);
+    return popup;
+  };
   assert.equal(page.context.PocketNodePopoutWindow.open(hostile), true);
-  const html = broker.popups[0].html;
+  const html = popup.html;
   assert.match(html, /<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">/);
   assert.match(html, /<script src="\/notespace\/js\/pocket-node-popout-runtime\.js"><\/script>/);
   assert.doesNotMatch(html, /<script(?!\s+src=)[^>]*>/i);
   assert.equal((html.match(/<script\b/gi) || []).length, 1);
   assert.equal((html.match(/<\/textarea>/gi) || []).length, 2);
   assert.doesNotMatch(html, /<script>window\.pwned/i);
-  assert.equal(html.includes("popupOwnerToken"), true);
-  assert.equal(html.includes("popupInstanceToken"), true);
+  const identity = currentIdentity(page);
+  assert.deepEqual(plain(popup.startupPayload), {
+    ...hostile,
+    popupOwnerToken: identity.ownerToken,
+    popupInstanceToken: identity.popupToken,
+  });
+  assert.deepEqual(plain(popup.PocketNodePopoutSession.getIdentity()), {
+    ownerToken: identity.ownerToken,
+    popupToken: identity.popupToken,
+  });
+  for (const method of ["matches", "hasUnsavedChanges", "requestUnsavedProtection", "requestOwnedClose"]) {
+    assert.equal(typeof popup.PocketNodePopoutSession[method], "function", method);
+  }
+  const saved = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    { ...hostile, body: "Saved through the real startup session" },
+    popup,
+  );
+  assert.equal(saved.ok, true);
+  assert.equal(page.metrics.truthWrites, 1);
+  assert.equal(popup.autoSession, false);
+});
+
+test("P094a fails closed when the external runtime cannot obtain a valid carrier identity", async () => {
+  for (const carrierMode of ["missing", "wrong-element", "malformed", "invalid-identity"]) {
+    const broker = createPopupBroker();
+    const page = createMainPage(broker, `p094a_${carrierMode}`);
+    let popup = null;
+    broker.nextPopup = (opener) => {
+      popup = new ExternalRuntimePopup(opener, { carrierMode });
+      return popup;
+    };
+    assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload(`p094a_${carrierMode}`, {
+      body: "Notes <script>not executable</script>",
+      outline: [{ id: "outline", text: "Outline </textarea> text", depth: 0 }],
+      sourceOwnerKind: "json",
+      sourceVaultSessionId: "",
+    })), false, carrierMode);
+    assert.equal(popup.closed, true, carrierMode);
+    if (carrierMode === "invalid-identity") {
+      assert.equal(popup.PocketNodePopoutSession.getIdentity().ownerToken, "", carrierMode);
+      const rejected = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+        "",
+        popup.PocketNodePopoutSession.getIdentity().popupToken,
+        editorPayload(`p094a_rejected_${carrierMode}`, { sourceOwnerKind: "json", sourceVaultSessionId: "" }),
+        popup,
+      );
+      assert.equal(rejected.reason, "popup-session-changed", carrierMode);
+    } else {
+      assert.equal(popup.PocketNodePopoutSession, null, carrierMode);
+    }
+    assert.equal(page.metrics.truthWrites, 0, carrierMode);
+  }
 });
 
 test("P018 opens simultaneous normal and Incognito-like PE windows without cross-window calls", () => {
