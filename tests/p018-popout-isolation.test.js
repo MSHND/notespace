@@ -59,6 +59,7 @@ class SyntheticPopup {
     this.identity = null;
     this.dirty = false;
     this.autoSession = options.autoSession !== false;
+    this.windowListeners = new Map();
     const popup = this;
     this.document = {
       open() {
@@ -71,8 +72,31 @@ class SyntheticPopup {
       close() {
         popup.calls.documentClose += 1;
         if (popup.autoSession) popup.installSession();
+        popup.dispatchLifecycle("load");
       },
     };
+  }
+
+  addEventListener(type, handler, options = {}) {
+    if (!this.windowListeners.has(type)) this.windowListeners.set(type, []);
+    this.windowListeners.get(type).push({ handler, once: options?.once === true });
+  }
+
+  removeEventListener(type, handler) {
+    if (!this.windowListeners.has(type)) return;
+    this.windowListeners.set(type, this.windowListeners.get(type).filter((entry) => entry.handler !== handler));
+  }
+
+  dispatchLifecycle(type) {
+    const entries = [...(this.windowListeners.get(type) || [])];
+    for (const entry of entries) {
+      entry.handler({ type, target: this });
+      if (entry.once) this.removeEventListener(type, entry.handler);
+    }
+  }
+
+  listenerCount(type) {
+    return (this.windowListeners.get(type) || []).length;
   }
 
   installSession() {
@@ -230,8 +254,11 @@ class ExternalRuntimePopup extends SyntheticPopup {
     const popup = this;
     this.document.close = function () {
       popup.calls.documentClose += 1;
-      popup.runExternalRuntime();
     };
+  }
+
+  completeLifecycle() {
+    this.dispatchLifecycle("load");
   }
 
   runExternalRuntime() {
@@ -435,7 +462,7 @@ test("P018 uses random bytes when crypto.randomUUID is unavailable", () => {
   assert.equal(randomCall, 2);
 });
 
-test("P094a starts the generated hostile carrier through the real external runtime before opener acceptance", async () => {
+test("P094b keeps generated hostile external-runtime startup pending until its lifecycle readiness signal", async () => {
   const broker = createPopupBroker();
   const page = createMainPage(broker, "p094", { pageUrl: "https://example.github.io/notespace/" });
   const hostile = editorPayload("p094-hostile", {
@@ -452,6 +479,9 @@ test("P094a starts the generated hostile carrier through the real external runti
     return popup;
   };
   assert.equal(page.context.PocketNodePopoutWindow.open(hostile), true);
+  assert.equal(popup.PocketNodePopoutSession, null);
+  assert.equal(popup.listenerCount("load"), 1);
+  assert.equal(popup.closed, false);
   const html = popup.html;
   assert.match(html, /<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">/);
   assert.match(html, /<script src="\/notespace\/js\/pocket-node-popout-runtime\.js"><\/script>/);
@@ -460,6 +490,24 @@ test("P094a starts the generated hostile carrier through the real external runti
   assert.equal((html.match(/<\/textarea>/gi) || []).length, 2);
   assert.doesNotMatch(html, /<script>window\.pwned/i);
   const identity = currentIdentity(page);
+  const preReady = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    { ...hostile, body: "Must not save while pending" },
+    popup,
+  );
+  assert.equal(preReady.reason, "popup-session-changed");
+  assert.equal(page.metrics.truthWrites, 0);
+  assert.equal(page.context.PocketNodePopoutWindow.hasUnsavedChanges(), false);
+  assert.equal(page.context.PocketNodePopoutWindow.cancelPendingOpen(
+    identity.ownerToken, identity.popupToken, popup,
+  ), false);
+  assert.equal(page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(
+    identity.ownerToken, identity.popupToken, popup,
+  ), false);
+  assert.equal(popup.closed, false);
+
+  popup.runExternalRuntime();
   assert.deepEqual(plain(popup.startupPayload), {
     ...hostile,
     popupOwnerToken: identity.ownerToken,
@@ -472,6 +520,16 @@ test("P094a starts the generated hostile carrier through the real external runti
   for (const method of ["matches", "hasUnsavedChanges", "requestUnsavedProtection", "requestOwnedClose"]) {
     assert.equal(typeof popup.PocketNodePopoutSession[method], "function", method);
   }
+  const beforeLoad = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    { ...hostile, body: "Still must not save before load" },
+    popup,
+  );
+  assert.equal(beforeLoad.reason, "popup-session-changed");
+  assert.equal(page.metrics.truthWrites, 0);
+  popup.completeLifecycle();
+  assert.equal(popup.listenerCount("load"), 0);
   const saved = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
     identity.ownerToken,
     identity.popupToken,
@@ -481,9 +539,11 @@ test("P094a starts the generated hostile carrier through the real external runti
   assert.equal(saved.ok, true);
   assert.equal(page.metrics.truthWrites, 1);
   assert.equal(popup.autoSession, false);
+  popup.completeLifecycle();
+  assert.equal(page.metrics.truthWrites, 1);
 });
 
-test("P094a fails closed when the external runtime cannot obtain a valid carrier identity", async () => {
+test("P094b closes failed external startup only at lifecycle completion", async () => {
   for (const carrierMode of ["missing", "wrong-element", "malformed", "invalid-identity"]) {
     const broker = createPopupBroker();
     const page = createMainPage(broker, `p094a_${carrierMode}`);
@@ -492,13 +552,24 @@ test("P094a fails closed when the external runtime cannot obtain a valid carrier
       popup = new ExternalRuntimePopup(opener, { carrierMode });
       return popup;
     };
-    assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload(`p094a_${carrierMode}`, {
+    const payload = editorPayload(`p094a_${carrierMode}`, {
       body: "Notes <script>not executable</script>",
       outline: [{ id: "outline", text: "Outline </textarea> text", depth: 0 }],
       sourceOwnerKind: "json",
       sourceVaultSessionId: "",
-    })), false, carrierMode);
-    assert.equal(popup.closed, true, carrierMode);
+    });
+    assert.equal(page.context.PocketNodePopoutWindow.open(payload), true, carrierMode);
+    const identity = currentIdentity(page);
+    const pending = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+      identity.ownerToken,
+      identity.popupToken,
+      payload,
+      popup,
+    );
+    assert.equal(pending.reason, "popup-session-changed", carrierMode);
+    assert.equal(popup.closed, false, carrierMode);
+    popup.runExternalRuntime();
+    assert.equal(popup.closed, false, carrierMode);
     if (carrierMode === "invalid-identity") {
       assert.equal(popup.PocketNodePopoutSession.getIdentity().ownerToken, "", carrierMode);
       const rejected = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
@@ -511,8 +582,121 @@ test("P094a fails closed when the external runtime cannot obtain a valid carrier
     } else {
       assert.equal(popup.PocketNodePopoutSession, null, carrierMode);
     }
+    popup.completeLifecycle();
+    assert.equal(popup.closed, true, carrierMode);
+    assert.match(page.metrics.statuses.at(-1).message, /private editor window/i, carrierMode);
     assert.equal(page.metrics.truthWrites, 0, carrierMode);
   }
+});
+
+test("P094b readies concurrent external popups independently and ignores stale lifecycle events", async () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p094b_concurrent");
+  let first = null;
+  let second = null;
+  broker.nextPopup = (opener) => {
+    first = new ExternalRuntimePopup(opener);
+    return first;
+  };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p094b_first", {
+    sourceOwnerKind: "json", sourceVaultSessionId: "",
+  })), true);
+  broker.nextPopup = (opener) => {
+    second = new ExternalRuntimePopup(opener);
+    return second;
+  };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p094b_second", {
+    sourceOwnerKind: "json", sourceVaultSessionId: "",
+  })), true);
+  assert.equal(first.PocketNodePopoutSession, null);
+  assert.equal(second.PocketNodePopoutSession, null);
+
+  second.runExternalRuntime();
+  second.completeLifecycle();
+  const secondIdentity = second.PocketNodePopoutSession.getIdentity();
+  const earlyFirst = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    secondIdentity.ownerToken,
+    secondIdentity.popupToken,
+    editorPayload("p094b_second", { sourceOwnerKind: "json", sourceVaultSessionId: "" }),
+    first,
+  );
+  assert.equal(earlyFirst.reason, "popup-session-changed");
+
+  first.runExternalRuntime();
+  first.completeLifecycle();
+  const firstIdentity = first.PocketNodePopoutSession.getIdentity();
+  const crossClose = page.context.PocketNodePopoutWindow.completeCloseFromOwnedPopup(
+    firstIdentity.ownerToken,
+    firstIdentity.popupToken,
+    second,
+  );
+  assert.equal(crossClose, false);
+  assert.equal((await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    firstIdentity.ownerToken,
+    firstIdentity.popupToken,
+    editorPayload("p094b_first", { sourceOwnerKind: "json", sourceVaultSessionId: "" }),
+    first,
+  )).ok, true);
+  assert.equal((await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    secondIdentity.ownerToken,
+    secondIdentity.popupToken,
+    editorPayload("p094b_second", { sourceOwnerKind: "json", sourceVaultSessionId: "" }),
+    second,
+  )).ok, true);
+  assert.equal(page.metrics.truthWrites, 2);
+  let failed = null;
+  broker.nextPopup = (opener) => {
+    failed = new ExternalRuntimePopup(opener);
+    return failed;
+  };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p094b_failed", {
+    sourceOwnerKind: "json", sourceVaultSessionId: "",
+  })), true);
+  failed.completeLifecycle();
+  assert.equal(failed.closed, true);
+  assert.equal((await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    firstIdentity.ownerToken,
+    firstIdentity.popupToken,
+    editorPayload("p094b_first", { sourceOwnerKind: "json", sourceVaultSessionId: "" }),
+    first,
+  )).ok, true);
+  assert.equal(page.metrics.truthWrites, 3);
+  first.completeLifecycle();
+  second.completeLifecycle();
+  assert.equal(first.listenerCount("load"), 0);
+  assert.equal(second.listenerCount("load"), 0);
+});
+
+test("P094b cleans up a write exception before any lifecycle event", () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p094b_write_failure");
+  let popup = null;
+  broker.nextPopup = (opener) => {
+    popup = new SyntheticPopup(opener, { autoSession: false });
+    popup.document.write = () => { throw new Error("synthetic write failure"); };
+    return popup;
+  };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p094b_write_failure")), false);
+  assert.equal(popup.closed, true);
+  assert.equal(popup.listenerCount("load"), 0);
+  assert.equal(page.metrics.truthWrites, 0);
+  assert.match(page.metrics.statuses.at(-1).message, /private editor window/i);
+});
+
+test("P094b rejects a popup that cannot observe deterministic readiness", () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p094b_no_lifecycle");
+  let popup = null;
+  broker.nextPopup = (opener) => {
+    popup = new SyntheticPopup(opener, { autoSession: false });
+    popup.addEventListener = null;
+    return popup;
+  };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p094b_no_lifecycle")), false);
+  assert.equal(popup.closed, true);
+  assert.equal(popup.calls.documentWrite, 0);
+  assert.equal(page.metrics.truthWrites, 0);
+  assert.match(page.metrics.statuses.at(-1).message, /private editor window/i);
 });
 
 test("P018 opens simultaneous normal and Incognito-like PE windows without cross-window calls", () => {

@@ -139,8 +139,19 @@
     return sessionMatches(session, record.popupToken) ? session : null;
   }
 
+  function removeStartupListener(record) {
+    if (!record || !record.startupListener) return;
+    try {
+      if (record.window && typeof record.window.removeEventListener === "function") {
+        record.window.removeEventListener("load", record.startupListener);
+      }
+    } catch (_error) {}
+    record.startupListener = null;
+  }
+
   function unregisterPopup(record) {
     if (!record) return;
+    removeStartupListener(record);
     livePopups.delete(record);
     if (lastOpenedPopup === record) {
       lastOpenedPopup = Array.from(livePopups).at(-1) || null;
@@ -154,6 +165,7 @@
   }
 
   function popupHasUnsavedChanges(record) {
+    if (record && record.startupState === "pending") return false;
     const session = ownedSession(record);
     if (!session) {
       unregisterPopup(record);
@@ -180,6 +192,7 @@
   }
 
   function requestUnsavedProtection(record) {
+    if (record && record.startupState === "pending") return false;
     const session = ownedSession(record);
     if (!session) {
       unregisterPopup(record);
@@ -199,26 +212,56 @@
     }
   }
 
+  function failPendingStartup(record, helpers) {
+    if (!record || !livePopups.has(record)) return false;
+    closeFreshPopup(record);
+    unregisterPopup(record);
+    setIsolatedPopupFailureStatus(helpers);
+    return false;
+  }
+
+  function confirmPendingStartup(record, helpers) {
+    if (!record || !livePopups.has(record) || record.startupState !== "pending") return false;
+    removeStartupListener(record);
+    try {
+      if (!isOpen(record.window)
+          || record.window.opener !== global
+          || !ownedSession(record)) {
+        return failPendingStartup(record, helpers);
+      }
+      record.startupState = "ready";
+      if (typeof record.window.focus === "function") record.window.focus();
+      return true;
+    } catch (_error) {
+      return failPendingStartup(record, helpers);
+    }
+  }
+
+  function beginPendingStartup(record, helpers) {
+    if (!record || !livePopups.has(record) || record.startupState !== "pending") return false;
+    if (!record.window || typeof record.window.addEventListener !== "function") return false;
+    record.startupListener = function () { confirmPendingStartup(record, helpers); };
+    try {
+      record.window.addEventListener("load", record.startupListener, { once: true });
+      return true;
+    } catch (_error) {
+      record.startupListener = null;
+      return false;
+    }
+  }
+
   function writeFreshPopup(record, payload, helpers) {
     if (!record || !livePopups.has(record) || !freshPopupIsOwned(record.window)) return false;
+    if (!beginPendingStartup(record, helpers)) {
+      closeFreshPopup(record);
+      unregisterPopup(record);
+      return false;
+    }
     try {
       record.window.name = record.targetName;
       record.window.document.open();
       record.window.document.write(editorHtml(payload, helpers, record.popupToken));
       record.window.document.close();
-    } catch (_error) {
-      closeFreshPopup(record);
-      unregisterPopup(record);
-      return false;
-    }
-    const session = ownedSession(record);
-    if (!session) {
-      closeFreshPopup(record);
-      unregisterPopup(record);
-      return false;
-    }
-    try {
-      if (typeof record.window.focus === "function") record.window.focus();
     } catch (_error) {
       closeFreshPopup(record);
       unregisterPopup(record);
@@ -244,7 +287,9 @@
     const record = {
       window: win,
       popupToken: popupToken,
-      targetName: targetName
+      targetName: targetName,
+      startupState: "pending",
+      startupListener: null
     };
     livePopups.add(record);
     lastOpenedPopup = record;
@@ -276,7 +321,8 @@
     const record = Array.from(livePopups).find((candidate) => candidate.window === callerWindow);
     if (!record
         || candidateOwnerToken !== ownerToken
-        || candidatePopupToken !== record.popupToken) {
+        || candidatePopupToken !== record.popupToken
+        || record.startupState !== "ready") {
       return null;
     }
     const session = ownedSession(record);
