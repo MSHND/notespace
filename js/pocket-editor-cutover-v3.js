@@ -88,8 +88,7 @@
     console.info("[editor cutover v3] edit requested", {
       foundNode: !!node,
       hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
-      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
-      hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
+      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode
     });
 
     if (!node) {
@@ -165,8 +164,7 @@
     document.addEventListener("dblclick", doubleClickCapture, true);
     console.info("[editor cutover v3] installed", {
       hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
-      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode,
-      hasPopout: !!(global.PocketEditorPopout && typeof global.PocketEditorPopout.open === "function")
+      hasLegacyOpen: !!legacyOpenDetailsForSelectedNode
     });
   }
 

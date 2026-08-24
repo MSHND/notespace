@@ -2591,6 +2591,7 @@ test("editor cutover fails closed when the canonical editor cannot open and neve
 
 test("P101 removes the private v3 legacy fallback while retaining the live Phone opener", () => {
   const cutover = source("js/pocket-editor-cutover-v3.js");
+  assert.doesNotMatch(cutover, /PocketEditorPopout/);
   assert.doesNotMatch(cutover, /openLegacyFallback|forceInlineBridgeToNode|function detailText/);
   assert.match(cutover, /const legacyOpenDetailsForSelectedNode/);
   assert.match(cutover, /function openPhoneDetails\(node\)/);
