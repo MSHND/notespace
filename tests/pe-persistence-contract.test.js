@@ -2904,6 +2904,153 @@ test("P095 routes the real Main-tree plain Enter boundary through canonical edit
   assert.equal(legacyCalls, 0);
 });
 
+test("P098 executable PE entry-route matrix proves the current owners", () => {
+  class RouteElement {
+    constructor(tagName = "div") {
+      this.tagName = String(tagName).toUpperCase();
+      this.isContentEditable = false;
+      this.textContent = "";
+    }
+  }
+
+  let phoneMode = false;
+  const listeners = {};
+  const context = createFullContractContext({
+    HTMLElement: RouteElement,
+    document: {
+      readyState: "complete",
+      body: { classList: { contains(name) { return phoneMode && name === "phoneMode"; } } },
+      getElementById() { return null; },
+      addEventListener(type, listener) { listeners[type] = listener; },
+    },
+  });
+  const ordinary = syntheticNode("p098_ordinary", { label: "Ordinary" });
+  const copyRoot = syntheticNode("p098_copy_root", { label: "Copy context", copyContext: true });
+  const copyLeaf = syntheticNode("p098_copy_leaf", { label: "Copy me", parentId: copyRoot.id, copyContext: true });
+  const unsupported = normaliseOne(context, fixture("unknown-editor-schema.json").mainThoughtTree[0]);
+  unsupported.id = "p098_unsupported";
+  const state = resetState(context, [ordinary, copyRoot, copyLeaf, unsupported]);
+
+  const indexScripts = indexScriptSources();
+  assert.ok(indexScripts.indexOf("js/pocket-tree-actions.js") < indexScripts.indexOf("js/pocket-editor-cutover-v3.js"));
+  assert.ok(indexScripts.indexOf("js/pocket-node-popout-editor.js") < indexScripts.indexOf("js/pocket-pe-node-popout-bridge.js"));
+  assert.ok(indexScripts.indexOf("js/pocket-pe-node-popout-bridge.js") < indexScripts.indexOf("js/pocket-editor-cutover-v3.js"));
+  assert.ok(indexScripts.includes("js/pocket-editor-popout.js"));
+  assert.ok(indexScripts.includes("js/pocket-editor-popout-v2.js"));
+  assert.ok(indexScripts.includes("js/pocket-enter-copy-only.js"));
+
+  const canonicalCalls = [];
+  const inlineCalls = [];
+  const copyCalls = [];
+  const statuses = [];
+  let canonicalResult = true;
+  context.PocketNodePopoutEditor = {
+    open(id) {
+      canonicalCalls.push(id);
+      return canonicalResult;
+    },
+  };
+  context.openDetailsEditorForSelectedNode = () => { inlineCalls.push(state.selectedId); };
+  context.copyText = () => { copyCalls.push(state.selectedId); return Promise.resolve(true); };
+  context.showCopiedFeedback = () => {};
+  context.setStatus = (message, tone) => { statuses.push({ message, tone }); };
+  context.isDetailsEditorOpen = () => false;
+  context.isControlsHelpOpen = () => false;
+  context.isCommandPaletteOpen = () => false;
+  context.isPocketVaultRecoveryFlowOpen = () => false;
+  context.isPocketDeviceChangesDecisionOpen = () => false;
+  context.cancelPendingCopyClick = () => {};
+  context.clearFilterForCopyLoop = () => {};
+  context.focusRowByNodeId = () => {};
+  context.commitPendingPathImport = () => {};
+  runScript(context, "js/pocket-tree-actions.js");
+  runScript(context, "js/pocket-pe-node-popout-bridge.js");
+  runScript(context, "js/pocket-editor-cutover-v3.js");
+
+  const dispatch = (key, extras = {}) => {
+    const event = {
+      key,
+      code: "",
+      ctrlKey: extras.ctrlKey === true,
+      metaKey: extras.metaKey === true,
+      altKey: extras.altKey === true,
+      shiftKey: extras.shiftKey === true,
+      target: extras.target || new RouteElement("div"),
+      defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; },
+    };
+    context.handleTreeKeydown(event);
+    return event;
+  };
+
+  const eventTarget = (kind, id) => {
+    const row = new RouteElement("div");
+    row.getAttribute = (name) => name === "data-node-id" ? id : null;
+    const editButton = new RouteElement("button");
+    editButton.textContent = "Edit";
+    const target = new RouteElement("button");
+    target.closest = (selector) => {
+      if (selector === "[data-node-id]") return row;
+      if (selector === ".rowMiniMenuBtn") return kind === "row-edit" ? editButton : null;
+      if (selector === "#btnOpenPrimary") return kind === "primary" ? target : null;
+      if (selector === "#cmdEdit") return kind === "command" ? target : null;
+      if (selector === "#btnDetailPopout") return null;
+      return null;
+    };
+    return target;
+  };
+
+  state.selectedId = ordinary.id;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.deepEqual(canonicalCalls, [ordinary.id], "plain Enter reaches the canonical desktop owner");
+  assert.equal(copyCalls.length, 0);
+
+  state.selectedId = copyLeaf.id;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.deepEqual(copyCalls, [copyLeaf.id], "copy-context Enter copies rather than opening PE");
+  assert.equal(canonicalCalls.length, 1);
+
+  state.selectedId = ordinary.id;
+  const editableTarget = new RouteElement("input");
+  assert.equal(dispatch("Enter", { target: editableTarget }).defaultPrevented, false);
+  assert.equal(dispatch("Enter", { ctrlKey: true }).defaultPrevented, false);
+  assert.equal(canonicalCalls.length, 1, "editable and modifier Enter do not open PE");
+
+  phoneMode = true;
+  assert.equal(dispatch("Enter").defaultPrevented, true);
+  assert.deepEqual(inlineCalls, [ordinary.id], "Phone Enter reaches in-page details");
+  assert.equal(canonicalCalls.length, 1, "Phone Enter does not open desktop PE");
+  phoneMode = false;
+
+  for (const [kind, eventName] of [
+    ["primary", "click"],
+    ["command", "click"],
+    ["row-edit", "click"],
+    ["row", "dblclick"],
+  ]) {
+    const event = {
+      target: eventTarget(kind, ordinary.id),
+      preventDefault() {},
+      stopPropagation() {},
+      stopImmediatePropagation() {},
+    };
+    listeners[eventName](event);
+  }
+  assert.deepEqual(canonicalCalls.slice(1), [ordinary.id, ordinary.id, ordinary.id, ordinary.id],
+    "primary Edit, command Edit, row-menu Edit and double-click share the canonical owner");
+  assert.equal(inlineCalls.length, 1);
+
+  assert.equal(context.openPocketEditor(ordinary.id), true, "canonical public alias remains supported");
+  assert.equal(context.PocketPeEditor.open(ordinary.id), true, "legacy public bridge remains supported");
+  assert.equal(canonicalCalls.length, 7);
+
+  canonicalResult = false;
+  assert.equal(context.openPocketNodeEditor(unsupported.id), false, "unsupported data fails closed");
+  assert.equal(inlineCalls.length, 1, "unsupported desktop data does not enter Phone details");
+  assert.equal(canonicalCalls.length, 8, "unsupported data still reaches the canonical validation boundary");
+  assert.match(statuses.at(-1).message, /read-only compatibility view/i);
+});
+
 test("P056 main-tree collapse and expand shortcuts respect keyboard ownership and preserve arrow shortcuts", () => {
   class KeyboardElement {
     constructor(tagName = "div") { this.tagName = String(tagName).toUpperCase(); this.isContentEditable = false; }
