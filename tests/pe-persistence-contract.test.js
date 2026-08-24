@@ -3051,6 +3051,22 @@ test("P098 executable PE entry-route matrix proves the current owners", () => {
   assert.match(statuses.at(-1).message, /read-only compatibility view/i);
 });
 
+test("P100 removes the unreachable human-close target while preserving canonical popup identity", () => {
+  const scripts = indexScriptSources();
+  assert.equal(scripts.includes("js/pocket-editor-human-close.js"), false);
+
+  const standaloneTargetOpen = /(?:global|window)\.open\([^)]*["']pocketStandalonePe["']/;
+  assert.equal(
+    scripts.some((script) => standaloneTargetOpen.test(source(script))),
+    false,
+    "no loaded production source opens the retired standalone PE target",
+  );
+
+  const ownerSource = source("js/pocket-node-popout-window.js");
+  assert.match(ownerSource, /global\.open\("", "_blank"/);
+  assert.match(ownerSource, /const targetName = `pocketPe_\$\{ownerToken\}_\$\{popupToken\}`/);
+});
+
 test("P056 main-tree collapse and expand shortcuts respect keyboard ownership and preserve arrow shortcuts", () => {
   class KeyboardElement {
     constructor(tagName = "div") { this.tagName = String(tagName).toUpperCase(); this.isContentEditable = false; }
