@@ -1,10 +1,17 @@
-/* Inline runtime script factory for the standalone node popout editor. */
+/* Same-origin runtime for the standalone node popout editor. */
 (function initialisePocketNodePopoutRuntime(global) {
   "use strict";
 
-  function build(initialJson) {
-    return `(function () {
-  var payload = ${initialJson};
+  function initialise(initialPayload, environment) {
+  environment = environment || {};
+  var window = environment.window || global;
+  var document = environment.document || window.document;
+  var navigator = environment.navigator || window.navigator;
+  var requestAnimationFrame = environment.requestAnimationFrame || window.requestAnimationFrame || function (callback) { return window.setTimeout(callback, 0); };
+  var alert = environment.alert || window.alert || function () {};
+  var console = environment.console || window.console || { error: function () {} };
+  if (!initialPayload || typeof initialPayload !== "object" || Array.isArray(initialPayload)) return false;
+  var payload = Object.assign({}, initialPayload);
   var ownerToken = typeof payload.popupOwnerToken === "string" ? payload.popupOwnerToken : "";
   var popupToken = typeof payload.popupInstanceToken === "string" ? payload.popupInstanceToken : "";
   delete payload.popupOwnerToken;
@@ -369,7 +376,7 @@
         var range = selection.getRangeAt(0);
         if (range && text.contains(range.commonAncestorContainer)) {
           range.deleteContents();
-          var newline = document.createTextNode("\\n");
+          var newline = document.createTextNode("\n");
           range.insertNode(newline);
           range.setStartAfter(newline);
           range.collapse(true);
@@ -379,7 +386,7 @@
         }
       }
     } catch (_error) {}
-    if (!inserted) text.textContent = String(text.textContent || "") + "\\n";
+    if (!inserted) text.textContent = String(text.textContent || "") + "\n";
     syncOutlineTextElement(text);
     markContentMutation(true);
     return true;
@@ -637,7 +644,7 @@
         lines.push("  ".repeat(Math.max(0, outlineDepth(i) - rootDepth)) + String(outline[i] && outline[i].text || ""));
       }
     });
-    return { text: lines.join("\\n"), count: lines.length };
+    return { text: lines.join("\n"), count: lines.length };
   }
   function fallbackCopyToClipboard(text) {
     var active = document.activeElement;
@@ -732,12 +739,12 @@
     return true;
   }
   function leadingIndentInfo(line) {
-    var match = String(line || "").match(/^[ \\t]*/);
+    var match = String(line || "").match(/^[ \t]*/);
     var leading = match ? match[0] : "";
     var tabs = 0;
     var spaces = 0;
     for (var i = 0; i < leading.length; i += 1) {
-      if (leading.charAt(i) === "\\t") tabs += 1;
+      if (leading.charAt(i) === "\t") tabs += 1;
       else if (leading.charAt(i) === " ") spaces += 1;
     }
     return { tabs: tabs, spaces: spaces, text: String(line || "").slice(leading.length) };
@@ -753,7 +760,7 @@
     return Math.max(1, unit || shallowest || 1);
   }
   function outlineBlocksFromPastedText(text, baseDepth) {
-    var rawLines = String(text || "").replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").split("\\n");
+    var rawLines = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     var lines = rawLines.filter(function (line) { return String(line || "").trim().length > 0; });
     if (!lines.length) return [];
     var spaceUnit = inferPastedSpaceUnit(lines);
@@ -836,7 +843,7 @@
   function handleOutlinePaste(ev) {
     if (mode !== "outline" || !ev || !ev.clipboardData) return;
     var text = ev.clipboardData.getData("text/plain") || "";
-    if (String(text).replace(/\\r\\n/g, "\\n").replace(/\\r/g, "\\n").indexOf("\\n") < 0) return;
+    if (String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n").indexOf("\n") < 0) return;
     if (insertStructuredOutlineText(text, { target: ev.target }) > 0) ev.preventDefault();
   }
   function updateModeChrome() { document.body.classList.toggle("textMode", mode === "text"); document.body.classList.toggle("outlineMode", mode === "outline"); textModeBtn.classList.toggle("on", mode === "text"); outlineModeBtn.classList.toggle("on", mode === "outline"); }
@@ -1234,6 +1241,20 @@
     return false;
   }
   function closeSafely() { closeOutlineContextMenu({ restoreFocus: false }); if (readOnly || !dirty) { allowedToClose = true; window.close(); return; } showUnsavedDialog(); }
+  if (typeof environment.probe === "function") {
+    environment.probe(Object.freeze({
+      outlineBlocksFromPastedText: outlineBlocksFromPastedText,
+      renderEmptyOutline: function (pane) {
+        outline = [];
+        outlinePane = pane;
+        outlineSelectedIds = new Set();
+        outlineSelectionAnchorId = "";
+        renderOutline();
+        return outline;
+      },
+    }));
+    return true;
+  }
   titleInput.addEventListener("input", function () { markContentMutation(true); });
   bodyInput.addEventListener("input", function () { markContentMutation(true); });
   saveBtn.addEventListener("click", function () { save(false); });
@@ -1343,9 +1364,20 @@
   if (readOnly) bodyInput.focus({ preventScroll: true });
   else if (mode === "outline") wakeOutlineNavigation("");
   else { titleInput.focus(); titleInput.select(); }
-})();
-`;
+  return true;
   }
 
-  global.PocketNodePopoutRuntime = Object.freeze({ build: build });
+  function initialPayloadFromDocument() {
+    if (!global.document || typeof global.document.getElementById !== "function") return null;
+    var carrier = global.document.getElementById("pocketNodePopoutPayload");
+    if (!carrier || carrier.tagName !== "TEXTAREA") return null;
+    try {
+      var value = JSON.parse(carrier.value);
+      return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+    } catch (_error) { return null; }
+  }
+
+  global.PocketNodePopoutRuntime = Object.freeze({ initialise: initialise });
+  var initialPayload = initialPayloadFromDocument();
+  if (initialPayload) initialise(initialPayload);
 })(window);

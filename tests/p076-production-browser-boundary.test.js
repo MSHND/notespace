@@ -196,6 +196,7 @@ test("P076 release manifest exactly hashes the frozen production static bytes", 
   assert.ok(manifest.length > 60);
   for (const required of [
     "/index.html", "/sw.js", "/styles.css", "/manifest.json",
+    "/js/pocket-node-popout-runtime.js",
     "/js/pocket-sync-production-bootstrap.js", "/js/pocket-sync-additional-device.js",
     "/js/pocket-sync-emergency-recovery.js", "/js/pocket-sync-local-integration.js",
   ]) assert.ok(manifest.some((entry) => entry.path === required), required);

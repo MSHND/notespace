@@ -11,8 +11,11 @@
   function render(payload, helpers) {
     helpers = helpers || {};
     const htmlEscape = typeof helpers.htmlEscape === "function" ? helpers.htmlEscape : fallbackHtmlEscape;
-    const runtimeScript = String(helpers.runtimeScript || "");
-    if (!runtimeScript) throw new Error("PocketNodePopoutTemplate.render requires a runtime script.");
+    const runtimeAssetUrl = typeof helpers.runtimeAssetUrl === "string" ? helpers.runtimeAssetUrl : "";
+    if (!/^\/(?!\/)[A-Za-z0-9._/-]+\.js$/.test(runtimeAssetUrl)) {
+      throw new Error("PocketNodePopoutTemplate.render requires a same-origin runtime asset.");
+    }
+    const payloadJson = JSON.stringify(payload).replace(/</g, "\\u003c");
 
     const safeTitle = htmlEscape(payload.title || "Untitled");
     const safePath = htmlEscape(payload.path || "");
@@ -132,9 +135,8 @@
       </div>
     </div>
   </div>
-<script>
-${runtimeScript}
-</script>
+<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">${htmlEscape(payloadJson)}</textarea>
+<script src="${runtimeAssetUrl}"></script>
 </body>
 </html>`;
   }

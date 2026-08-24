@@ -673,35 +673,19 @@ function loadRuntimeFactory() {
 }
 
 function runtimeProbe(factory, payload) {
-  const program = factory.build(JSON.stringify(payload));
-  assert.doesNotThrow(() => new Function(program));
-  const marker = "(function () {\n";
-  assert.equal(program.indexOf(marker), 0);
-  const injection = [
-    marker,
-    "  globalThis.__peRuntimeProbe = {",
-    "    outlineBlocksFromPastedText: outlineBlocksFromPastedText,",
-    "    renderEmptyOutline: function (pane) {",
-    "      outline = [];",
-    "      outlinePane = pane;",
-    "      outlineSelectedIds = new Set();",
-    "      outlineSelectionAnchorId = '';",
-    "      renderOutline();",
-    "      return outline;",
-    "    }",
-    "  };",
-    "  return;",
-    "",
-  ].join("\n");
-  const instrumented = program.replace(marker, injection);
-  assert.notEqual(instrumented, program);
-  const exposed = {};
+  let probe = null;
   const fakeDocument = {
     activeElement: null,
     createElement(tagName) { return fakeElement(tagName); },
+    getElementById() { return null; },
   };
-  new Function("globalThis", "document", "requestAnimationFrame", instrumented)(exposed, fakeDocument, () => 1);
-  return { program, probe: exposed.__peRuntimeProbe };
+  assert.equal(factory.initialise(payload, {
+    window: { setTimeout(callback) { if (typeof callback === "function") callback(); } },
+    document: fakeDocument,
+    requestAnimationFrame: () => 1,
+    probe(value) { probe = value; },
+  }), true);
+  return { program: source("js/pocket-node-popout-runtime.js"), probe };
 }
 
 function executeControlledRuntime(payload, options = {}) {
@@ -970,28 +954,27 @@ function executeControlledRuntime(payload, options = {}) {
     close() { closeCalls += 1; },
     focus() {},
   };
-  const program = factory.build(JSON.stringify(runtimePayload));
-  assert.doesNotThrow(() => new Function(program));
-  new Function("window", "document", "navigator", "requestAnimationFrame", "alert", "console", program)(
-    window,
-    document,
-    {
-      clipboard: {
-        writeText(text) {
-          clipboardWrites.push(String(text));
-          return Promise.resolve();
-        },
-        readText() {
-          return Promise.resolve(typeof options.clipboardText === "string" ? options.clipboardText : "");
-        },
+  const navigator = {
+    clipboard: {
+      writeText(text) {
+        clipboardWrites.push(String(text));
+        return Promise.resolve();
+      },
+      readText() {
+        return Promise.resolve(typeof options.clipboardText === "string" ? options.clipboardText : "");
       },
     },
-    (callback) => { if (typeof callback === "function") callback(); return 1; },
-    (message) => { alerts.push(String(message)); },
-    { log() {}, info() {}, warn() {}, error() {} },
-  );
+  };
+  assert.equal(factory.initialise(runtimePayload, {
+    window,
+    document,
+    navigator,
+    requestAnimationFrame: (callback) => { if (typeof callback === "function") callback(); return 1; },
+    alert: (message) => { alerts.push(String(message)); },
+    console: { log() {}, info() {}, warn() {}, error() {} },
+  }), true);
   return {
-    program,
+    program: source("js/pocket-node-popout-runtime.js"),
     window,
     document,
     controls,
@@ -2193,7 +2176,7 @@ test("accepted Outline and independent Notes both load while Outline owns the op
 });
 
 test("malformed and unknown editor objects survive raw while PE exposes read-only Text payloads", () => {
-  const factory = loadRuntimeFactory();
+  const runtimeSource = source("js/pocket-node-popout-runtime.js");
   const malformed = loadAndExportFixture("malformed-editor.json");
   const rawMalformed = fixture("malformed-editor.json").mainThoughtTree[0].editor;
   assert.equal(JSON.stringify(malformed.state.nodes[0].editor), JSON.stringify(rawMalformed));
@@ -2206,7 +2189,7 @@ test("malformed and unknown editor objects survive raw while PE exposes read-onl
   assert.equal(malformedOpening.readOnlyMessage, UNKNOWN_EDITOR_MESSAGE);
   assert.equal(malformedOpening.editorSchema, EDITOR_SCHEMA);
   assert.equal(Object.hasOwn(malformedOpening, "editor"), false);
-  assert.equal(factory.build(JSON.stringify(malformedOpening)).includes("fixtureMarker"), false);
+  assert.equal(runtimeSource.includes("fixtureMarker"), false);
 
   const unknown = loadAndExportFixture("unknown-editor-schema.json");
   const rawUnknown = fixture("unknown-editor-schema.json").mainThoughtTree[0].editor;
@@ -2222,9 +2205,8 @@ test("malformed and unknown editor objects survive raw while PE exposes read-onl
   assert.equal(openingPayload.editorSchema, "pocket.nodeEditor.v9");
   assert.equal(Object.hasOwn(openingPayload, "editor"), false);
   assert.equal(Object.hasOwn(openingPayload, "futureTopLevel"), false);
-  const program = factory.build(JSON.stringify(openingPayload));
-  assert.equal(program.includes("preserve-if-untouched"), false);
-  assert.equal(program.includes("Future outline content"), false);
+  assert.equal(runtimeSource.includes("preserve-if-untouched"), false);
+  assert.equal(runtimeSource.includes("Future outline content"), false);
 });
 
 test("CURRENT-RISK: portal.export.v1 top-level precedence drops nested data extras on later export", () => {
@@ -4614,8 +4596,8 @@ test("successful picked and newly created truth-file targets establish new edito
   assert.equal(pickerCalls, 2);
 });
 
-test("generated PE runtime builds and compiles for independent Notes, Outline, both, structural-only, absent, and rejected payloads", () => {
-  const factory = loadRuntimeFactory();
+test("P094 external PE runtime accepts independent Notes, Outline, both, structural-only, absent, and rejected payloads", () => {
+  const runtimeSource = source("js/pocket-node-popout-runtime.js");
   const modelContext = createFullContractContext();
   const rejected = modelContext.PocketNodePopoutModel.buildPayload(syntheticNode("rejected", {
     details: "",
@@ -4664,9 +4646,8 @@ test("generated PE runtime builds and compiles for independent Notes, Outline, b
     rejected,
   ];
   for (const payload of payloads) {
-    const program = factory.build(JSON.stringify(payload));
-    assert.equal(typeof program, "string");
-    assert.doesNotThrow(() => new Function(program));
+    assert.equal(typeof payload, "object");
+    assert.equal(runtimeSource.includes(JSON.stringify(payload)), false);
   }
 });
 
@@ -5411,7 +5392,7 @@ test("generated runtime exposes transient popup identity and sends saves only th
     popupInstanceToken: "popup_transient_runtime",
   }));
   const identity = runtime.window.PocketNodePopoutSession.getIdentity();
-  assert.deepEqual(identity, {
+  assert.deepEqual(plain(identity), {
     ownerToken: "owner_transient_runtime",
     popupToken: "popup_transient_runtime",
   });
@@ -5851,7 +5832,9 @@ test("generated read-only runtime disables mutation and save paths while keeping
 
   const templateContext = vm.createContext({ window: {} });
   runScript(templateContext, "js/pocket-node-popout-template.js");
-  const html = templateContext.window.PocketNodePopoutTemplate.render(payload, { runtimeScript: "void 0;" });
+  const html = templateContext.window.PocketNodePopoutTemplate.render(payload, {
+    runtimeAssetUrl: "/js/pocket-node-popout-runtime.js",
+  });
   assert.match(html, /id="readOnlyBanner"/);
   assert.equal(html.includes(UNKNOWN_EDITOR_MESSAGE), true);
   assert.match(html, /readonly aria-readonly="true"/);
@@ -5881,14 +5864,14 @@ test("generated PE runtime structured-paste parser retains spaces, tabs, mixed i
   ];
   for (const [input, depths] of cases) {
     const blocks = probe.outlineBlocksFromPastedText(input, 0);
-    assert.deepEqual(blocks.map((block) => block.depth), depths);
+    assert.deepEqual(plain(blocks.map((block) => block.depth)), depths);
     assert.equal(blocks.length, depths.length);
     assert.equal(new Set(blocks.map((block) => block.id)).size, blocks.length);
     assert.equal(blocks.every((block) => block.collapsed === false), true);
   }
 
   const pasted = probe.outlineBlocksFromPastedText("    Parent\n      Child\n        Grandchild", 5);
-  assert.deepEqual(pasted.map((block) => block.depth), [5, 6, 7]);
+  assert.deepEqual(plain(pasted.map((block) => block.depth)), [5, 6, 7]);
 });
 
 test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {

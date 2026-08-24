@@ -165,6 +165,7 @@ function createMainPage(broker, pageId, options = {}) {
     Promise,
     Set,
     Uint32Array,
+    URL,
     console: { log() {}, info() {}, warn() {}, error() {} },
     crypto: Object.hasOwn(options, "crypto") ? options.crypto : {
       randomUUID() {
@@ -173,6 +174,7 @@ function createMainPage(broker, pageId, options = {}) {
       },
     },
     screen: { availWidth: 1440, availHeight: 900 },
+    location: { href: options.pageUrl || "https://pocket.example/" },
     document: {},
     state: {
       nodes: [editorPayload(`${pageId}_state`)],
@@ -284,6 +286,27 @@ test("P018 uses random bytes when crypto.randomUUID is unavailable", () => {
   assert.match(popupToken, /^popup_[a-f0-9]+$/);
   assert.notEqual(ownerToken.replace(/^owner_/, ""), popupToken.replace(/^popup_/, ""));
   assert.equal(randomCall, 2);
+});
+
+test("P094 renders one same-origin external PE runtime and inert escaped payload data", () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p094", { pageUrl: "https://example.github.io/notespace/" });
+  const hostile = editorPayload("p094-hostile", {
+    title: "<script>window.pwned=1</script> \" & unicode ✓",
+    body: "</textarea><script>window.pwned=2</script> & \" ✓",
+    outline: [{ id: "row", text: "</textarea><script>window.pwned=3</script>", depth: 0 }],
+    mode: "outline",
+  });
+  assert.equal(page.context.PocketNodePopoutWindow.open(hostile), true);
+  const html = broker.popups[0].html;
+  assert.match(html, /<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">/);
+  assert.match(html, /<script src="\/notespace\/js\/pocket-node-popout-runtime\.js"><\/script>/);
+  assert.doesNotMatch(html, /<script(?!\s+src=)[^>]*>/i);
+  assert.equal((html.match(/<script\b/gi) || []).length, 1);
+  assert.equal((html.match(/<\/textarea>/gi) || []).length, 2);
+  assert.doesNotMatch(html, /<script>window\.pwned/i);
+  assert.equal(html.includes("popupOwnerToken"), true);
+  assert.equal(html.includes("popupInstanceToken"), true);
 });
 
 test("P018 opens simultaneous normal and Incognito-like PE windows without cross-window calls", () => {
@@ -544,15 +567,12 @@ test("P018 isolates same-filename sessions because filenames never establish pop
   assert.equal(pageB.metrics.truthWrites, 1);
 });
 
-test("P018 generated runtime compiles with identity validation and no direct editor Save call", () => {
+test("P094 external runtime retains identity validation and no direct editor Save call", () => {
   const context = vm.createContext({ window: {} });
   runScript(context, "js/pocket-node-popout-runtime.js");
-  const program = context.window.PocketNodePopoutRuntime.build(JSON.stringify(editorPayload("runtime", {
-    popupOwnerToken: "owner_runtime",
-    popupInstanceToken: "popup_runtime",
-  })));
+  const program = source("js/pocket-node-popout-runtime.js");
 
-  assert.doesNotThrow(() => new Function(program));
+  assert.deepEqual(Object.keys(context.window.PocketNodePopoutRuntime), ["initialise"]);
   assert.equal(program.includes("popupOwnerToken"), true);
   assert.equal(program.includes("popupInstanceToken"), true);
   assert.equal(program.includes("applyAndSaveFromOwnedPopup"), true);
