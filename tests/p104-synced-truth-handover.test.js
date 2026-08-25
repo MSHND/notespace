@@ -36,7 +36,31 @@ function createHandoverHarness(options = {}) {
     hasUnsavedDetailsEditorChanges() { return false; },
     hasUnsavedInlineTitleDraft() { return false; },
     isPocketPayloadShape(value) { return value?.schema === "portal.export.v1"; },
-    normaliseInput(value) { return JSON.parse(JSON.stringify(value)); },
+    normaliseInput(value) {
+      return {
+        schema: value.schema,
+        writtenAt: value.writtenAt || "",
+        nodes: JSON.parse(JSON.stringify(value.mainThoughtTree || [])),
+        tombstones: JSON.parse(JSON.stringify(value.mainThoughtTreeTombstones || [])),
+        rootExtras: { sourceRootExtra: "kept" },
+        dataExtras: { sourceDataExtra: "kept" },
+      };
+    },
+    buildCanonicalPocketPayload(norm, options) {
+      return {
+        ...norm.rootExtras,
+        schema: "portal.export.v1",
+        exportedAt: options.writtenAt || norm.writtenAt,
+        writtenAt: options.writtenAt || norm.writtenAt,
+        mainThoughtTree: JSON.parse(JSON.stringify(norm.nodes)),
+        mainThoughtTreeTombstones: JSON.parse(JSON.stringify(norm.tombstones)),
+        data: {
+          ...norm.dataExtras,
+          mainThoughtTree: JSON.parse(JSON.stringify(norm.nodes)),
+          mainThoughtTreeTombstones: JSON.parse(JSON.stringify(norm.tombstones)),
+        },
+      };
+    },
     setStatus(message) { statuses.push(message); },
     PocketFileOpening: {
       async chooseExistingFile() { return options.inspected; },
@@ -71,8 +95,18 @@ test("P104 validates and freezes a normal Pocket JSON before replacing the exist
   assert.equal(result, true);
   assert.equal(harness.saves.length, 1);
   assert.equal(harness.commits.length, 1);
-  assert.notEqual(harness.saves[0].freezePayload(), selected);
-  assert.deepEqual(harness.saves[0].freezePayload(), selected);
+  const frozen = harness.saves[0].freezePayload();
+  assert.notEqual(frozen, selected);
+  assert.equal(Object.isFrozen(frozen), true);
+  assert.equal(Object.isFrozen(frozen.data), true);
+  assert.equal(harness.saves[0].freezePayload(), frozen);
+  assert.equal(Array.isArray(frozen.mainThoughtTree), true);
+  assert.equal(Array.isArray(frozen.data.mainThoughtTree), true);
+  assert.equal(Object.hasOwn(frozen, "nodes"), false);
+  assert.equal(frozen.sourceRootExtra, "kept");
+  assert.equal(frozen.data.sourceDataExtra, "kept");
+  assert.equal(Array.isArray(harness.commits[0].norm.nodes), true);
+  assert.equal(Object.hasOwn(harness.commits[0].norm, "mainThoughtTree"), false);
   assert.equal(sourceWrites, 0);
   assert.equal(harness.commits[0].metadata.fileName, "Synced Pocket");
   assert.equal(harness.commits[0].guard.ownerKind, "synced");

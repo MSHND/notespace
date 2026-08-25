@@ -1084,6 +1084,87 @@ test("P104 opens existing Synced truth over a clean local JSON without a refresh
   assert.equal(failed.remoteCalls.filter((call) => call.route === "addEnvelope").length, failedGrantsBefore);
 });
 
+test("P104a persists canonical selected truth through the existing Synced owner and reopens it as an ordinary healthy Pocket", async () => {
+  const remoteSentinel = "P104a REMOTE BEFORE HANDOVER";
+  const handoverSentinel = "P104a CANONICAL HANDOVER TRUTH";
+  const reopenedEdit = "P104a REOPENED ORDINARY EDIT";
+  const journey = await createBrowserJourney({
+    browserPersistence: true, captureSessionTransitions: true, sameDeviceReopen: true,
+    ownerKind: "none", remoteSentinel,
+  });
+  assert.equal(journey.opened.ok, true);
+  assert.equal(journey.ownerKind, "synced");
+  assert.equal(journey.visible.some((node) => node.label === remoteSentinel), true);
+  const [before] = [...journey.idb.records.values()];
+  const deviceId = before.deviceId;
+  const deviceEnvelopeMetadata = plain(before.deviceEnvelope.metadata);
+  const grantsBefore = journey.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  const recoveryBefore = journey.remoteCalls.filter((call) => /recovery/i.test(call.route)).length;
+  let sourceWrites = 0;
+  const sourcePayload = {
+    sourceRootExtra: "P104a root extra",
+    schema: "portal.export.v1",
+    exportedAt: "2041-01-01T00:00:00.000Z",
+    writtenAt: "2041-01-01T00:00:00.000Z",
+    mainThoughtTree: [{ id: "p104a-selected", label: handoverSentinel, details: handoverSentinel, children: [] }],
+    mainThoughtTreeTombstones: [],
+    data: {
+      sourceDataExtra: "P104a data extra",
+      mainThoughtTree: [{ id: "p104a-selected", label: handoverSentinel, details: handoverSentinel, children: [] }],
+      mainThoughtTreeTombstones: [],
+    },
+  };
+  journey.b.PocketFileOpening = {
+    async chooseExistingFile() {
+      return {
+        ok: true, kind: "json", fileName: "p104a-selected.json", payload: sourcePayload,
+        handle: { async createWritable() { sourceWrites += 1; throw new Error("selected source must remain untouched"); } },
+      };
+    },
+  };
+  assert.equal(await journey.b.PocketSyncedTruthHandover.begin(), true);
+  assert.equal(sourceWrites, 0);
+  assert.equal((await journey.readRemoteRevision()).revision, 2);
+  const [handedOver] = [...journey.idb.records.values()];
+  assert.equal(handedOver.deviceId, deviceId);
+  assert.deepEqual(plain(handedOver.deviceEnvelope.metadata), deviceEnvelopeMetadata);
+  assert.equal(handedOver.remote.confirmedRevision, 2);
+  assert.equal(handedOver.remote.pending, null);
+  assert.equal(handedOver.remote.conflict, null);
+  assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(journey.b.hasPocketUnsavedChanges(), false);
+  assert.equal(journey.visible.some((node) => node.label === handoverSentinel), true);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBefore);
+  assert.equal(journey.remoteCalls.filter((call) => /recovery/i.test(call.route)).length, recoveryBefore);
+  assert.doesNotMatch(JSON.stringify(journey.serviceDriver.snapshot()), new RegExp(`${remoteSentinel}|${handoverSentinel}`));
+  assert.doesNotMatch(JSON.stringify(journey.remoteCalls), new RegExp(`${remoteSentinel}|${handoverSentinel}`));
+
+  const fresh = journey.createFreshBrowserRuntime();
+  assert.deepEqual(plain(await fresh.openExisting()), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 2,
+  });
+  assert.equal(fresh.context.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(fresh.context.hasPocketUnsavedChanges(), false);
+  assert.equal(plain(vm.runInContext("state.nodes", fresh.context)).some((node) => node.label === handoverSentinel), true);
+  assert.equal(vm.runInContext("state.rootExtras.sourceRootExtra", fresh.context), "P104a root extra");
+  const [reopened] = [...journey.idb.records.values()];
+  assert.equal(reopened.deviceId, deviceId);
+  assert.deepEqual(plain(reopened.deviceEnvelope.metadata), deviceEnvelopeMetadata);
+  assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBefore);
+  assert.equal(journey.remoteCalls.filter((call) => /recovery/i.test(call.route)).length, recoveryBefore);
+
+  const freshState = vm.runInContext("state", fresh.context);
+  freshState.nodes.push({ id: "p104a-reopened-edit", label: reopenedEdit, children: [] });
+  fresh.context.recordOp({ type: "p104a-reopened-edit", id: "p104a-reopened-edit", changed: reopenedEdit });
+  const saved = await fresh.context.exportTree({ returnDetails: true, downloadFallback: false });
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.reason, "synced-save");
+  assert.equal((await fresh.readRemoteRevision()).revision, 3);
+  assert.equal(fresh.context.hasPocketUnsavedChanges(), false);
+  assert.doesNotMatch(JSON.stringify(journey.serviceDriver.snapshot()), new RegExp(`${remoteSentinel}|${handoverSentinel}|${reopenedEdit}`));
+  assert.doesNotMatch(JSON.stringify(journey.remoteCalls), new RegExp(`${remoteSentinel}|${handoverSentinel}|${reopenedEdit}`));
+});
+
 test("P052c production browser adoption keeps visible truth and authority coherent across final transition failures", async () => {
   const targetChanged = await createBrowserJourney({ targetChangesBeforeCommit: true });
   assert.equal(targetChanged.opened.ok, false);

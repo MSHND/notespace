@@ -36,15 +36,27 @@
     catch (_error) { return null; }
   }
 
+  function freezePayload(payload, seen = new Set()) {
+    if (!payload || typeof payload !== "object" || seen.has(payload)) return payload;
+    seen.add(payload);
+    for (const value of Object.values(payload)) freezePayload(value, seen);
+    return Object.freeze(payload);
+  }
+
   function selectedPayload(inspected) {
     if (!inspected?.ok || inspected.kind !== "json" || !inspected.payload
         || global.isPocketPayloadShape?.(inspected.payload) !== true
-        || typeof global.normaliseInput !== "function") return null;
+        || typeof global.normaliseInput !== "function"
+        || typeof global.buildCanonicalPocketPayload !== "function") return null;
     const payload = copyPayload(inspected.payload);
     if (!payload || global.isPocketPayloadShape?.(payload) !== true) return null;
     try {
       const norm = global.normaliseInput(payload);
-      return global.isPocketPayloadShape?.(norm) === true ? { payload, norm } : null;
+      if (!norm || !Array.isArray(norm.nodes) || !Array.isArray(norm.tombstones)) return null;
+      const canonical = global.buildCanonicalPocketPayload(norm, {
+        writtenAt: payload.writtenAt || payload.exportedAt || norm.writtenAt,
+      });
+      return global.isPocketPayloadShape?.(canonical) === true ? { canonical: freezePayload(canonical), norm } : null;
     } catch (_error) { return null; }
   }
 
@@ -96,7 +108,7 @@
       const boundary = global.PocketOwnerSaveBoundary;
       const saved = await boundary.save({
         expectedSession: sourceSession,
-        freezePayload: () => candidate.norm,
+        freezePayload: () => candidate.canonical,
       });
       if (!saved?.ok || saved.ownerKind !== "synced" || saved.target !== "synced") {
         say("Synced Pocket could not replace its contents. The selected file is unchanged.");
@@ -111,7 +123,7 @@
       const committed = global.commitPreparedPocketDocument(candidate.norm, {
         schema: candidate.norm.schema || "portal.export.v1",
         fileName: "Synced Pocket",
-        writtenAt: candidate.norm.writtenAt || candidate.payload.writtenAt || candidate.payload.exportedAt || "",
+        writtenAt: candidate.norm.writtenAt || candidate.canonical.writtenAt || "",
       }, {
         ownerKind: "synced",
         displayName: "Synced Pocket",

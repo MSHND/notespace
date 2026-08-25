@@ -85,21 +85,28 @@ function restoreWorkspaceState() {
   }
 }
 
-function buildPocketPayload(writtenAt = nowIso()) {
-  const treeNodes = JSON.parse(JSON.stringify(state.nodes || []));
-  const treeTombstones = JSON.parse(JSON.stringify(state.tombstones || []));
-  const rootExtras = JSON.parse(JSON.stringify(state.rootExtras || {}));
-  const dataExtras = JSON.parse(JSON.stringify(state.dataExtras || {}));
-  const pocketGuard = {
-    schema: "pocket.guard.v1",
-    instanceId: getPocketInstanceId(),
-    sourceFileName: cleanText(state.source?.fileName, 120),
-    sourceWrittenAt: cleanText(state.source?.writtenAt, 40),
-    backupWrittenAt: writtenAt,
-  };
+function buildCanonicalPocketPayload(norm, options = {}) {
+  if (!norm || typeof norm !== "object" || Array.isArray(norm)) return null;
+  let treeNodes;
+  let treeTombstones;
+  let rootExtras;
+  let dataExtras;
+  let pocketGuard = null;
+  try {
+    treeNodes = JSON.parse(JSON.stringify(Array.isArray(norm.nodes) ? norm.nodes : []));
+    treeTombstones = JSON.parse(JSON.stringify(Array.isArray(norm.tombstones) ? norm.tombstones : []));
+    rootExtras = JSON.parse(JSON.stringify(norm.rootExtras || {}));
+    dataExtras = JSON.parse(JSON.stringify(norm.dataExtras || {}));
+    if (options.pocketGuard && typeof options.pocketGuard === "object") {
+      pocketGuard = JSON.parse(JSON.stringify(options.pocketGuard));
+    }
+  } catch {
+    return null;
+  }
+  const writtenAt = cleanText(options.writtenAt || norm.writtenAt, 40);
   return {
     ...rootExtras,
-    pocketGuard,
+    ...(pocketGuard ? { pocketGuard } : {}),
     schema: "portal.export.v1",
     exportedAt: writtenAt,
     writtenAt,
@@ -107,11 +114,27 @@ function buildPocketPayload(writtenAt = nowIso()) {
     mainThoughtTreeTombstones: treeTombstones,
     data: {
       ...dataExtras,
-      pocketGuard,
+      ...(pocketGuard ? { pocketGuard } : {}),
       mainThoughtTree: treeNodes,
       mainThoughtTreeTombstones: treeTombstones,
     },
   };
+}
+
+function buildPocketPayload(writtenAt = nowIso()) {
+  const pocketGuard = {
+    schema: "pocket.guard.v1",
+    instanceId: getPocketInstanceId(),
+    sourceFileName: cleanText(state.source?.fileName, 120),
+    sourceWrittenAt: cleanText(state.source?.writtenAt, 40),
+    backupWrittenAt: writtenAt,
+  };
+  return buildCanonicalPocketPayload({
+    nodes: state.nodes,
+    tombstones: state.tombstones,
+    rootExtras: state.rootExtras,
+    dataExtras: state.dataExtras,
+  }, { writtenAt, pocketGuard });
 }
 
 function pocketDeviceChangesOwner() {
