@@ -108,7 +108,7 @@
 
     function eligibleActivation(session) { return !!session && ["json", "vault"].includes(session.ownerKind); }
     function eligibleOpen(session) {
-      if (!session || !["none", "detached"].includes(session.ownerKind)) return false;
+      if (!session || !["none", "detached", "json", "vault"].includes(session.ownerKind)) return false;
       if (session.ownerKind === "none") return true;
       try { return global.hasPocketUnsavedChanges?.() === false; } catch (_error) { return false; }
     }
@@ -126,9 +126,9 @@
       topbarButton.hidden = !canOpen || synced;
       topbarButton.disabled = topbarButton.hidden || busy || discovering;
       const label = button.querySelector("span");
-      if (label) label.textContent = canOpen ? "Open synced Pocket…" : "Turn on Sync…";
+      if (label) label.textContent = canActivate ? "Turn on Sync…" : "Open synced Pocket…";
       const hint = button.querySelector(".commandHint");
-      if (hint) hint.textContent = canOpen ? "open another device" : "encrypted copy";
+      if (hint) hint.textContent = canActivate ? "encrypted copy" : "open another device";
       const source = document.getElementById("activeDocumentSource");
       if (synced && source instanceof global.HTMLElement) {
         source.textContent = "Synced Pocket";
@@ -251,10 +251,10 @@
       status.textContent = message(result);
       refresh();
     }
-    function begin() {
+    function begin(intent = "default") {
       if (discovering) return;
       const session = owner();
-      if (eligibleOpen(session)) {
+      if (eligibleOpen(session) && (intent === "open" || !eligibleActivation(session))) {
         if (typeof integration.findRecoveryAttempt !== "function") {
           show("open");
           return;
@@ -289,8 +289,8 @@
       }
       else if (eligibleActivation(session)) show(continuation ? "continue" : "activate");
     }
-    button.addEventListener("click", begin);
-    topbarButton.addEventListener("click", begin);
+    button.addEventListener("click", () => begin("default"));
+    topbarButton.addEventListener("click", () => begin("open"));
     primary.addEventListener("click", () => void run(primary.dataset.mode));
     recovery.addEventListener("click", () => { if (!busy && !discovering && eligibleOpen(owner())) show("recovery"); });
     restart.addEventListener("click", () => void run("recovery-restart"));

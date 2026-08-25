@@ -106,7 +106,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
   const harness = createUiHarness("json");
   assert.equal(harness.command.hidden, false);
-  assert.equal(harness.topbar.hidden, true);
+  assert.equal(harness.topbar.hidden, false);
   harness.command.fire("click");
   assert.equal(harness.context.paletteClosed, true);
   assert.equal(harness.overlay.hidden, false);
@@ -121,6 +121,21 @@ test("P053a gives JSON owners explicit consent, closes More, and single-flights 
   assert.equal(harness.resumeCalls, 1);
   assert.equal(JSON.stringify(harness.resumeInput), '{"activationId":"existing-activation"}');
   assert.equal(harness.activateCalls, 1);
+});
+
+test("P104 opens existing Synced truth from a clean local Pocket without changing activation consent", async () => {
+  const clean = createUiHarness("json");
+  clean.topbar.fire("click");
+  const primary = clean.overlay.querySelector(".vaultDialogPrimary");
+  primary.fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(clean.openCalls, 1);
+  assert.equal(clean.activateCalls, 0);
+
+  const dirty = createUiHarness("json", { dirty: true });
+  assert.equal(dirty.topbar.hidden, true);
+  dirty.topbar.fire("click");
+  assert.equal(dirty.openCalls, 0);
 });
 
 test("P053a exposes fresh-device open directly and updates after an owner transition without a timer", async () => {

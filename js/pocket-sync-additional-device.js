@@ -47,7 +47,7 @@
   }
 
   function target(value) {
-    if (!object(value) || !["none", "detached"].includes(value.ownerKind)) return null;
+    if (!object(value) || !["none", "detached", "json", "vault"].includes(value.ownerKind)) return null;
     const continuityId = value.continuityId ?? value.id ?? value.sessionId;
     if ((typeof continuityId !== "string" && !Number.isSafeInteger(continuityId)) || String(continuityId).trim() === "") return null;
     return freeze({ ownerKind: value.ownerKind, continuityId: `${value.ownerKind}:${String(continuityId)}` });

@@ -65,7 +65,7 @@ function loadProduction(options = {}) {
     "js/pocket-sync-account-client.js", "js/pocket-sync-remote-client.js",
     "js/pocket-sync-activation.js", "js/pocket-sync-emergency-recovery.js", "js/pocket-sync-additional-device.js",
     "js/pocket-owner-save-boundary.js", "js/pocket-sync-activation-owner-bridge.js",
-    "js/pocket-sync-browser-runtime.js"])) {
+    "js/pocket-sync-browser-runtime.js", "js/pocket-synced-truth-handover.js"])) {
     vm.runInContext(source(file), context, { filename: file });
   }
   if (options.browserPersistence === true) {
@@ -303,6 +303,16 @@ async function createBrowserJourney(options = {}) {
     };
   }
   const environment = createBrowserEnvironment();
+  if (options.localJsonTarget === true && options.browserPersistence === true) {
+    b.setPocketFileSession({ name: "p104-local-source.json" }, "p104-local-source.json", {
+      ownerKind: "json", forceNewSession: true,
+    });
+    const localState = vm.runInContext("state", b);
+    const localLabel = options.localSentinel || "P104 LOCAL SOURCE";
+    localState.nodes = [{ id: "p104-local-source", label: localLabel, details: localLabel, children: [] }];
+    localState.tombstones = [];
+    localState.ops = [];
+  }
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
     accountService: bRemote.createAccountService({ transport: bTransport, now: () => now }),
     contentService: bRemote.createContentService({ transport: bTransport }), envelopeService: bRemote.createEnvelopeService({ transport: bTransport }),
@@ -1035,6 +1045,43 @@ test("P103 desktop Synced Pocket saves through exportTree and reopens the same d
   assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeSave);
   assert.doesNotMatch(JSON.stringify(journey.serviceDriver.snapshot()), new RegExp(`${remoteSentinel}|${firstEdit}|${secondEdit}`));
   assert.doesNotMatch(JSON.stringify(journey.remoteCalls), new RegExp(`${remoteSentinel}|${firstEdit}|${secondEdit}`));
+});
+
+test("P104 opens existing Synced truth over a clean local JSON without a refresh, and preserves that local truth if opening fails", async () => {
+  const remoteSentinel = "P104 EXISTING SYNCED TRUTH";
+  const localSentinel = "P104 LOCAL JSON TRUTH";
+  const opened = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    remoteSentinel, localJsonTarget: true, localSentinel,
+  });
+  const grantsBeforeOpen = opened.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  const before = opened.b.capturePocketFileSaveSession();
+  assert.equal(before.ownerKind, "json");
+  assert.equal(opened.b.hasPocketUnsavedChanges(), false);
+  assert.equal(opened.visible.some((node) => node.label === localSentinel), true);
+  assert.deepEqual(plain(await opened.openExisting()), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
+  });
+  assert.equal(opened.b.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(opened.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  assert.equal(opened.b.hasPocketUnsavedChanges(), false);
+  assert.equal(opened.visible.some((node) => node.label === remoteSentinel), true);
+  assert.equal(opened.visible.some((node) => node.label === localSentinel), false);
+  assert.equal(opened.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeOpen);
+
+  const failed = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    remoteSentinel, localJsonTarget: true, localSentinel,
+  });
+  const failedGrantsBefore = failed.remoteCalls.filter((call) => call.route === "addEnvelope").length;
+  failed.setServerDeviceInvalid(true);
+  const failedResult = await failed.openExisting();
+  assert.equal(failedResult.ok, false);
+  assert.equal(failed.b.capturePocketFileSaveSession().ownerKind, "json");
+  assert.equal(failed.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+  assert.equal(failed.visible.some((node) => node.label === localSentinel), true);
+  assert.equal(failed.b.hasPocketUnsavedChanges(), false);
+  assert.equal(failed.remoteCalls.filter((call) => call.route === "addEnvelope").length, failedGrantsBefore);
 });
 
 test("P052c production browser adoption keeps visible truth and authority coherent across final transition failures", async () => {

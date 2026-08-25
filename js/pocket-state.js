@@ -171,6 +171,7 @@ const el = {
   cmdCreateVault: document.getElementById("cmdCreateVault"),
   cmdExportVaultJson: document.getElementById("cmdExportVaultJson"),
   cmdSync: document.getElementById("cmdSync"),
+  cmdUseSyncedTruth: document.getElementById("cmdUseSyncedTruth"),
   cmdHealth: document.getElementById("cmdHealth"),
   cmdRestoreRecent: document.getElementById("cmdRestoreRecent"),
   cmdOpenPocket: document.getElementById("cmdOpenPocket"),

@@ -419,16 +419,15 @@
     function additionalTarget() {
       const session = typeof global.capturePocketFileSaveSession === "function"
         ? global.capturePocketFileSaveSession() : null;
-      if (!session || !["none", "detached"].includes(session.ownerKind)) return null;
+      if (!session || !["none", "detached", "json", "vault"].includes(session.ownerKind)) return null;
       return frozen({ ownerKind: session.ownerKind, continuityId: String(session.id) });
     }
 
     function additionalTargetCurrent(expected = null) {
       const target = additionalTarget();
       return !!target && (expected === null || (target.ownerKind === expected.ownerKind
-        && target.ownerKind === "none") || (target.ownerKind === expected.ownerKind
-        && [target.continuityId, `${target.ownerKind}:${target.continuityId}`]
-          .includes(expected.continuityId)));
+        && (target.ownerKind === "none" || [target.continuityId, `${target.ownerKind}:${target.continuityId}`]
+          .includes(expected.continuityId))));
     }
 
     function additionalTargetReplaceable(expected = null) {
@@ -520,22 +519,61 @@
       }); } catch (_error) { eligible = null; }
       if (!eligible?.ok || boundary.hasSyncedOwner?.() === true) return frozen({ ok: false });
       const norm = global.normaliseInput(input.payload);
-      const committed = global.commitPreparedPocketDocument(norm, {
+      const localRollback = ["json", "vault"].includes(captured.ownerKind)
+        && typeof global.capturePocketDocumentStateForAdoption === "function"
+        && typeof global.capturePocketFileOwnerForAdoption === "function"
+        ? {
+          document: global.capturePocketDocumentStateForAdoption(),
+          owner: global.capturePocketFileOwnerForAdoption(),
+        }
+        : null;
+      const restoreLocalTarget = () => {
+        if (!localRollback) return false;
+        try {
+          global.restorePocketDocumentStateAfterFailedAdoption?.(localRollback.document);
+          global.restorePocketFileOwnerAfterFailedAdoption?.(localRollback.owner);
+          global.refreshMeta?.();
+          global.renderTree?.();
+          global.refocusTreeNavigation?.(global.state?.selectedId || "");
+          return true;
+        } catch (_error) { return false; }
+      };
+      const commitOpenedPayload = () => global.commitPreparedPocketDocument(norm, {
         schema: norm.schema || "portal.export.v1", fileName: "Synced Pocket",
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
         detachedDeviceChanges: true, storagePrivate: "synced",
         canContinue: () => additionalTargetReplaceable(input.target) });
-      if (!committed?.ok) {
-        if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });
-        if (!additionalTargetReplaceable(input.target)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
-        return frozen({ ok: false });
+      if (!localRollback) {
+        const committed = commitOpenedPayload();
+        if (!committed?.ok) {
+          if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });
+          if (!additionalTargetReplaceable(input.target)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
+          return frozen({ ok: false });
+        }
+        const adopted = await syncedOwnerController.adoptSyncedOwner({
+          syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,
+        });
+        if (!adopted?.ok || boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
+          try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
+          return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
+        }
+        return frozen({ ok: true });
       }
       const adopted = await syncedOwnerController.adoptSyncedOwner({
         syncedPocketId: input.syncedPocketId, masterKey: input.masterKey,
       });
-      if (!adopted?.ok || boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
+      if (!adopted?.ok) return frozen({ ok: false });
+      const committed = commitOpenedPayload();
+      if (!committed?.ok) {
         try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
+        if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });
+        if (!additionalTargetReplaceable(input.target)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
+        return frozen({ ok: false });
+      }
+      if (boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
+        try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
+        restoreLocalTarget();
         return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
       }
       return frozen({ ok: true });
