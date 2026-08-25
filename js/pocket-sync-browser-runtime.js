@@ -430,6 +430,11 @@
           .includes(expected.continuityId))));
     }
 
+    function hasDirtyStandalonePe() {
+      try { return global.PocketNodePopoutWindow?.hasUnsavedChanges?.() === true; }
+      catch (_error) { return true; }
+    }
+
     function additionalTargetReplaceable(expected = null, discardTarget = null) {
       const target = additionalTarget();
       if (!target || (expected !== null && (target.ownerKind !== expected.ownerKind
@@ -437,6 +442,7 @@
             && ![target.continuityId, `${target.ownerKind}:${target.continuityId}`]
               .includes(expected.continuityId))))) return false;
       if (target.ownerKind === "none") return true;
+      if (["json", "vault"].includes(target.ownerKind) && hasDirtyStandalonePe()) return false;
       try {
         if (global.hasUnsavedDetailsEditorChanges?.() === true
             || global.hasUnsavedInlineTitleDraft?.() === true) return false;

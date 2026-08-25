@@ -66,10 +66,15 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   let session = { ownerKind, id: 1 };
   let dirty = options.dirty === true;
+  let peDirty = options.peDirty === true;
   let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let recoveryRestartCalls = 0; let discoveryCalls = 0; let saveSwitchCalls = 0; let discardSwitchCalls = 0; let resumeInput; let recoveryResumeInput; let recoveryRestartInput; let openInput; let resolveActivate; let resolveOpen; let resolveRecovery; let resolveDiscovery; let resolveSaveSwitch;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
     capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
+    PocketNodePopoutWindow: { hasUnsavedChanges() {
+      if (options.peSignalThrows === true) throw new Error("synthetic PE signal failure");
+      return peDirty;
+    } },
     requestAnimationFrame(callback) { callback(); }, addEventListener(type, listener) { events.set(type, listener); },
     closeCommandPalette() { context.paletteClosed = true; return options.paletteOpen === true; },
     isPocketVaultRecoveryFlowOpen() { return options.blocker === "recovery"; },
@@ -113,7 +118,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryRestartCalls() { return recoveryRestartCalls; }, get discoveryCalls() { return discoveryCalls; }, get saveSwitchCalls() { return saveSwitchCalls; }, get discardSwitchCalls() { return discardSwitchCalls; }, get openInput() { return openInput; }, get recoveryResumeInput() { return recoveryResumeInput; }, get recoveryRestartInput() { return recoveryRestartInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, get resolveDiscovery() { return resolveDiscovery; }, get resolveSaveSwitch() { return resolveSaveSwitch; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, setPeDirty(value) { peDirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryRestartCalls() { return recoveryRestartCalls; }, get discoveryCalls() { return discoveryCalls; }, get saveSwitchCalls() { return saveSwitchCalls; }, get discardSwitchCalls() { return discardSwitchCalls; }, get openInput() { return openInput; }, get recoveryResumeInput() { return recoveryResumeInput; }, get recoveryRestartInput() { return recoveryRestartInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, get resolveDiscovery() { return resolveDiscovery; }, get resolveSaveSwitch() { return resolveSaveSwitch; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -217,6 +222,30 @@ test("P104b discards only through a matching adoption permit, with no implicit s
   assert.equal(blocked.saveSwitchCalls, 0);
   assert.equal(blocked.openCalls, 0);
   assert.equal(blocked.overlay.hidden, false);
+});
+
+test("P104c blocks dirty standalone PE work before local Save, Discard, discovery, or Synced opening", async () => {
+  for (const [ownerKind, dirty] of [["json", false], ["json", true], ["vault", true]]) {
+    const harness = createUiHarness(ownerKind, { dirty, peDirty: true, discoveryResult: { ok: true } });
+    assert.equal(harness.topbar.hidden, false);
+    harness.topbar.fire("click");
+    assert.equal(harness.overlay.querySelector("h2").textContent, "Open editor changes");
+    assert.equal(harness.overlay.querySelector("#syncSetupBody").textContent,
+      "Save or close open editor windows before opening Synced Pocket.");
+    assert.equal(harness.overlay.querySelector(".vaultDialogPrimary").hidden, true);
+    assert.equal(harness.saveSwitchCalls, 0);
+    assert.equal(harness.discardSwitchCalls, 0);
+    assert.equal(harness.discoveryCalls, 0);
+    assert.equal(harness.openCalls, 0);
+    assert.equal(harness.recoveryCalls, 0);
+    harness.overlay.querySelector(".vaultDialogSecondary").fire("click");
+    assert.equal(harness.overlay.hidden, true);
+  }
+
+  const clean = createUiHarness("json", { peDirty: true });
+  clean.setPeDirty(false);
+  clean.topbar.fire("click");
+  assert.equal(clean.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "open");
 });
 
 test("P053a exposes fresh-device open directly and updates after an owner transition without a timer", async () => {

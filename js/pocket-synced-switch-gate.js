@@ -23,8 +23,9 @@
 
   function hasDraft() {
     try {
-      return global.hasUnsavedDetailsEditorChanges?.() === true
-        || global.hasUnsavedInlineTitleDraft?.() === true;
+      if (global.hasUnsavedDetailsEditorChanges?.() === true
+          || global.hasUnsavedInlineTitleDraft?.() === true) return true;
+      return global.PocketNodePopoutWindow?.hasUnsavedChanges?.() === true;
     } catch (_error) { return true; }
   }
 

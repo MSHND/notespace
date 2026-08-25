@@ -29,6 +29,7 @@ function recoveryRegistrationCredential() {
 function loadProduction(options = {}) {
   const storage = new Map(Object.entries(options.localStorageSeed || {}).map(([key, value]) => [String(key), String(value)]));
   const storageCalls = [];
+  let standalonePeDirty = options.standalonePeDirty === true;
   const document = {
     body: { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } } },
     activeElement: null,
@@ -50,6 +51,11 @@ function loadProduction(options = {}) {
     refreshMeta() {}, renderTree() {}, refocusTreeNavigation() {}, softlyEnsureSelectionVisible() {}, repairVisibleSelectionAfterRender() {},
     collapseAllNodes() {}, expandPathToNode() {}, focusRowByNodeId() {}, stopMovePadRepeat() {}, getExpandableIds() { return []; }, getPath(id) { return String(id || ""); },
     isDetailsEditorOpen() { return false; }, hasUnsavedDetailsEditorChanges() { return false; }, saveDetailsEditor() {}, flashSaveChip() {}, setStatus() {},
+    PocketNodePopoutWindow: { hasUnsavedChanges() {
+      if (options.standalonePeSignalThrows === true) throw new Error("synthetic PE signal failure");
+      return standalonePeDirty;
+    } },
+    __setStandalonePeDirty(value) { standalonePeDirty = value === true; },
     __localStorage: { values: storage, calls: storageCalls },
     btoa: (value) => Buffer.from(value, "binary").toString("base64"),
     atob: (value) => Buffer.from(value, "base64").toString("binary") };
@@ -135,6 +141,8 @@ async function createBrowserJourney(options = {}) {
   const b = loadProduction({
     browserPersistence: options.browserPersistence === true,
     captureSessionTransitions: options.captureSessionTransitions === true,
+    standalonePeDirty: options.standalonePeDirty === true,
+    standalonePeSignalThrows: options.standalonePeSignalThrows === true,
     localStorageSeed: options.localStorageSeed,
   });
   const serviceDriver = createMemoryServiceStore();
@@ -314,6 +322,13 @@ async function createBrowserJourney(options = {}) {
     localState.ops = [];
     if (options.localJsonDirty === true) b.recordOp({ type: "p104b-local-edit", id: "p104-local-source" });
   }
+  if (options.peDirtyBeforeCommit === true && options.browserPersistence === true) {
+    const commitPrepared = b.commitPreparedPocketDocument;
+    b.commitPreparedPocketDocument = (...input) => {
+      b.__setStandalonePeDirty(true);
+      return commitPrepared(...input);
+    };
+  }
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
     accountService: bRemote.createAccountService({ transport: bTransport, now: () => now }),
     contentService: bRemote.createContentService({ transport: bTransport }), envelopeService: bRemote.createEnvelopeService({ transport: bTransport }),
@@ -330,6 +345,7 @@ async function createBrowserJourney(options = {}) {
       installFails = false; ownerAdoptionFailsAfterCommit = false; idb.setBeforeRead(null); }, setPrfUnavailable(value) { prfUnavailable = value === true; },
     setDetachedDirty(value) { detachedDirty = value === true; }, setDirtyBeforeCommit(value) { dirtyBeforeCommit = value === true; },
     setDirtySignalThrows(value) { dirtySignalThrows = value === true; },
+    setStandalonePeDirty(value) { b.__setStandalonePeDirty(value); },
     setReadRevisionFailure(value) { failReadRevision = value === true; },
     setServerDeviceInvalid(value) { serverDeviceInvalid = value === true; },
     get ownerKind() { return options.browserPersistence === true ? b.capturePocketFileSaveSession().ownerKind : ownerKind; },
@@ -1116,6 +1132,54 @@ test("P104b allows an explicit matching dirty-JSON discard permit only for the t
   assert.equal(failed.b.capturePocketFileSaveSession().ownerKind, "json");
   assert.equal(failed.b.hasPocketUnsavedChanges(), true);
   assert.equal(failed.visible.some((node) => node.label === localSentinel), true);
+});
+
+test("P104c rejects dirty standalone PE work before replacement, including an otherwise valid discard permit", async () => {
+  const localSentinel = "P104c LOCAL JSON";
+  for (const localJsonDirty of [false, true]) {
+    const journey = await createBrowserJourney({
+      browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+      localJsonTarget: true, localJsonDirty, localSentinel, standalonePeDirty: true,
+    });
+    const before = journey.b.capturePocketFileSaveSession();
+    const callsBefore = journey.remoteCalls.length;
+    const input = localJsonDirty ? { discardTarget: { ownerKind: "json", continuityId: String(before.id) } } : undefined;
+    const rejected = await journey.openExisting(input);
+    assert.equal(rejected.reason, "additional-device-target-dirty");
+    assert.equal(journey.remoteCalls.length, callsBefore);
+    assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "json");
+    assert.equal(journey.b.hasPocketUnsavedChanges(), localJsonDirty);
+    assert.equal(journey.visible.some((node) => node.label === localSentinel), true);
+  }
+  const failedSignal = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    localJsonTarget: true, localSentinel, standalonePeSignalThrows: true,
+  });
+  assert.equal((await failedSignal.openExisting()).reason, "additional-device-target-dirty");
+  assert.equal(failedSignal.b.capturePocketFileSaveSession().ownerKind, "json");
+
+  const vault = await createBrowserJourney({ ownerKind: "vault", skipOpenExisting: true, standalonePeDirty: true });
+  const vaultCallsBefore = vault.remoteCalls.length;
+  assert.equal((await vault.openExisting()).reason, "additional-device-target-dirty");
+  assert.equal(vault.ownerKind, "vault");
+  assert.equal(vault.commits, 0);
+  assert.equal(vault.remoteCalls.length, vaultCallsBefore);
+});
+
+test("P104c fails closed when standalone PE work becomes dirty before the final local replacement", async () => {
+  const localSentinel = "P104c RACE LOCAL JSON";
+  const journey = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    localJsonTarget: true, localJsonDirty: true, localSentinel, peDirtyBeforeCommit: true,
+  });
+  const before = journey.b.capturePocketFileSaveSession();
+  const rejected = await journey.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(before.id),
+  } });
+  assert.equal(rejected.reason, "additional-device-target-dirty");
+  assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "json");
+  assert.equal(journey.b.hasPocketUnsavedChanges(), true);
+  assert.equal(journey.visible.some((node) => node.label === localSentinel), true);
 });
 
 test("P104a persists canonical selected truth through the existing Synced owner and reopens it as an ordinary healthy Pocket", async () => {

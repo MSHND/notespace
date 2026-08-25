@@ -11,6 +11,7 @@ const GATE_PATH = path.join(ROOT, "js/pocket-synced-switch-gate.js");
 
 function createGate(ownerKind = "json", options = {}) {
   let dirty = true;
+  let peDirty = options.peDirty === true;
   let session = { ownerKind, id: 42, vaultSessionId: ownerKind === "vault" ? "vault-session" : "" };
   let saves = 0;
   const context = {
@@ -19,6 +20,10 @@ function createGate(ownerKind = "json", options = {}) {
     hasPocketUnsavedChanges() { return dirty; },
     hasUnsavedDetailsEditorChanges() { return options.detailsDraft === true; },
     hasUnsavedInlineTitleDraft() { return options.inlineDraft === true; },
+    PocketNodePopoutWindow: { hasUnsavedChanges() {
+      if (options.peSignalThrows === true) throw new Error("synthetic PE signal failure");
+      return peDirty;
+    } },
     async exportTree(input) {
       saves += 1;
       assert.deepEqual(JSON.parse(JSON.stringify(input)), { returnDetails: true, downloadFallback: false });
@@ -31,7 +36,7 @@ function createGate(ownerKind = "json", options = {}) {
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(GATE_PATH, "utf8"), context, { filename: "pocket-synced-switch-gate.js" });
-  return { gate: context.PocketSyncedSwitchGate, setDirty(value) { dirty = value; }, setSession(value) { session = value; }, get saves() { return saves; } };
+  return { gate: context.PocketSyncedSwitchGate, setDirty(value) { dirty = value; }, setPeDirty(value) { peDirty = value; }, setSession(value) { session = value; }, get saves() { return saves; } };
 }
 
 test("P104b delegates JSON and Vault Save to the active owner and verifies its completed clean state", async () => {
@@ -58,4 +63,22 @@ test("P104b refuses discard and Save around editor drafts or a changed local ses
   assert.equal(stale.gate.discardPermit(staleTarget), null);
   assert.deepEqual(JSON.parse(JSON.stringify(await stale.gate.save(staleTarget))), { ok: false, reason: "source-session-changed" });
   assert.equal(stale.saves, 0);
+});
+
+test("P104c treats dirty standalone PE work as an unsafe draft for JSON and Vault owners", async () => {
+  for (const ownerKind of ["json", "vault"]) {
+    const harness = createGate(ownerKind, { peDirty: true });
+    const target = harness.gate.capture();
+    assert.equal(harness.gate.discardPermit(target), null);
+    assert.deepEqual(JSON.parse(JSON.stringify(await harness.gate.save(target))),
+      { ok: false, reason: "editor-draft-active" });
+    assert.equal(harness.saves, 0);
+    harness.setPeDirty(false);
+    assert.notEqual(harness.gate.discardPermit(target), null);
+  }
+
+  const failedSignal = createGate("json", { peSignalThrows: true });
+  const target = failedSignal.gate.capture();
+  assert.equal(failedSignal.gate.discardPermit(target), null);
+  assert.equal(failedSignal.saves, 0);
 });

@@ -122,6 +122,10 @@
       if (!session || !["json", "vault"].includes(session.ownerKind)) return false;
       try { return global.hasPocketUnsavedChanges?.() === true; } catch (_error) { return true; }
     }
+    function dirtyStandalonePe() {
+      try { return global.PocketNodePopoutWindow?.hasUnsavedChanges?.() === true; }
+      catch (_error) { return true; }
+    }
     function hasRecovery() {
       return typeof integration.recoverExisting === "function"
         && typeof integration.resumeRecovery === "function";
@@ -176,6 +180,10 @@
         title.textContent = "Save local changes?";
         body.textContent = "Save these local changes before opening Synced Pocket, discard them only if the switch succeeds, or cancel.";
         primary.textContent = "Save and open Synced Pocket";
+      } else if (mode === "pe-blocked") {
+        title.textContent = "Open editor changes";
+        body.textContent = "Save or close open editor windows before opening Synced Pocket.";
+        primary.hidden = true;
       } else if (mode === "recovery") {
         title.textContent = "Use recovery copy";
         body.textContent = "Pocket will ask for your saved Recovery Copy, create a passkey for this device, then ask where to save the replacement Recovery Copy.";
@@ -341,6 +349,10 @@
       if (discovering) return;
       const session = owner();
       if (eligibleOpen(session) && (intent === "open" || !eligibleActivation(session))) {
+        if (["json", "vault"].includes(session?.ownerKind) && dirtyStandalonePe()) {
+          show("pe-blocked");
+          return;
+        }
         if (dirtyLocal(session)) {
           const target = integration.captureSwitchTarget?.();
           if (!target || target.ownerKind !== session.ownerKind || target.id !== session.id || !show("switch")) return;
