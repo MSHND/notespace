@@ -85,9 +85,24 @@
       catch (_error) { return safeFailure("activation-unavailable"); }
     }
 
-    async function openExisting() {
-      try { return remember(await runtime.openExisting()); }
+    async function openExisting(input) {
+      try { return remember(await runtime.openExisting(input)); }
       catch (_error) { return safeFailure("additional-device-unavailable"); }
+    }
+
+    function captureSwitchTarget() {
+      try { return global.PocketSyncedSwitchGate?.capture?.() || null; }
+      catch (_error) { return null; }
+    }
+
+    async function saveSwitchTarget(target) {
+      try { return await global.PocketSyncedSwitchGate?.save?.(target) || safeFailure("save-unavailable"); }
+      catch (_error) { return safeFailure("save-failed"); }
+    }
+
+    function discardSwitchTarget(target) {
+      try { return global.PocketSyncedSwitchGate?.discardPermit?.(target) || null; }
+      catch (_error) { return null; }
     }
 
     async function recoverExisting() {
@@ -158,7 +173,8 @@
     }
 
     const integration = frozen({
-      activate, resume, openExisting, recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip,
+      activate, resume, openExisting, captureSwitchTarget, saveSwitchTarget, discardSwitchTarget,
+      recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip,
     });
     try { global.PocketSyncUi?.install?.(integration); } catch (_error) {}
     return integration;

@@ -63,13 +63,16 @@
       return result?.resumable === true && reason !== "recovery-required"
         ? `${copy} Continue recovery will retry this same recovery attempt.` : copy;
     }
-    if (result?.sourceOwnerPreserved !== true) {
-      return "Sync setup could not finish. Check Storage & Sync before continuing.";
-    }
     if (["additional-device-target-dirty", "source-has-unsaved-changes"].includes(reason)) {
       return "Pocket has changes that need attention before Sync can continue.";
     }
+    if (["editor-draft-active", "save-failed", "save-unavailable", "source-still-dirty"].includes(reason)) {
+      return "Pocket could not confirm local changes were saved. Synced Pocket was not opened.";
+    }
     if (reason === "source-session-changed") return "This Pocket changed while setup was running. Nothing was switched.";
+    if (result?.sourceOwnerPreserved !== true) {
+      return "Sync setup could not finish. Check Storage & Sync before continuing.";
+    }
     if (["recovery-copy-destination-deferred", "source-save-cancelled"].includes(reason)) return "Setup was cancelled. Your current Pocket is unchanged.";
     return "Sync setup could not finish. Your current Pocket is unchanged.";
   }
@@ -88,6 +91,8 @@
     let continuation = null;
     let restartEligible = false;
     let returnFocus = null;
+    let switchTarget = null;
+    let openExistingInput = null;
 
     const overlay = document.createElement("div");
     overlay.className = "vaultDialogOverlay";
@@ -110,7 +115,12 @@
     function eligibleOpen(session) {
       if (!session || !["none", "detached", "json", "vault"].includes(session.ownerKind)) return false;
       if (session.ownerKind === "none") return true;
+      if (["json", "vault"].includes(session.ownerKind)) return true;
       try { return global.hasPocketUnsavedChanges?.() === false; } catch (_error) { return false; }
+    }
+    function dirtyLocal(session) {
+      if (!session || !["json", "vault"].includes(session.ownerKind)) return false;
+      try { return global.hasPocketUnsavedChanges?.() === true; } catch (_error) { return true; }
     }
     function hasRecovery() {
       return typeof integration.recoverExisting === "function"
@@ -142,6 +152,8 @@
       overlay.hidden = true;
       continuation = null;
       restartEligible = false;
+      switchTarget = null;
+      openExistingInput = null;
       returnFocus?.focus?.({ preventScroll: true });
       return true;
     }
@@ -160,6 +172,10 @@
         title.textContent = "Open synced Pocket";
         body.textContent = "Open the encrypted Pocket already linked to your passkey on this device.";
         primary.textContent = "Open synced Pocket";
+      } else if (mode === "switch") {
+        title.textContent = "Save local changes?";
+        body.textContent = "Save these local changes before opening Synced Pocket, discard them only if the switch succeeds, or cancel.";
+        primary.textContent = "Save and open Synced Pocket";
       } else if (mode === "recovery") {
         title.textContent = "Use recovery copy";
         body.textContent = "Pocket will ask for your saved Recovery Copy, create a passkey for this device, then ask where to save the replacement Recovery Copy.";
@@ -189,7 +205,8 @@
         primary.textContent = "Turn on Sync";
       }
       primary.dataset.mode = mode;
-      recovery.hidden = mode !== "open" || !hasRecovery();
+      recovery.hidden = mode === "switch" ? false : mode !== "open" || !hasRecovery();
+      recovery.textContent = mode === "switch" ? "Discard and open Synced Pocket" : "Use recovery copy…";
       cancel.hidden = false;
       global.requestAnimationFrame?.(() => primary.focus({ preventScroll: true }));
       return true;
@@ -198,6 +215,7 @@
       if (busy || discovering || ["recovery-discovery", "recovery-attention"].includes(mode)) return;
       busy = true;
       primary.disabled = true;
+      recovery.disabled = true;
       cancel.disabled = true;
       restart.disabled = true;
       status.textContent = mode === "open" ? "Opening synced Pocket…"
@@ -205,7 +223,7 @@
           : mode.startsWith("recovery") ? "Recovering synced Pocket…" : "Setting up Sync…";
       let result;
       try {
-        result = mode === "open" ? await integration.openExisting()
+        result = mode === "open" ? await integration.openExisting(openExistingInput || undefined)
           : mode === "continue" ? await integration.resume({ activationId: continuation })
             : mode === "recovery-continue" ? await integration.resumeRecovery({ recoveryAttemptId: continuation })
               : mode === "recovery-restart" ? await integration.restartLegacyRecovery({ recoveryAttemptId: continuation })
@@ -213,6 +231,7 @@
       } catch (_error) { result = { ok: false, reason: "sync-unavailable" }; }
       busy = false;
       primary.disabled = false;
+      recovery.disabled = false;
       cancel.disabled = false;
       restart.disabled = false;
       if (result?.ok === true && result?.recoveryRestarted === true) {
@@ -251,48 +270,98 @@
       status.textContent = message(result);
       refresh();
     }
+    async function resolveDirtySwitch(decision) {
+      if (busy || discovering || !switchTarget) return;
+      busy = true;
+      primary.disabled = true;
+      recovery.disabled = true;
+      cancel.disabled = true;
+      status.textContent = decision === "save" ? "Saving local changes…" : "Preparing to open Synced Pocket…";
+      let result;
+      try {
+        if (decision === "save") result = await integration.saveSwitchTarget?.(switchTarget);
+        else {
+          const discardTarget = integration.discardSwitchTarget?.(switchTarget);
+          result = discardTarget ? { ok: true, discardTarget } : { ok: false, reason: "additional-device-target-dirty" };
+        }
+      } catch (_error) { result = { ok: false, reason: decision === "save" ? "save-failed" : "additional-device-target-dirty" }; }
+      busy = false;
+      primary.disabled = false;
+      recovery.disabled = false;
+      cancel.disabled = false;
+      if (result?.ok !== true) {
+        status.textContent = message(result);
+        refresh();
+        return;
+      }
+      const current = owner();
+      if (!current || current.ownerKind !== switchTarget.ownerKind || current.id !== switchTarget.id) {
+        status.textContent = message({ ok: false, reason: "source-session-changed" });
+        refresh();
+        return;
+      }
+      openExistingInput = decision === "discard" ? { discardTarget: result.discardTarget } : null;
+      switchTarget = null;
+      beginExistingOpen(current);
+    }
+    function beginExistingOpen(session) {
+      if (typeof integration.findRecoveryAttempt !== "function") {
+        show("open");
+        return;
+      }
+      if (!show("recovery-discovery")) return;
+      discovering = true;
+      refresh();
+      const version = ++discoveryVersion;
+      void (async () => {
+        let found;
+        try { found = await integration.findRecoveryAttempt(); }
+        catch (_error) { found = { ok: false, reason: "recovery-discovery-needs-attention" }; }
+        const current = owner();
+        if (version !== discoveryVersion || overlay.hidden || busy || !eligibleOpen(current)
+            || current?.ownerKind !== session.ownerKind || current?.id !== session.id) return;
+        discovering = false;
+        if (found?.ok === true && typeof found.recoveryAttemptId === "string") {
+          restartEligible = false;
+          continuation = found.recoveryAttemptId;
+          show("recovery-continue");
+        } else if (found?.ok === true) {
+          restartEligible = false;
+          show("open");
+        } else {
+          continuation = found?.restartable === true && typeof found?.recoveryAttemptId === "string"
+            ? found.recoveryAttemptId : null;
+          restartEligible = found?.restartable === true;
+          show("recovery-attention");
+          status.textContent = message(found);
+        }
+      })();
+    }
     function begin(intent = "default") {
       if (discovering) return;
       const session = owner();
       if (eligibleOpen(session) && (intent === "open" || !eligibleActivation(session))) {
-        if (typeof integration.findRecoveryAttempt !== "function") {
-          show("open");
+        if (dirtyLocal(session)) {
+          const target = integration.captureSwitchTarget?.();
+          if (!target || target.ownerKind !== session.ownerKind || target.id !== session.id || !show("switch")) return;
+          switchTarget = target;
           return;
         }
-        if (!show("recovery-discovery")) return;
-        discovering = true;
-        refresh();
-        const version = ++discoveryVersion;
-        void (async () => {
-          let found;
-          try { found = await integration.findRecoveryAttempt(); }
-          catch (_error) { found = { ok: false, reason: "recovery-discovery-needs-attention" }; }
-          const current = owner();
-          if (version !== discoveryVersion || overlay.hidden || busy || !eligibleOpen(current)
-              || current?.ownerKind !== session.ownerKind || current?.id !== session.id) return;
-          discovering = false;
-          if (found?.ok === true && typeof found.recoveryAttemptId === "string") {
-            restartEligible = false;
-            continuation = found.recoveryAttemptId;
-            show("recovery-continue");
-          } else if (found?.ok === true) {
-            restartEligible = false;
-            show("open");
-          } else if (found?.ok !== true) {
-            continuation = found?.restartable === true && typeof found?.recoveryAttemptId === "string"
-              ? found.recoveryAttemptId : null;
-            restartEligible = found?.restartable === true;
-            show("recovery-attention");
-            status.textContent = message(found);
-          }
-        })();
+        openExistingInput = null;
+        beginExistingOpen(session);
       }
       else if (eligibleActivation(session)) show(continuation ? "continue" : "activate");
     }
     button.addEventListener("click", () => begin("default"));
     topbarButton.addEventListener("click", () => begin("open"));
-    primary.addEventListener("click", () => void run(primary.dataset.mode));
-    recovery.addEventListener("click", () => { if (!busy && !discovering && eligibleOpen(owner())) show("recovery"); });
+    primary.addEventListener("click", () => {
+      if (primary.dataset.mode === "switch") void resolveDirtySwitch("save");
+      else void run(primary.dataset.mode);
+    });
+    recovery.addEventListener("click", () => {
+      if (primary.dataset.mode === "switch") void resolveDirtySwitch("discard");
+      else if (!busy && !discovering && eligibleOpen(owner())) show("recovery");
+    });
     restart.addEventListener("click", () => void run("recovery-restart"));
     cancel.addEventListener("click", close);
     document.addEventListener("keydown", (event) => {

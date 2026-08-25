@@ -312,6 +312,7 @@ async function createBrowserJourney(options = {}) {
     localState.nodes = [{ id: "p104-local-source", label: localLabel, details: localLabel, children: [] }];
     localState.tombstones = [];
     localState.ops = [];
+    if (options.localJsonDirty === true) b.recordOp({ type: "p104b-local-edit", id: "p104-local-source" });
   }
   const runtime = b.PocketSyncBrowserRuntime.createRuntime({
     accountService: bRemote.createAccountService({ transport: bTransport, now: () => now }),
@@ -325,7 +326,7 @@ async function createBrowserJourney(options = {}) {
     readRemoteRevision: () => bRemote.createContentService({ transport: bTransport }).readRevision({
       apiVersion: 1, operationId: "p052h2-read-revision", syncedPocketId: "pocket-p052c-browser",
     }),
-    openExisting: () => runtime.openExisting(), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
+    openExisting: (input) => runtime.openExisting(input), clearFaults() { targetChangesBeforeCommit = false; commitFails = false;
       installFails = false; ownerAdoptionFailsAfterCommit = false; idb.setBeforeRead(null); }, setPrfUnavailable(value) { prfUnavailable = value === true; },
     setDetachedDirty(value) { detachedDirty = value === true; }, setDirtyBeforeCommit(value) { dirtyBeforeCommit = value === true; },
     setDirtySignalThrows(value) { dirtySignalThrows = value === true; },
@@ -1059,6 +1060,9 @@ test("P104 opens existing Synced truth over a clean local JSON without a refresh
   assert.equal(before.ownerKind, "json");
   assert.equal(opened.b.hasPocketUnsavedChanges(), false);
   assert.equal(opened.visible.some((node) => node.label === localSentinel), true);
+  assert.equal((await opened.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(before.id),
+  } })).reason, "additional-device-target-dirty");
   assert.deepEqual(plain(await opened.openExisting()), {
     ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
   });
@@ -1082,6 +1086,36 @@ test("P104 opens existing Synced truth over a clean local JSON without a refresh
   assert.equal(failed.visible.some((node) => node.label === localSentinel), true);
   assert.equal(failed.b.hasPocketUnsavedChanges(), false);
   assert.equal(failed.remoteCalls.filter((call) => call.route === "addEnvelope").length, failedGrantsBefore);
+});
+
+test("P104b allows an explicit matching dirty-JSON discard permit only for the transactional Synced adoption", async () => {
+  const remoteSentinel = "P104b EXISTING SYNCED TRUTH";
+  const localSentinel = "P104b DIRTY LOCAL JSON";
+  const opened = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    remoteSentinel, localJsonTarget: true, localJsonDirty: true, localSentinel,
+  });
+  const before = opened.b.capturePocketFileSaveSession();
+  assert.equal(opened.b.hasPocketUnsavedChanges(), true);
+  assert.deepEqual(plain(await opened.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(before.id),
+  } })), { ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1 });
+  assert.equal(opened.b.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(opened.visible.some((node) => node.label === remoteSentinel), true);
+
+  const failed = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    remoteSentinel, localJsonTarget: true, localJsonDirty: true, localSentinel,
+  });
+  const failedBefore = failed.b.capturePocketFileSaveSession();
+  failed.setServerDeviceInvalid(true);
+  const rejected = await failed.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(failedBefore.id),
+  } });
+  assert.equal(rejected.ok, false);
+  assert.equal(failed.b.capturePocketFileSaveSession().ownerKind, "json");
+  assert.equal(failed.b.hasPocketUnsavedChanges(), true);
+  assert.equal(failed.visible.some((node) => node.label === localSentinel), true);
 });
 
 test("P104a persists canonical selected truth through the existing Synced owner and reopens it as an ordinary healthy Pocket", async () => {

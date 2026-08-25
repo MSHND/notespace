@@ -18,7 +18,7 @@ test("P053 leaves static Pocket inert and keeps the Sync doorway provider-neutra
   assert.doesNotMatch(index, /pocket-sync-local-integration\.js/);
   assert.doesNotMatch(ui, /localStorage|sessionStorage|fetch\(|accountLocator|syncedPocketId|credentialId|deviceId/);
   assert.match(ui, /integration\.activate\(\)/);
-  assert.match(ui, /integration\.openExisting\(\)/);
+  assert.match(ui, /integration\.openExisting\(openExistingInput \|\| undefined\)/);
   assert.match(ui, /integration\.resume\(\{ activationId: continuation \}\)/);
   assert.doesNotMatch(ui, /setInterval|setTimeout|MutationObserver/);
 });
@@ -66,7 +66,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   let session = { ownerKind, id: 1 };
   let dirty = options.dirty === true;
-  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let recoveryRestartCalls = 0; let discoveryCalls = 0; let resumeInput; let recoveryResumeInput; let recoveryRestartInput; let resolveActivate; let resolveOpen; let resolveRecovery; let resolveDiscovery;
+  let activateCalls = 0; let openCalls = 0; let resumeCalls = 0; let recoveryCalls = 0; let recoveryResumeCalls = 0; let recoveryRestartCalls = 0; let discoveryCalls = 0; let saveSwitchCalls = 0; let discardSwitchCalls = 0; let resumeInput; let recoveryResumeInput; let recoveryRestartInput; let openInput; let resolveActivate; let resolveOpen; let resolveRecovery; let resolveDiscovery; let resolveSaveSwitch;
   const context = {
     Object, Array, String, Boolean, Error, Promise, HTMLButtonElement: Button, HTMLElement: Element, document,
     capturePocketFileSaveSession() { return session; }, hasPocketUnsavedChanges() { return dirty; },
@@ -82,7 +82,20 @@ function createUiHarness(ownerKind = "json", options = {}) {
   vm.runInContext(fs.readFileSync(UI_PATH, "utf8"), context, { filename: "pocket-sync-ui.js" });
   const integration = {
     activate() { activateCalls += 1; return new Promise((resolve) => { resolveActivate = resolve; }); },
-    openExisting() { openCalls += 1; return options.holdOpen ? new Promise((resolve) => { resolveOpen = resolve; }) : Promise.resolve({ ok: true }); },
+    openExisting(input) { openCalls += 1; openInput = input; return options.holdOpen ? new Promise((resolve) => { resolveOpen = resolve; }) : Promise.resolve({ ok: true }); },
+    captureSwitchTarget() { return options.captureSwitchTarget === false ? null : { ownerKind: session.ownerKind, id: session.id, vaultSessionId: session.vaultSessionId || "" }; },
+    saveSwitchTarget(target) {
+      saveSwitchCalls += 1;
+      if (options.saveSwitchPending === true) return new Promise((resolve) => { resolveSaveSwitch = resolve; });
+      if (options.saveSwitchResult) return Promise.resolve(options.saveSwitchResult);
+      dirty = false;
+      return Promise.resolve({ ok: true, target });
+    },
+    discardSwitchTarget(target) {
+      discardSwitchCalls += 1;
+      return options.discardSwitchResult === null ? null
+        : (options.discardSwitchResult || { ownerKind: target.ownerKind, continuityId: String(target.id) });
+    },
     resume(input) { resumeCalls += 1; resumeInput = input; return Promise.resolve({ ok: false }); },
     ...(options.recovery === false ? {} : {
       recoverExisting() { recoveryCalls += 1; return new Promise((resolve) => { resolveRecovery = resolve; }); },
@@ -100,7 +113,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
   };
   assert.equal(context.PocketSyncUi.install(integration), true);
   return { context, command, topbar, source, overlay: document.body.children[0], integration,
-    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryRestartCalls() { return recoveryRestartCalls; }, get discoveryCalls() { return discoveryCalls; }, get recoveryResumeInput() { return recoveryResumeInput; }, get recoveryRestartInput() { return recoveryRestartInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, get resolveDiscovery() { return resolveDiscovery; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
+    setSession(value) { session = value; }, setDirty(value) { dirty = value; }, get activateCalls() { return activateCalls; }, get openCalls() { return openCalls; }, get resumeCalls() { return resumeCalls; }, get recoveryCalls() { return recoveryCalls; }, get recoveryResumeCalls() { return recoveryResumeCalls; }, get recoveryRestartCalls() { return recoveryRestartCalls; }, get discoveryCalls() { return discoveryCalls; }, get saveSwitchCalls() { return saveSwitchCalls; }, get discardSwitchCalls() { return discardSwitchCalls; }, get openInput() { return openInput; }, get recoveryResumeInput() { return recoveryResumeInput; }, get recoveryRestartInput() { return recoveryRestartInput; }, get resumeInput() { return resumeInput; }, get resolveActivate() { return resolveActivate; }, get resolveOpen() { return resolveOpen; }, get resolveRecovery() { return resolveRecovery; }, get resolveDiscovery() { return resolveDiscovery; }, get resolveSaveSwitch() { return resolveSaveSwitch; }, event(name, input = {}) { return events.get(name)?.({ preventDefault() {}, key: "", ...input }); }, more };
 }
 
 test("P053a gives JSON owners explicit consent, closes More, and single-flights activation", async () => {
@@ -133,9 +146,77 @@ test("P104 opens existing Synced truth from a clean local Pocket without changin
   assert.equal(clean.activateCalls, 0);
 
   const dirty = createUiHarness("json", { dirty: true });
-  assert.equal(dirty.topbar.hidden, true);
+  assert.equal(dirty.topbar.hidden, false);
   dirty.topbar.fire("click");
+  assert.equal(dirty.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "switch");
   assert.equal(dirty.openCalls, 0);
+});
+
+test("P104b keeps JSON and Vault opening reachable while dirty, and Cancel leaves both owners untouched", async () => {
+  for (const ownerKind of ["json", "vault"]) {
+    const harness = createUiHarness(ownerKind, { dirty: true });
+    assert.equal(harness.topbar.hidden, false);
+    harness.topbar.fire("click");
+    assert.equal(harness.overlay.querySelector("h2").textContent, "Save local changes?");
+    harness.overlay.querySelector(".vaultDialogSecondary").fire("click");
+    await Promise.resolve();
+    assert.equal(harness.overlay.hidden, true);
+    assert.equal(harness.saveSwitchCalls, 0);
+    assert.equal(harness.discardSwitchCalls, 0);
+    assert.equal(harness.openCalls, 0);
+  }
+});
+
+test("P104b saves through the active owner before opening, and cannot open after a failed or stale save", async () => {
+  const saved = createUiHarness("json", { dirty: true, saveSwitchPending: true });
+  saved.topbar.fire("click");
+  saved.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  assert.equal(saved.saveSwitchCalls, 1);
+  assert.equal(saved.openCalls, 0);
+  saved.setDirty(false);
+  saved.resolveSaveSwitch({ ok: true });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  saved.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(saved.openCalls, 1);
+  assert.equal(saved.openInput, undefined);
+
+  const failed = createUiHarness("vault", { dirty: true, saveSwitchResult: { ok: false, reason: "save-failed" } });
+  failed.topbar.fire("click");
+  failed.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(failed.openCalls, 0);
+  assert.equal(failed.overlay.hidden, false);
+
+  const stale = createUiHarness("json", { dirty: true });
+  stale.topbar.fire("click");
+  stale.setSession({ ownerKind: "json", id: 2 });
+  stale.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(stale.openCalls, 0);
+  assert.equal(stale.overlay.querySelector("#syncSetupStatus").textContent,
+    "This Pocket changed while setup was running. Nothing was switched.");
+});
+
+test("P104b discards only through a matching adoption permit, with no implicit save", async () => {
+  const success = createUiHarness("json", { dirty: true });
+  success.topbar.fire("click");
+  success.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(success.saveSwitchCalls, 0);
+  assert.equal(success.discardSwitchCalls, 1);
+  success.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(success.openCalls, 1);
+  assert.equal(JSON.stringify(success.openInput), '{"discardTarget":{"ownerKind":"json","continuityId":"1"}}');
+
+  const blocked = createUiHarness("vault", { dirty: true, discardSwitchResult: null });
+  blocked.topbar.fire("click");
+  blocked.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(blocked.saveSwitchCalls, 0);
+  assert.equal(blocked.openCalls, 0);
+  assert.equal(blocked.overlay.hidden, false);
 });
 
 test("P053a exposes fresh-device open directly and updates after an owner transition without a timer", async () => {

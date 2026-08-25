@@ -430,13 +430,19 @@
           .includes(expected.continuityId))));
     }
 
-    function additionalTargetReplaceable(expected = null) {
+    function additionalTargetReplaceable(expected = null, discardTarget = null) {
       const target = additionalTarget();
       if (!target || (expected !== null && (target.ownerKind !== expected.ownerKind
           || (target.ownerKind !== "none"
             && ![target.continuityId, `${target.ownerKind}:${target.continuityId}`]
               .includes(expected.continuityId))))) return false;
       if (target.ownerKind === "none") return true;
+      try {
+        if (global.hasUnsavedDetailsEditorChanges?.() === true
+            || global.hasUnsavedInlineTitleDraft?.() === true) return false;
+      } catch (_error) { return false; }
+      if (discardTarget && ["json", "vault"].includes(target.ownerKind)
+          && additionalTargetCurrent(discardTarget)) return true;
       try {
         return typeof global.hasPocketUnsavedChanges === "function"
           && global.hasPocketUnsavedChanges() === false;
@@ -506,7 +512,7 @@
       return frozen({ ok: true });
     }
 
-    async function adoptAdditionalDevice(input) {
+    async function adoptAdditionalDevice(input, discardTarget = null) {
       const captured = additionalTarget();
       if (!captured || typeof global.normaliseInput !== "function"
           || typeof global.commitPreparedPocketDocument !== "function"
@@ -543,12 +549,12 @@
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
         detachedDeviceChanges: true, storagePrivate: "synced",
-        canContinue: () => additionalTargetReplaceable(input.target) });
+        canContinue: () => additionalTargetReplaceable(input.target, discardTarget) });
       if (!localRollback) {
         const committed = commitOpenedPayload();
         if (!committed?.ok) {
           if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });
-          if (!additionalTargetReplaceable(input.target)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
+          if (!additionalTargetReplaceable(input.target, discardTarget)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
           return frozen({ ok: false });
         }
         const adopted = await syncedOwnerController.adoptSyncedOwner({
@@ -568,7 +574,7 @@
       if (!committed?.ok) {
         try { syncedOwnerController.releaseSyncedOwner(); } catch (_error) {}
         if (!additionalTargetCurrent(input.target)) return frozen({ ok: false, reason: "additional-device-target-stale" });
-        if (!additionalTargetReplaceable(input.target)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
+        if (!additionalTargetReplaceable(input.target, discardTarget)) return frozen({ ok: false, reason: "additional-device-target-dirty" });
         return frozen({ ok: false });
       }
       if (boundary.installSyncedOwnerForSave(syncedOwnerController) !== true) {
@@ -633,13 +639,30 @@
       return orchestrator.resume(dependenciesFor(snapshot), { activationId: input.activationId });
     }
 
-    async function openExisting() {
+    async function openExisting(input = {}) {
       if (!additionalApi || typeof additionalApi.createAdditionalDeviceOpener !== "function") {
         return safeFailure("additional-device-unavailable");
       }
       try { requireMethods(config.discoveryService, ["readSyncedPocket"], "discovery-service-invalid"); }
       catch (_error) { return safeFailure("additional-device-unavailable"); }
-      if (!additionalTargetReplaceable()) return safeFailure("additional-device-target-dirty");
+      if (!input || typeof input !== "object" || Array.isArray(input)
+          || Object.keys(input).some((field) => field !== "discardTarget")) {
+        return safeFailure("additional-device-target-dirty");
+      }
+      const requestedDiscard = input.discardTarget || null;
+      const discardTarget = requestedDiscard
+        && ["json", "vault"].includes(requestedDiscard.ownerKind)
+        && typeof requestedDiscard.continuityId === "string"
+        && additionalTargetCurrent(requestedDiscard)
+        ? frozen({ ownerKind: requestedDiscard.ownerKind, continuityId: requestedDiscard.continuityId })
+        : null;
+      if (requestedDiscard && !discardTarget) return safeFailure("additional-device-target-dirty");
+      if (discardTarget) {
+        try {
+          if (global.hasPocketUnsavedChanges?.() !== true) return safeFailure("additional-device-target-dirty");
+        } catch (_error) { return safeFailure("additional-device-target-dirty"); }
+      }
+      if (!additionalTargetReplaceable(null, discardTarget)) return safeFailure("additional-device-target-dirty");
       const additionalDevice = additionalApi.createAdditionalDeviceOpener({
         crypto, deviceStore, accountClient,
         discoveryService: config.discoveryService,
@@ -651,7 +674,7 @@
         captureTarget: additionalTarget,
         isTargetCurrent: additionalTargetCurrent,
         validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
-        adoptOpenedPocket: adoptAdditionalDevice,
+        adoptOpenedPocket: (opened) => adoptAdditionalDevice(opened, discardTarget),
       });
     }
 
