@@ -678,6 +678,29 @@ function safetySnapshotFor(context, deviceDocument, options = {}) {
   return snapshot;
 }
 
+function storageCharacterTotal(storage) {
+  return Array.from(storage.entries()).reduce((total, [key, value]) =>
+    total + String(key).length + String(value).length, 0);
+}
+
+function storageCharacterTotalAfterSet(storage, key, value) {
+  const candidate = new Map(storage);
+  candidate.set(String(key), String(value));
+  return storageCharacterTotal(candidate);
+}
+
+function safetyTrailEntries(context, count, options = {}) {
+  const capturedAt = options.capturedAt || Date.parse("2026-01-01T00:00:00.000Z");
+  const historySize = options.historySize || 0;
+  return Array.from({ length: count }, (_unused, index) => safetySnapshotFor(context, documentWith([
+    node(`p104i-d-history-${index}`),
+  ], {
+    rootExtras: { [`p104iDHistory${index}`]: "h".repeat(historySize) },
+  }), {
+    capturedAt: new Date(capturedAt - index * 60000).toISOString(),
+  }).parsed);
+}
+
 function fakeHandle(name, options = {}) {
   const calls = {
     getFile: 0,
@@ -2281,6 +2304,154 @@ test("P104i-a honours the canonical safety-trail entry bound before retiring JSO
   context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
   assert.equal(context.retireJsonSafetyForSyncedDiscard(token), false);
   assert.equal(context.__storage.get(currentKey), oversizedRaw);
+});
+
+test("P104i-d prunes only the oldest aggregate-pressure trail history before retiring exact JSON safety", () => {
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const trailKey = "pocketLite.localSafety.trail.v1";
+  let context;
+  let capacity = null;
+  context = createIntegrationContext({
+    failStorageWrite(key, value) {
+      const proposedTotal = storageCharacterTotalAfterSet(context.__storage, key, value);
+      if (key === currentKey && capacity === null) {
+        capacity = proposedTotal;
+        return false;
+      }
+      return capacity !== null && proposedTotal > capacity;
+    },
+  });
+  const state = resetIntegrationState(context, [node("p104i-d-newest", {
+    details: "P104i-d discarded JSON safety must be retained exactly",
+  })], [{ type: "p104i-d-edit" }]);
+  state.rootExtras = { p104iDAggregatePayload: "x".repeat(720000) };
+  const oldTrail = safetyTrailEntries(context, 8, { historySize: 100000 });
+  context.__storage.set(trailKey, JSON.stringify(oldTrail));
+  const oldTrailRaw = context.__storage.get(trailKey);
+  const handle = fakeHandle("p104i-d-local.json");
+  context.setPocketFileSession(handle, handle.name, { ownerKind: "json", forceNewSession: true });
+
+  assert.equal(context.saveLocalSafetySnapshot("p104i-d-edit"), true);
+  const currentRaw = context.__storage.get(currentKey);
+  assert.ok(currentRaw);
+  assert.ok(storageCharacterTotal(context.__storage) <= capacity);
+  const trailAttempts = context.__storageAttempts.filter(({ key }) => key === trailKey);
+  const attemptLengths = trailAttempts.map(({ value }) => JSON.parse(value).length);
+  assert.equal(attemptLengths[0], 8, "the full canonical trail is attempted first");
+  assert.equal(attemptLengths.at(-1) < 8, true, "only the oldest trail history is pruned after pressure");
+  assert.deepEqual(attemptLengths, Array.from(
+    { length: attemptLengths[0] - attemptLengths.at(-1) + 1 },
+    (_unused, index) => attemptLengths[0] - index,
+  ));
+  assert.ok(trailAttempts.slice(0, -1).every(({ value }) =>
+    storageCharacterTotal(new Map([[currentKey, currentRaw], [trailKey, value]])) > capacity,
+  ));
+  const archivedTrail = JSON.parse(context.__storage.get(trailKey));
+  assert.ok(archivedTrail.length < 8);
+  assert.equal(JSON.stringify(archivedTrail[0]), currentRaw);
+  assert.deepEqual(archivedTrail.slice(1), oldTrail.slice(0, archivedTrail.length - 1));
+  assert.equal(context.__storageCalls.filter(({ key }) => key === currentKey).length, 1);
+  assert.notEqual(context.__storage.get(trailKey), oldTrailRaw);
+
+  const token = context.captureJsonSafetyForSyncedDiscard();
+  assert.ok(token);
+  context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  assert.equal(context.retireJsonSafetyForSyncedDiscard(token), true);
+  assert.equal(context.__storage.has(currentKey), false);
+  assert.equal(handle.calls.createWritable, 0);
+});
+
+test("P104i-d keeps current safety and the prior trail when newest-only aggregate storage cannot fit", () => {
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const trailKey = "pocketLite.localSafety.trail.v1";
+  let context;
+  let capacity = null;
+  context = createIntegrationContext({
+    failStorageWrite(key, value) {
+      return capacity !== null
+        && storageCharacterTotalAfterSet(context.__storage, key, value) > capacity;
+    },
+  });
+  const oldTrail = safetyTrailEntries(context, 8, { historySize: 100 });
+  const newest = safetySnapshotFor(context, documentWith([
+    node("p104i-d-newest-only", { details: "Newest exact DEVICE payload" }),
+  ], {
+    rootExtras: { p104iDNewestOnly: "x".repeat(720000) },
+  }), { capturedAt: "2026-08-27T00:00:00.000Z" }).parsed;
+  const newestRaw = JSON.stringify(newest);
+  const oldTrailRaw = JSON.stringify(oldTrail);
+  context.__storage.set(currentKey, newestRaw);
+  context.__storage.set(trailKey, oldTrailRaw);
+  capacity = storageCharacterTotal(context.__storage);
+  assert.ok(storageCharacterTotal(new Map([
+    [currentKey, newestRaw],
+    [trailKey, JSON.stringify([newest])],
+  ])) > capacity, "even the newest-only archive cannot fit");
+  const handle = fakeHandle("p104i-d-newest-only.json");
+  context.setPocketFileSession(handle, handle.name, { ownerKind: "json", forceNewSession: true });
+  const token = context.captureJsonSafetyForSyncedDiscard();
+  assert.ok(token);
+
+  context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  assert.equal(context.retireJsonSafetyForSyncedDiscard(token), false);
+  const trailAttempts = context.__storageAttempts.filter(({ key }) => key === trailKey);
+  assert.deepEqual(trailAttempts.map(({ value }) => JSON.parse(value).length), [8, 7, 6, 5, 4, 3, 2, 1]);
+  assert.equal(context.__storage.get(currentKey), newestRaw);
+  assert.equal(context.__storage.get(trailKey), oldTrailRaw);
+  assert.equal(handle.calls.createWritable, 0);
+});
+
+test("P104i-d retains a coalesced newest replacement while pruning only its older tail", () => {
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const trailKey = "pocketLite.localSafety.trail.v1";
+  let context;
+  let capacity = null;
+  context = createIntegrationContext({
+    failStorageWrite(key, value) {
+      return capacity !== null
+        && storageCharacterTotalAfterSet(context.__storage, key, value) > capacity;
+    },
+  });
+  const first = safetySnapshotFor(context, documentWith([
+    node("p104i-d-first"),
+  ]), { capturedAt: "2026-08-27T00:00:00.000Z" }).parsed;
+  const older = safetyTrailEntries(context, 7, { historySize: 100000 });
+  const newest = safetySnapshotFor(context, documentWith([
+    node("p104i-d-coalesced", { details: "Coalesced newest exact DEVICE payload" }),
+  ], {
+    rootExtras: { p104iDCoalesced: "x".repeat(720000) },
+  }), { capturedAt: "2026-08-27T00:00:10.000Z" }).parsed;
+  const newestRaw = JSON.stringify(newest);
+  context.__storage.set(currentKey, newestRaw);
+  context.__storage.set(trailKey, JSON.stringify([first, ...older]));
+  capacity = storageCharacterTotal(new Map([
+    [currentKey, newestRaw],
+    [trailKey, JSON.stringify([newest])],
+  ]));
+
+  assert.equal(context.appendLocalSafetyTrail(newest), true);
+  const trail = JSON.parse(context.__storage.get(trailKey));
+  assert.ok(trail.length < 8);
+  assert.equal(JSON.stringify(trail[0]), newestRaw);
+  assert.deepEqual(trail.slice(1), older.slice(0, trail.length - 1));
+  assert.equal(context.__storage.get(currentKey), newestRaw);
+});
+
+test("P104i-d recordOp captures a fresh current safety timestamp", () => {
+  const context = createIntegrationContext();
+  const state = resetIntegrationState(context, [node("p104i-d-timestamp")]);
+  context.setPocketFileSession(fakeHandle("p104i-d-timestamp.json"), "p104i-d-timestamp.json", {
+    ownerKind: "json", forceNewSession: true,
+  });
+  const before = Date.now();
+  state.nodes[0].details = "Fresh local mutation";
+  context.recordOp({ type: "p104i-d-timestamp", id: state.nodes[0].id });
+  const after = Date.now();
+  const safety = context.readLocalSafetySnapshot();
+  assert.ok(safety);
+  assert.ok(Date.parse(safety.capturedAt) >= before);
+  assert.ok(Date.parse(safety.capturedAt) <= after);
+  assert.equal(safety.norm.nodes[0].details, "Fresh local mutation");
 });
 
 test("opening a stored device version detaches from the active file, preserves operations, and writes neither handle", () => {

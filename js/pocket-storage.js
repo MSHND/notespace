@@ -543,8 +543,17 @@ function writeLocalSafetyTrail(entries, options = {}) {
       .map((entry) => entry && entry.parsed ? entry.parsed : entry)
       .filter((entry) => entry && typeof entry === "object")
       .slice(0, LOCAL_SAFETY_TRAIL_MAX);
-    localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(arr));
-    return true;
+    if (!arr.length) {
+      localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(arr));
+      return true;
+    }
+    for (let length = arr.length; length >= 1; length -= 1) {
+      try {
+        localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(arr.slice(0, length)));
+        return true;
+      } catch {}
+    }
+    return false;
   } catch {
     return false;
   }
