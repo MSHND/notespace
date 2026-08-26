@@ -313,6 +313,10 @@
       beginExistingOpen(current);
     }
     function beginExistingOpen(session) {
+      if (["json", "vault"].includes(session?.ownerKind)) {
+        show("open");
+        return;
+      }
       if (typeof integration.findRecoveryAttempt !== "function") {
         show("open");
         return;

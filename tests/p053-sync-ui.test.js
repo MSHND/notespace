@@ -248,6 +248,65 @@ test("P104c blocks dirty standalone PE work before local Save, Discard, discover
   assert.equal(clean.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "open");
 });
 
+test("P104e bypasses Recovery discovery for local Synced switches while preserving none and detached discovery", async () => {
+  const attention = { ok: false, reason: "recovery-discovery-needs-attention" };
+  for (const ownerKind of ["json", "vault"]) {
+    const clean = createUiHarness(ownerKind, { discoveryResult: attention });
+    clean.topbar.fire("click");
+    assert.equal(clean.discoveryCalls, 0, ownerKind);
+    assert.equal(clean.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "open", ownerKind);
+    clean.overlay.querySelector(".vaultDialogPrimary").fire("click");
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(clean.openCalls, 1, ownerKind);
+  }
+
+  const saved = createUiHarness("json", { dirty: true, discoveryResult: attention });
+  saved.topbar.fire("click");
+  saved.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(saved.saveSwitchCalls, 1);
+  assert.equal(saved.discoveryCalls, 0);
+  assert.equal(saved.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "open");
+  saved.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(saved.openCalls, 1);
+
+  const discarded = createUiHarness("vault", { dirty: true, discoveryResult: attention });
+  discarded.topbar.fire("click");
+  discarded.overlay.querySelector(".vaultDialogRecovery").fire("click");
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(discarded.discardSwitchCalls, 1);
+  assert.equal(discarded.saveSwitchCalls, 0);
+  assert.equal(discarded.discoveryCalls, 0);
+  assert.equal(discarded.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "open");
+  discarded.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(discarded.openCalls, 1);
+
+  const cancelled = createUiHarness("json", { dirty: true, discoveryResult: attention });
+  cancelled.topbar.fire("click");
+  cancelled.overlay.querySelector(".vaultDialogSecondary").fire("click");
+  assert.equal(cancelled.discoveryCalls, 0);
+  assert.equal(cancelled.openCalls, 0);
+
+  const recoveryRequired = createUiHarness("json", { discoveryResult: attention, holdOpen: true });
+  recoveryRequired.topbar.fire("click");
+  recoveryRequired.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  recoveryRequired.resolveOpen({ ok: false, reason: "recovery-required", adopted: false });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(recoveryRequired.discoveryCalls, 0);
+  assert.equal(recoveryRequired.overlay.querySelector("#syncSetupStatus").textContent,
+    "A recovery copy is needed to open this synced Pocket on this device.");
+
+  for (const ownerKind of ["none", "detached"]) {
+    const existing = createUiHarness(ownerKind, { discoveryResult: { ok: true } });
+    existing.topbar.fire("click");
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(existing.discoveryCalls, 1, ownerKind);
+    assert.equal(existing.overlay.querySelector(".vaultDialogPrimary").dataset.mode, "open", ownerKind);
+  }
+});
+
 test("P053a exposes fresh-device open directly and updates after an owner transition without a timer", async () => {
   const harness = createUiHarness("none");
   assert.equal(harness.command.hidden, false);
