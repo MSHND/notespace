@@ -898,6 +898,46 @@ test("P085 rejects corrupt, pre-adoption, pending, and mismatched adopted-draft 
   }
 });
 
+test("P104g classifies stranded and malformed activation drafts before completed-device remote work", async () => {
+  const fieldState = async (record, crypto) => {
+    const draft = await crypto.openContent(record.activationDraft.record,
+      record.deviceWrappingKey, record.activationDraft.context);
+    Object.assign(draft, {
+      stage: "device-staged", pendingOperation: "account-registration", sourceOwnerKind: "json",
+      sourceSaved: true, recoveryCopyStored: false, adopted: false,
+      confirmedRemoteRevision: 0, keySetVersion: 0, recoveryVersion: 0,
+      account: null, registrationContinuation: null,
+    });
+    return Object.assign({}, record, {
+      content: Object.assign({}, record.content, { context: Object.assign({}, record.content.context, { revision: 0 }) }),
+      remote: { confirmedRevision: 0, pending: null, conflict: null },
+      activationDraft: { context: record.activationDraft.context,
+        record: await crypto.sealContent(draft, record.deviceWrappingKey, record.activationDraft.context) },
+    });
+  };
+  for (const [name, expectedReason, mutate] of [
+    ["exact stranded field state", "local-activation-attention", fieldState],
+    ["malformed activation draft", "additional-device-state-invalid", (record) => Object.assign({}, record, { activationDraft: Object.assign({}, record.activationDraft, {
+      record: Object.assign({}, record.activationDraft.record, { ciphertext: "corrupt" }),
+    }) })],
+  ]) {
+    const journey = await createBrowserJourney({ sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true });
+    const [record] = [...journey.idb.records.values()];
+    journey.idb.records.set(record.syncedPocketId, await mutate(record, journey.b.PocketSyncCrypto));
+    const beforeRecord = plain([...journey.idb.records.values()][0]);
+    const callsBefore = journey.remoteCalls.length;
+    const result = await journey.openExisting();
+    const calls = journey.remoteCalls.slice(callsBefore).map((call) => call.route);
+    assert.equal(result.reason, expectedReason, name);
+    assert.equal(journey.ownerKind, "none");
+    assert.equal(journey.visible, null);
+    assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
+    assert.deepEqual(plain([...journey.idb.records.values()][0]), beforeRecord);
+    assert.deepEqual(calls.filter((route) => ["listEnvelopes", "downloadEnvelope", "readRevision",
+      "downloadEncryptedRecord", "addEnvelope", "conditionalUpload"].includes(route)), []);
+  }
+});
+
 test("P085 refreshes the existing adopted record without creating another device identity", async () => {
   const journey = await createBrowserJourney({ sameDeviceReopen: true, advanceRemoteBeforeOpen: true, ownerKind: "none" });
   assert.deepEqual(plain(journey.opened), {

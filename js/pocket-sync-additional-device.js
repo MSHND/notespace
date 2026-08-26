@@ -246,6 +246,9 @@
       try { record = await config.deviceStore.readPocket(discovery.syncedPocketId); }
       catch (_error) { return fail("additional-device-state-invalid"); }
       if (record && record.additionalDeviceDraft === null) {
+        if (record.activationDraft !== null && !(await completedActivationDraft(config, record))) {
+          return fail("local-activation-attention", { sourceOwnerPreserved: true });
+        }
         return await openCompletedDevice(config, dependencies, captured, discovery.syncedPocketId, record);
       }
       if (authentication.prf?.status !== "available" || !(authentication.prf.outputBytes instanceof Uint8Array)

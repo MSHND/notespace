@@ -406,6 +406,22 @@ test("P086 gives recovery-required its specific mobile guidance before generic o
     "A recovery copy is needed to open this synced Pocket on this device.");
 });
 
+test("P104g gives stranded local activation Cancel-only attention without changing Recovery guidance", async () => {
+  const harness = createUiHarness("none", { holdOpen: true });
+  harness.topbar.fire("click");
+  harness.overlay.querySelector(".vaultDialogPrimary").fire("click");
+  harness.resolveOpen({ ok: false, reason: "local-activation-attention", sourceOwnerPreserved: true });
+  await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  assert.equal(harness.overlay.querySelector("h2").textContent, "Sync setup needs attention");
+  assert.equal(harness.overlay.querySelector("#syncSetupBody").textContent,
+    "An unfinished Sync setup is saved on this device. Pocket has not replaced it.");
+  assert.equal(harness.overlay.querySelector(".vaultDialogPrimary").hidden, true);
+  assert.equal(harness.overlay.querySelector(".vaultDialogRecovery").hidden, true);
+  assert.equal(harness.overlay.querySelector(".vaultDialogSecondary").hidden, false);
+  harness.overlay.querySelector(".vaultDialogSecondary").fire("click");
+  assert.equal(harness.overlay.hidden, true);
+});
+
 test("P086 keeps recovery picker cancellation and replacement-copy failure truthful", async () => {
   for (const [reason, expected] of [
     ["recovery-package-invalid", "Recovery copy could not be used. Your current Pocket is unchanged."],

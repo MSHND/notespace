@@ -184,6 +184,10 @@
         title.textContent = "Open editor changes";
         body.textContent = "Save or close open editor windows before opening Synced Pocket.";
         primary.hidden = true;
+      } else if (mode === "local-activation-attention") {
+        title.textContent = "Sync setup needs attention";
+        body.textContent = "An unfinished Sync setup is saved on this device. Pocket has not replaced it.";
+        primary.hidden = true;
       } else if (mode === "recovery") {
         title.textContent = "Use recovery copy";
         body.textContent = "Pocket will ask for your saved Recovery Copy, create a passkey for this device, then ask where to save the replacement Recovery Copy.";
@@ -252,6 +256,11 @@
       if (result?.ok === true) {
         overlay.hidden = true;
         continuation = null;
+        refresh();
+        return;
+      }
+      if (result?.reason === "local-activation-attention") {
+        show("local-activation-attention");
         refresh();
         return;
       }
