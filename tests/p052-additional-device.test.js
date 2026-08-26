@@ -898,15 +898,20 @@ test("P085 rejects corrupt, pre-adoption, pending, and mismatched adopted-draft 
   }
 });
 
-test("P104g classifies stranded and malformed activation drafts before completed-device remote work", async () => {
+test("P104g-a classifies exact stranded activation before completed-device remote work", async () => {
   const fieldState = async (record, crypto) => {
     const draft = await crypto.openContent(record.activationDraft.record,
       record.deviceWrappingKey, record.activationDraft.context);
+    const recoveryAuthorisation = await crypto.createRecoveryAuthorisationKeyPair();
     Object.assign(draft, {
       stage: "device-staged", pendingOperation: "account-registration", sourceOwnerKind: "json",
       sourceSaved: true, recoveryCopyStored: false, adopted: false,
       confirmedRemoteRevision: 0, keySetVersion: 0, recoveryVersion: 0,
-      account: null, registrationContinuation: null,
+      account: null, registrationContinuation: null, accountLocator: null,
+      prfEnvelope: null, prfStatus: "pending", recoveryPackage: null,
+      recoveryRoot: crypto.encodeBase64Url(bytes(32, 41)),
+      recoveryAuthorisation: recoveryAuthorisation.recoveryAuthorisation,
+      recoveryVerifier: recoveryAuthorisation.recoveryVerifier,
     });
     return Object.assign({}, record, {
       content: Object.assign({}, record.content, { context: Object.assign({}, record.content.context, { revision: 0 }) }),
@@ -915,11 +920,23 @@ test("P104g classifies stranded and malformed activation drafts before completed
         record: await crypto.sealContent(draft, record.deviceWrappingKey, record.activationDraft.context) },
     });
   };
+  const undecryptableDraft = async (record, crypto) => {
+    const draft = await crypto.openContent(record.activationDraft.record,
+      record.deviceWrappingKey, record.activationDraft.context);
+    return Object.assign({}, record, { activationDraft: { context: record.activationDraft.context,
+      record: await crypto.sealContent(draft, await crypto.generateDeviceWrappingKey(), record.activationDraft.context) } });
+  };
+  const possibleRemoteProgress = async (record, crypto) => {
+    const draft = await crypto.openContent(record.activationDraft.record,
+      record.deviceWrappingKey, record.activationDraft.context);
+    Object.assign(draft, { stage: "ready-for-adoption", adopted: false, pendingOperation: null });
+    return Object.assign({}, record, { activationDraft: { context: record.activationDraft.context,
+      record: await crypto.sealContent(draft, record.deviceWrappingKey, record.activationDraft.context) } });
+  };
   for (const [name, expectedReason, mutate] of [
     ["exact stranded field state", "local-activation-attention", fieldState],
-    ["malformed activation draft", "additional-device-state-invalid", (record) => Object.assign({}, record, { activationDraft: Object.assign({}, record.activationDraft, {
-      record: Object.assign({}, record.activationDraft.record, { ciphertext: "corrupt" }),
-    }) })],
+    ["undecryptable activation draft", "additional-device-state-invalid", undecryptableDraft],
+    ["well-formed activation with possible remote progress", "additional-device-state-invalid", possibleRemoteProgress],
   ]) {
     const journey = await createBrowserJourney({ sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true });
     const [record] = [...journey.idb.records.values()];

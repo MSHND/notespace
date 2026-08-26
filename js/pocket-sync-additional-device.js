@@ -116,6 +116,44 @@
       && draft.recoveryVersion === 1 && id(draft.accountLocator);
   }
 
+  async function strandedActivationDraft(config, record, syncedPocketId) {
+    if (!record || record.kind !== "pocket.sync.device-state" || record.schemaVersion !== 5
+        || record.syncedPocketId !== syncedPocketId || !id(record.deviceId)
+        || record.activationDraft === null || record.additionalDeviceDraft !== null
+        || record.recoveryDraft !== null || record.remote?.confirmedRevision !== 0
+        || record.remote?.conflict !== null || record.content?.context?.syncedPocketId !== syncedPocketId
+        || record.content.context.revision !== 0 || record.content.context.contentType !== config.crypto.FORMAT.contentType) {
+      return false;
+    }
+    let draft;
+    try {
+      draft = await config.crypto.openContent(record.activationDraft.record,
+        record.deviceWrappingKey, record.activationDraft.context);
+    } catch (_error) { return false; }
+    return object(draft) && Object.keys(draft).length === ACTIVATION_DRAFT_FIELDS.length
+      && ACTIVATION_DRAFT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(draft, field))
+      && draft.kind === "pocket.sync.activation-draft" && draft.schemaVersion === 1
+      && id(draft.activationId) && ["json", "vault"].includes(draft.sourceOwnerKind)
+      && id(draft.sourceContinuityId) && draft.syncedPocketId === syncedPocketId
+      && draft.deviceId === record.deviceId && draft.stage === "device-staged"
+      && draft.pendingOperation === "account-registration" && draft.sourceSaved === true
+      && draft.recoveryCopyStored === false && draft.adopted === false
+      && draft.confirmedRemoteRevision === 0 && draft.keySetVersion === 0
+      && draft.recoveryVersion === 0 && draft.account === null
+      && draft.registrationContinuation === null && draft.accountLocator === null
+      && draft.prfEnvelope === null && draft.prfStatus === "pending"
+      && draft.recoveryPackage === null && draft.recoveryRoot !== null
+      && draft.recoveryAuthorisation !== null && draft.deviceEnvelope !== null
+      && draft.recoveryEnvelope !== null
+      && object(draft.ids) && Object.keys(draft.ids).length === 12 && Object.values(draft.ids).every(id)
+      && object(draft.content) && Object.keys(draft.content).length === 2
+      && Object.prototype.hasOwnProperty.call(draft.content, "context")
+      && Object.prototype.hasOwnProperty.call(draft.content, "record")
+      && draft.content.context?.syncedPocketId === syncedPocketId
+      && draft.content.context?.revision === 1
+      && draft.content.context?.contentType === config.crypto.FORMAT.contentType;
+  }
+
   async function completedDeviceRecord(config, record, syncedPocketId) {
     const metadata = record?.deviceEnvelope?.metadata;
     const context = record?.deviceEnvelope?.context;
@@ -246,7 +284,7 @@
       try { record = await config.deviceStore.readPocket(discovery.syncedPocketId); }
       catch (_error) { return fail("additional-device-state-invalid"); }
       if (record && record.additionalDeviceDraft === null) {
-        if (record.activationDraft !== null && !(await completedActivationDraft(config, record))) {
+        if (await strandedActivationDraft(config, record, discovery.syncedPocketId)) {
           return fail("local-activation-attention", { sourceOwnerPreserved: true });
         }
         return await openCompletedDevice(config, dependencies, captured, discovery.syncedPocketId, record);
