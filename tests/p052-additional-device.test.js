@@ -26,11 +26,57 @@ function recoveryRegistrationCredential() {
   } };
 }
 
+function createP016Dom() {
+  const elements = new Map();
+  const classList = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const element = (id = "", tagName = "div") => {
+    const value = {
+      id, tagName: String(tagName).toUpperCase(), children: [], hidden: false, disabled: false,
+      classList, parentElement: null, textContent: "",
+      appendChild(child) { child.parentElement = this; this.children.push(child); return child; },
+      removeChild(child) { const index = this.children.indexOf(child); if (index >= 0) this.children.splice(index, 1); return child; },
+      get firstChild() { return this.children[0] || null; },
+      contains(child) { return child === this || this.children.some((item) => item.contains?.(child)); },
+      addEventListener() {},
+      querySelectorAll(selector) {
+        return selector === "button:not([disabled])"
+          ? this.children.filter((item) => item.tagName === "BUTTON" && !item.disabled)
+          : [];
+      },
+      focus() { document.activeElement = this; },
+    };
+    if (id) elements.set(id, value);
+    return value;
+  };
+  const body = element("body", "body");
+  const background = element("p016-background", "main");
+  const overlay = element("deviceChangesOverlay");
+  overlay.hidden = true;
+  body.appendChild(background);
+  body.appendChild(overlay);
+  for (const [id, tagName] of [
+    ["deviceChangesCombine", "button"], ["deviceChangesNotice", "p"],
+    ["deviceChangesDecisionView", "div"], ["deviceChangesReview", "section"],
+    ["deviceChangesChoiceView", "section"], ["deviceChangesBack", "button"],
+    ["deviceChangesReviewBtn", "button"], ["deviceChangesFileName", "strong"],
+    ["deviceChangesFileTime", "span"], ["deviceChangesDeviceTime", "strong"],
+    ["deviceChangesDeviceSource", "span"], ["deviceChangesReviewList", "div"],
+  ]) overlay.appendChild(element(id, tagName));
+  const document = {
+    body, activeElement: null,
+    getElementById(id) { return elements.get(String(id)) || null; },
+    createElement(tagName) { return element("", tagName); },
+    addEventListener() {},
+  };
+  return { document, overlay };
+}
+
 function loadProduction(options = {}) {
   const storage = new Map(Object.entries(options.localStorageSeed || {}).map(([key, value]) => [String(key), String(value)]));
   const storageCalls = [];
   let standalonePeDirty = options.standalonePeDirty === true;
-  const document = {
+  const p016Dom = options.p016Dom === true ? createP016Dom() : null;
+  const document = p016Dom?.document || {
     body: { classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } } },
     activeElement: null,
     getElementById() { return null; },
@@ -91,6 +137,7 @@ function loadProduction(options = {}) {
       };
     }
   }
+  context.__p016Dom = p016Dom;
   return context;
 }
 
@@ -143,6 +190,7 @@ async function createBrowserJourney(options = {}) {
     captureSessionTransitions: options.captureSessionTransitions === true,
     standalonePeDirty: options.standalonePeDirty === true,
     standalonePeSignalThrows: options.standalonePeSignalThrows === true,
+    p016Dom: options.p016Dom === true,
     localStorageSeed: options.localStorageSeed,
   });
   const serviceDriver = createMemoryServiceStore();
@@ -1215,12 +1263,6 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
   const trailKey = "pocketLite.localSafety.trail.v1";
   const previousSafety = journey.b.__localStorage.values.get(currentKey);
   assert.ok(previousSafety);
-  let p016Calls = 0;
-  const openDecision = journey.b.openPocketDeviceChangesDecision;
-  journey.b.openPocketDeviceChangesDecision = (...input) => {
-    p016Calls += 1;
-    return openDecision(...input);
-  };
   let retirementBoundary = null;
   const retireSafety = journey.b.retireJsonSafetyForSyncedDiscard;
   journey.b.retireJsonSafetyForSyncedDiscard = (token) => {
@@ -1243,7 +1285,6 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
   } });
 
   assert.equal(opened.ok, true, JSON.stringify(opened));
-  assert.equal(p016Calls, 0);
   assert.equal(jsonWrites, 0);
   assert.deepEqual(retirementBoundary, {
     session: {
@@ -1266,6 +1307,43 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
   assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");
   assert.equal(journey.b.capturePocketFileSaveSession().storagePrivacy, "synced");
   assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+});
+
+test("P104i-a suppresses the real pre-transition P016 check only through its explicit loaded-state flag", async () => {
+  const journey = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    localJsonTarget: true, localJsonDirty: true, p016Dom: true,
+  });
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const before = journey.b.capturePocketFileSaveSession();
+  const localState = vm.runInContext("state", journey.b);
+  localState.nodes[0].details = "P104i-a live JSON differs from its captured safety";
+  const originalCommit = journey.b.commitPreparedPocketDocument;
+  let controlOpened = false;
+  let suppressedAttempt = true;
+  journey.b.commitPreparedPocketDocument = (norm, sourceInfo, options) => {
+    const loadedStateOptions = options?.loadedStateOptions;
+    assert.equal(loadedStateOptions?.skipLocalSafetyCheck, true);
+    const withoutSuppression = { ...loadedStateOptions };
+    delete withoutSuppression.skipLocalSafetyCheck;
+    controlOpened = journey.b.maybeOfferLocalSafetyRestore(localState.source, withoutSuppression);
+    assert.equal(controlOpened, true);
+    assert.equal(journey.b.__p016Dom.overlay.hidden, false);
+    assert.equal(journey.b.isPocketDeviceChangesDecisionOpen(), true);
+    journey.b.__p016Dom.overlay.hidden = true;
+    suppressedAttempt = journey.b.maybeOfferLocalSafetyRestore(localState.source, loadedStateOptions);
+    assert.equal(suppressedAttempt, false);
+    return originalCommit(norm, sourceInfo, options);
+  };
+  const opened = await journey.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(before.id),
+  } });
+
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  assert.equal(controlOpened, true);
+  assert.equal(suppressedAttempt, false);
+  assert.equal(journey.b.__localStorage.values.has(currentKey), false);
+  assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");
 });
 
 test("P104i preserves JSON safety across early, prepared, and final-owner hand-off failures", async () => {

@@ -465,30 +465,22 @@ function releaseJsonSafetyForSyncedDiscard(token) {
   return syncedDiscardSafetyTokens.delete(token.tokenId);
 }
 
+function canUseLocalSafetyTrail(options = {}) {
+  if (!isPocketBrowserStoragePrivate()) return true;
+  const token = options && typeof options === "object" ? options.syncedDiscardSafetyToken : null;
+  return pocketBrowserStoragePrivacyMode() === "synced"
+    && !!validSyncedDiscardSafetyToken(token);
+}
+
 function retireJsonSafetyForSyncedDiscard(token) {
   const captured = validSyncedDiscardSafetyToken(token);
   if (!captured) return false;
   try {
     const current = localStorage.getItem(LOCAL_SAFETY_KEY);
     if (current !== captured.raw) return false;
-    const trailRaw = localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY);
-    const trail = trailRaw ? JSON.parse(trailRaw) : [];
-    if (!Array.isArray(trail)) return false;
-    const capturedText = JSON.stringify(captured.entry);
-    const preserved = trail.some((entry) => {
-      try { return JSON.stringify(entry) === capturedText; } catch { return false; }
-    });
-    if (!preserved) {
-      const nextTrail = [captured.entry, ...trail].slice(0, LOCAL_SAFETY_TRAIL_MAX);
-      localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(nextTrail));
-      const writtenTrail = JSON.parse(localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY) || "");
-      if (!Array.isArray(writtenTrail) || !writtenTrail.some((entry) => {
-        try { return JSON.stringify(entry) === capturedText; } catch { return false; }
-      })) return false;
-    }
+    if (!appendLocalSafetyTrail(captured.entry, { syncedDiscardSafetyToken: token })) return false;
     if (localStorage.getItem(LOCAL_SAFETY_KEY) !== captured.raw) return false;
     localStorage.removeItem(LOCAL_SAFETY_KEY);
-    syncedDiscardSafetyTokens.delete(token.tokenId);
     return true;
   } catch {
     return false;
@@ -497,8 +489,8 @@ function retireJsonSafetyForSyncedDiscard(token) {
   }
 }
 
-function readLocalSafetyTrail() {
-  if (isPocketBrowserStoragePrivate()) return [];
+function readLocalSafetyTrail(options = {}) {
+  if (!canUseLocalSafetyTrail(options)) return [];
   try {
     const raw = localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
@@ -531,8 +523,8 @@ function readLocalSafetyTrail() {
   }
 }
 
-function writeLocalSafetyTrail(entries) {
-  if (isPocketBrowserStoragePrivate()) return false;
+function writeLocalSafetyTrail(entries, options = {}) {
+  if (!canUseLocalSafetyTrail(options)) return false;
   try {
     const arr = (Array.isArray(entries) ? entries : [])
       .map((entry) => entry && entry.parsed ? entry.parsed : entry)
@@ -711,14 +703,14 @@ function startupConfidenceKind() {
 }
 
 
-function appendLocalSafetyTrail(entry) {
-  if (isPocketBrowserStoragePrivate()) return false;
+function appendLocalSafetyTrail(entry, options = {}) {
+  if (!canUseLocalSafetyTrail(options)) return false;
   if (!entry || typeof entry !== "object") return false;
   const capturedAt = cleanText(entry.capturedAt, 40);
   const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
   if (capturedMs <= 0) return false;
   try {
-    const trail = readLocalSafetyTrail();
+    const trail = readLocalSafetyTrail(options);
     const latest = trail[0] || null;
     const latestMs = latest ? latest.capturedMs : 0;
     const compactEntry = safeJsonClone(entry, 900000);
@@ -729,7 +721,7 @@ function appendLocalSafetyTrail(entry) {
     } else {
       trail.unshift(nextEntry);
     }
-    return writeLocalSafetyTrail(trail);
+    return writeLocalSafetyTrail(trail, options);
   } catch {
     return false;
   }

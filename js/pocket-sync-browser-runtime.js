@@ -677,9 +677,6 @@
         } catch (_error) { return safeFailure("additional-device-target-dirty"); }
       }
       if (!additionalTargetReplaceable(null, discardTarget)) return safeFailure("additional-device-target-dirty");
-      const jsonSafetyToken = discardTarget?.ownerKind === "json"
-        ? global.captureJsonSafetyForSyncedDiscard?.() || null
-        : null;
       const additionalDevice = additionalApi.createAdditionalDeviceOpener({
         crypto, deviceStore, accountClient,
         strandedActivationClassifier,
@@ -688,6 +685,9 @@
         envelopeService: config.envelopeService,
         randomBytes: browserRandom(environment), now,
       });
+      const jsonSafetyToken = discardTarget?.ownerKind === "json"
+        ? global.captureJsonSafetyForSyncedDiscard?.() || null
+        : null;
       let opened = null;
       try {
         opened = await additionalDevice.openExisting({

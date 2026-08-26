@@ -2251,6 +2251,26 @@ test("P104i never clears a changed JSON current-safety entry or an entry it cann
   assert.equal(pressured.__storage.get("pocketLite.localSafety.snapshot.v1"), safetyRaw);
 });
 
+test("P104i-a honours the canonical safety-trail entry bound before retiring JSON safety", () => {
+  const context = createIntegrationContext();
+  resetIntegrationState(context, [node("p104i-a-oversized")], [{ type: "p104i-edit" }]);
+  context.setPocketFileSession(fakeHandle("p104i-a-oversized.json"), "p104i-a-oversized.json", {
+    ownerKind: "json", forceNewSession: true,
+  });
+  assert.equal(context.saveLocalSafetySnapshot("p104i-edit"), true);
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const oversized = JSON.parse(context.__storage.get(currentKey));
+  oversized.payload.p104iOversized = "x".repeat(900000);
+  const oversizedRaw = JSON.stringify(oversized);
+  context.__storage.set(currentKey, oversizedRaw);
+  const token = context.captureJsonSafetyForSyncedDiscard();
+  assert.ok(token);
+
+  context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  assert.equal(context.retireJsonSafetyForSyncedDiscard(token), false);
+  assert.equal(context.__storage.get(currentKey), oversizedRaw);
+});
+
 test("opening a stored device version detaches from the active file, preserves operations, and writes neither handle", () => {
   const context = createIntegrationContext();
   const deviceNodes = [node("shared", { label: "Device title", details: "Device Notes" })];
