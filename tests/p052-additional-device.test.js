@@ -926,6 +926,14 @@ test("P104g-a classifies exact stranded activation before completed-device remot
     return Object.assign({}, record, { activationDraft: { context: record.activationDraft.context,
       record: await crypto.sealContent(draft, await crypto.generateDeviceWrappingKey(), record.activationDraft.context) } });
   };
+  const malformedStrandedDraft = async (record, crypto, mutate) => {
+    const stranded = await fieldState(record, crypto);
+    const draft = await crypto.openContent(stranded.activationDraft.record,
+      stranded.deviceWrappingKey, stranded.activationDraft.context);
+    mutate(draft);
+    return Object.assign({}, stranded, { activationDraft: { context: stranded.activationDraft.context,
+      record: await crypto.sealContent(draft, stranded.deviceWrappingKey, stranded.activationDraft.context) } });
+  };
   const possibleRemoteProgress = async (record, crypto) => {
     const draft = await crypto.openContent(record.activationDraft.record,
       record.deviceWrappingKey, record.activationDraft.context);
@@ -936,6 +944,12 @@ test("P104g-a classifies exact stranded activation before completed-device remot
   for (const [name, expectedReason, mutate] of [
     ["exact stranded field state", "local-activation-attention", fieldState],
     ["undecryptable activation draft", "additional-device-state-invalid", undecryptableDraft],
+    ["malformed device envelope", "additional-device-state-invalid", (record, crypto) => malformedStrandedDraft(record, crypto, (draft) => { draft.deviceEnvelope.encryptedEnvelope = {}; })],
+    ["malformed recovery verifier", "additional-device-state-invalid", (record, crypto) => malformedStrandedDraft(record, crypto, (draft) => { draft.recoveryVerifier.publicKey = "not-base64url"; })],
+    ["malformed recovery authorisation", "additional-device-state-invalid", (record, crypto) => malformedStrandedDraft(record, crypto, (draft) => { draft.recoveryAuthorisation.privateKey = "not-base64url"; })],
+    ["malformed recovery root", "additional-device-state-invalid", (record, crypto) => malformedStrandedDraft(record, crypto, (draft) => { draft.recoveryRoot = "not-base64url"; })],
+    ["malformed content context", "additional-device-state-invalid", (record, crypto) => malformedStrandedDraft(record, crypto, (draft) => { draft.content.context.revision = 2; })],
+    ["malformed content record", "additional-device-state-invalid", (record, crypto) => malformedStrandedDraft(record, crypto, (draft) => { draft.content.record = {}; })],
     ["well-formed activation with possible remote progress", "additional-device-state-invalid", possibleRemoteProgress],
   ]) {
     const journey = await createBrowserJourney({ sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true });
@@ -951,7 +965,8 @@ test("P104g-a classifies exact stranded activation before completed-device remot
     assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false);
     assert.deepEqual(plain([...journey.idb.records.values()][0]), beforeRecord);
     assert.deepEqual(calls.filter((route) => ["listEnvelopes", "downloadEnvelope", "readRevision",
-      "downloadEncryptedRecord", "addEnvelope", "conditionalUpload"].includes(route)), []);
+      "downloadEncryptedRecord", "addEnvelope", "conditionalUpload", "beginRegistration",
+      "finishRegistration", "initialiseRecovery"].includes(route)), []);
   }
 });
 

@@ -442,6 +442,39 @@ without adding UI, a live synced owner, background work, or deployment state.
     return deepFreeze(jsonClone(draft));
   }
 
+  function validateStrandedClassifierFactory(input) {
+    const config = exactObject(input, ["securityContract", "crypto"], "activation-classifier-invalid");
+    requireMethods(config.securityContract, [
+      "buildRecoveryPackage", "validateOpaqueEncryptedRecord", "validateOpaqueMasterKeyEnvelopeRecord",
+    ], "activation-classifier-invalid");
+    requireMethods(config.crypto, ["validateContentContext", "validateContentRecord"], "activation-classifier-invalid");
+    return config;
+  }
+
+  function isExactStrandedDraft(draft, expected) {
+    return isObject(expected) && Object.keys(expected).length === 2
+      && Object.prototype.hasOwnProperty.call(expected, "syncedPocketId")
+      && Object.prototype.hasOwnProperty.call(expected, "deviceId")
+      && identifier(expected.syncedPocketId, "activation-state-invalid") === draft.syncedPocketId
+      && identifier(expected.deviceId, "activation-state-invalid") === draft.deviceId
+      && draft.stage === "device-staged" && draft.pendingOperation === "account-registration"
+      && POLICY.allowedSourceOwners.includes(draft.sourceOwnerKind) && draft.sourceSaved === true
+      && draft.recoveryCopyStored === false && draft.adopted === false
+      && draft.confirmedRemoteRevision === 0 && draft.keySetVersion === 0
+      && draft.recoveryVersion === 0 && draft.account === null
+      && draft.registrationContinuation === null && draft.accountLocator === null
+      && draft.prfStatus === "pending" && draft.prfEnvelope === null;
+  }
+
+  function createStrandedActivationClassifier(input) {
+    const config = validateStrandedClassifierFactory(input);
+    function classify(draft, expected) {
+      try { return isExactStrandedDraft(validateDraft(draft, config), expected) ? "exact-stranded" : "other-valid"; }
+      catch (_error) { return "invalid"; }
+    }
+    return Object.freeze({ classify });
+  }
+
   function validateDestination(result) {
     if (!result || result.ok !== true || !("destination" in result)) return null;
     return result.destination;
@@ -1347,5 +1380,5 @@ without adding UI, a live synced owner, background work, or deployment state.
     return Object.freeze({ activate, resume });
   }
 
-  global.PocketSyncActivation = Object.freeze({ POLICY, createActivationOrchestrator });
+  global.PocketSyncActivation = Object.freeze({ POLICY, createActivationOrchestrator, createStrandedActivationClassifier });
 })(typeof window !== "undefined" ? window : globalThis);

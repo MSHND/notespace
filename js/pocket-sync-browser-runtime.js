@@ -368,7 +368,7 @@
     requireMethods(crypto, ["encodeBase64Url", "openMasterKeyBundle", "openContent"], "foundation-unavailable");
     requireMethods(storeApi, ["createIndexedDbDriver", "createStore"], "foundation-unavailable");
     requireMethods(accountApi, ["createClient", "createBrowserWebAuthnAdapter"], "foundation-unavailable");
-    requireMethods(activationApi, ["createActivationOrchestrator"], "foundation-unavailable");
+    requireMethods(activationApi, ["createActivationOrchestrator", "createStrandedActivationClassifier"], "foundation-unavailable");
     requireMethods(recoveryApi, ["createRecoveryOrchestrator"], "foundation-unavailable");
     requireMethods(ownerApi, ["createSyncedOwnerController"], "foundation-unavailable");
     requireMethods(bridgeApi, ["createActivationOwnerBridge"], "foundation-unavailable");
@@ -401,6 +401,10 @@
       recoveryService: config.recoveryService,
       randomBytes: browserRandom(environment),
       now,
+    });
+    const strandedActivationClassifier = activationApi.createStrandedActivationClassifier({
+      securityContract: security,
+      crypto,
     });
     const recoveryWebAuthn = accountApi.createBrowserWebAuthnAdapter(environment);
     const recoveryOrchestrator = recoveryApi.createRecoveryOrchestrator({
@@ -671,6 +675,7 @@
       if (!additionalTargetReplaceable(null, discardTarget)) return safeFailure("additional-device-target-dirty");
       const additionalDevice = additionalApi.createAdditionalDeviceOpener({
         crypto, deviceStore, accountClient,
+        strandedActivationClassifier,
         discoveryService: config.discoveryService,
         contentService: config.contentService,
         envelopeService: config.envelopeService,

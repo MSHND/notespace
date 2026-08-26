@@ -20,7 +20,7 @@
   const freeze = (value) => Object.freeze(value);
 
   function validFactory(value) {
-    if (!object(value) || Object.keys(value).length !== FACTORY.length
+    if (!object(value) || Object.keys(value).some((key) => ![...FACTORY, "strandedActivationClassifier"].includes(key))
         || FACTORY.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) return null;
     const required = {
       crypto: ["generateDeviceWrappingKey", "deriveWrappingKey", "openMasterKeyBundle", "openContent", "sealContent", "encodeBase64Url", "validateNonExtractableAesKey"],
@@ -32,7 +32,10 @@
     };
     if (Object.keys(required).some((name) => !object(value[name]) || required[name].some((method) => typeof value[name][method] !== "function"))
         || !object(value.crypto.FORMAT) || typeof value.crypto.FORMAT.contentType !== "string"
-        || typeof value.randomBytes !== "function" || typeof value.now !== "function") return null;
+        || typeof value.randomBytes !== "function" || typeof value.now !== "function"
+        || (value.strandedActivationClassifier !== undefined
+          && (!object(value.strandedActivationClassifier)
+            || typeof value.strandedActivationClassifier.classify !== "function"))) return null;
     return value;
   }
 
@@ -121,8 +124,8 @@
         || record.syncedPocketId !== syncedPocketId || !id(record.deviceId)
         || record.activationDraft === null || record.additionalDeviceDraft !== null
         || record.recoveryDraft !== null || record.remote?.confirmedRevision !== 0
-        || record.remote?.conflict !== null || record.content?.context?.syncedPocketId !== syncedPocketId
-        || record.content.context.revision !== 0 || record.content.context.contentType !== config.crypto.FORMAT.contentType) {
+        || record.remote?.conflict !== null
+        || typeof config.strandedActivationClassifier?.classify !== "function") {
       return false;
     }
     let draft;
@@ -130,28 +133,11 @@
       draft = await config.crypto.openContent(record.activationDraft.record,
         record.deviceWrappingKey, record.activationDraft.context);
     } catch (_error) { return false; }
-    return object(draft) && Object.keys(draft).length === ACTIVATION_DRAFT_FIELDS.length
-      && ACTIVATION_DRAFT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(draft, field))
-      && draft.kind === "pocket.sync.activation-draft" && draft.schemaVersion === 1
-      && id(draft.activationId) && ["json", "vault"].includes(draft.sourceOwnerKind)
-      && id(draft.sourceContinuityId) && draft.syncedPocketId === syncedPocketId
-      && draft.deviceId === record.deviceId && draft.stage === "device-staged"
-      && draft.pendingOperation === "account-registration" && draft.sourceSaved === true
-      && draft.recoveryCopyStored === false && draft.adopted === false
-      && draft.confirmedRemoteRevision === 0 && draft.keySetVersion === 0
-      && draft.recoveryVersion === 0 && draft.account === null
-      && draft.registrationContinuation === null && draft.accountLocator === null
-      && draft.prfEnvelope === null && draft.prfStatus === "pending"
-      && draft.recoveryPackage === null && draft.recoveryRoot !== null
-      && draft.recoveryAuthorisation !== null && draft.deviceEnvelope !== null
-      && draft.recoveryEnvelope !== null
-      && object(draft.ids) && Object.keys(draft.ids).length === 12 && Object.values(draft.ids).every(id)
-      && object(draft.content) && Object.keys(draft.content).length === 2
-      && Object.prototype.hasOwnProperty.call(draft.content, "context")
-      && Object.prototype.hasOwnProperty.call(draft.content, "record")
-      && draft.content.context?.syncedPocketId === syncedPocketId
-      && draft.content.context?.revision === 1
-      && draft.content.context?.contentType === config.crypto.FORMAT.contentType;
+    try {
+      return config.strandedActivationClassifier.classify(draft, {
+        syncedPocketId, deviceId: record.deviceId,
+      }) === "exact-stranded";
+    } catch (_error) { return false; }
   }
 
   async function completedDeviceRecord(config, record, syncedPocketId) {

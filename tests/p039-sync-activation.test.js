@@ -342,12 +342,67 @@ test("P039 module is one dormant, inert and exact frozen activation boundary", (
   vm.createContext(context);
   assert.doesNotThrow(() => vm.runInContext(source(MODULE), context, { filename: MODULE }));
   assert.equal(reads, 0);
-  assert.deepEqual(Object.keys(context.PocketSyncActivation), ["POLICY", "createActivationOrchestrator"]);
+  assert.deepEqual(Object.keys(context.PocketSyncActivation), ["POLICY", "createActivationOrchestrator", "createStrandedActivationClassifier"]);
   assert.equal(Object.isFrozen(context.PocketSyncActivation), true);
   assert.equal(Object.isFrozen(context.PocketSyncActivation.POLICY), true);
   assert.match(source("index.html"), /pocket-sync-activation\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-activation\.js/);
   assert.doesNotMatch(source("js/pocket-sync-contract.js"), /PocketSyncActivation/);
+});
+
+test("P104g-b keeps exact stranded classification inside the canonical activation validator", async () => {
+  const harness = createHarness();
+  const accountClient = Object.freeze({ ...harness.activationConfig.accountClient,
+    async registerPasskey() { throw new Error("synthetic registration interruption"); },
+  });
+  const orchestrator = harness.activation.createActivationOrchestrator({
+    ...harness.activationConfig, accountClient,
+  });
+  const result = await orchestrator.activate(harness.dependencies, {
+    syncedPocketId: "pocket-p104g-b", deviceId: "device-p104g-b",
+  });
+  assert.equal(result.reason, "account-registration-failed");
+  const found = await harness.deviceStore.readActivation(result.activationId);
+  const classifier = harness.activation.createStrandedActivationClassifier({
+    securityContract: harness.security, crypto: harness.crypto,
+  });
+  assert.equal(classifier.classify(found.draft, {
+    syncedPocketId: found.draft.syncedPocketId, deviceId: found.draft.deviceId,
+  }), "exact-stranded");
+  for (const mutate of [
+    (draft) => { draft.deviceEnvelope.encryptedEnvelope = {}; },
+    (draft) => { draft.recoveryVerifier.publicKey = "not-base64url"; },
+    (draft) => { draft.recoveryAuthorisation.privateKey = "not-base64url"; },
+    (draft) => { draft.recoveryRoot = "not-base64url"; },
+    (draft) => { draft.content.context.revision = 2; },
+    (draft) => { draft.content.record = {}; },
+  ]) {
+    const invalid = plain(found.draft);
+    mutate(invalid);
+    assert.equal(classifier.classify(invalid, {
+      syncedPocketId: found.draft.syncedPocketId, deviceId: found.draft.deviceId,
+    }), "invalid");
+  }
+  const later = plain(found.draft);
+  later.stage = "ready-for-adoption";
+  later.adopted = false;
+  later.pendingOperation = null;
+  later.recoveryCopyStored = true;
+  later.recoveryRoot = null;
+  later.recoveryAuthorisation = null;
+  later.recoveryPackage = null;
+  later.confirmedRemoteRevision = 1;
+  later.keySetVersion = 2;
+  later.recoveryVersion = 1;
+  later.accountLocator = "account-p104g-b";
+  later.account = {
+    accountId: "account-p104g-b", credentialId: "credential-p104g-b",
+    credentialVersion: 1, accountPolicyVersion: 1, prfEvaluationInput: b64(32, 67),
+  };
+  later.prfStatus = "skipped";
+  assert.equal(classifier.classify(later, {
+    syncedPocketId: found.draft.syncedPocketId, deviceId: found.draft.deviceId,
+  }), "other-valid");
 });
 
 test("actual P029-P038 modules complete activation device-first and adopt last", async () => {
