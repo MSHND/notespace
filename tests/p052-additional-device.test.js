@@ -1263,6 +1263,16 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
   const trailKey = "pocketLite.localSafety.trail.v1";
   const previousSafety = journey.b.__localStorage.values.get(currentKey);
   assert.ok(previousSafety);
+  const archivedTrail = journey.b.__localStorage.values.get(trailKey);
+  let trailWrites = 0;
+  const setItem = journey.b.localStorage.setItem;
+  journey.b.localStorage.setItem = (key, value) => {
+    if (key === trailKey) {
+      trailWrites += 1;
+      throw new Error("redundant trail write");
+    }
+    return setItem(key, value);
+  };
   let retirementBoundary = null;
   const retireSafety = journey.b.retireJsonSafetyForSyncedDiscard;
   journey.b.retireJsonSafetyForSyncedDiscard = (token) => {
@@ -1286,6 +1296,7 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
 
   assert.equal(opened.ok, true, JSON.stringify(opened));
   assert.equal(jsonWrites, 0);
+  assert.equal(trailWrites, 0);
   assert.deepEqual(retirementBoundary, {
     session: {
       id: retirementBoundary.session.id,
@@ -1302,6 +1313,7 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
     currentSafety: previousSafety,
   });
   assert.equal(journey.b.__localStorage.values.has(currentKey), false);
+  assert.equal(journey.b.__localStorage.values.get(trailKey), archivedTrail);
   assert.ok(JSON.parse(journey.b.__localStorage.values.get(trailKey))
     .some((entry) => JSON.stringify(entry) === previousSafety));
   assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");

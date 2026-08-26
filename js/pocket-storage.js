@@ -472,13 +472,26 @@ function canUseLocalSafetyTrail(options = {}) {
     && !!validSyncedDiscardSafetyToken(token);
 }
 
+function hasExactLocalSafetyTrailEntry(entry, options = {}) {
+  let expected;
+  try { expected = JSON.stringify(entry); } catch { return false; }
+  if (!expected) return false;
+  return readLocalSafetyTrail(options).some((candidate) => {
+    try { return JSON.stringify(candidate.parsed) === expected; } catch { return false; }
+  });
+}
+
 function retireJsonSafetyForSyncedDiscard(token) {
   const captured = validSyncedDiscardSafetyToken(token);
   if (!captured) return false;
   try {
     const current = localStorage.getItem(LOCAL_SAFETY_KEY);
     if (current !== captured.raw) return false;
-    if (!appendLocalSafetyTrail(captured.entry, { syncedDiscardSafetyToken: token })) return false;
+    const trailAccess = { syncedDiscardSafetyToken: token };
+    if (!hasExactLocalSafetyTrailEntry(captured.entry, trailAccess)) {
+      if (!appendLocalSafetyTrail(captured.entry, trailAccess)) return false;
+      if (!hasExactLocalSafetyTrailEntry(captured.entry, trailAccess)) return false;
+    }
     if (localStorage.getItem(LOCAL_SAFETY_KEY) !== captured.raw) return false;
     localStorage.removeItem(LOCAL_SAFETY_KEY);
     return true;

@@ -2196,7 +2196,7 @@ test("browser safety stores a valid BASE and falls back to the device copy when 
   assert.equal(review.combineMessage, NO_BASE_MESSAGE);
 });
 
-test("P104i retires only the captured JSON current-safety entry after Synced ownership", () => {
+test("P104i-b retires an already-archived JSON current-safety entry without rewriting the trail", () => {
   const context = createIntegrationContext();
   const state = resetIntegrationState(context, [node("p104i", { details: "Discarded JSON safety" })], [
     { type: "p104i-edit" },
@@ -2205,12 +2205,24 @@ test("P104i retires only the captured JSON current-safety entry after Synced own
   context.setPocketFileSession(handle, handle.name, { ownerKind: "json", forceNewSession: true });
   assert.equal(context.saveLocalSafetySnapshot("p104i-edit"), true);
   const capturedRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
+  const archivedTrail = context.__storage.get("pocketLite.localSafety.trail.v1");
   const token = context.captureJsonSafetyForSyncedDiscard();
   assert.ok(token);
 
   context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  let trailWrites = 0;
+  const setItem = context.localStorage.setItem;
+  context.localStorage.setItem = (key, value) => {
+    if (key === "pocketLite.localSafety.trail.v1") {
+      trailWrites += 1;
+      throw new Error("redundant trail write");
+    }
+    return setItem(key, value);
+  };
   assert.equal(context.retireJsonSafetyForSyncedDiscard(token), true);
+  assert.equal(trailWrites, 0);
   assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
+  assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), archivedTrail);
   const trail = JSON.parse(context.__storage.get("pocketLite.localSafety.trail.v1"));
   assert.ok(trail.some((entry) => JSON.stringify(entry) === capturedRaw));
   assert.equal(handle.calls.createWritable, 0);
