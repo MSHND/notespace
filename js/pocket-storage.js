@@ -1,5 +1,8 @@
 /* Payload building, local safety, cache, startup restore, health/restore helpers. */
 
+const syncedDiscardSafetyTokens = new Map();
+let nextSyncedDiscardSafetyToken = 0;
+
 function isPocketVaultStoragePrivate() {
   try {
     return typeof window.isPocketVaultOwnerActive === "function"
@@ -425,6 +428,72 @@ function readLocalSafetySnapshot() {
     };
   } catch {
     return null;
+  }
+}
+
+function captureJsonSafetyForSyncedDiscard() {
+  const session = typeof window.capturePocketFileSaveSession === "function"
+    ? window.capturePocketFileSaveSession()
+    : null;
+  if (session?.ownerKind !== "json" || isPocketBrowserStoragePrivate()) return null;
+  const snapshot = readLocalSafetySnapshot();
+  if (!snapshot?.parsed) return null;
+  let raw;
+  let entry;
+  try {
+    raw = localStorage.getItem(LOCAL_SAFETY_KEY);
+    if (!raw) return null;
+    entry = JSON.parse(raw);
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  } catch {
+    return null;
+  }
+  const tokenId = `pocket-synced-discard-${Date.now().toString(36)}-${(++nextSyncedDiscardSafetyToken).toString(36)}`;
+  syncedDiscardSafetyTokens.set(tokenId, { raw, entry });
+  return Object.freeze({ schema: "pocket.syncedDiscardSafety.v1", tokenId });
+}
+
+function validSyncedDiscardSafetyToken(token) {
+  if (!token || typeof token !== "object" || Array.isArray(token)
+      || token.schema !== "pocket.syncedDiscardSafety.v1"
+      || typeof token.tokenId !== "string" || token.tokenId.length < 1) return null;
+  return syncedDiscardSafetyTokens.get(token.tokenId) || null;
+}
+
+function releaseJsonSafetyForSyncedDiscard(token) {
+  if (!token || typeof token !== "object" || typeof token.tokenId !== "string") return false;
+  return syncedDiscardSafetyTokens.delete(token.tokenId);
+}
+
+function retireJsonSafetyForSyncedDiscard(token) {
+  const captured = validSyncedDiscardSafetyToken(token);
+  if (!captured) return false;
+  try {
+    const current = localStorage.getItem(LOCAL_SAFETY_KEY);
+    if (current !== captured.raw) return false;
+    const trailRaw = localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY);
+    const trail = trailRaw ? JSON.parse(trailRaw) : [];
+    if (!Array.isArray(trail)) return false;
+    const capturedText = JSON.stringify(captured.entry);
+    const preserved = trail.some((entry) => {
+      try { return JSON.stringify(entry) === capturedText; } catch { return false; }
+    });
+    if (!preserved) {
+      const nextTrail = [captured.entry, ...trail].slice(0, LOCAL_SAFETY_TRAIL_MAX);
+      localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(nextTrail));
+      const writtenTrail = JSON.parse(localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY) || "");
+      if (!Array.isArray(writtenTrail) || !writtenTrail.some((entry) => {
+        try { return JSON.stringify(entry) === capturedText; } catch { return false; }
+      })) return false;
+    }
+    if (localStorage.getItem(LOCAL_SAFETY_KEY) !== captured.raw) return false;
+    localStorage.removeItem(LOCAL_SAFETY_KEY);
+    syncedDiscardSafetyTokens.delete(token.tokenId);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    syncedDiscardSafetyTokens.delete(token.tokenId);
   }
 }
 

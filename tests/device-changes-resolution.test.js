@@ -2196,6 +2196,61 @@ test("browser safety stores a valid BASE and falls back to the device copy when 
   assert.equal(review.combineMessage, NO_BASE_MESSAGE);
 });
 
+test("P104i retires only the captured JSON current-safety entry after Synced ownership", () => {
+  const context = createIntegrationContext();
+  const state = resetIntegrationState(context, [node("p104i", { details: "Discarded JSON safety" })], [
+    { type: "p104i-edit" },
+  ]);
+  const handle = fakeHandle("p104i-local.json");
+  context.setPocketFileSession(handle, handle.name, { ownerKind: "json", forceNewSession: true });
+  assert.equal(context.saveLocalSafetySnapshot("p104i-edit"), true);
+  const capturedRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
+  const token = context.captureJsonSafetyForSyncedDiscard();
+  assert.ok(token);
+
+  context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  assert.equal(context.retireJsonSafetyForSyncedDiscard(token), true);
+  assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
+  const trail = JSON.parse(context.__storage.get("pocketLite.localSafety.trail.v1"));
+  assert.ok(trail.some((entry) => JSON.stringify(entry) === capturedRaw));
+  assert.equal(handle.calls.createWritable, 0);
+  assert.equal(state.nodes[0].details, "Discarded JSON safety");
+});
+
+test("P104i never clears a changed JSON current-safety entry or an entry it cannot archive", () => {
+  const changed = createIntegrationContext();
+  resetIntegrationState(changed, [node("p104i-changed")], [{ type: "p104i-edit" }]);
+  changed.setPocketFileSession(fakeHandle("p104i-changed.json"), "p104i-changed.json", {
+    ownerKind: "json", forceNewSession: true,
+  });
+  assert.equal(changed.saveLocalSafetySnapshot("p104i-edit"), true);
+  const token = changed.captureJsonSafetyForSyncedDiscard();
+  const newer = JSON.parse(changed.__storage.get("pocketLite.localSafety.snapshot.v1"));
+  newer.reason = "newer-p104i-edit";
+  changed.__storage.set("pocketLite.localSafety.snapshot.v1", JSON.stringify(newer));
+  changed.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  assert.equal(changed.retireJsonSafetyForSyncedDiscard(token), false);
+  assert.equal(changed.__storage.get("pocketLite.localSafety.snapshot.v1"), JSON.stringify(newer));
+
+  const pressured = createIntegrationContext();
+  resetIntegrationState(pressured, [node("p104i-pressure")], [{ type: "p104i-edit" }]);
+  pressured.setPocketFileSession(fakeHandle("p104i-pressure.json"), "p104i-pressure.json", {
+    ownerKind: "json", forceNewSession: true,
+  });
+  assert.equal(pressured.saveLocalSafetySnapshot("p104i-edit"), true);
+  const pressuredToken = pressured.captureJsonSafetyForSyncedDiscard();
+  const safetyRaw = pressured.__storage.get("pocketLite.localSafety.snapshot.v1");
+  pressured.__storage.delete("pocketLite.localSafety.trail.v1");
+  const setItem = pressured.localStorage.setItem;
+  pressured.localStorage.setItem = (key, value) => {
+    if (key === "pocketLite.localSafety.trail.v1") throw new Error("synthetic trail failure");
+    return setItem(key, value);
+  };
+  pressured.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+  assert.equal(pressured.retireJsonSafetyForSyncedDiscard(pressuredToken), false);
+  assert.equal(pressured.__storage.get("pocketLite.localSafety.snapshot.v1"), safetyRaw);
+});
+
 test("opening a stored device version detaches from the active file, preserves operations, and writes neither handle", () => {
   const context = createIntegrationContext();
   const deviceNodes = [node("shared", { label: "Device title", details: "Device Notes" })];

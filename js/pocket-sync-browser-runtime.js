@@ -522,7 +522,7 @@
       return frozen({ ok: true });
     }
 
-    async function adoptAdditionalDevice(input, discardTarget = null) {
+    async function adoptAdditionalDevice(input, discardTarget = null, jsonSafetyToken = null) {
       const captured = additionalTarget();
       if (!captured || typeof global.normaliseInput !== "function"
           || typeof global.commitPreparedPocketDocument !== "function"
@@ -559,6 +559,9 @@
         writtenAt: norm.writtenAt || "",
       }, { ownerKind: "detached", displayName: "Synced Pocket", forceNewSession: true,
         detachedDeviceChanges: true, storagePrivate: "synced",
+        ...(discardTarget?.ownerKind === "json" ? {
+          loadedStateOptions: { skipLocalSafetyCheck: true },
+        } : {}),
         canContinue: () => additionalTargetReplaceable(input.target, discardTarget) });
       if (!localRollback) {
         const committed = commitOpenedPayload();
@@ -592,6 +595,7 @@
         restoreLocalTarget();
         return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
       }
+      try { global.retireJsonSafetyForSyncedDiscard?.(jsonSafetyToken); } catch (_error) {}
       return frozen({ ok: true });
     }
 
@@ -673,6 +677,9 @@
         } catch (_error) { return safeFailure("additional-device-target-dirty"); }
       }
       if (!additionalTargetReplaceable(null, discardTarget)) return safeFailure("additional-device-target-dirty");
+      const jsonSafetyToken = discardTarget?.ownerKind === "json"
+        ? global.captureJsonSafetyForSyncedDiscard?.() || null
+        : null;
       const additionalDevice = additionalApi.createAdditionalDeviceOpener({
         crypto, deviceStore, accountClient,
         strandedActivationClassifier,
@@ -681,12 +688,18 @@
         envelopeService: config.envelopeService,
         randomBytes: browserRandom(environment), now,
       });
-      return additionalDevice.openExisting({
-        captureTarget: additionalTarget,
-        isTargetCurrent: additionalTargetCurrent,
-        validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
-        adoptOpenedPocket: (opened) => adoptAdditionalDevice(opened, discardTarget),
-      });
+      let opened = null;
+      try {
+        opened = await additionalDevice.openExisting({
+          captureTarget: additionalTarget,
+          isTargetCurrent: additionalTargetCurrent,
+          validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
+          adoptOpenedPocket: (opened) => adoptAdditionalDevice(opened, discardTarget, jsonSafetyToken),
+        });
+        return opened;
+      } finally {
+        global.releaseJsonSafetyForSyncedDiscard?.(jsonSafetyToken);
+      }
     }
 
     async function recoverExisting() {

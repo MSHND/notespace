@@ -1206,6 +1206,137 @@ test("P104b allows an explicit matching dirty-JSON discard permit only for the t
   assert.equal(failed.visible.some((node) => node.label === localSentinel), true);
 });
 
+test("P104i retires dirty JSON current safety only after the final Synced owner hand-off", async () => {
+  const journey = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    localJsonTarget: true, localJsonDirty: true, remoteSentinel: "P104i SYNCED TRUTH",
+  });
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const trailKey = "pocketLite.localSafety.trail.v1";
+  const previousSafety = journey.b.__localStorage.values.get(currentKey);
+  assert.ok(previousSafety);
+  let p016Calls = 0;
+  const openDecision = journey.b.openPocketDeviceChangesDecision;
+  journey.b.openPocketDeviceChangesDecision = (...input) => {
+    p016Calls += 1;
+    return openDecision(...input);
+  };
+  let retirementBoundary = null;
+  const retireSafety = journey.b.retireJsonSafetyForSyncedDiscard;
+  journey.b.retireJsonSafetyForSyncedDiscard = (token) => {
+    retirementBoundary = {
+      session: plain(journey.b.capturePocketFileSaveSession()),
+      hasSyncedOwner: journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(),
+      currentSafety: journey.b.__localStorage.values.get(currentKey),
+    };
+    return retireSafety(token);
+  };
+  let jsonWrites = 0;
+  const writeTruthFile = journey.b.writeTruthFile;
+  journey.b.writeTruthFile = async (...input) => {
+    jsonWrites += 1;
+    return writeTruthFile(...input);
+  };
+  const before = journey.b.capturePocketFileSaveSession();
+  const opened = await journey.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(before.id),
+  } });
+
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  assert.equal(p016Calls, 0);
+  assert.equal(jsonWrites, 0);
+  assert.deepEqual(retirementBoundary, {
+    session: {
+      id: retirementBoundary.session.id,
+      handle: null,
+      ownerKind: "synced",
+      storagePrivacy: "synced",
+      vaultSessionId: "",
+      displayName: "Synced Pocket",
+      writable: true,
+      pipSession: false,
+      detachedDeviceChanges: false,
+    },
+    hasSyncedOwner: true,
+    currentSafety: previousSafety,
+  });
+  assert.equal(journey.b.__localStorage.values.has(currentKey), false);
+  assert.ok(JSON.parse(journey.b.__localStorage.values.get(trailKey))
+    .some((entry) => JSON.stringify(entry) === previousSafety));
+  assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(journey.b.capturePocketFileSaveSession().storagePrivacy, "synced");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+});
+
+test("P104i preserves JSON safety across early, prepared, and final-owner hand-off failures", async () => {
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  for (const options of [
+    { serverDeviceInvalid: true },
+    { peDirtyBeforeCommit: true },
+    { installFails: true },
+  ]) {
+    const journey = await createBrowserJourney({
+      browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+      localJsonTarget: true, localJsonDirty: true, ...options,
+    });
+    const originalSafety = journey.b.__localStorage.values.get(currentKey);
+    const originalSession = plain(journey.b.capturePocketFileSaveSession());
+    const originalVisible = plain(journey.visible);
+    let jsonWrites = 0;
+    const writeTruthFile = journey.b.writeTruthFile;
+    journey.b.writeTruthFile = async (...input) => {
+      jsonWrites += 1;
+      return writeTruthFile(...input);
+    };
+    if (options.serverDeviceInvalid === true) journey.setServerDeviceInvalid(true);
+    if (options.installFails === true) {
+      const setSession = journey.b.setPocketFileSession;
+      journey.b.setPocketFileSession = (...input) => {
+        if (input[2]?.ownerKind === "synced") throw new Error("synthetic final owner install failure");
+        return setSession(...input);
+      };
+    }
+    const result = await journey.openExisting({ discardTarget: {
+      ownerKind: "json", continuityId: String(originalSession.id),
+    } });
+    assert.equal(result.ok, false, JSON.stringify(options));
+    assert.deepEqual(plain(journey.b.capturePocketFileSaveSession()), originalSession, JSON.stringify(options));
+    assert.deepEqual(plain(journey.visible), originalVisible, JSON.stringify(options));
+    assert.equal(journey.b.__localStorage.values.get(currentKey), originalSafety, JSON.stringify(options));
+    assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), false, JSON.stringify(options));
+    assert.equal(jsonWrites, 0, JSON.stringify(options));
+  }
+});
+
+test("P104i keeps the installed Synced owner when post-success safety retirement fails", async () => {
+  const journey = await createBrowserJourney({
+    browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
+    localJsonTarget: true, localJsonDirty: true,
+  });
+  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  const trailKey = "pocketLite.localSafety.trail.v1";
+  const previousSafety = journey.b.__localStorage.values.get(currentKey);
+  const retireSafety = journey.b.retireJsonSafetyForSyncedDiscard;
+  journey.b.retireJsonSafetyForSyncedDiscard = (token) => {
+    journey.b.__localStorage.values.delete(trailKey);
+    const setItem = journey.b.localStorage.setItem;
+    journey.b.localStorage.setItem = (key, value) => {
+      if (key === trailKey) throw new Error("synthetic post-success archive failure");
+      return setItem(key, value);
+    };
+    try { return retireSafety(token); }
+    finally { journey.b.localStorage.setItem = setItem; }
+  };
+  const before = journey.b.capturePocketFileSaveSession();
+  const opened = await journey.openExisting({ discardTarget: {
+    ownerKind: "json", continuityId: String(before.id),
+  } });
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");
+  assert.equal(journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(), true);
+  assert.equal(journey.b.__localStorage.values.get(currentKey), previousSafety);
+});
+
 test("P104c rejects dirty standalone PE work before replacement, including an otherwise valid discard permit", async () => {
   const localSentinel = "P104c LOCAL JSON";
   for (const localJsonDirty of [false, true]) {
