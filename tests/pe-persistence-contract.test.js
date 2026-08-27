@@ -6294,10 +6294,10 @@ test("P105a drives threshold, collapse, selection, and creditor-scale visibility
   };
   const hierarchical = (roots) => Array.from({ length: roots }, (_unused, index) =>
     `Root ${index}\n  Child ${index}`).join("\n");
-  const under = paste(hierarchical(99));
+  const under = paste(`${hierarchical(99)}\nFinal root`);
   assert.equal(under.event.defaultPrevented, true);
-  assert.equal(under.pane.children.length, 199);
-  assert.equal(under.pane.children.slice(1).every((row) => row.children[1].textContent.startsWith("Root ") || row.children[1].textContent.startsWith("Child ")), true);
+  assert.equal(under.pane.children.length, 200);
+  assert.equal(under.pane.children.slice(1).every((row) => /^(Root|Child|Final root)/.test(row.children[1].textContent)), true);
 
   const boundary = paste(hierarchical(100));
   assert.equal(boundary.runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
@@ -6312,6 +6312,12 @@ test("P105a drives threshold, collapse, selection, and creditor-scale visibility
   const mixed = paste(`Parent\n  Nested\n    Grandchild\nLeaf\n${Array.from({ length: 196 }, (_unused, index) => `Leaf ${index}`).join("\n")}`, 3);
   assert.equal(mixed.pane.children.length, 199, "only the collapsed parent hides its two descendants");
   assert.equal(mixed.pane.children.slice(1).some((row) => row.children[1].textContent === "Leaf"), true);
+  mixed.runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  const mixedSaved = mixed.runtime.saveCalls[0].outline.slice(1, 5);
+  assert.deepEqual(mixedSaved.map((block) => [block.text, block.depth, block.collapsed]), [
+    ["Parent", 3, true], ["Nested", 4, false], ["Grandchild", 5, false], ["Leaf", 3, false],
+  ]);
 
   const creditorText = Array.from({ length: 3000 }, (_unused, index) =>
     `Creditor ${index}\n  Datascape ${index}\n  Synergy ${index}\n  Email ${index}\n  Notes ${index}`,
@@ -6321,8 +6327,17 @@ test("P105a drives threshold, collapse, selection, and creditor-scale visibility
   creditor.runtime.controls.get("saveBtn").dispatch("click");
   await settleRuntime();
   assert.equal(creditor.runtime.saveCalls[0].outline.length, 15001);
-  assert.equal(creditor.runtime.saveCalls[0].outline.slice(1).filter((block) => block.depth === 0 && block.collapsed).length, 3000);
-  assert.equal(creditor.runtime.saveCalls[0].outline.at(-1).text, "Notes 2999");
+  const savedCreditorOutline = creditor.runtime.saveCalls[0].outline.slice(1);
+  assert.equal(savedCreditorOutline.filter((block) => block.depth === 0 && block.collapsed).length, 3000);
+  for (let index = 0; index < 3000; index += 1) {
+    const offset = index * 5;
+    assert.deepEqual(savedCreditorOutline.slice(offset, offset + 5).map((block) => [block.text, block.depth, block.collapsed]), [
+      [`Creditor ${index}`, 0, true], [`Datascape ${index}`, 1, false], [`Synergy ${index}`, 1, false], [`Email ${index}`, 1, false], [`Notes ${index}`, 1, false],
+    ]);
+  }
+  creditor.pane.children[1].children[0].dispatch("click");
+  assert.deepEqual(creditor.pane.children.slice(1, 6).map((row) => row.children[1].textContent), ["Creditor 0", "Datascape 0", "Synergy 0", "Email 0", "Notes 0"]);
+  assert.equal(creditor.pane.children.length, 3005);
 });
 
 test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {
