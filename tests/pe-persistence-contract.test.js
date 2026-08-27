@@ -814,6 +814,13 @@ function executeControlledRuntime(payload, options = {}) {
       setAttribute(name, value) { attributes.set(String(name), String(value)); },
       getAttribute(name) { return attributes.has(String(name)) ? attributes.get(String(name)) : null; },
       appendChild(child) { child.parentNode = this; this.children.push(child); return child; },
+      insertBefore(child, reference) {
+        child.parentNode = this;
+        const index = reference ? this.children.indexOf(reference) : -1;
+        if (index < 0) this.children.push(child);
+        else this.children.splice(index, 0, child);
+        return child;
+      },
       removeChild(child) { this.children = this.children.filter((item) => item !== child); child.parentNode = null; return child; },
       querySelectorAll(selector) {
         const results = [];
@@ -858,6 +865,13 @@ function executeControlledRuntime(payload, options = {}) {
     Object.defineProperty(control, "innerHTML", {
       get() { return ""; },
       set() { control.children.length = 0; },
+    });
+    Object.defineProperty(control, "nextSibling", {
+      get() {
+        if (!control.parentNode) return null;
+        const index = control.parentNode.children.indexOf(control);
+        return index >= 0 ? control.parentNode.children[index + 1] || null : null;
+      },
     });
     return control;
   }
@@ -6338,6 +6352,81 @@ test("P105a drives threshold, collapse, selection, and creditor-scale visibility
   creditor.pane.children[1].children[0].dispatch("click");
   assert.deepEqual(creditor.pane.children.slice(1, 6).map((row) => row.children[1].textContent), ["Creditor 0", "Datascape 0", "Synergy 0", "Email 0", "Notes 0"]);
   assert.equal(creditor.pane.children.length, 3005);
+});
+
+test("P105c keeps large PE branch disclosure local for mouse and keyboard toggles", async () => {
+  const creditorText = Array.from({ length: 3000 }, (_unused, index) =>
+    `Creditor ${index}\n  Datascape ${index}\n  Synergy ${index}\n  Email ${index}\n  Notes ${index}`,
+  ).join("\n");
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [{ id: "p105c-anchor", text: "Anchor", depth: 0, collapsed: false }],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  pane.dispatch("paste", {
+    target: pane.children[0].children[1],
+    clipboardData: { getData() { return creditorText; } },
+  });
+  assert.equal(pane.children.length, 3001);
+  const creditor = pane.children[1];
+  const unaffected = pane.children[2];
+  const finalRoot = pane.children.at(-1);
+  creditor.children[0].dispatch("click");
+  assert.equal(pane.children.length, 3005);
+  assert.strictEqual(pane.children[6], unaffected);
+  assert.strictEqual(pane.children.at(-1), finalRoot);
+  assert.deepEqual(pane.children.slice(1, 6).map((row) => row.children[1].textContent), [
+    "Creditor 0", "Datascape 0", "Synergy 0", "Email 0", "Notes 0",
+  ]);
+  assert.equal(creditor.children[0].textContent, "▾");
+  assert.equal(creditor.children[0].getAttribute("aria-label"), "Collapse branch");
+  assert.equal(creditor.getAttribute("aria-selected"), "true");
+  assert.strictEqual(runtime.document.activeElement, creditor.children[0]);
+  assert.equal(runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  creditor.children[0].dispatch("click");
+  assert.equal(pane.children.length, 3001);
+  assert.strictEqual(pane.children[2], unaffected);
+  assert.strictEqual(pane.children.at(-1), finalRoot);
+
+  runtime.document.dispatch("keydown", { key: "ArrowRight" });
+  assert.equal(pane.children.length, 3005);
+  runtime.document.dispatch("keydown", { key: "ArrowLeft" });
+  assert.equal(pane.children.length, 3001);
+  creditor.children[0].dispatch("click");
+  assert.equal(pane.children.length, 3005);
+
+  const nested = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [
+      { id: "p105c-parent", text: "Parent", depth: 0, collapsed: true },
+      { id: "p105c-nested", text: "Nested", depth: 1, collapsed: true },
+      { id: "p105c-grandchild", text: "Grandchild", depth: 2, collapsed: false },
+      { id: "p105c-sibling", text: "Sibling", depth: 0, collapsed: false },
+    ],
+  }));
+  const nestedPane = nested.controls.get("outlinePane");
+  nestedPane.children[0].children[0].dispatch("click");
+  assert.deepEqual(nestedPane.children.map((row) => row.children[1].textContent), ["Parent", "Nested", "Sibling"]);
+  assert.equal(nestedPane.children[1].children[0].textContent, "▸");
+  nestedPane.children[1].dispatch("click");
+  nested.document.dispatch("keydown", { key: "ArrowLeft" });
+  assert.strictEqual(nested.document.activeElement, nestedPane.children[0].children[0]);
+  nested.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.deepEqual(nested.saveCalls[0].outline.map((block) => block.collapsed), [false, true, false, false]);
+
+  const edited = pane.children[2].children[1];
+  edited.textContent = "Edited Datascape";
+  edited.dispatch("input");
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  const saved = runtime.saveCalls.at(-1).outline;
+  assert.equal(saved[2].text, "Edited Datascape");
+  assert.equal(saved.filter((block) => block.depth === 0 && block.collapsed).length, 2999);
+  assert.equal(saved[1].collapsed, false);
+  assert.deepEqual(saved.slice(1, 6).map((block) => [block.text, block.depth, block.collapsed]), [
+    ["Creditor 0", 0, false], ["Edited Datascape", 1, false], ["Synergy 0", 1, false], ["Email 0", 1, false], ["Notes 0", 1, false],
+  ]);
 });
 
 test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {

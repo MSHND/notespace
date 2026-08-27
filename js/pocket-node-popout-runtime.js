@@ -876,6 +876,134 @@
     renderOutline(blockIndexById(blockId));
     return blockId;
   }
+  function outlineRowElement(blockId) {
+    if (!outlinePane || !blockId) return null;
+    var rows = outlinePane.querySelectorAll(".outlineRow[data-block-id]");
+    for (var i = 0; i < rows.length; i += 1) if (rows[i].getAttribute("data-block-id") === blockId) return rows[i];
+    return null;
+  }
+  function updateOutlineToggleChrome(toggle, index) {
+    if (!toggle) return;
+    var children = hasChildren(index);
+    var block = outline[index] || {};
+    toggle.className = "outlineToggle" + (children ? "" : " empty");
+    toggle.textContent = children ? (block.collapsed ? "▸" : "▾") : "";
+    toggle.setAttribute("aria-label", children ? (block.collapsed ? "Expand branch" : "Collapse branch") : "Select branch");
+  }
+  function createOutlineRow(block, index) {
+    ensureBlockId(block);
+    var row = document.createElement("div");
+    row.className = "outlineRow" + (outlineSelectedIds.has(block.id) ? " isOutlineSelected" : "");
+    row.setAttribute("data-block-id", block.id);
+    row.setAttribute("aria-selected", outlineSelectedIds.has(block.id) ? "true" : "false");
+    row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px";
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    updateOutlineToggleChrome(toggle, index);
+    installOutlineGutterDrag(toggle, block.id);
+    toggle.addEventListener("click", function (ev) {
+      syncOutlineFromDom();
+      handleOutlineSelectClick(ev, block);
+      if (ev.shiftKey || ev.metaKey || ev.ctrlKey) { focusOutlineBlock(block.id); return; }
+      if (hasChildren(index)) {
+        toggleOutlineBranchLocally(index);
+        markContentMutation(true);
+        focusOutlineBlock(block.id);
+      } else focusOutlineBlock(block.id);
+    });
+    var text = document.createElement("div");
+    text.className = "outlineText";
+    text.setAttribute("data-block-id", block.id);
+    var editing = outlineEditingId === block.id;
+    text.contentEditable = editing ? "true" : "false";
+    text.spellcheck = true;
+    text.textContent = block.text || "";
+    text.addEventListener("input", function () { block.text = text.textContent || ""; markContentMutation(true); });
+    text.addEventListener("click", function (ev) {
+      ev.stopPropagation();
+      if (outlineEditingId === block.id) return;
+      ev.preventDefault();
+      beginOutlineRowEditing(ensureBlockId(block));
+    });
+    text.addEventListener("keydown", function (ev) {
+      if (outlineEditingId !== block.id) return;
+      if (ev.key === "Enter" && ev.altKey) { ev.preventDefault(); insertOutlineEditingNewline(text); return; }
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        if (ev.metaKey || ev.ctrlKey) {
+          syncOutlineTextElement(text);
+          var currentId = ensureBlockId(block);
+          outlineEditingId = "";
+          outlineEditingOriginalText = "";
+          outlineEditingWasDirty = false;
+          insertOutlineSibling(currentId, "below");
+        } else finishOutlineRowEditing(text);
+        return;
+      }
+      if (ev.key === "Tab") {
+        ev.preventDefault();
+        syncOutlineTextElement(text);
+        var visibleIds = visibleOutlineBlockIds();
+        var visibleIndex = visibleIds.indexOf(ensureBlockId(block));
+        var nextId = visibleIds[visibleIndex + (ev.shiftKey ? -1 : 1)] || "";
+        finishOutlineRowEditing(text);
+        if (nextId) beginOutlineRowEditing(nextId);
+        return;
+      }
+      if (ev.key === "Backspace" && !text.textContent && outline.length > 1) {
+        ev.preventDefault();
+        syncOutlineFromDom();
+        var nextIndex = Math.max(0, index - 1);
+        outline.splice(index, 1);
+        var nextBlock = outline[nextIndex];
+        outlineEditingId = nextBlock ? ensureBlockId(nextBlock) : "";
+        if (outlineEditingId) {
+          selectSingleOutlineBlock(outlineEditingId);
+          outlineEditingOriginalText = String(nextBlock.text || "");
+          outlineEditingWasDirty = dirty;
+        }
+        markContentMutation(true);
+        renderOutline(nextIndex);
+        return;
+      }
+      if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finishOutlineRowEditing(text, { cancel: true }); }
+    });
+    row.appendChild(toggle);
+    row.appendChild(text);
+    row.addEventListener("click", function (ev) {
+      if (outlineEditingId === block.id || ev.target === text || ev.target === toggle) return;
+      var blockId = ensureBlockId(block);
+      if (ev.shiftKey) selectOutlineRange(blockId);
+      else if (ev.metaKey || ev.ctrlKey) {
+        if (outlineSelectedIds.has(blockId)) outlineSelectedIds.delete(blockId);
+        else outlineSelectedIds.add(blockId);
+        outlineSelectionAnchorId = blockId;
+        updateOutlineSelectionChrome();
+      } else selectSingleOutlineBlock(blockId);
+      focusOutlineBlock(blockId);
+    });
+    return row;
+  }
+  function toggleOutlineBranchLocally(index) {
+    var block = outline[index];
+    var row = block && outlineRowElement(ensureBlockId(block));
+    if (!block || !row || !hasChildren(index)) return false;
+    block.collapsed = !block.collapsed;
+    updateOutlineToggleChrome(row.children[0], index);
+    var branchEnd = outlineSubtreeEndIndex(index);
+    if (block.collapsed) {
+      for (var removeIndex = index + 1; removeIndex < branchEnd; removeIndex += 1) {
+        var descendantRow = outlineRowElement(ensureBlockId(outline[removeIndex]));
+        if (descendantRow && descendantRow.parentNode) descendantRow.parentNode.removeChild(descendantRow);
+      }
+      return true;
+    }
+    var insertionPoint = row.nextSibling;
+    for (var insertIndex = index + 1; insertIndex < branchEnd; insertIndex += 1) {
+      if (!isHidden(insertIndex)) outlinePane.insertBefore(createOutlineRow(outline[insertIndex], insertIndex), insertionPoint);
+    }
+    return true;
+  }
   function renderOutline(focusIndex) {
     syncOutlineFromDom();
     if (!Array.isArray(outline) || outline.length === 0) outline = [makeBlock("", 0)];
@@ -884,102 +1012,10 @@
     outlinePane.innerHTML = "";
     outline.forEach(function (block, index) {
       if (isHidden(index)) return;
-      ensureBlockId(block);
-      var row = document.createElement("div");
-      row.className = "outlineRow" + (outlineSelectedIds.has(block.id) ? " isOutlineSelected" : "");
-      row.setAttribute("data-block-id", block.id);
-      row.setAttribute("aria-selected", outlineSelectedIds.has(block.id) ? "true" : "false");
-      row.style.paddingLeft = (4 + (Number(block.depth) || 0) * 22) + "px";
-      var toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "outlineToggle" + (hasChildren(index) ? "" : " empty");
-      toggle.textContent = hasChildren(index) ? (block.collapsed ? "▸" : "▾") : "";
-      toggle.setAttribute("aria-label", hasChildren(index) ? (block.collapsed ? "Expand branch" : "Collapse branch") : "Select branch");
-      installOutlineGutterDrag(toggle, block.id);
-      toggle.addEventListener("click", function (ev) {
-        syncOutlineFromDom();
-        handleOutlineSelectClick(ev, block);
-        if (ev.shiftKey || ev.metaKey || ev.ctrlKey) { focusOutlineBlock(block.id); return; }
-        if (hasChildren(index)) {
-          block.collapsed = !block.collapsed;
-          markContentMutation(true);
-          renderOutline(index);
-        } else focusOutlineBlock(block.id);
-      });
-      var text = document.createElement("div");
-      text.className = "outlineText";
-      text.setAttribute("data-block-id", block.id);
-      var editing = outlineEditingId === block.id;
-      text.contentEditable = editing ? "true" : "false";
-      text.spellcheck = true;
-      text.textContent = block.text || "";
-      text.addEventListener("input", function () { block.text = text.textContent || ""; markContentMutation(true); });
-      text.addEventListener("click", function (ev) {
-        ev.stopPropagation();
-        if (outlineEditingId === block.id) return;
-        ev.preventDefault();
-        beginOutlineRowEditing(ensureBlockId(block));
-      });
-      text.addEventListener("keydown", function (ev) {
-        if (outlineEditingId !== block.id) return;
-        if (ev.key === "Enter" && ev.altKey) { ev.preventDefault(); insertOutlineEditingNewline(text); return; }
-        if (ev.key === "Enter") {
-          ev.preventDefault();
-          if (ev.metaKey || ev.ctrlKey) {
-            syncOutlineTextElement(text);
-            var currentId = ensureBlockId(block);
-            outlineEditingId = "";
-            outlineEditingOriginalText = "";
-            outlineEditingWasDirty = false;
-            insertOutlineSibling(currentId, "below");
-          } else finishOutlineRowEditing(text);
-          return;
-        }
-        if (ev.key === "Tab") {
-          ev.preventDefault();
-          syncOutlineTextElement(text);
-          var visibleIds = visibleOutlineBlockIds();
-          var visibleIndex = visibleIds.indexOf(ensureBlockId(block));
-          var nextId = visibleIds[visibleIndex + (ev.shiftKey ? -1 : 1)] || "";
-          finishOutlineRowEditing(text);
-          if (nextId) beginOutlineRowEditing(nextId);
-          return;
-        }
-        if (ev.key === "Backspace" && !text.textContent && outline.length > 1) {
-          ev.preventDefault();
-          syncOutlineFromDom();
-          var nextIndex = Math.max(0, index - 1);
-          outline.splice(index, 1);
-          var nextBlock = outline[nextIndex];
-          outlineEditingId = nextBlock ? ensureBlockId(nextBlock) : "";
-          if (outlineEditingId) {
-            selectSingleOutlineBlock(outlineEditingId);
-            outlineEditingOriginalText = String(nextBlock.text || "");
-            outlineEditingWasDirty = dirty;
-          }
-          markContentMutation(true);
-          renderOutline(nextIndex);
-          return;
-        }
-        if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); finishOutlineRowEditing(text, { cancel: true }); }
-      });
-      row.appendChild(toggle);
-      row.appendChild(text);
-      row.addEventListener("click", function (ev) {
-        if (outlineEditingId === block.id || ev.target === text || ev.target === toggle) return;
-        var blockId = ensureBlockId(block);
-        if (ev.shiftKey) selectOutlineRange(blockId);
-        else if (ev.metaKey || ev.ctrlKey) {
-          if (outlineSelectedIds.has(blockId)) outlineSelectedIds.delete(blockId);
-          else outlineSelectedIds.add(blockId);
-          outlineSelectionAnchorId = blockId;
-          updateOutlineSelectionChrome();
-        } else selectSingleOutlineBlock(blockId);
-        focusOutlineBlock(blockId);
-      });
+      var row = createOutlineRow(block, index);
       outlinePane.appendChild(row);
       if (index === focusIndex) {
-        if (outlineEditingId === block.id) requestAnimationFrame(function () { text.focus({ preventScroll: true }); });
+        if (outlineEditingId === block.id) requestAnimationFrame(function () { row.children[1].focus({ preventScroll: true }); });
         else focusOutlineBlock(block.id);
       }
     });
@@ -1010,18 +1046,16 @@
     }
     if (key === "ArrowLeft") {
       if (hasChildren(index) && outline[index].collapsed !== true) {
-        outline[index].collapsed = true;
+        toggleOutlineBranchLocally(index);
         markContentMutation(true);
-        renderOutline();
         return selectAndFocusOutlineBlock(blockId);
       }
       return selectAndFocusOutlineBlock(visibleParentOutlineBlockId(index));
     }
     if (key === "ArrowRight") {
       if (hasChildren(index) && outline[index].collapsed === true) {
-        outline[index].collapsed = false;
+        toggleOutlineBranchLocally(index);
         markContentMutation(true);
-        renderOutline();
         return selectAndFocusOutlineBlock(blockId);
       }
       var child = outline[index + 1];
