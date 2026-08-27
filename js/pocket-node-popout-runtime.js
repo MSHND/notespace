@@ -140,6 +140,20 @@
     if (active && active.classList && active.classList.contains("outlineText")) syncOutlineTextElement(active);
     Array.prototype.forEach.call(outlinePane.querySelectorAll(".outlineText[data-block-id]"), syncOutlineTextElement);
   }
+  function syncActiveOutlineEditingText() {
+    if (!outlineEditingId || !outlinePane) return false;
+    var active = document.activeElement;
+    if (active && active.classList && active.classList.contains("outlineText")
+      && active.getAttribute("data-block-id") === outlineEditingId) {
+      syncOutlineTextElement(active);
+      return true;
+    }
+    var row = outlineRowElement(outlineEditingId);
+    var text = row && row.querySelector(".outlineText[data-block-id]");
+    if (!text) return false;
+    syncOutlineTextElement(text);
+    return true;
+  }
   function outlineDepth(index) { return Math.max(0, Number(outline[index] && outline[index].depth) || 0); }
   function blockIndexById(blockId) {
     if (!Array.isArray(outline) || !blockId) return -1;
@@ -902,7 +916,7 @@
     updateOutlineToggleChrome(toggle, index);
     installOutlineGutterDrag(toggle, block.id);
     toggle.addEventListener("click", function (ev) {
-      syncOutlineFromDom();
+      syncActiveOutlineEditingText();
       handleOutlineSelectClick(ev, block);
       if (ev.shiftKey || ev.metaKey || ev.ctrlKey) { focusOutlineBlock(block.id); return; }
       if (hasChildren(index)) {

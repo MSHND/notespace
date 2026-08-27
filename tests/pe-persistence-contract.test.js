@@ -703,6 +703,7 @@ function executeControlledRuntime(payload, options = {}) {
   const alerts = [];
   const clipboardWrites = [];
   const classNames = new Set(["textMode"]);
+  const outlinePaneQueryCounts = new Map();
   const zeroWindowTimers = new Map();
   let nextWindowTimerId = 1;
   let closeCalls = 0;
@@ -823,6 +824,7 @@ function executeControlledRuntime(payload, options = {}) {
       },
       removeChild(child) { this.children = this.children.filter((item) => item !== child); child.parentNode = null; return child; },
       querySelectorAll(selector) {
+        if (id === "outlinePane") outlinePaneQueryCounts.set(selector, (outlinePaneQueryCounts.get(selector) || 0) + 1);
         const results = [];
         const matches = (candidate) => {
           if (!candidate) return false;
@@ -998,6 +1000,8 @@ function executeControlledRuntime(payload, options = {}) {
     clipboardWrites,
     classNames,
     closeCalls: () => closeCalls,
+    outlinePaneQueryCount: (selector) => outlinePaneQueryCounts.get(selector) || 0,
+    resetOutlinePaneQueryCounts() { outlinePaneQueryCounts.clear(); },
     windowListenerCount: (type) => (windowListeners.get(type) || []).length,
     documentListenerCount: (type) => (listeners.get(type) || []).length,
     flushZeroTimers() {
@@ -6408,6 +6412,14 @@ test("P105c keeps large PE branch disclosure local for mouse and keyboard toggle
   nestedPane.children[0].children[0].dispatch("click");
   assert.deepEqual(nestedPane.children.map((row) => row.children[1].textContent), ["Parent", "Nested", "Sibling"]);
   assert.equal(nestedPane.children[1].children[0].textContent, "▸");
+  nestedPane.children[1].children[0].dispatch("click");
+  assert.deepEqual(nestedPane.children.map((row) => row.children[1].textContent), ["Parent", "Nested", "Grandchild", "Sibling"]);
+  nestedPane.children[0].children[0].dispatch("click");
+  assert.deepEqual(nestedPane.children.map((row) => row.children[1].textContent), ["Parent", "Sibling"]);
+  nestedPane.children[0].children[0].dispatch("click");
+  assert.deepEqual(nestedPane.children.map((row) => row.children[1].textContent), ["Parent", "Nested", "Grandchild", "Sibling"]);
+  nestedPane.children[1].children[0].dispatch("click");
+  assert.deepEqual(nestedPane.children.map((row) => row.children[1].textContent), ["Parent", "Nested", "Sibling"]);
   nestedPane.children[1].dispatch("click");
   nested.document.dispatch("keydown", { key: "ArrowLeft" });
   assert.strictEqual(nested.document.activeElement, nestedPane.children[0].children[0]);
@@ -6427,6 +6439,55 @@ test("P105c keeps large PE branch disclosure local for mouse and keyboard toggle
   assert.deepEqual(saved.slice(1, 6).map((block) => [block.text, block.depth, block.collapsed]), [
     ["Creditor 0", 0, false], ["Edited Datascape", 1, false], ["Synergy 0", 1, false], ["Email 0", 1, false], ["Notes 0", 1, false],
   ]);
+});
+
+test("P105d avoids whole-pane text sync for large PE disclosure while preserving an active edit", async () => {
+  const creditorText = Array.from({ length: 3000 }, (_unused, index) =>
+    `Creditor ${index}\n  Datascape ${index}\n  Synergy ${index}\n  Email ${index}\n  Notes ${index}`,
+  ).join("\n");
+  const runtime = executeControlledRuntime(runtimeEditablePayload({
+    mode: "outline",
+    outline: [{ id: "p105d-anchor", text: "Anchor", depth: 0, collapsed: false }],
+  }));
+  const pane = runtime.controls.get("outlinePane");
+  pane.dispatch("paste", {
+    target: pane.children[0].children[1],
+    clipboardData: { getData() { return creditorText; } },
+  });
+  const creditor = pane.children[1];
+  const unaffected = pane.children[2];
+  const finalRoot = pane.children.at(-1);
+  runtime.resetOutlinePaneQueryCounts();
+  creditor.children[0].dispatch("click");
+  creditor.children[0].dispatch("click");
+  assert.equal(runtime.outlinePaneQueryCount(".outlineText[data-block-id]"), 0);
+  assert.strictEqual(pane.children[2], unaffected);
+  assert.strictEqual(pane.children.at(-1), finalRoot);
+
+  pane.children[0].children[1].dispatch("click");
+  const activeEditor = runtime.document.activeElement;
+  assert.equal(activeEditor.getAttribute("data-block-id"), pane.children[0].getAttribute("data-block-id"));
+  activeEditor.textContent = "Edited anchor";
+  runtime.resetOutlinePaneQueryCounts();
+  pane.children[1].children[0].dispatch("click");
+  assert.equal(runtime.outlinePaneQueryCount(".outlineText[data-block-id]"), 0);
+  assert.equal(pane.children.length, 3005);
+
+  runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  const saved = runtime.saveCalls[0].outline;
+  assert.equal(saved.length, 15001);
+  assert.equal(saved[0].text, "Edited anchor");
+  for (let index = 0; index < 3000; index += 1) {
+    const offset = 1 + index * 5;
+    assert.deepEqual(saved.slice(offset, offset + 5).map((block) => [block.text, block.depth, block.collapsed]), [
+      [`Creditor ${index}`, 0, index === 0 ? false : true],
+      [`Datascape ${index}`, 1, false],
+      [`Synergy ${index}`, 1, false],
+      [`Email ${index}`, 1, false],
+      [`Notes ${index}`, 1, false],
+    ]);
+  }
 });
 
 test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {
