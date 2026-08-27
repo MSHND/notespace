@@ -778,6 +778,20 @@
     var minDepth = blocks.reduce(function (depth, block) { return Math.min(depth, Number(block.depth) || 0); }, Number(blocks[0].depth) || 0);
     return blocks.filter(function (block) { return (Number(block.depth) || 0) === minDepth; }).map(function (block) { return block.id; });
   }
+  var LARGE_STRUCTURED_PASTE_ROW_THRESHOLD = 200;
+  function collapseLargePastedRoots(blocks) {
+    if (!Array.isArray(blocks) || blocks.length < LARGE_STRUCTURED_PASTE_ROW_THRESHOLD) return blocks;
+    var rootDepth = blocks.reduce(function (depth, block) { return Math.min(depth, Number(block.depth) || 0); }, Number(blocks[0] && blocks[0].depth) || 0);
+    for (var index = 0; index < blocks.length; index += 1) {
+      var block = blocks[index];
+      var next = blocks[index + 1];
+      if ((Number(block.depth) || 0) === rootDepth && next && (Number(next.depth) || 0) > rootDepth) block.collapsed = true;
+    }
+    return blocks;
+  }
+  function insertOutlineBlocksAt(insertAt, blocks) {
+    outline = outline.slice(0, insertAt).concat(blocks, outline.slice(insertAt));
+  }
   function activeOutlineRowIndex(target) {
     var textEl = target && target.closest ? target.closest(".outlineText[data-block-id]") : null;
     var blockId = textEl ? textEl.getAttribute("data-block-id") || "" : "";
@@ -806,7 +820,8 @@
     }
     var blocks = outlineBlocksFromPastedText(text, insertion.baseDepth);
     if (!blocks.length) return 0;
-    outline.splice.apply(outline, [insertion.insertAt, 0].concat(blocks));
+    collapseLargePastedRoots(blocks);
+    insertOutlineBlocksAt(insertion.insertAt, blocks);
     var rootIds = pastedRootIds(blocks);
     outlineSelectedIds.clear();
     rootIds.forEach(function (blockId) { outlineSelectedIds.add(blockId); });
@@ -1244,6 +1259,12 @@
   if (typeof environment.probe === "function") {
     environment.probe(Object.freeze({
       outlineBlocksFromPastedText: outlineBlocksFromPastedText,
+      collapseLargePastedRoots: collapseLargePastedRoots,
+      insertOutlineBlocksAt: function (existing, insertAt, blocks) {
+        outline = Array.isArray(existing) ? existing : [];
+        insertOutlineBlocksAt(insertAt, blocks);
+        return outline;
+      },
       renderEmptyOutline: function (pane) {
         outline = [];
         outlinePane = pane;

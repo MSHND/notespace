@@ -6239,6 +6239,46 @@ test("generated PE runtime structured-paste parser retains spaces, tabs, mixed i
   assert.deepEqual(plain(pasted.map((block) => block.depth)), [5, 6, 7]);
 });
 
+test("P105 collapses only hierarchical roots of large structured PE pastes and inserts creditor-scale blocks safely", () => {
+  const factory = loadRuntimeFactory();
+  const { probe } = runtimeProbe(factory, { id: "p105", title: "P105", body: "", mode: "text", outline: null });
+  const structuredText = Array.from({ length: 100 }, (_unused, index) => `Root ${index}\n  Child ${index}`).join("\n");
+  const underBoundary = probe.outlineBlocksFromPastedText(structuredText.slice(0, structuredText.lastIndexOf("\n")), 0);
+  probe.collapseLargePastedRoots(underBoundary);
+  assert.equal(underBoundary.length, 199);
+  assert.equal(underBoundary.every((block) => block.collapsed === false), true);
+
+  const atBoundary = probe.outlineBlocksFromPastedText(structuredText, 0);
+  probe.collapseLargePastedRoots(atBoundary);
+  assert.equal(atBoundary.length, 200);
+  assert.equal(atBoundary.filter((block) => block.depth === 0).every((block) => block.collapsed === true), true);
+  assert.equal(atBoundary.filter((block) => block.depth === 1).every((block) => block.collapsed === false), true);
+
+  const flat = probe.outlineBlocksFromPastedText(Array.from({ length: 200 }, (_unused, index) => `Flat ${index}`).join("\n"), 0);
+  probe.collapseLargePastedRoots(flat);
+  assert.equal(flat.every((block) => block.collapsed === false), true);
+
+  const mixed = probe.outlineBlocksFromPastedText("Parent\n  Child\nLeaf", 3);
+  while (mixed.length < 200) mixed.push(...probe.outlineBlocksFromPastedText("Leaf", 3));
+  probe.collapseLargePastedRoots(mixed);
+  assert.equal(mixed[0].collapsed, true);
+  assert.equal(mixed[1].collapsed, false);
+  assert.equal(mixed[2].collapsed, false);
+
+  const creditorText = Array.from({ length: 3000 }, (_unused, index) =>
+    `Creditor ${index}\n  Datascape Code: ${index}\n  Synergy Code: ${index}\n  Email: creditor${index}@example.test\n  Notes:`,
+  ).join("\n");
+  const creditorBlocks = probe.outlineBlocksFromPastedText(creditorText, 0);
+  probe.collapseLargePastedRoots(creditorBlocks);
+  const inserted = probe.insertOutlineBlocksAt([{ id: "before", depth: 0, collapsed: false }], 1, creditorBlocks);
+  assert.equal(inserted.length, 15001);
+  assert.equal(inserted.slice(1).filter((block) => block.depth === 0).length, 3000);
+  assert.equal(inserted.slice(1).filter((block) => block.depth === 0).every((block) => block.collapsed === true), true);
+  assert.equal(inserted[1].text, "Creditor 0");
+  assert.equal(inserted.at(-1).text, "Notes:");
+  assert.equal(inserted.filter((block) => block.depth === 1).length, 12000);
+});
+
 test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {
   const factory = loadRuntimeFactory();
   const { probe } = runtimeProbe(factory, { id: "empty_runtime", title: "Empty", body: "", mode: "text", outline: null });
