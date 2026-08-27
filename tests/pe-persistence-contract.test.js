@@ -6279,6 +6279,52 @@ test("P105 collapses only hierarchical roots of large structured PE pastes and i
   assert.equal(inserted.filter((block) => block.depth === 1).length, 12000);
 });
 
+test("P105a drives threshold, collapse, selection, and creditor-scale visibility through the real PE paste path", async () => {
+  const paste = (text, depth = 0) => {
+    const runtime = executeControlledRuntime(runtimeEditablePayload({
+      mode: "outline",
+      outline: [{ id: "p105a-anchor", text: "Anchor", depth, collapsed: false }],
+    }));
+    const pane = runtime.controls.get("outlinePane");
+    const event = pane.dispatch("paste", {
+      target: pane.children[0].children[1],
+      clipboardData: { getData() { return text; } },
+    });
+    return { runtime, pane, event };
+  };
+  const hierarchical = (roots) => Array.from({ length: roots }, (_unused, index) =>
+    `Root ${index}\n  Child ${index}`).join("\n");
+  const under = paste(hierarchical(99));
+  assert.equal(under.event.defaultPrevented, true);
+  assert.equal(under.pane.children.length, 199);
+  assert.equal(under.pane.children.slice(1).every((row) => row.children[1].textContent.startsWith("Root ") || row.children[1].textContent.startsWith("Child ")), true);
+
+  const boundary = paste(hierarchical(100));
+  assert.equal(boundary.runtime.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.match(boundary.controls?.get?.("saveState")?.textContent || boundary.runtime.controls.get("saveState").textContent, /pasted 200 outline rows/);
+  assert.equal(boundary.pane.children.length, 101);
+  assert.equal(boundary.pane.children.slice(1).every((row) => row.children[1].textContent.startsWith("Root ")), true);
+  assert.equal(boundary.pane.children.slice(1).every((row) => row.getAttribute("aria-selected") === "true"), true);
+
+  const flat = paste(Array.from({ length: 200 }, (_unused, index) => `Flat ${index}`).join("\n"));
+  assert.equal(flat.pane.children.length, 201);
+
+  const mixed = paste(`Parent\n  Nested\n    Grandchild\nLeaf\n${Array.from({ length: 196 }, (_unused, index) => `Leaf ${index}`).join("\n")}`, 3);
+  assert.equal(mixed.pane.children.length, 199, "only the collapsed parent hides its two descendants");
+  assert.equal(mixed.pane.children.slice(1).some((row) => row.children[1].textContent === "Leaf"), true);
+
+  const creditorText = Array.from({ length: 3000 }, (_unused, index) =>
+    `Creditor ${index}\n  Datascape ${index}\n  Synergy ${index}\n  Email ${index}\n  Notes ${index}`,
+  ).join("\n");
+  const creditor = paste(creditorText);
+  assert.equal(creditor.pane.children.length, 3001);
+  creditor.runtime.controls.get("saveBtn").dispatch("click");
+  await settleRuntime();
+  assert.equal(creditor.runtime.saveCalls[0].outline.length, 15001);
+  assert.equal(creditor.runtime.saveCalls[0].outline.slice(1).filter((block) => block.depth === 0 && block.collapsed).length, 3000);
+  assert.equal(creditor.runtime.saveCalls[0].outline.at(-1).text, "Notes 2999");
+});
+
 test("generated PE runtime renders one fresh blank row for an absent independent Outline", () => {
   const factory = loadRuntimeFactory();
   const { probe } = runtimeProbe(factory, { id: "empty_runtime", title: "Empty", body: "", mode: "text", outline: null });
