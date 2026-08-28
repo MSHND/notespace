@@ -54,6 +54,61 @@ function indexScriptSources() {
   return Array.from(source("index.html").matchAll(/<script\s+src="([^"]+)"/g), (match) => match[1]);
 }
 
+function createLocalSafetyIndexedDb() {
+  const records = new Map();
+  const api = { records, failPut: null, indexedDB: null };
+  let created = false;
+  const store = {
+    keyPath: "key",
+    get(key) { const request = {}; queueMicrotask(() => { request.result = records.get(key); request.onsuccess?.(); }); return request; },
+    put(value) { const request = {}; queueMicrotask(() => {
+      if (api.failPut) { request.error = api.failPut; request.onerror?.(); return; }
+      records.set(value.key, plain(value)); request.onsuccess?.();
+    }); return request; },
+    delete(key) { const request = {}; queueMicrotask(() => { records.delete(key); request.onsuccess?.(); }); return request; },
+  };
+  const database = {
+    version: 1,
+    get objectStoreNames() { return created ? ["current"] : []; },
+    createObjectStore(name, options) {
+      if (name !== "current" || options?.keyPath !== "key") throw new Error("invalid local safety schema");
+      created = true;
+      return store;
+    },
+    transaction() {
+      const transaction = { error: null, objectStore: () => store, abort() { queueMicrotask(() => transaction.onabort?.()); } };
+      setImmediate(() => transaction.oncomplete?.());
+      return transaction;
+    },
+    close() {},
+  };
+  api.indexedDB = { open(name, version) {
+      if (name !== "pocket.local.safety.v1" || version !== 1) {
+        const genericRecords = new Map();
+        let genericStoreName = "";
+        const genericStore = {
+          get(key) { const request = {}; queueMicrotask(() => { request.result = genericRecords.get(key); request.onsuccess?.(); }); return request; },
+          put(value) { const request = {}; queueMicrotask(() => { genericRecords.set(value.key || value.name, plain(value)); request.onsuccess?.(); }); return request; },
+          delete(key) { const request = {}; queueMicrotask(() => { genericRecords.delete(key); request.onsuccess?.(); }); return request; },
+          getAll() { const request = {}; queueMicrotask(() => { request.result = [...genericRecords.values()]; request.onsuccess?.(); }); return request; },
+        };
+        const genericDb = {
+          get objectStoreNames() { return { contains: (candidate) => candidate === genericStoreName }; },
+          createObjectStore(storeName) { genericStoreName = storeName; return genericStore; },
+          transaction() { const transaction = { objectStore: () => genericStore, abort() {} }; setImmediate(() => transaction.oncomplete?.()); return transaction; },
+          close() {},
+        };
+        const request = { result: genericDb, transaction: { abort() {} } };
+        queueMicrotask(() => { request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });
+        return request;
+      }
+      const request = { result: database, transaction: { abort() {} } };
+      queueMicrotask(() => { if (!created) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });
+      return request;
+    } };
+  return api;
+}
+
 function createBrowserContext(options = {}) {
   const storage = new Map();
   const storageWrites = [];
@@ -83,6 +138,7 @@ function createBrowserContext(options = {}) {
     console: { log() {}, info() {}, warn() {}, error() {} },
     document: options.document || defaultDocument,
     navigator: { clipboard: {} },
+    indexedDB: options.indexedDB,
     localStorage: {
       getItem(key) { return storage.has(String(key)) ? storage.get(String(key)) : null; },
       setItem(key, value) {
@@ -4498,7 +4554,8 @@ test("applyAndSave requests the controlled export surface after a changed apply"
 });
 
 test("P105f saves and freshly reopens a creditor-scale Outline through the real JSON writer", async () => {
-  const context = createFullContractContext();
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
   runScript(context, "js/pocket-file-opening.js");
   const outline = creditorScaleOutline();
   const node = syntheticNode("p105f_creditors", { details: "", editor: null });
@@ -4511,7 +4568,7 @@ test("P105f saves and freshly reopens a creditor-scale Outline through the real 
     async createWritable() {
       return {
         async write(value) {
-          safetyAtWrite = context.__storage.get("pocketLite.localSafety.snapshot.v1") || "";
+          safetyAtWrite = JSON.stringify(idb.records.get("current")?.entry || null);
           written = String(value);
         },
         async close() {},
@@ -4545,9 +4602,10 @@ test("P105f saves and freshly reopens a creditor-scale Outline through the real 
     plain(reopenedOutline.map((block) => [block.id, block.text, block.depth, block.collapsed, block.order])),
     plain(outline.map((block, index) => [block.id, block.text, block.depth, block.collapsed, index + 1]))
   );
+  assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
 });
 
-test("P105f restores a large JSON-owner edit before export when the local envelope or current safety copy fails", () => {
+test("P105f restores a large JSON-owner edit before export when the local envelope or current safety copy fails", async () => {
   const outline = Array.from({ length: 401 }, (_, index) => ({
     id: `large_${index}`,
     text: `Large ${index}`,
@@ -4558,30 +4616,35 @@ test("P105f restores a large JSON-owner edit before export when the local envelo
     ["local envelope", (context) => {
       context.buildPocketPayload = () => ({ padding: "x".repeat(8000001) });
     }, "large-outline-local-file-too-large"],
-    ["current safety", (context) => {
-      context.localStorage.setItem = () => { throw new Error("quota"); };
+    ["current safety", (_context, idb) => {
+      idb.failPut = new DOMException("IndexedDB quota", "QuotaExceededError");
     }, "large-outline-safety-copy-failed"],
   ]) {
-    const context = createFullContractContext();
+    const idb = createLocalSafetyIndexedDb();
+    const context = createFullContractContext({ indexedDB: idb.indexedDB });
     const node = syntheticNode(`p105f_${label}`, { details: "Before" });
     const state = resetState(context, [node]);
     let exports = 0;
     context.exportTree = async () => { exports += 1; return { ok: true }; };
-    configure(context);
+    configure(context, idb);
     const before = snapshotSaveBoundary(context, node.id);
-    const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+    const result = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, state.nodes[0], {
       schema: EDITOR_SCHEMA,
       mode: "outline",
       outline,
-    }), { returnDetails: true });
+    }));
     assert.equal(result.reason, reason, label);
-    assertSaveBoundaryUnchanged(context, node.id, before);
+    const after = snapshotSaveBoundary(context, node.id);
+    assert.deepEqual(after.node, before.node, label);
+    assert.deepEqual(after.ops, before.ops, label);
+    assert.equal(after.selectedId, before.selectedId, label);
     assert.equal(exports, 0, label);
   }
 });
 
 test("P105h prunes expendable safety trail before a creditor-scale JSON Outline safety snapshot", async () => {
-  const context = createFullContractContext();
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
   runScript(context, "js/pocket-file-opening.js");
   const oldOutline = creditorScaleOutline();
   oldOutline.at(-1).text = "Old safety tail";
@@ -4590,28 +4653,14 @@ test("P105h prunes expendable safety trail before a creditor-scale JSON Outline 
     : block);
   const node = syntheticNode("p105h_creditors", { details: "", editor: outlineMeta(oldOutline) });
   const state = resetState(context, [node]);
-  assert.equal(context.saveLocalSafetySnapshot("p105h-old"), true);
-  const oldRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
-  state.nodes[0].editor = outlineMeta(nextOutline);
-  assert.equal(context.saveLocalSafetySnapshot("p105h-next"), true);
-  const nextRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
-  state.nodes[0].editor = outlineMeta(oldOutline);
-  const trailRaw = JSON.stringify([JSON.parse(oldRaw)]);
-  context.__storage.clear();
-  context.__storage.set("pocketLite.localSafety.snapshot.v1", oldRaw);
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105h-old"), true);
+  const oldEntry = idb.records.get("current").entry;
+  const trailRaw = JSON.stringify([oldEntry]);
   context.__storage.set("pocketLite.localSafety.trail.v1", trailRaw);
-  const storageSize = (entries) => [...entries.entries()]
-    .reduce((total, [key, value]) => total + key.length + String(value).length, 0);
-  const quota = storageSize(context.__storage) + Math.max(0, nextRaw.length - oldRaw.length) - 1;
   context.localStorage.setItem = (key, value) => {
-    const next = new Map(context.__storage);
-    next.set(String(key), String(value));
-    if (storageSize(next) > quota) throw quotaExceededError();
+    if (key === "pocketLite.localSafety.snapshot.v1") throw quotaExceededError();
     context.__storage.set(String(key), String(value));
   };
-  assert.throws(() => context.localStorage.setItem("pocketLite.localSafety.snapshot.v1", nextRaw), {
-    name: "QuotaExceededError",
-  });
 
   let written = "";
   let safetyAtWrite = "";
@@ -4619,7 +4668,7 @@ test("P105h prunes expendable safety trail before a creditor-scale JSON Outline 
     name: "p105h-creditors.json",
     async queryPermission() { return "granted"; },
     async createWritable() { return { async write(value) {
-      safetyAtWrite = context.__storage.get("pocketLite.localSafety.snapshot.v1") || "";
+      safetyAtWrite = JSON.stringify(idb.records.get("current")?.entry || null);
       written = String(value);
     }, async close() {}, async abort() {} }; },
     async getFile() { return { name: "p105h-creditors.json", async text() { return written; } }; },
@@ -4633,14 +4682,16 @@ test("P105h prunes expendable safety trail before a creditor-scale JSON Outline 
   assert.equal(result.exported, true);
   const safety = JSON.parse(safetyAtWrite);
   assertExactOutline(context.normaliseInput(safety.payload).nodes[0].editor.outline, nextOutline);
-  assert.equal(context.readLocalSafetyTrail().length, 0);
+  assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), trailRaw);
+  assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
   const inspected = await context.PocketFileOpening.inspectHandle(handle);
   assert.equal(inspected.ok, true);
   assertExactOutline(context.normaliseInput(inspected.parsed).nodes[0].editor.outline, nextOutline);
 });
 
-test("P105h fails closed after clearing an expendable safety trail that cannot free enough quota", () => {
-  const context = createFullContractContext();
+test("P105h fails closed when the dedicated current-safety store cannot commit", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
   const oldOutline = creditorScaleOutline();
   oldOutline.at(-1).text = "Old safety tail";
   const nextOutline = oldOutline.map((block, index) => index === oldOutline.length - 1
@@ -4648,23 +4699,19 @@ test("P105h fails closed after clearing an expendable safety trail that cannot f
     : block);
   const node = syntheticNode("p105h_no_capacity", { details: "", editor: outlineMeta(oldOutline) });
   const state = resetState(context, [node]);
-  assert.equal(context.saveLocalSafetySnapshot("p105h-old"), true);
-  const oldRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
-  const trailRaw = JSON.stringify([JSON.parse(oldRaw)]);
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105h-old"), true);
+  const oldEntry = idb.records.get("current").entry;
+  const trailRaw = JSON.stringify([oldEntry]);
   context.__storage.set("pocketLite.localSafety.trail.v1", trailRaw);
-  context.localStorage.setItem = (key, value) => {
-    const next = new Map(context.__storage);
-    next.set(String(key), String(value));
-    throw quotaExceededError();
-  };
+  idb.failPut = quotaExceededError();
   let exports = 0;
   context.exportTree = async () => { exports += 1; return { ok: true }; };
 
-  const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+  const result = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, state.nodes[0], {
     schema: EDITOR_SCHEMA,
     mode: "outline",
     outline: nextOutline,
-  }), { returnDetails: true });
+  }));
 
   assert.equal(result.reason, "large-outline-safety-copy-failed");
   assert.equal(exports, 0);
@@ -4672,17 +4719,18 @@ test("P105h fails closed after clearing an expendable safety trail that cannot f
     plain(state.nodes[0].editor.outline.map((block) => [block.id, block.text, block.depth, block.collapsed])),
     plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
   );
-  assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), undefined);
-  assert.equal(context.__storage.get("pocketLite.localSafety.snapshot.v1"), oldRaw);
+  assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), trailRaw);
+  assert.deepEqual(idb.records.get("current").entry, oldEntry);
   assert.deepEqual(
-    plain(context.readLocalSafetySnapshot().norm.nodes[0].editor.outline
+    plain((await context.readLocalSafetySnapshotDurably()).norm.nodes[0].editor.outline
       .map((block) => [block.id, block.text, block.depth, block.collapsed])),
     plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
   );
 });
 
-test("P105i preserves current safety and history when local storage is denied without quota pressure", () => {
-  const context = createFullContractContext();
+test("P105i preserves current safety and history when IndexedDB rejects a non-quota write", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
   const oldOutline = creditorScaleOutline();
   oldOutline.at(-1).text = "Old safety tail";
   const nextOutline = oldOutline.map((block, index) => index === oldOutline.length - 1
@@ -4690,41 +4738,111 @@ test("P105i preserves current safety and history when local storage is denied wi
     : block);
   const node = syntheticNode("p105i_storage_denied", { details: "", editor: outlineMeta(oldOutline) });
   const state = resetState(context, [node]);
-  assert.equal(context.saveLocalSafetySnapshot("p105i-old"), true);
-  const oldRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
-  const trailRaw = JSON.stringify([JSON.parse(oldRaw)]);
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105i-old"), true);
+  const oldEntry = idb.records.get("current").entry;
+  const trailRaw = JSON.stringify([oldEntry]);
   context.__storage.set("pocketLite.localSafety.trail.v1", trailRaw);
-  const originalSetItem = context.localStorage.setItem.bind(context.localStorage);
-  const writes = [];
-  context.localStorage.setItem = (key, value) => {
-    writes.push(String(key));
-    if (key === "pocketLite.localSafety.snapshot.v1") {
-      throw new DOMException("Storage access denied", "SecurityError");
-    }
-    return originalSetItem(key, value);
-  };
+  idb.failPut = new DOMException("Storage access denied", "SecurityError");
   let exports = 0;
   context.exportTree = async () => { exports += 1; return { ok: true }; };
 
-  const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+  const result = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, state.nodes[0], {
     schema: EDITOR_SCHEMA,
     mode: "outline",
     outline: nextOutline,
-  }), { returnDetails: true });
+  }));
 
   assert.equal(result.reason, "large-outline-safety-copy-failed");
   assert.equal(exports, 0);
-  assert.deepEqual(writes, ["pocketLite.localSafety.snapshot.v1"]);
   assert.deepEqual(
     plain(state.nodes[0].editor.outline.map((block) => [block.id, block.text, block.depth, block.collapsed])),
     plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
   );
-  assert.equal(context.__storage.get("pocketLite.localSafety.snapshot.v1"), oldRaw);
+  assert.deepEqual(idb.records.get("current").entry, oldEntry);
   assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), trailRaw);
 });
 
-test("P105f continues after a bounded trail failure when the complete current safety slot succeeds", () => {
-  const context = createFullContractContext();
+test("P105j commits the JSON current safety slot in dedicated IndexedDB without a localStorage duplicate", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
+  const node = syntheticNode("p105j_current", { details: "IndexedDB safety" });
+  resetState(context, [node]);
+
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105j-current"), true);
+  assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
+  const current = await context.readLocalSafetySnapshotDurably();
+  assert.equal(current.norm.nodes[0].details, "IndexedDB safety");
+  assert.equal(idb.records.get("current").entry.reason, "p105j-current");
+
+  const reopened = createFullContractContext({ indexedDB: idb.indexedDB });
+  resetState(reopened, [node]);
+  const afterRestart = await reopened.readLocalSafetySnapshotDurably();
+  assert.equal(afterRestart.norm.nodes[0].details, "IndexedDB safety");
+});
+
+test("P105j retains a legacy current snapshot until IndexedDB commits an equivalent-or-newer entry", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
+  resetState(context, [syntheticNode("p105j_legacy", { details: "Legacy current" })]);
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105j-legacy"), true);
+  const legacyRaw = JSON.stringify(idb.records.get("current").entry);
+  idb.records.clear();
+  context.__storage.set("pocketLite.localSafety.snapshot.v1", legacyRaw);
+  idb.failPut = new DOMException("IndexedDB unavailable", "InvalidStateError");
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105j-migration"), false);
+  assert.equal(context.__storage.get("pocketLite.localSafety.snapshot.v1"), legacyRaw);
+  idb.failPut = null;
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p105j-migration"), true);
+  assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
+  assert.equal((await context.readLocalSafetySnapshotDurably()).norm.nodes[0].details, "Legacy current");
+});
+
+test("P105j never writes plaintext current safety to the local database for Synced or Vault ownership", async () => {
+  for (const ownerKind of ["synced", "vault"]) {
+    const idb = createLocalSafetyIndexedDb();
+    const context = createFullContractContext({ indexedDB: idb.indexedDB });
+    resetState(context, [syntheticNode(`p105j_${ownerKind}`, { details: ownerKind })]);
+    if (ownerKind === "synced") {
+      context.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+    } else {
+      context.isPocketVaultOwnerActive = () => true;
+    }
+    assert.equal(await context.saveLocalSafetySnapshotDurably("p105j-private"), false, ownerKind);
+    assert.equal(idb.records.size, 0, ownerKind);
+  }
+});
+
+test("P105j fails closed before a large JSON Outline truth write when IndexedDB cannot commit", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  idb.failPut = new DOMException("IndexedDB quota", "QuotaExceededError");
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
+  const oldOutline = creditorScaleOutline();
+  const nextOutline = oldOutline.map((block, index) => index === oldOutline.length - 1
+    ? { ...block, text: "Must not reach truth write" }
+    : block);
+  const node = syntheticNode("p105j_failure", { details: "", editor: outlineMeta(oldOutline) });
+  const state = resetState(context, [node]);
+  let exports = 0;
+  context.exportTree = async () => { exports += 1; return { ok: true }; };
+
+  const result = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(context, state.nodes[0], {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline: nextOutline,
+  }));
+
+  assert.equal(result.reason, "large-outline-safety-copy-failed");
+  assert.equal(exports, 0);
+  assert.deepEqual(
+    plain(state.nodes[0].editor.outline.map((block) => [block.id, block.text, block.depth, block.collapsed])),
+    plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
+  );
+  assert.equal(context.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
+});
+
+test("P105f continues after a bounded trail failure when the complete current safety slot succeeds", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  const context = createFullContractContext({ indexedDB: idb.indexedDB });
   const node = syntheticNode("p105f_trail", { details: "Before" });
   const state = resetState(context, [node]);
   const originalSetItem = context.localStorage.setItem.bind(context.localStorage);
@@ -4744,7 +4862,7 @@ test("P105f continues after a bounded trail failure when the complete current sa
     outline,
   }), { returnDetails: true });
   assert.equal(result.ok, true);
-  const current = context.readLocalSafetySnapshot();
+  const current = await context.readLocalSafetySnapshotDurably();
   assert.equal(current.norm.nodes[0].editor.outline.length, 401);
   assert.equal(context.readLocalSafetyTrail().length, 0);
   assert.equal(state.nodes[0].editor.outline.length, 401);

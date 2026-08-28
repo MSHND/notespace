@@ -135,7 +135,7 @@
       && global.capturePocketFileSaveSession?.()?.ownerKind === "json";
   }
 
-  function verifyLargeJsonOutlineSafety() {
+  function verifyLargeJsonOutlineEnvelope() {
     const policy = global.PocketOutlinePersistencePolicy;
     let data;
     try {
@@ -148,10 +148,6 @@
     }
     if (!policy || typeof policy.allowsLocalFileText !== "function" || !policy.allowsLocalFileText(data)) {
       return { ok: false, reason: "large-outline-local-file-too-large" };
-    }
-    if (typeof global.saveLocalSafetySnapshot !== "function"
-        || global.saveLocalSafetySnapshot("large-outline-before-truth-save") !== true) {
-      return { ok: false, reason: "large-outline-safety-copy-failed" };
     }
     return { ok: true };
   }
@@ -280,7 +276,7 @@
     node.updatedAt = updatedAt;
 
     if (rollback) {
-      const safety = verifyLargeJsonOutlineSafety();
+      const safety = verifyLargeJsonOutlineEnvelope();
       if (!safety.ok) {
         restoreNodeFromRollback(node, rollback);
         return rejection(
@@ -316,6 +312,8 @@
       reason: "changed",
       nodeUpdatedAt: node.updatedAt,
       sourceIdentity,
+      rollback,
+      largeJsonOutline: needsLargeOutlineSafety,
     };
   }
 
@@ -325,6 +323,7 @@
   }
 
   async function applyAndSave(payload, options = {}) {
+    const opsBeforeApply = Array.isArray(state.ops) ? state.ops.length : 0;
     const applied = applyPayload(payload, { quiet: true });
     if (!applied.ok) {
       return { ...applied, ok: false, applied: false, changed: false, exported: false, reason: applied.reason || "apply-failed" };
@@ -341,6 +340,21 @@
         nodeUpdatedAt: applied.nodeUpdatedAt,
         sourceIdentity: applied.sourceIdentity,
       };
+    }
+
+    if (applied.largeJsonOutline === true) {
+      const safetyStored = typeof global.saveLocalSafetySnapshotDurably === "function"
+        && await global.saveLocalSafetySnapshotDurably("large-outline-before-truth-save") === true;
+      if (!safetyStored) {
+        restoreNodeFromRollback(popoutTarget().getById(applied.id), applied.rollback);
+        state.ops = Array.isArray(state.ops) ? state.ops.slice(0, opsBeforeApply) : [];
+        if (typeof global.resetPocketOperationAnchor === "function") global.resetPocketOperationAnchor();
+        return rejection(
+          "large-outline-safety-copy-failed",
+          "Pocket could not retain a complete current safety copy for this large Outline. Nothing was changed.",
+          "Large Outline safety copy failed — not saved"
+        );
+      }
     }
 
     if (typeof exportTree !== "function") {

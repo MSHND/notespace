@@ -2,6 +2,13 @@
 
 const syncedDiscardSafetyTokens = new Map();
 let nextSyncedDiscardSafetyToken = 0;
+const LOCAL_SAFETY_DATABASE = Object.freeze({
+  name: "pocket.local.safety.v1",
+  version: 1,
+  store: "current",
+  key: "current",
+});
+let localSafetyDatabasePromise = null;
 
 function isPocketVaultStoragePrivate() {
   try {
@@ -27,6 +34,21 @@ function pocketBrowserStoragePrivacyMode() {
 
 function isPocketBrowserStoragePrivate() {
   return pocketBrowserStoragePrivacyMode() !== "";
+}
+
+function isJsonLocalSafetyOwner() {
+  try {
+    return !isPocketBrowserStoragePrivate()
+      && window.capturePocketFileSaveSession?.()?.ownerKind === "json";
+  } catch {
+    return false;
+  }
+}
+
+function canUseLocalSafetyIndexedDb() {
+  return isJsonLocalSafetyOwner()
+    && !!window.indexedDB
+    && typeof window.indexedDB.open === "function";
 }
 
 window.pocketBrowserStoragePrivacyMode = pocketBrowserStoragePrivacyMode;
@@ -285,6 +307,144 @@ function isLocalStorageQuotaError(error) {
     || code === 1014;
 }
 
+function localSafetyIndexedDbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error("local-safety-indexeddb-request-failed"));
+  });
+}
+
+function openLocalSafetyIndexedDb() {
+  if (localSafetyDatabasePromise) return localSafetyDatabasePromise;
+  localSafetyDatabasePromise = new Promise((resolve, reject) => {
+    let request;
+    try {
+      if (!window.indexedDB || typeof window.indexedDB.open !== "function") {
+        throw new Error("local-safety-indexeddb-unavailable");
+      }
+      request = window.indexedDB.open(LOCAL_SAFETY_DATABASE.name, LOCAL_SAFETY_DATABASE.version);
+    } catch (error) {
+      localSafetyDatabasePromise = null;
+      reject(error);
+      return;
+    }
+    request.onupgradeneeded = (event) => {
+      try {
+        const db = request.result;
+        if (event.oldVersion !== 0 || Array.from(db.objectStoreNames || []).length !== 0) {
+          throw new Error("local-safety-indexeddb-schema-invalid");
+        }
+        db.createObjectStore(LOCAL_SAFETY_DATABASE.store, { keyPath: "key" });
+      } catch (error) {
+        try { request.transaction.abort(); } catch {}
+        localSafetyDatabasePromise = null;
+        reject(error);
+      }
+    };
+    request.onblocked = () => {
+      localSafetyDatabasePromise = null;
+      reject(new Error("local-safety-indexeddb-blocked"));
+    };
+    request.onerror = () => {
+      localSafetyDatabasePromise = null;
+      reject(request.error || new Error("local-safety-indexeddb-open-failed"));
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+  return localSafetyDatabasePromise;
+}
+
+function localSafetyIndexedDbTransaction(mode, work) {
+  return openLocalSafetyIndexedDb().then((db) => new Promise((resolve, reject) => {
+    let transaction;
+    let result;
+    let workDone = false;
+    try {
+      transaction = db.transaction(LOCAL_SAFETY_DATABASE.store, mode);
+      const store = transaction.objectStore(LOCAL_SAFETY_DATABASE.store);
+      transaction.oncomplete = () => workDone
+        ? resolve(result)
+        : reject(new Error("local-safety-indexeddb-transaction-incomplete"));
+      transaction.onabort = () => reject(transaction.error || new Error("local-safety-indexeddb-transaction-aborted"));
+      transaction.onerror = () => {};
+      Promise.resolve(work(store)).then((value) => {
+        result = value;
+        workDone = true;
+      }).catch((error) => {
+        try { transaction.abort(); } catch {}
+        reject(error);
+      });
+    } catch (error) {
+      reject(error);
+    }
+  }));
+}
+
+async function writeLocalSafetyIndexedDbCurrent(entry) {
+  if (!canUseLocalSafetyIndexedDb()) return false;
+  let copy;
+  try { copy = JSON.parse(JSON.stringify(entry)); } catch { return false; }
+  try {
+    await localSafetyIndexedDbTransaction("readwrite", (store) => localSafetyIndexedDbRequest(
+      store.put({ key: LOCAL_SAFETY_DATABASE.key, entry: copy })
+    ));
+  } catch {
+    return false;
+  }
+  try {
+    const legacy = localStorage.getItem(LOCAL_SAFETY_KEY);
+    const parsed = legacy ? JSON.parse(legacy) : null;
+    if (parsed && Date.parse(parsed.capturedAt || "") <= Date.parse(copy.capturedAt || "")) {
+      localStorage.removeItem(LOCAL_SAFETY_KEY);
+    }
+  } catch {}
+  return true;
+}
+
+async function readLocalSafetyIndexedDbCurrent() {
+  if (!canUseLocalSafetyIndexedDb()) return null;
+  try {
+    const record = await localSafetyIndexedDbTransaction("readonly", (store) => localSafetyIndexedDbRequest(
+      store.get(LOCAL_SAFETY_DATABASE.key)
+    ));
+    return record?.entry && typeof record.entry === "object" ? record.entry : null;
+  } catch {
+    return null;
+  }
+}
+
+async function clearLocalSafetyIndexedDbCurrent() {
+  if (!canUseLocalSafetyIndexedDb()) return false;
+  try {
+    await localSafetyIndexedDbTransaction("readwrite", (store) => localSafetyIndexedDbRequest(
+      store.delete(LOCAL_SAFETY_DATABASE.key)
+    ));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function localSafetySnapshotFromEntry(parsed) {
+  const payload = parsed?.payload && typeof parsed.payload === "object" ? parsed.payload : null;
+  if (!payload || !hasPocketSafetyTree(payload)) return null;
+  const norm = normalisePocketSafetyPayload(payload);
+  if (!Array.isArray(norm.nodes)) return null;
+  const capturedAt = cleanText(parsed.capturedAt || norm.writtenAt, 40);
+  const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
+  if (capturedMs <= 0) return null;
+  return {
+    parsed,
+    norm,
+    capturedAt,
+    capturedMs,
+    base: normaliseStoredPocketBaseline(parsed.base),
+    deviceChanges: parsed.deviceChanges && typeof parsed.deviceChanges === "object"
+      ? parsed.deviceChanges
+      : null,
+  };
+}
+
 function storeLocalSafetyEntry(entry) {
   if (isPocketBrowserStoragePrivate()) {
     return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
@@ -389,7 +549,26 @@ function saveLocalSafetySnapshot(reason = "change") {
   } catch {
     return false;
   }
+  if (isJsonLocalSafetyOwner()) {
+    if (!canUseLocalSafetyIndexedDb()) return false;
+    void writeLocalSafetyIndexedDbCurrent(entry);
+    return true;
+  }
   return storeLocalSafetyEntry(entry).ok === true;
+}
+
+async function saveLocalSafetySnapshotDurably(reason = "change", options = {}) {
+  if (!canUseLocalSafetyIndexedDb()) return false;
+  let entry;
+  try {
+    entry = buildLocalSafetyEntry(reason, nowIso(), {
+      includeBase: true,
+      ...(options && typeof options === "object" ? options : {}),
+    });
+  } catch {
+    return false;
+  }
+  return writeLocalSafetyIndexedDbCurrent(entry);
 }
 
 function saveDetachedPocketSafetySnapshot(documentInput, base, options = {}) {
@@ -457,27 +636,15 @@ function readLocalSafetySnapshot() {
     const raw = localStorage.getItem(LOCAL_SAFETY_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-    const payload = parsed.payload && typeof parsed.payload === "object" ? parsed.payload : null;
-    if (!hasPocketSafetyTree(payload)) return null;
-    const norm = normalisePocketSafetyPayload(payload);
-    if (!Array.isArray(norm.nodes)) return null;
-    const capturedAt = cleanText(parsed.capturedAt || norm.writtenAt, 40);
-    const capturedMs = Number.isFinite(Date.parse(capturedAt)) ? Date.parse(capturedAt) : 0;
-    if (capturedMs <= 0) return null;
-    return {
-      parsed,
-      norm,
-      capturedAt,
-      capturedMs,
-      base: normaliseStoredPocketBaseline(parsed.base),
-      deviceChanges: parsed.deviceChanges && typeof parsed.deviceChanges === "object"
-        ? parsed.deviceChanges
-        : null,
-    };
+    return localSafetySnapshotFromEntry(parsed);
   } catch {
     return null;
   }
+}
+
+async function readLocalSafetySnapshotDurably() {
+  const current = localSafetySnapshotFromEntry(await readLocalSafetyIndexedDbCurrent());
+  return current || readLocalSafetySnapshot();
 }
 
 function captureJsonSafetyForSyncedDiscard() {
@@ -806,6 +973,7 @@ function clearLocalSafetySnapshot(options = {}) {
     return true;
   }
   try {
+    if (canUseLocalSafetyIndexedDb()) void clearLocalSafetyIndexedDbCurrent();
     localStorage.removeItem(LOCAL_SAFETY_KEY);
     return true;
   } catch {

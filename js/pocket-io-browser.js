@@ -1065,6 +1065,10 @@ async function writeTruthFile(payload, options = {}) {
   if (ownerKind === "vault" || ownerKind === "synced") {
     return { ok: false, reason: ownerKind === "vault" ? "vault-encrypted-owner" : "synced-encrypted-owner" };
   }
+  if (ownerKind === "json" && (typeof saveLocalSafetySnapshotDurably !== "function"
+      || await saveLocalSafetySnapshotDurably("before-local-truth-write", { payload }) !== true)) {
+    return { ok: false, reason: "local-safety-copy-failed" };
+  }
   const activeHandle = expectedSession ? expectedSession.handle : truthFileHandle;
   const expectedSessionIsCurrent = () => !expectedSession || isPocketFileSaveSessionCurrent(expectedSession);
   const resolveSavePicker = () => {
