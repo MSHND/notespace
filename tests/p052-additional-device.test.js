@@ -8,6 +8,7 @@ const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
 const { createServiceCore } = require("../sync-service/pocket-sync-service-core.js");
 const { createRecoveryProofVerifier } = require("../sync-service/pocket-sync-recovery-proof-verifier.js");
+const { createHttpAdapter, POLICY: HTTP_POLICY, ROUTES: HTTP_ROUTES } = require("../sync-service/pocket-sync-http-adapter.js");
 const { createMemoryServiceStore } = require("./helpers/p034-memory-service-store.js");
 const { createSharedDeviceStoreState, createMemoryDeviceStoreDriver } = require("./helpers/p030-memory-device-store-driver.js");
 const fixtures = require("./helpers/p032-remote-fixtures.js");
@@ -149,8 +150,35 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function creditorScaleOutline(groups = 3000) {
+  return Array.from({ length: groups }, (_unused, index) => [
+    { id: `creditor_${index}_0`, text: `Creditor ${index}`, depth: 0, collapsed: true },
+    { id: `creditor_${index}_1`, text: `Datascape ${index}`, depth: 1, collapsed: false },
+    { id: `creditor_${index}_2`, text: `Synergy ${index}`, depth: 1, collapsed: false },
+    { id: `creditor_${index}_3`, text: `Email creditor${index}@example.test`, depth: 1, collapsed: false },
+    { id: `creditor_${index}_4`, text: "Notes:", depth: 1, collapsed: false },
+  ]).flat();
+}
+
+function assertExactOutline(actual, expected) {
+  assert.equal(actual.length, expected.length);
+  assert.deepEqual(
+    plain(actual.map((block) => [block.id, block.text, block.depth, block.collapsed, block.order])),
+    plain(expected.map((block, index) => [block.id, block.text, block.depth, block.collapsed, index + 1]))
+  );
+}
+
+function loadProductionNodePopout(context) {
+  for (const file of [
+    "js/pocket-node-popout-model.js",
+    "js/pocket-node-popout-target.js",
+    "js/pocket-node-popout-editor.js",
+  ]) vm.runInContext(source(file), context, { filename: file });
+}
+
 function createIndexedDb() {
   const records = new Map();
+  const writes = [];
   let reads = 0;
   let beforeRead = null;
   let storeCreated = false;
@@ -167,8 +195,8 @@ function createIndexedDb() {
     },
     getAll() { const request = {}; queueMicrotask(() => { request.result = [...records.values()]; request.onsuccess?.(); }); return request; },
     add(value) { if (records.has(value.syncedPocketId)) throw new Error("duplicate"); const request = {};
-      queueMicrotask(() => { records.set(value.syncedPocketId, value); request.onsuccess?.(); }); return request; },
-    put(value) { const request = {}; queueMicrotask(() => { records.set(value.syncedPocketId, value); request.onsuccess?.(); }); return request; },
+      queueMicrotask(() => { writes.push(plain(value)); records.set(value.syncedPocketId, value); request.onsuccess?.(); }); return request; },
+    put(value) { const request = {}; queueMicrotask(() => { writes.push(plain(value)); records.set(value.syncedPocketId, value); request.onsuccess?.(); }); return request; },
   };
   const database = {
     version: 1, get objectStoreNames() { return storeCreated ? ["pockets"] : []; },
@@ -177,7 +205,7 @@ function createIndexedDb() {
       abort() { queueMicrotask(() => transaction.onabort?.()); } }; setImmediate(() => transaction.oncomplete?.()); return transaction; },
     close() {}, onversionchange: null,
   };
-  return { records, setBeforeRead(callback) { beforeRead = callback; },
+  return { records, writes, setBeforeRead(callback) { beforeRead = callback; },
     indexedDB: { open(name, version) { if (name !== "pocket.sync.device.v1" || version !== 1) throw new Error("database invalid");
       const request = { result: database, transaction: { abort() {} } };
       queueMicrotask(() => { if (!storeCreated) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); }); return request; } } };
@@ -1182,6 +1210,123 @@ test("P103 desktop Synced Pocket saves through exportTree and reopens the same d
   assert.equal(journey.remoteCalls.filter((call) => call.route === "addEnvelope").length, grantsBeforeSave);
   assert.doesNotMatch(JSON.stringify(journey.serviceDriver.snapshot()), new RegExp(`${remoteSentinel}|${firstEdit}|${secondEdit}`));
   assert.doesNotMatch(JSON.stringify(journey.remoteCalls), new RegExp(`${remoteSentinel}|${firstEdit}|${secondEdit}`));
+});
+
+test("P105g persists and reopens the creditor-scale Outline through the production-shaped Synced owner", async () => {
+  const journey = await createBrowserJourney({
+    browserPersistence: true, captureSessionTransitions: true, sameDeviceReopen: true, ownerKind: "none",
+  });
+  assert.deepEqual(plain(journey.opened), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1,
+  });
+  loadProductionNodePopout(journey.b);
+  const outline = creditorScaleOutline();
+  const state = vm.runInContext("state", journey.b);
+  const node = state.nodes[0];
+  const opening = journey.b.PocketNodePopoutModel.buildPayload(node);
+  Object.assign(opening, { schema: "pocket.nodeEditor.v1", mode: "outline", outline });
+  const writesBeforeSave = journey.idb.writes.length;
+  const callsBeforeSave = journey.remoteCalls.length;
+
+  const saved = await journey.b.PocketNodePopoutEditor.applyAndSave(opening);
+  assert.equal(saved.ok, true, JSON.stringify(saved));
+  assert.equal(saved.applied, true);
+  assert.equal(saved.exported, true);
+  assert.equal(saved.exportReason, "synced-save");
+  assert.equal(journey.b.hasPocketUnsavedChanges(), false);
+  assertExactOutline(node.editor.outline, outline);
+
+  const canonicalFrozenPayload = plain(journey.b.buildPocketPayload());
+  assertExactOutline(canonicalFrozenPayload.mainThoughtTree[0].editor.outline, outline);
+  const pendingRecord = journey.idb.writes.slice(writesBeforeSave).find((record) => record.remote?.pending !== null);
+  assert.ok(pendingRecord, "the encrypted pending record must be durable before upload");
+  assert.equal(pendingRecord.remote.pending.expectedRevision, 1);
+  assert.equal(pendingRecord.content.context.revision, 2);
+  assert.equal(pendingRecord.content.record.format, "pocket.sync.content.opaque");
+
+  const upload = journey.remoteCalls.slice(callsBeforeSave).find((call) => call.route === "conditionalUpload");
+  assert.ok(upload);
+  assert.deepEqual(plain(upload.body.encryptedRecord), plain(pendingRecord.content.record));
+  const encodedUploadBytes = new TextEncoder().encode(JSON.stringify(upload.body)).byteLength;
+  assert.ok(encodedUploadBytes < journey.b.PocketSyncRemoteClient.POLICY.contentJsonLimitBytes);
+  assert.ok(encodedUploadBytes < HTTP_POLICY.contentJsonLimitBytes);
+  assert.equal(upload.body.encryptedRecord.format, "pocket.sync.content.opaque");
+  assert.equal(upload.body.encryptedRecord.version, 1);
+
+  let wire = null;
+  const wireTransport = journey.b.PocketSyncRemoteClient.createBrowserJsonTransport({
+    serviceRoot: "/pocket-sync/v1",
+    fetch: async (url, options) => {
+      wire = { url, method: options.method, body: options.body };
+      return {
+        status: 409,
+        redirected: false,
+        headers: { get(name) { return String(name).toLowerCase() === "content-type" ? "application/json" : null; } },
+        async text() { return JSON.stringify({ apiVersion: 1, ok: false, status: "conflict", wrote: false, conflict: true,
+          actualRevision: 2, operationId: upload.body.operationId }); },
+      };
+    },
+  });
+  const wireConflict = await journey.b.PocketSyncRemoteClient.createContentService({ transport: wireTransport })
+    .conditionalUpload(plain(upload.body));
+  assert.equal(wireConflict.conflict, true);
+  assert.equal(wire.url, "/pocket-sync/v1/pockets/content/conditional-upload");
+  assert.equal(wire.method, "POST");
+  assert.equal(wire.body, JSON.stringify(upload.body));
+
+  const adapter = createHttpAdapter({
+    core: journey.core, trustedOrigin: "https://sync.pocket.example", serviceRoot: "/pocket-sync/v1",
+  });
+  const adapterUpload = {
+    ...plain(upload.body), operationId: "p105g-adapter-operation", logicalChangeId: "p105g-adapter-change",
+  };
+  const adapterBody = JSON.stringify(adapterUpload);
+  const adapterBytes = new TextEncoder().encode(adapterBody).byteLength;
+  assert.ok(adapterBytes < HTTP_POLICY.contentJsonLimitBytes);
+  const adapterResponse = await adapter.handle(new Request(`https://sync.pocket.example/pocket-sync/v1${HTTP_ROUTES.conditionalUpload}`, {
+    method: "POST",
+    headers: {
+      Origin: "https://sync.pocket.example", "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json",
+      Cookie: `__Host-pocket-sync-session=${journey.bSessionId}`, "Content-Length": String(adapterBytes),
+    },
+    body: adapterBody,
+  }));
+  assert.equal(adapterResponse.status, 409);
+  const adapterConflict = await adapterResponse.json();
+  assert.equal(adapterConflict.actualRevision, 2);
+  assert.equal(adapterConflict.operationId, adapterUpload.operationId);
+
+  const fresh = journey.createFreshBrowserRuntime();
+  const readCallsBeforeReopen = journey.remoteCalls.length;
+  assert.deepEqual(plain(await fresh.openExisting()), {
+    ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 2,
+  });
+  assert.ok(journey.remoteCalls.slice(readCallsBeforeReopen).some((call) => call.route === "downloadEncryptedRecord"));
+  const reopenedNode = vm.runInContext("state.nodes", fresh.context)[0];
+  assertExactOutline(reopenedNode.editor.outline, outline);
+
+  const advance = await journey.core.conditionalUpload({
+    context: { method: "POST", origin: "https://sync.pocket.example", fetchSite: "same-origin", contentType: "application/json", sessionId: journey.bSessionId },
+    body: { ...plain(upload.body), expectedRevision: 2, operationId: "p105g-advance-operation", logicalChangeId: "p105g-advance-change" },
+  });
+  assert.equal(advance.status, 200);
+  assert.equal(advance.body.revision, 3);
+  const staleOpening = journey.b.PocketNodePopoutModel.buildPayload(node);
+  staleOpening.outline = outline.map((block, index) => index === outline.length - 1
+    ? { ...block, text: "Stale revision must not overwrite" }
+    : block);
+  const callsBeforeConflict = journey.remoteCalls.length;
+  const stale = await journey.b.PocketNodePopoutEditor.applyAndSave(staleOpening);
+  assert.equal(stale.ok, false);
+  assert.equal(stale.applied, true);
+  assert.equal(stale.exported, false);
+  assert.equal(stale.reason, "revision-conflict");
+  assert.equal(journey.remoteCalls.slice(callsBeforeConflict).filter((call) => call.route === "conditionalUpload").length, 1);
+  const [conflictedRecord] = [...journey.idb.records.values()];
+  assert.equal(conflictedRecord.remote.confirmedRevision, 2);
+  assert.equal(conflictedRecord.remote.pending.expectedRevision, 2);
+  assert.equal(conflictedRecord.remote.conflict.actualRevision, 3);
+  assert.equal(node.editor.outline.at(-1).text, "Stale revision must not overwrite");
 });
 
 test("P104 opens existing Synced truth over a clean local JSON without a refresh, and preserves that local truth if opening fails", async () => {
