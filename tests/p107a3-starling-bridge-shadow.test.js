@@ -218,11 +218,14 @@ test("P107a3a fails closed for missing dependencies and malformed bridge sides",
     b = a.encode(n).bridge,
     p = c.PocketStarlingPlacementShadow,
     structural = b.structural;
+  const sourceSnapshot = plain(n);
   c.compareSiblingOrder = undefined;
   assert.equal(a.encode(n).reason, "bridge-dependency-unavailable");
+  assert.deepEqual(plain(n), sourceSnapshot);
   const d = ctx(),
     bridge = d.PocketStarlingBridgeShadow.encode(norm(d)).bridge,
     badCompat = plain(bridge.compatibility);
+  const structuralReference = bridge.structural;
   badCompat.placements = [];
   const corruptCompat = Object.freeze({ ...bridge, compatibility: badCompat });
   assert.equal(d.PocketStarlingBridgeShadow.audit(corruptCompat).ok, false);
@@ -230,12 +233,16 @@ test("P107a3a fails closed for missing dependencies and malformed bridge sides",
     d.PocketStarlingBridgeShadow.decodeExact(corruptCompat).ok,
     false,
   );
+  assert.strictEqual(bridge.structural, structuralReference);
+  assert.equal(d.PocketStarlingPlacementShadow.audit(structuralReference).ok, true);
   const corruptStructural = Object.freeze({ ...bridge, structural: {} });
+  const compatibilitySnapshot = plain(bridge.compatibility);
   assert.equal(d.PocketStarlingBridgeShadow.audit(corruptStructural).ok, false);
   assert.equal(
     d.PocketStarlingBridgeShadow.decodeExact(corruptStructural).ok,
     false,
   );
+  assert.deepEqual(plain(bridge.compatibility), compatibilitySnapshot);
   assert.strictEqual(b.structural, structural);
   assert.equal(p.audit(structural).ok, true);
 });
