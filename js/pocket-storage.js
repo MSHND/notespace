@@ -9,6 +9,7 @@ const LOCAL_SAFETY_DATABASE = Object.freeze({
   key: "current",
 });
 let localSafetyDatabasePromise = null;
+let localSafetyCurrentMemory = null;
 
 function isPocketVaultStoragePrivate() {
   try {
@@ -391,6 +392,7 @@ async function writeLocalSafetyIndexedDbCurrent(entry) {
   } catch {
     return false;
   }
+  localSafetyCurrentMemory = copy;
   try {
     const legacy = localStorage.getItem(LOCAL_SAFETY_KEY);
     const parsed = legacy ? JSON.parse(legacy) : null;
@@ -398,6 +400,7 @@ async function writeLocalSafetyIndexedDbCurrent(entry) {
       localStorage.removeItem(LOCAL_SAFETY_KEY);
     }
   } catch {}
+  appendLocalSafetyTrail(copy);
   return true;
 }
 
@@ -407,7 +410,9 @@ async function readLocalSafetyIndexedDbCurrent() {
     const record = await localSafetyIndexedDbTransaction("readonly", (store) => localSafetyIndexedDbRequest(
       store.get(LOCAL_SAFETY_DATABASE.key)
     ));
-    return record?.entry && typeof record.entry === "object" ? record.entry : null;
+    const entry = record?.entry && typeof record.entry === "object" ? record.entry : null;
+    if (entry) localSafetyCurrentMemory = entry;
+    return entry;
   } catch {
     return null;
   }
@@ -419,6 +424,7 @@ async function clearLocalSafetyIndexedDbCurrent() {
     await localSafetyIndexedDbTransaction("readwrite", (store) => localSafetyIndexedDbRequest(
       store.delete(LOCAL_SAFETY_DATABASE.key)
     ));
+    localSafetyCurrentMemory = null;
     return true;
   } catch {
     return false;
@@ -632,6 +638,8 @@ function hasPocketSafetyTree(payload) {
 
 function readLocalSafetySnapshot() {
   if (isPocketBrowserStoragePrivate()) return null;
+  const memory = localSafetySnapshotFromEntry(localSafetyCurrentMemory);
+  if (memory) return memory;
   try {
     const raw = localStorage.getItem(LOCAL_SAFETY_KEY);
     if (!raw) return null;
@@ -647,25 +655,34 @@ async function readLocalSafetySnapshotDurably() {
   return current || readLocalSafetySnapshot();
 }
 
-function captureJsonSafetyForSyncedDiscard() {
+async function captureJsonSafetyForSyncedDiscard() {
   const session = typeof window.capturePocketFileSaveSession === "function"
     ? window.capturePocketFileSaveSession()
     : null;
   if (session?.ownerKind !== "json" || isPocketBrowserStoragePrivate()) return null;
-  const snapshot = readLocalSafetySnapshot();
+  let entry = await localSafetyIndexedDbTransaction("readonly", (store) => localSafetyIndexedDbRequest(
+    store.get(LOCAL_SAFETY_DATABASE.key)
+  )).then((record) => record?.entry || null).catch(() => null);
+  let source = "indexeddb";
+  if (!entry) {
+    source = "legacy";
+    try {
+      const raw = localStorage.getItem(LOCAL_SAFETY_KEY);
+      entry = raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  const snapshot = localSafetySnapshotFromEntry(entry);
   if (!snapshot?.parsed) return null;
   let raw;
-  let entry;
   try {
-    raw = localStorage.getItem(LOCAL_SAFETY_KEY);
-    if (!raw) return null;
-    entry = JSON.parse(raw);
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    raw = JSON.stringify(entry);
   } catch {
     return null;
   }
   const tokenId = `pocket-synced-discard-${Date.now().toString(36)}-${(++nextSyncedDiscardSafetyToken).toString(36)}`;
-  syncedDiscardSafetyTokens.set(tokenId, { raw, entry });
+  syncedDiscardSafetyTokens.set(tokenId, { raw, entry, source });
   return Object.freeze({ schema: "pocket.syncedDiscardSafety.v1", tokenId });
 }
 
@@ -697,19 +714,28 @@ function hasExactLocalSafetyTrailEntry(entry, options = {}) {
   });
 }
 
-function retireJsonSafetyForSyncedDiscard(token) {
+async function retireJsonSafetyForSyncedDiscard(token) {
   const captured = validSyncedDiscardSafetyToken(token);
   if (!captured) return false;
   try {
-    const current = localStorage.getItem(LOCAL_SAFETY_KEY);
-    if (current !== captured.raw) return false;
     const trailAccess = { syncedDiscardSafetyToken: token };
     if (!hasExactLocalSafetyTrailEntry(captured.entry, trailAccess)) {
       if (!appendLocalSafetyTrail(captured.entry, trailAccess)) return false;
       if (!hasExactLocalSafetyTrailEntry(captured.entry, trailAccess)) return false;
     }
-    if (localStorage.getItem(LOCAL_SAFETY_KEY) !== captured.raw) return false;
-    localStorage.removeItem(LOCAL_SAFETY_KEY);
+    if (captured.source === "legacy") {
+      if (localStorage.getItem(LOCAL_SAFETY_KEY) !== captured.raw) return false;
+      localStorage.removeItem(LOCAL_SAFETY_KEY);
+      return true;
+    }
+    const current = await localSafetyIndexedDbTransaction("readonly", (store) => localSafetyIndexedDbRequest(
+      store.get(LOCAL_SAFETY_DATABASE.key)
+    )).then((record) => record?.entry || null).catch(() => null);
+    if (JSON.stringify(current) !== captured.raw) return false;
+    await localSafetyIndexedDbTransaction("readwrite", (store) => localSafetyIndexedDbRequest(
+      store.delete(LOCAL_SAFETY_DATABASE.key)
+    ));
+    localSafetyCurrentMemory = null;
     return true;
   } catch {
     return false;

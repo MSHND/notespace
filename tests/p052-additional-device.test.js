@@ -178,10 +178,23 @@ function loadProductionNodePopout(context) {
 
 function createIndexedDb() {
   const records = new Map();
+  const localSafetyRecords = new Map();
   const writes = [];
   let reads = 0;
   let beforeRead = null;
   let storeCreated = false;
+  let localSafetyStoreCreated = false;
+  const localSafetyStore = {
+    get(key) { const request = {}; queueMicrotask(() => { request.result = localSafetyRecords.get(key); request.onsuccess?.(); }); return request; },
+    put(value) { const request = {}; queueMicrotask(() => { localSafetyRecords.set(value.key, plain(value)); request.onsuccess?.(); }); return request; },
+    delete(key) { const request = {}; queueMicrotask(() => { localSafetyRecords.delete(key); request.onsuccess?.(); }); return request; },
+  };
+  const localSafetyDatabase = {
+    get objectStoreNames() { return localSafetyStoreCreated ? ["current"] : []; },
+    createObjectStore(name, options) { if (name !== "current" || options?.keyPath !== "key") throw new Error("schema invalid"); localSafetyStoreCreated = true; return localSafetyStore; },
+    transaction() { const transaction = { error: null, objectStore: () => localSafetyStore, abort() { queueMicrotask(() => transaction.onabort?.()); } }; setImmediate(() => transaction.oncomplete?.()); return transaction; },
+    close() {}, onversionchange: null,
+  };
   const store = {
     keyPath: "syncedPocketId", autoIncrement: false, indexNames: [],
     get(key) {
@@ -205,8 +218,12 @@ function createIndexedDb() {
       abort() { queueMicrotask(() => transaction.onabort?.()); } }; setImmediate(() => transaction.oncomplete?.()); return transaction; },
     close() {}, onversionchange: null,
   };
-  return { records, writes, setBeforeRead(callback) { beforeRead = callback; },
-    indexedDB: { open(name, version) { if (name !== "pocket.sync.device.v1" || version !== 1) throw new Error("database invalid");
+  return { records, localSafetyRecords, writes, setBeforeRead(callback) { beforeRead = callback; },
+    indexedDB: { open(name, version) { if (name === "pocket.local.safety.v1" && version === 1) {
+      const request = { result: localSafetyDatabase, transaction: { abort() {} } };
+      queueMicrotask(() => { if (!localSafetyStoreCreated) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); }); return request;
+    }
+      if (name !== "pocket.sync.device.v1" || version !== 1) throw new Error("database invalid");
       const request = { result: database, transaction: { abort() {} } };
       queueMicrotask(() => { if (!storeCreated) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); }); return request; } } };
 }
@@ -294,6 +311,7 @@ async function createBrowserJourney(options = {}) {
   assert.equal(created.ok, true, JSON.stringify(created));
 
   const idb = createIndexedDb();
+  b.indexedDB = idb.indexedDB;
   const activationRecord = options.sameDeviceReopen === true || options.advanceRemoteBeforeOpen === true
     ? await aDeviceStore.readPocket(created.owner.syncedPocketId)
     : null;
@@ -1404,9 +1422,11 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
     browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
     localJsonTarget: true, localJsonDirty: true, remoteSentinel: "P104i SYNCED TRUTH",
   });
-  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(journey.idb.localSafetyRecords.has("current"), true);
   const trailKey = "pocketLite.localSafety.trail.v1";
-  const previousSafety = journey.b.__localStorage.values.get(currentKey);
+  const previousSafety = JSON.stringify(journey.idb.localSafetyRecords.get("current")?.entry);
   assert.ok(previousSafety);
   const archivedTrail = journey.b.__localStorage.values.get(trailKey);
   let trailWrites = 0;
@@ -1424,7 +1444,7 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
     retirementBoundary = {
       session: plain(journey.b.capturePocketFileSaveSession()),
       hasSyncedOwner: journey.b.PocketOwnerSaveBoundary.hasSyncedOwner(),
-      currentSafety: journey.b.__localStorage.values.get(currentKey),
+      currentSafety: JSON.stringify(journey.idb.localSafetyRecords.get("current")?.entry),
     };
     return retireSafety(token);
   };
@@ -1457,7 +1477,7 @@ test("P104i retires dirty JSON current safety only after the final Synced owner 
     hasSyncedOwner: true,
     currentSafety: previousSafety,
   });
-  assert.equal(journey.b.__localStorage.values.has(currentKey), false);
+  assert.equal(journey.idb.localSafetyRecords.has("current"), false);
   assert.equal(journey.b.__localStorage.values.get(trailKey), archivedTrail);
   assert.ok(JSON.parse(journey.b.__localStorage.values.get(trailKey))
     .some((entry) => JSON.stringify(entry) === previousSafety));
@@ -1471,7 +1491,8 @@ test("P104i-a suppresses the real pre-transition P016 check only through its exp
     browserPersistence: true, sameDeviceReopen: true, ownerKind: "none", skipOpenExisting: true,
     localJsonTarget: true, localJsonDirty: true, p016Dom: true,
   });
-  const currentKey = "pocketLite.localSafety.snapshot.v1";
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(journey.idb.localSafetyRecords.has("current"), true);
   const before = journey.b.capturePocketFileSaveSession();
   const localState = vm.runInContext("state", journey.b);
   localState.nodes[0].details = "P104i-a live JSON differs from its captured safety";
@@ -1499,7 +1520,7 @@ test("P104i-a suppresses the real pre-transition P016 check only through its exp
   assert.equal(opened.ok, true, JSON.stringify(opened));
   assert.equal(controlOpened, true);
   assert.equal(suppressedAttempt, false);
-  assert.equal(journey.b.__localStorage.values.has(currentKey), false);
+  assert.equal(journey.idb.localSafetyRecords.has("current"), false);
   assert.equal(journey.b.capturePocketFileSaveSession().ownerKind, "synced");
 });
 

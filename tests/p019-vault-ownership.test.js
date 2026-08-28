@@ -713,6 +713,19 @@ function createVaultContext(options = {}) {
   const openPickerQueue = [];
   const savePickerQueue = [];
   const indexedDbCalls = [];
+  const localSafetyRecords = new Map();
+  let localSafetyStoreCreated = false;
+  const localSafetyStore = {
+    get(key) { const request = {}; queueMicrotask(() => { request.result = localSafetyRecords.get(key); request.onsuccess?.(); }); return request; },
+    put(value) { const request = {}; queueMicrotask(() => { localSafetyRecords.set(value.key, plain(value)); request.onsuccess?.(); }); return request; },
+    delete(key) { const request = {}; queueMicrotask(() => { localSafetyRecords.delete(key); request.onsuccess?.(); }); return request; },
+  };
+  const localSafetyDatabase = {
+    get objectStoreNames() { return localSafetyStoreCreated ? ["current"] : []; },
+    createObjectStore(name, schema) { if (name !== "current" || schema?.keyPath !== "key") throw new Error("schema invalid"); localSafetyStoreCreated = true; return localSafetyStore; },
+    transaction() { const transaction = { objectStore: () => localSafetyStore, abort() { queueMicrotask(() => transaction.onabort?.()); } }; setImmediate(() => transaction.oncomplete?.()); return transaction; },
+    close() {},
+  };
   const pipCalls = {
     requestWindow: 0,
     popup: 0,
@@ -759,6 +772,11 @@ function createVaultContext(options = {}) {
     indexedDB: {
       open(...args) {
         indexedDbCalls.push(args);
+        if (args[0] === "pocket.local.safety.v1" && args[1] === 1) {
+          const request = { result: localSafetyDatabase, transaction: { abort() {} } };
+          queueMicrotask(() => { if (!localSafetyStoreCreated) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });
+          return request;
+        }
         throw new Error("Synthetic IndexedDB access is not available.");
       },
     },

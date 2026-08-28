@@ -595,7 +595,7 @@
         restoreLocalTarget();
         return frozen({ ok: false, partialState: "visible-payload-committed-detached" });
       }
-      try { global.retireJsonSafetyForSyncedDiscard?.(jsonSafetyToken); } catch (_error) {}
+      try { await global.retireJsonSafetyForSyncedDiscard?.(jsonSafetyToken); } catch (_error) {}
       return frozen({ ok: true });
     }
 
@@ -686,7 +686,7 @@
         randomBytes: browserRandom(environment), now,
       });
       const jsonSafetyToken = discardTarget?.ownerKind === "json"
-        ? global.captureJsonSafetyForSyncedDiscard?.() || null
+        ? await global.captureJsonSafetyForSyncedDiscard?.() || null
         : null;
       let opened = null;
       try {
