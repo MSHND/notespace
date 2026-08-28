@@ -1,83 +1,300 @@
-/* Dormant P107 reference model. Page capacity is a test-only proof parameter,
-   not a storage or production tuning decision. */
+/* Dormant P107a2 placement proof. It is not loaded by the live Pocket runtime. */
 (function (global) {
   "use strict";
+
   const ROOT = "root";
-  function fail(reason) { return { ok: false, reason }; }
-  function clone(value) { return JSON.parse(JSON.stringify(value)); }
-  function pageId(kind, items) { return `${kind}:${items.map((item) => encodeURIComponent(String(item))).join("|")}`; }
-  function sequence(children, capacity) {
-    const pages = [];
-    for (let i = 0; i < children.length; i += capacity) {
-      const items = children.slice(i, i + capacity);
-      pages.push({ id: pageId("leaf", items), kind: "leaf", items });
-    }
-    return { pages, branchPages: pages.reduce((out, page, index) => {
-      if (index % capacity === 0) out.push([]);
-      out[out.length - 1].push(page.id);
-      return out;
-    }, []).map((items) => ({ id: pageId("branch", items), kind: "branch", items })) };
+  const EMPTY = freezeTrie(false, null, []);
+
+  function fail(reason) {
+    return { ok: false, reason };
   }
-  function materialiseSequence(seq) { return seq.pages.flatMap((page) => page.items); }
-  function validate(relation) {
-    if (!relation || !Array.isArray(relation.nodeIds) || !relation.parents || !relation.children) return fail("invalid-relation");
-    const ids = new Set();
-    for (const id of relation.nodeIds) {
-      if (typeof id !== "string" || !id || id === ROOT || ids.has(id)) return fail("duplicate-or-invalid-node");
-      ids.add(id);
+
+  function freezeTrie(hasValue, value, children) {
+    return Object.freeze({
+      hasValue,
+      value,
+      children: Object.freeze(children.map(([key, child]) => Object.freeze([key, child])))
+    });
+  }
+
+  function childAt(node, key) {
+    for (const pair of node.children) {
+      if (pair[0] === key) return pair[1];
     }
+    return null;
+  }
+
+  function trieGet(node, key) {
+    if (typeof key !== "string") return null;
+    let cursor = node;
+    for (let offset = 0; offset < key.length; offset += 1) {
+      cursor = childAt(cursor, key[offset]);
+      if (!cursor) return null;
+    }
+    return cursor.hasValue ? cursor.value : null;
+  }
+
+  function trieSet(node, key, value, offset = 0) {
+    if (offset === key.length) return freezeTrie(true, value, node.children);
+
+    const character = key[offset];
+    const existing = childAt(node, character) || EMPTY;
+    const replacement = trieSet(existing, key, value, offset + 1);
+    const children = node.children.filter((pair) => pair[0] !== character);
+    children.push([character, replacement]);
+    children.sort((left, right) => left[0].localeCompare(right[0]));
+    return freezeTrie(node.hasValue, node.value, children);
+  }
+
+  function trieEntries(node, prefix = "", entries = []) {
+    if (node.hasValue) entries.push([prefix, node.value]);
+    for (const [character, child] of node.children) {
+      trieEntries(child, prefix + character, entries);
+    }
+    return entries;
+  }
+
+  function nodeIdIsValid(nodeId) {
+    return typeof nodeId === "string" && nodeId.length > 0 && nodeId !== ROOT;
+  }
+
+  function own(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+  }
+
+  function validate(relation) {
+    if (!relation || !Array.isArray(relation.nodeIds) || !relation.parents || !relation.children) {
+      return fail("invalid-relation");
+    }
+
+    const nodeIds = new Set();
+    for (const nodeId of relation.nodeIds) {
+      if (!nodeIdIsValid(nodeId) || nodeIds.has(nodeId)) return fail("duplicate-or-invalid-node");
+      nodeIds.add(nodeId);
+    }
+
+    for (const nodeId of Object.keys(relation.parents)) {
+      if (!nodeIds.has(nodeId)) return fail("unknown-placement-node");
+    }
+
     const membership = new Map();
-    for (const [parent, children] of Object.entries(relation.children)) {
-      if (parent !== ROOT && !ids.has(parent)) return fail("unknown-parent");
+    for (const [parentId, children] of Object.entries(relation.children)) {
+      if (parentId !== ROOT && !nodeIds.has(parentId)) return fail("unknown-parent");
       if (!Array.isArray(children)) return fail("invalid-child-sequence");
-      for (const id of children) {
-        if (!ids.has(id)) return fail("unknown-child");
-        if (membership.has(id)) return fail("duplicate-ordered-membership");
-        membership.set(id, parent);
+      for (const nodeId of children) {
+        if (!nodeIds.has(nodeId)) return fail("unknown-child");
+        if (membership.has(nodeId)) return fail("duplicate-ordered-membership");
+        membership.set(nodeId, parentId);
       }
     }
-    for (const id of ids) {
-      const parent = relation.parents[id];
-      if (typeof parent !== "string" || (parent !== ROOT && !ids.has(parent))) return fail("invalid-parent-placement");
-      if (membership.get(id) !== parent) return fail("placement-membership-mismatch");
-      const seen = new Set([id]); let cursor = parent;
-      while (cursor !== ROOT) { if (seen.has(cursor)) return fail("parent-cycle"); seen.add(cursor); cursor = relation.parents[cursor]; if (typeof cursor !== "string") return fail("invalid-parent-placement"); }
+
+    for (const nodeId of nodeIds) {
+      if (!own(relation.parents, nodeId)) return fail("invalid-parent-placement");
+      const parentId = relation.parents[nodeId];
+      if (typeof parentId !== "string") return fail("invalid-parent-placement");
+      if (parentId !== ROOT && !nodeIds.has(parentId)) return fail("unknown-parent");
+      if (membership.get(nodeId) !== parentId) return fail("placement-membership-mismatch");
     }
+
+    for (const nodeId of nodeIds) {
+      const seen = new Set([nodeId]);
+      let cursor = relation.parents[nodeId];
+      while (cursor !== ROOT) {
+        if (seen.has(cursor)) return fail("parent-cycle");
+        seen.add(cursor);
+        cursor = relation.parents[cursor];
+        if (typeof cursor !== "string") return fail("invalid-parent-placement");
+      }
+    }
+
     return { ok: true };
   }
+
+  function sequenceApi() {
+    return global.PocketStarlingSequenceShadow || null;
+  }
+
+  function emptySequence(capacity) {
+    const sequence = sequenceApi();
+    if (!sequence) return null;
+    return sequence.build([], { capacity }).root;
+  }
+
+  function modelFrom(capacity, placements, children) {
+    return Object.freeze({ capacity, placements, children });
+  }
+
+  function getPlacement(model, nodeId) {
+    return model && trieGet(model.placements, nodeId);
+  }
+
+  function getChildrenRoot(model, parentId) {
+    return model && trieGet(model.children, parentId);
+  }
+
+  function parentExists(model, parentId) {
+    return parentId === ROOT || Boolean(getPlacement(model, parentId));
+  }
+
+  function itemAt(root, index) {
+    if (!Number.isInteger(index) || index < 0 || index >= root.count) return null;
+    let page = root;
+    let offset = index;
+    while (page.kind === "branch") {
+      let child = 0;
+      while (child < page.children.length - 1 && offset >= page.children[child].count) {
+        offset -= page.children[child].count;
+        child += 1;
+      }
+      page = page.children[child];
+    }
+    return page.items[offset];
+  }
+
+  function destinationIndex(index, count) {
+    if (!Number.isInteger(index)) return count;
+    return Math.max(0, Math.min(index, count));
+  }
+
   function build(relation, options = {}) {
-    const checked = validate(relation); if (!checked.ok) return checked;
+    const checked = validate(relation);
+    if (!checked.ok) return checked;
+    const sequence = sequenceApi();
+    if (!sequence) return fail("sequence-unavailable");
+
     const capacity = Number.isInteger(options.capacity) && options.capacity >= 2 ? options.capacity : 4;
-    const children = {}; for (const [parent, items] of Object.entries(relation.children)) children[parent] = sequence(items, capacity);
-    return { ok: true, model: { capacity, nodeIds: relation.nodeIds.slice(), parents: clone(relation.parents), children } };
+    let placements = EMPTY;
+    let children = EMPTY;
+
+    for (const nodeId of relation.nodeIds) {
+      const record = Object.freeze({ nodeId, parentId: relation.parents[nodeId] });
+      placements = trieSet(placements, nodeId, record);
+    }
+    for (const [parentId, nodeIds] of Object.entries(relation.children)) {
+      children = trieSet(children, parentId, sequence.build(nodeIds, { capacity }).root);
+    }
+
+    return { ok: true, model: modelFrom(capacity, placements, children) };
   }
-  function relationFrom(model) {
-    const children = {}; for (const [parent, seq] of Object.entries(model.children)) children[parent] = materialiseSequence(seq);
-    return { nodeIds: model.nodeIds.slice(), parents: clone(model.parents), children };
+
+  function materialise(model) {
+    if (!model || !Number.isInteger(model.capacity) || !model.placements || !model.children) {
+      return fail("invalid-model");
+    }
+    const sequence = sequenceApi();
+    if (!sequence) return fail("sequence-unavailable");
+
+    const parents = Object.create(null);
+    const nodeIds = [];
+    for (const [nodeId, record] of trieEntries(model.placements)) {
+      nodeIds.push(nodeId);
+      parents[nodeId] = record.parentId;
+    }
+    const children = Object.create(null);
+    for (const [parentId, root] of trieEntries(model.children)) {
+      children[parentId] = sequence.materialise(root);
+    }
+    const relation = { nodeIds, parents, children };
+    const checked = validate(relation);
+    return checked.ok ? { ok: true, relation } : checked;
   }
-  function materialise(model) { const relation = relationFrom(model); const checked = validate(relation); return checked.ok ? { ok: true, relation } : checked; }
-  function update(model, relation) { return build(relation, { capacity: model.capacity }); }
+
   function insert(model, nodeId, parentId, index) {
-    const relation = relationFrom(model); if (relation.nodeIds.includes(nodeId)) return fail("duplicate-node-id");
-    if (parentId !== ROOT && !relation.nodeIds.includes(parentId)) return fail("unknown-parent");
-    const list = relation.children[parentId] || []; const at = Number.isInteger(index) && index >= 0 && index <= list.length ? index : list.length;
-    relation.nodeIds.push(nodeId); relation.parents[nodeId] = parentId; relation.children[parentId] = list.slice(); relation.children[parentId].splice(at, 0, nodeId);
-    return update(model, relation);
+    if (!model || !nodeIdIsValid(nodeId)) return fail("invalid-node-id");
+    if (getPlacement(model, nodeId)) return fail("duplicate-node-id");
+    if (!parentExists(model, parentId)) return fail("unknown-parent");
+
+    const sequence = sequenceApi();
+    if (!sequence) return fail("sequence-unavailable");
+    const current = getChildrenRoot(model, parentId) || emptySequence(model.capacity);
+    const nextSequence = sequence.insertAt(
+      current,
+      destinationIndex(index, current.count),
+      nodeId
+    );
+    if (!nextSequence.ok) return nextSequence;
+
+    const record = Object.freeze({ nodeId, parentId });
+    return {
+      ok: true,
+      model: modelFrom(
+        model.capacity,
+        trieSet(model.placements, nodeId, record),
+        trieSet(model.children, parentId, nextSequence.root)
+      )
+    };
   }
-  function reorder(model, nodeId, index) {
-    const relation = relationFrom(model); const parent = relation.parents[nodeId]; if (!parent) return fail("unknown-node");
-    const list = relation.children[parent].slice(); const old = list.indexOf(nodeId); if (old < 0) return fail("placement-membership-mismatch");
-    list.splice(old, 1); const at = Math.max(0, Math.min(Number.isInteger(index) ? index : list.length, list.length)); list.splice(at, 0, nodeId); relation.children[parent] = list;
-    return update(model, relation);
+
+  function reorder(model, nodeId, fromIndex, toIndex) {
+    const record = getPlacement(model, nodeId);
+    if (!record) return fail("unknown-node");
+
+    const sequence = sequenceApi();
+    if (!sequence) return fail("sequence-unavailable");
+    const current = getChildrenRoot(model, record.parentId);
+    if (!current || itemAt(current, fromIndex) !== nodeId) return fail("placement-membership-mismatch");
+
+    const removed = sequence.removeAt(current, fromIndex);
+    if (!removed.ok) return removed;
+    const requested = destinationIndex(toIndex, current.count);
+    const adjusted = requested > fromIndex ? requested - 1 : requested;
+    const inserted = sequence.insertAt(removed.root, adjusted, nodeId);
+    if (!inserted.ok) return inserted;
+
+    return {
+      ok: true,
+      model: modelFrom(model.capacity, model.placements, trieSet(model.children, record.parentId, inserted.root))
+    };
   }
-  function move(model, nodeId, parentId, index) {
-    const relation = relationFrom(model); if (!relation.parents[nodeId]) return fail("unknown-node");
-    if (parentId !== ROOT && !relation.nodeIds.includes(parentId)) return fail("unknown-parent");
-    let cursor = parentId; while (cursor !== ROOT) { if (cursor === nodeId) return fail("move-would-cycle"); cursor = relation.parents[cursor]; }
-    const from = relation.parents[nodeId]; relation.children[from] = relation.children[from].filter((id) => id !== nodeId);
-    const to = relation.children[parentId] || []; const at = Math.max(0, Math.min(Number.isInteger(index) ? index : to.length, to.length)); relation.children[parentId] = to.slice(); relation.children[parentId].splice(at, 0, nodeId); relation.parents[nodeId] = parentId;
-    return update(model, relation);
+
+  function move(model, nodeId, fromIndex, newParentId, toIndex) {
+    const record = getPlacement(model, nodeId);
+    if (!record) return fail("unknown-node");
+    if (!parentExists(model, newParentId)) return fail("unknown-parent");
+    if (newParentId === record.parentId) return reorder(model, nodeId, fromIndex, toIndex);
+
+    const sequence = sequenceApi();
+    if (!sequence) return fail("sequence-unavailable");
+    const source = getChildrenRoot(model, record.parentId);
+    if (!source || itemAt(source, fromIndex) !== nodeId) return fail("placement-membership-mismatch");
+
+    let cursor = newParentId;
+    while (cursor !== ROOT) {
+      if (cursor === nodeId) return fail("move-would-cycle");
+      const ancestor = getPlacement(model, cursor);
+      if (!ancestor) return fail("unknown-parent");
+      cursor = ancestor.parentId;
+    }
+
+    const removed = sequence.removeAt(source, fromIndex);
+    if (!removed.ok) return removed;
+    const destination = getChildrenRoot(model, newParentId) || emptySequence(model.capacity);
+    const inserted = sequence.insertAt(
+      destination,
+      destinationIndex(toIndex, destination.count),
+      nodeId
+    );
+    if (!inserted.ok) return inserted;
+
+    const moved = Object.freeze({ nodeId, parentId: newParentId });
+    const children = trieSet(
+      trieSet(model.children, record.parentId, removed.root),
+      newParentId,
+      inserted.root
+    );
+    return { ok: true, model: modelFrom(model.capacity, trieSet(model.placements, nodeId, moved), children) };
   }
-  function pageIds(model, parentId) { const seq = model.children[parentId]; return seq ? seq.pages.map((page) => page.id) : []; }
-  global.PocketStarlingPlacementShadow = Object.freeze({ ROOT, build, validate, materialise, insert, reorder, move, pageIds });
+
+  global.PocketStarlingPlacementShadow = Object.freeze({
+    ROOT,
+    build,
+    validate,
+    materialise,
+    audit: materialise,
+    getPlacement,
+    getChildrenRoot,
+    insert,
+    reorder,
+    move
+  });
 })(typeof window !== "undefined" ? window : globalThis);
