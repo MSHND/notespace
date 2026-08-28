@@ -361,6 +361,14 @@ function creditorScaleOutline(groups = 3000) {
   ]).flat();
 }
 
+function assertExactOutline(actual, expected) {
+  assert.equal(actual.length, expected.length);
+  assert.deepEqual(
+    plain(actual.map((block) => [block.id, block.text, block.depth, block.collapsed, block.order])),
+    plain(expected.map((block, index) => [block.id, block.text, block.depth, block.collapsed, index + 1]))
+  );
+}
+
 function normaliseOne(context, node) {
   const result = context.normaliseInput({
     schema: "portal.export.v1",
@@ -4566,6 +4574,105 @@ test("P105f restores a large JSON-owner edit before export when the local envelo
     assertSaveBoundaryUnchanged(context, node.id, before);
     assert.equal(exports, 0, label);
   }
+});
+
+test("P105h prunes expendable safety trail before a creditor-scale JSON Outline safety snapshot", async () => {
+  const context = createFullContractContext();
+  runScript(context, "js/pocket-file-opening.js");
+  const oldOutline = creditorScaleOutline();
+  oldOutline.at(-1).text = "Old safety tail";
+  const nextOutline = oldOutline.map((block, index) => index === oldOutline.length - 1
+    ? { ...block, text: "Replacement safety tail that needs quota room" }
+    : block);
+  const node = syntheticNode("p105h_creditors", { details: "", editor: outlineMeta(oldOutline) });
+  const state = resetState(context, [node]);
+  assert.equal(context.saveLocalSafetySnapshot("p105h-old"), true);
+  const oldRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
+  state.nodes[0].editor = outlineMeta(nextOutline);
+  assert.equal(context.saveLocalSafetySnapshot("p105h-next"), true);
+  const nextRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
+  state.nodes[0].editor = outlineMeta(oldOutline);
+  const trailRaw = JSON.stringify([JSON.parse(oldRaw)]);
+  context.__storage.clear();
+  context.__storage.set("pocketLite.localSafety.snapshot.v1", oldRaw);
+  context.__storage.set("pocketLite.localSafety.trail.v1", trailRaw);
+  const storageSize = (entries) => [...entries.entries()]
+    .reduce((total, [key, value]) => total + key.length + String(value).length, 0);
+  const quota = storageSize(context.__storage) + Math.max(0, nextRaw.length - oldRaw.length) - 1;
+  context.localStorage.setItem = (key, value) => {
+    const next = new Map(context.__storage);
+    next.set(String(key), String(value));
+    if (storageSize(next) > quota) throw new Error("quota exceeded");
+    context.__storage.set(String(key), String(value));
+  };
+  assert.throws(() => context.localStorage.setItem("pocketLite.localSafety.snapshot.v1", nextRaw), /quota exceeded/);
+
+  let written = "";
+  let safetyAtWrite = "";
+  const handle = {
+    name: "p105h-creditors.json",
+    async queryPermission() { return "granted"; },
+    async createWritable() { return { async write(value) {
+      safetyAtWrite = context.__storage.get("pocketLite.localSafety.snapshot.v1") || "";
+      written = String(value);
+    }, async close() {}, async abort() {} }; },
+    async getFile() { return { name: "p105h-creditors.json", async text() { return written; } }; },
+  };
+  context.setPocketFileSession(handle, handle.name, { forceNewSession: true });
+  const opening = editorPayload(context, state.nodes[0], {
+    schema: EDITOR_SCHEMA, mode: "outline", outline: nextOutline,
+  });
+  const result = await context.PocketNodePopoutEditor.applyAndSave(opening);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.exported, true);
+  const safety = JSON.parse(safetyAtWrite);
+  assertExactOutline(context.normaliseInput(safety.payload).nodes[0].editor.outline, nextOutline);
+  assert.equal(context.readLocalSafetyTrail().length, 0);
+  const inspected = await context.PocketFileOpening.inspectHandle(handle);
+  assert.equal(inspected.ok, true);
+  assertExactOutline(context.normaliseInput(inspected.parsed).nodes[0].editor.outline, nextOutline);
+});
+
+test("P105h fails closed after clearing an expendable safety trail that cannot free enough quota", () => {
+  const context = createFullContractContext();
+  const oldOutline = creditorScaleOutline();
+  oldOutline.at(-1).text = "Old safety tail";
+  const nextOutline = oldOutline.map((block, index) => index === oldOutline.length - 1
+    ? { ...block, text: "Replacement safety tail that cannot fit" }
+    : block);
+  const node = syntheticNode("p105h_no_capacity", { details: "", editor: outlineMeta(oldOutline) });
+  const state = resetState(context, [node]);
+  assert.equal(context.saveLocalSafetySnapshot("p105h-old"), true);
+  const oldRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
+  const trailRaw = JSON.stringify([JSON.parse(oldRaw)]);
+  context.__storage.set("pocketLite.localSafety.trail.v1", trailRaw);
+  context.localStorage.setItem = (key, value) => {
+    const next = new Map(context.__storage);
+    next.set(String(key), String(value));
+    throw new Error("quota exceeded");
+  };
+  let exports = 0;
+  context.exportTree = async () => { exports += 1; return { ok: true }; };
+
+  const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline: nextOutline,
+  }), { returnDetails: true });
+
+  assert.equal(result.reason, "large-outline-safety-copy-failed");
+  assert.equal(exports, 0);
+  assert.deepEqual(
+    plain(state.nodes[0].editor.outline.map((block) => [block.id, block.text, block.depth, block.collapsed])),
+    plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
+  );
+  assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), undefined);
+  assert.equal(context.__storage.get("pocketLite.localSafety.snapshot.v1"), oldRaw);
+  assert.deepEqual(
+    plain(context.readLocalSafetySnapshot().norm.nodes[0].editor.outline
+      .map((block) => [block.id, block.text, block.depth, block.collapsed])),
+    plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
+  );
 });
 
 test("P105f continues after a bounded trail failure when the complete current safety slot succeeds", () => {

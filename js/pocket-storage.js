@@ -296,13 +296,49 @@ function storeLocalSafetyEntry(entry) {
     addCandidate(localSafetyEntryWithoutChangeMetadata(entry, { keepBase: false }));
   } catch {}
 
+  function pruneOneLocalSafetyTrailEntry() {
+    let raw;
+    try { raw = localStorage.getItem(LOCAL_SAFETY_TRAIL_KEY); } catch { return false; }
+    if (raw === null) return false;
+    let trail = [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) trail = parsed;
+    } catch {}
+    if (!trail.length) {
+      try {
+        localStorage.removeItem(LOCAL_SAFETY_TRAIL_KEY);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    for (let length = trail.length - 1; length >= 0; length -= 1) {
+      try {
+        localStorage.setItem(LOCAL_SAFETY_TRAIL_KEY, JSON.stringify(trail.slice(0, length)));
+        return true;
+      } catch {}
+    }
+    try {
+      localStorage.removeItem(LOCAL_SAFETY_TRAIL_KEY);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   let storedEntry = null;
   for (const candidate of candidates) {
-    try {
-      localStorage.setItem(LOCAL_SAFETY_KEY, candidate.serialised);
-      storedEntry = candidate.entry;
-      break;
-    } catch {}
+    while (true) {
+      try {
+        localStorage.setItem(LOCAL_SAFETY_KEY, candidate.serialised);
+        storedEntry = candidate.entry;
+        break;
+      } catch {
+        if (!pruneOneLocalSafetyTrailEntry()) break;
+      }
+    }
+    if (storedEntry) break;
   }
   if (!storedEntry) {
     return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
