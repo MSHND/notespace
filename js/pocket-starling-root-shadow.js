@@ -78,7 +78,7 @@
     }
     return (h >>> 0).toString(16).padStart(8, "0");
   }
-  function digest(value, stats, stack = new Set()) {
+  function digest(value, stats, cache, stack = new Set()) {
     if (value === null) return { ok: true, digest: "null" };
     const type = typeof value;
     if (type === "string")
@@ -91,22 +91,27 @@
         : fail("unsupported-digest-material");
     if (type !== "object" || stack.has(value))
       return fail("unsupported-digest-material");
-    if (memo.has(value)) {
+    if (
+      !Array.isArray(value) &&
+      Object.prototype.toString.call(value) !== "[object Object]"
+    )
+      return fail("unsupported-digest-material");
+    if (cache.has(value)) {
       stats.cacheHits += 1;
-      return { ok: true, digest: memo.get(value) };
+      return { ok: true, digest: cache.get(value) };
     }
     stack.add(value);
     let parts = [];
     if (Array.isArray(value)) {
       for (const item of value) {
-        const d = digest(item, stats, stack);
+        const d = digest(item, stats, cache, stack);
         if (!d.ok) return d;
         parts.push(d.digest);
       }
       parts = ["array", String(value.length), ...parts];
     } else {
       for (const key of Object.keys(value).sort()) {
-        const d = digest(value[key], stats, stack);
+        const d = digest(value[key], stats, cache, stack);
         if (!d.ok) return d;
         parts.push(hash("key:" + key), d.digest);
       }
@@ -114,11 +119,11 @@
     }
     stack.delete(value);
     const result = hash(parts.join("|"));
-    memo.set(value, result);
+    cache.set(value, result);
     stats.newlyDigestedObjects += 1;
     return { ok: true, digest: result };
   }
-  function witness(components) {
+  function witness(components, cache = memo) {
     const stats = { newlyDigestedObjects: 0, cacheHits: 0 },
       parts = [
         ["content", "contentDigest"],
@@ -128,7 +133,7 @@
       ],
       digests = {};
     for (const [component, field] of parts) {
-      const d = digest(components[component], stats);
+      const d = digest(components[component], stats, cache);
       if (!d.ok) return d;
       digests[field] = d.digest;
     }
@@ -210,43 +215,123 @@
   function getContent(state, nodeId) {
     return state && get(state.content, nodeId);
   }
+  function contentEntries(root) {
+    const output = [],
+      seen = new Set();
+    function visit(node, prefix) {
+      if (
+        !node ||
+        typeof node !== "object" ||
+        seen.has(node) ||
+        Object.keys(node).sort().join("|") !== "children|hasValue|value" ||
+        typeof node.hasValue !== "boolean" ||
+        !Array.isArray(node.children)
+      )
+        return fail("invalid-content-root");
+      seen.add(node);
+      if (node.hasValue) {
+        const record = node.value;
+        if (
+          !record ||
+          Object.prototype.toString.call(record) !== "[object Object]" ||
+          Object.keys(record).sort().join("|") !== "nodeId|payload" ||
+          record.nodeId !== prefix
+        )
+          return fail("invalid-content-record");
+        const supported = digest(
+          record.payload,
+          { newlyDigestedObjects: 0, cacheHits: 0 },
+          new WeakMap(),
+        );
+        if (!supported.ok) return supported;
+        output.push([prefix, record]);
+      } else if (node.value !== null) return fail("invalid-content-root");
+      const keys = new Set();
+      for (const pair of node.children) {
+        if (
+          !Array.isArray(pair) ||
+          pair.length !== 2 ||
+          typeof pair[0] !== "string" ||
+          pair[0].length !== 1 ||
+          keys.has(pair[0])
+        )
+          return fail("invalid-content-root");
+        keys.add(pair[0]);
+        const checked = visit(pair[1], prefix + pair[0]);
+        if (!checked.ok) return checked;
+      }
+      return { ok: true };
+    }
+    const checked = visit(root, "");
+    return checked.ok ? { ok: true, entries: output } : checked;
+  }
   function auditCandidate(candidate) {
     const d = deps();
     if (!d) return fail("root-dependency-unavailable");
-    if (
-      !candidate ||
-      candidate.schema !== SCHEMA ||
-      !candidate.content ||
-      !candidate.structural ||
-      !candidate.preservation ||
-      !candidate.root
-    )
+    try {
+      const rootKeys = [
+        "schema",
+        "capacity",
+        "contentDigest",
+        "placementDigest",
+        "childrenDigest",
+        "preservationDigest",
+        "rootDigest",
+      ].sort();
+      if (
+        !candidate ||
+        candidate.schema !== SCHEMA ||
+        !candidate.content ||
+        !candidate.structural ||
+        !candidate.preservation ||
+        !candidate.root
+      )
+        return fail("invalid-root-candidate");
+      if (
+        Object.keys(candidate.root).sort().join("|") !== rootKeys.join("|") ||
+        candidate.root.schema !== SCHEMA
+      )
+        return fail("invalid-root-witness");
+      if (
+        !Number.isInteger(candidate.capacity) ||
+        candidate.capacity < 2 ||
+        candidate.structural.capacity !== candidate.capacity ||
+        candidate.root.capacity !== candidate.capacity
+      )
+        return fail("invalid-root-config");
+      const content = contentEntries(candidate.content);
+      if (!content.ok) return content;
+      const relation = d.placement.audit(candidate.structural);
+      if (!relation.ok) return relation;
+      const contentIds = content.entries.map((e) => e[0]),
+        structuralIds = relation.relation.nodeIds;
+      if (
+        contentIds.length !== structuralIds.length ||
+        contentIds.some((id) => !structuralIds.includes(id))
+      )
+        return fail("root-membership-mismatch");
+      const computed = witness(
+        {
+          capacity: candidate.capacity,
+          content: candidate.content,
+          placements: candidate.structural.placements,
+          children: candidate.structural.children,
+          preservation: candidate.preservation,
+        },
+        new WeakMap(),
+      );
+      if (!computed.ok) return computed;
+      for (const key of rootKeys)
+        if (candidate.root[key] !== computed.root[key])
+          return fail(
+            key === "rootDigest"
+              ? "root-digest-mismatch"
+              : "component-digest-mismatch",
+          );
+      return { ok: true, diagnostics: computed.diagnostics };
+    } catch (_error) {
       return fail("invalid-root-candidate");
-    const relation = d.placement.audit(candidate.structural);
-    if (!relation.ok) return relation;
-    const contentIds = entries(candidate.content).map((e) => e[0]),
-      structuralIds = relation.relation.nodeIds;
-    if (
-      contentIds.length !== structuralIds.length ||
-      contentIds.some((id) => !structuralIds.includes(id))
-    )
-      return fail("root-membership-mismatch");
-    const computed = witness({
-      capacity: candidate.capacity,
-      content: candidate.content,
-      placements: candidate.structural.placements,
-      children: candidate.structural.children,
-      preservation: candidate.preservation,
-    });
-    if (!computed.ok) return computed;
-    for (const key of Object.keys(computed.root))
-      if (candidate.root[key] !== computed.root[key])
-        return fail(
-          key === "rootDigest"
-            ? "root-digest-mismatch"
-            : "component-digest-mismatch",
-        );
-    return { ok: true, diagnostics: computed.diagnostics };
+    }
   }
   function mutate(state, structural, content, preservation) {
     const rooted = witness({
@@ -312,7 +397,11 @@
       : result;
   }
   function diagnosticRootFor(components) {
-    return witness(components);
+    try {
+      return witness(components, new WeakMap());
+    } catch (_error) {
+      return fail("unsupported-digest-material");
+    }
   }
   global.PocketStarlingRootShadow = Object.freeze({
     SCHEMA,

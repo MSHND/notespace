@@ -108,6 +108,14 @@ function rootNodes(count) {
     value: i,
   }));
 }
+function firstContentValueNode(root) {
+  if (root.hasValue) return root;
+  for (const pair of root.children) {
+    const found = firstContentValueNode(pair[1]);
+    if (found) return found;
+  }
+  return null;
+}
 
 test("P108 builds a fixed-size witness from real canonical ingress", () => {
   const c = context(),
@@ -164,12 +172,17 @@ test("P108 payload edit is local across two thousand nodes", () => {
       bridge(c, normalised(rootNodes(2000))),
     ),
     state = built.state,
+    oldRoot = plain(state.root),
     distant = c.PocketStarlingRootShadow.getContent(state, "n1999"),
     changed = c.PocketStarlingRootShadow.editPayload(state, "n2", {
       label: "changed",
       value: 2,
     });
   assert.equal(changed.ok, true);
+  assert.deepEqual(
+    plain(c.PocketStarlingRootShadow.getContent(changed.state, "n2").payload),
+    { label: "changed", value: 2 },
+  );
   assert.strictEqual(changed.state.structural, state.structural);
   assert.strictEqual(changed.state.preservation, state.preservation);
   assert.strictEqual(
@@ -188,7 +201,12 @@ test("P108 payload edit is local across two thousand nodes", () => {
   );
   assert.notEqual(changed.state.root.contentDigest, state.root.contentDigest);
   assert.notEqual(changed.state.root.rootDigest, state.root.rootDigest);
-  assert.ok(changed.diagnostics.newlyDigestedObjects <= 20);
+  assert.deepEqual(plain(state.root), oldRoot);
+  // Each nodeId character creates one trie frontier; the multiplier covers
+  // its node, child array and edge pair, plus the new record/payload objects.
+  const contentFrontierBound = 3 * ("n2".length + 1) + 8;
+  assert.ok(changed.diagnostics.newlyDigestedObjects <= contentFrontierBound);
+  assert.ok(changed.diagnostics.cacheHits >= 3);
 });
 
 test("P108 reorder and huge branch move preserve untouched components", () => {
@@ -197,8 +215,11 @@ test("P108 reorder and huge branch move preserve untouched components", () => {
     p = c.PocketStarlingPlacementShadow,
     seq = c.PocketStarlingSequenceShadow,
     reorderState = api.build(bridge(c, normalised(rootNodes(1024)))).state,
-    distant = seq
-      .pages(p.getChildrenRoot(reorderState.structural, "root"))
+    originalSiblingRoot = p.getChildrenRoot(reorderState.structural, "root"),
+    originalPages = seq.pages(originalSiblingRoot),
+    distantLeaf = originalPages.filter((page) => page.kind === "leaf").at(-1),
+    distantBranch = originalPages
+      .filter((page) => page.kind === "branch" && page !== originalSiblingRoot)
       .at(-1),
     reordered = api.reorder(reorderState, "n0", 0, 5);
   assert.equal(reordered.ok, true);
@@ -211,19 +232,56 @@ test("P108 reorder and huge branch move preserve untouched components", () => {
   assert.ok(
     seq
       .pages(p.getChildrenRoot(reordered.state.structural, "root"))
-      .includes(distant),
+      .includes(distantLeaf),
   );
+  assert.ok(
+    seq
+      .pages(p.getChildrenRoot(reordered.state.structural, "root"))
+      .includes(distantBranch),
+  );
+  const expectedOrder = rootNodes(1024).map((node) => node.id);
+  expectedOrder.splice(0, 1);
+  expectedOrder.splice(4, 0, "n0");
   assert.deepEqual(
-    plain(
-      p.audit(reordered.state.structural).relation.children.root.slice(0, 5),
-    ),
-    ["n1", "n2", "n3", "n4", "n0"],
+    plain(p.audit(reordered.state.structural).relation.children.root),
+    expectedOrder,
   );
-  assert.ok(reordered.diagnostics.newlyDigestedObjects <= 100);
+  assert.equal(
+    reordered.state.root.contentDigest,
+    reorderState.root.contentDigest,
+  );
+  assert.equal(
+    reordered.state.root.placementDigest,
+    reorderState.root.placementDigest,
+  );
+  assert.equal(
+    reordered.state.root.preservationDigest,
+    reorderState.root.preservationDigest,
+  );
+  assert.notEqual(
+    reordered.state.root.childrenDigest,
+    reorderState.root.childrenDigest,
+  );
+  assert.notEqual(
+    reordered.state.root.rootDigest,
+    reorderState.root.rootDigest,
+  );
+  // Reorder changes two sequence paths plus the four-character parent-key trie path.
+  const reorderFrontierBound =
+    8 * (2 * (seq.height(originalSiblingRoot) + 1) + "root".length + 2);
+  assert.ok(reordered.diagnostics.newlyDigestedObjects <= reorderFrontierBound);
+  assert.ok(reordered.diagnostics.cacheHits >= 3);
   const nodes = [
       { id: "source", parentId: "root", order: 1, label: "source" },
       { id: "dest", parentId: "root", order: 2, label: "dest" },
       { id: "branch", parentId: "source", order: 1, label: "branch" },
+      { id: "unrelated", parentId: "root", order: 3, label: "unrelated" },
+      {
+        id: "unrelated-child",
+        parentId: "unrelated",
+        order: 1,
+        label: "unrelated child",
+      },
       ...Array.from({ length: 512 }, (_, i) => ({
         id: `d${i}`,
         parentId: "branch",
@@ -232,9 +290,18 @@ test("P108 reorder and huge branch move preserve untouched components", () => {
       })),
     ],
     state = api.build(bridge(c, normalised(nodes))).state,
+    stateStructural = state.structural,
+    stateContent = state.content,
+    statePreservation = state.preservation,
     descContent = api.getContent(state, "d400"),
     descPlacement = p.getPlacement(state.structural, "d400"),
+    branchPlacement = p.getPlacement(state.structural, "branch"),
     branchChildren = p.getChildrenRoot(state.structural, "branch"),
+    sourceChildren = p.getChildrenRoot(state.structural, "source"),
+    destinationChildren = p.getChildrenRoot(state.structural, "dest"),
+    unrelatedChildren = p.getChildrenRoot(state.structural, "unrelated"),
+    unrelatedPage = seq.pages(unrelatedChildren).at(-1),
+    stateRoot = plain(state.root),
     moved = api.move(state, "branch", 0, "dest", 0);
   assert.equal(moved.ok, true);
   assert.strictEqual(api.getContent(moved.state, "d400"), descContent);
@@ -246,15 +313,57 @@ test("P108 reorder and huge branch move preserve untouched components", () => {
     p.getChildrenRoot(moved.state.structural, "branch"),
     branchChildren,
   );
+  assert.notStrictEqual(
+    p.getPlacement(moved.state.structural, "branch"),
+    branchPlacement,
+  );
+  assert.equal(
+    p.getPlacement(moved.state.structural, "branch").parentId,
+    "dest",
+  );
+  assert.notStrictEqual(
+    p.getChildrenRoot(moved.state.structural, "source"),
+    sourceChildren,
+  );
+  assert.notStrictEqual(
+    p.getChildrenRoot(moved.state.structural, "dest"),
+    destinationChildren,
+  );
+  assert.strictEqual(
+    p.getChildrenRoot(moved.state.structural, "unrelated"),
+    unrelatedChildren,
+  );
+  assert.ok(
+    seq
+      .pages(p.getChildrenRoot(moved.state.structural, "unrelated"))
+      .includes(unrelatedPage),
+  );
   assert.equal(moved.state.root.contentDigest, state.root.contentDigest);
   assert.equal(
     moved.state.root.preservationDigest,
     state.root.preservationDigest,
   );
   assert.notEqual(moved.state.root.placementDigest, state.root.placementDigest);
-  assert.ok(moved.diagnostics.newlyDigestedObjects <= 200);
+  assert.notEqual(moved.state.root.childrenDigest, state.root.childrenDigest);
+  assert.notEqual(moved.state.root.rootDigest, state.root.rootDigest);
+  // Move changes the moved-node placement path, two parent-key paths and two
+  // short sequence frontiers; descendant count does not enter this formula.
+  const moveFrontierBound =
+    10 *
+    ("branch".length +
+      "source".length +
+      "dest".length +
+      seq.height(sourceChildren) +
+      (destinationChildren ? seq.height(destinationChildren) : 0) +
+      6);
+  assert.ok(moved.diagnostics.newlyDigestedObjects <= moveFrontierBound);
+  assert.ok(moved.diagnostics.cacheHits >= 2);
   const rejected = api.move(state, "branch", 0, "d400", 0);
   assert.equal(rejected.reason, "move-would-cycle");
+  assert.strictEqual(state.structural, stateStructural);
+  assert.strictEqual(state.content, stateContent);
+  assert.strictEqual(state.preservation, statePreservation);
+  assert.deepEqual(plain(state.root), stateRoot);
   assert.equal(api.auditCandidate(state).ok, true);
 });
 
@@ -286,6 +395,7 @@ test("P108 continuity rejects lookalikes and does not hide whole audits", () => 
   });
   assert.equal(api.editPayload(state, "n1", { value: 1 }).ok, true);
   assert.equal(api.reorder(state, "n0", 0, 2).ok, true);
+  assert.equal(api.move(state, "n0", 0, "n1", 0).ok, true);
 });
 
 test("P108 audit rejects damage even when supplied digests are recomputed", () => {
@@ -293,20 +403,86 @@ test("P108 audit rejects damage even when supplied digests are recomputed", () =
     api = c.PocketStarlingRootShadow,
     p = c.PocketStarlingPlacementShadow,
     state = api.build(bridge(c, normalised(rootNodes(8)))).state,
-    original = plain(state.root);
+    original = plain(state.root),
+    originalContent = state.content,
+    originalStructural = state.structural,
+    originalPreservation = state.preservation;
   assert.equal(
     api.auditCandidate({ ...state, root: { ...state.root, rootDigest: "bad" } })
       .reason,
     "root-digest-mismatch",
   );
   assert.equal(
-    api.auditCandidate({ ...state, root: { ...state.root, contentDigest: "bad" } })
-      .reason,
+    api.auditCandidate({
+      ...state,
+      root: { ...state.root, contentDigest: "bad" },
+    }).reason,
     "component-digest-mismatch",
   );
   assert.equal(
     api.auditCandidate({ ...state, content: null }).reason,
     "invalid-root-candidate",
+  );
+  assert.equal(
+    api.auditCandidate({ ...state, root: { ...state.root, extra: [] } }).reason,
+    "invalid-root-witness",
+  );
+  const missingKeyRoot = plain(state.root);
+  delete missingKeyRoot.childrenDigest;
+  assert.equal(
+    api.auditCandidate({ ...state, root: missingKeyRoot }).reason,
+    "invalid-root-witness",
+  );
+  assert.equal(
+    api.auditCandidate({ ...state, root: { ...state.root, schema: "wrong" } })
+      .reason,
+    "invalid-root-witness",
+  );
+  assert.equal(
+    api.auditCandidate({ ...state, capacity: 8 }).reason,
+    "invalid-root-config",
+  );
+  assert.equal(
+    api.auditCandidate({ ...state, schema: "wrong" }).reason,
+    "invalid-root-candidate",
+  );
+  assert.equal(
+    api.auditCandidate({
+      ...state,
+      structural: Object.freeze({ ...state.structural, capacity: 8 }),
+    }).reason,
+    "invalid-root-config",
+  );
+  assert.equal(
+    api.auditCandidate({
+      ...state,
+      content: { hasValue: false, value: null, children: "bad" },
+    }).reason,
+    "invalid-content-root",
+  );
+  const keyMismatchContent = plain(state.content);
+  firstContentValueNode(keyMismatchContent).value.nodeId = "wrong";
+  assert.equal(
+    api.auditCandidate({ ...state, content: keyMismatchContent }).reason,
+    "invalid-content-record",
+  );
+  const extraFieldContent = plain(state.content);
+  firstContentValueNode(extraFieldContent).value.parentId = "root";
+  assert.equal(
+    api.auditCandidate({ ...state, content: extraFieldContent }).reason,
+    "invalid-content-record",
+  );
+  const unsupportedContent = plain(state.content);
+  firstContentValueNode(unsupportedContent).value.payload = new Date();
+  assert.equal(
+    api.auditCandidate({ ...state, content: unsupportedContent }).reason,
+    "unsupported-digest-material",
+  );
+  const cyclicContent = { hasValue: false, value: null, children: [] };
+  cyclicContent.children.push(["x", cyclicContent]);
+  assert.equal(
+    api.auditCandidate({ ...state, content: cyclicContent }).reason,
+    "invalid-content-root",
   );
   const relation = plain(p.audit(state.structural).relation);
   relation.parents.n0 = "n1";
@@ -329,8 +505,11 @@ test("P108 audit rejects damage even when supplied digests are recomputed", () =
         children: state.structural.children,
       }),
       root,
-  };
-  assert.equal(api.auditCandidate(candidate).ok, false);
+    };
+  assert.equal(
+    api.auditCandidate(candidate).reason,
+    "placement-membership-mismatch",
+  );
   const smaller = api.build(bridge(c, normalised(rootNodes(7)))).state;
   const missingComponents = {
     capacity: state.capacity,
@@ -354,7 +533,28 @@ test("P108 audit rejects damage even when supplied digests are recomputed", () =
     api.editPayload(state, "n1", cyclic).reason,
     "unsupported-digest-material",
   );
+  const mutablePreservation = plain(state.preservation);
+  const mutableComponents = {
+    capacity: state.capacity,
+    content: state.content,
+    placements: state.structural.placements,
+    children: state.structural.children,
+    preservation: mutablePreservation,
+  };
+  const staleWitness = api.diagnosticRootFor(mutableComponents).root;
+  mutablePreservation.rootExtras.changedAfterDigest = true;
+  assert.equal(
+    api.auditCandidate({
+      ...state,
+      preservation: mutablePreservation,
+      root: staleWitness,
+    }).reason,
+    "component-digest-mismatch",
+  );
   assert.deepEqual(plain(state.root), original);
+  assert.strictEqual(state.content, originalContent);
+  assert.strictEqual(state.structural, originalStructural);
+  assert.strictEqual(state.preservation, originalPreservation);
   assert.equal(api.auditCandidate(state).ok, true);
 });
 
