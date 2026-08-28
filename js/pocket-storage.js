@@ -655,6 +655,14 @@ async function readLocalSafetySnapshotDurably() {
   return current || readLocalSafetySnapshot();
 }
 
+async function hydrateLocalSafetySnapshotForCurrentJsonOwner() {
+  if (!canUseLocalSafetyIndexedDb()) return false;
+  const entry = await readLocalSafetyIndexedDbCurrent();
+  if (!localSafetySnapshotFromEntry(entry)) return false;
+  localSafetyCurrentMemory = entry;
+  return true;
+}
+
 async function captureJsonSafetyForSyncedDiscard() {
   const session = typeof window.capturePocketFileSaveSession === "function"
     ? window.capturePocketFileSaveSession()

@@ -1415,6 +1415,29 @@ function commitPreparedPocketDocument(norm, sourceInfo = {}, options = {}) {
     storagePrivate: options.storagePrivate === "synced" ? "synced" : (options.loadedStateOptions?.storagePrivate || ""),
     deferEffects: true,
   };
+  const finishAdoption = () => {
+    try {
+      if (typeof finishLoadedStateAdoption === "function") {
+        const finished = finishLoadedStateAdoption(norm, sourceInfo, loadedStateOptions);
+        if (finished !== true) {
+          throw new Error("Pocket could not finish adopting the prepared document.");
+        }
+      }
+    } catch (error) {
+      restorePocketDocumentStateAfterFailedAdoption(rollback);
+      restorePocketFileOwnerAfterFailedAdoption(ownerRollback);
+      try {
+        refreshMeta();
+        renderTree();
+        refocusTreeNavigation(state.selectedId || "");
+      } catch {}
+      return { ok: false, reason: "adoption-failed", error };
+    }
+    return {
+      ok: true,
+      sourceIdentity: capturePocketEditorSourceIdentity(),
+    };
+  };
   try {
     applyLoadedState(norm, sourceInfo, loadedStateOptions);
     if (!canContinue()) {
@@ -1439,27 +1462,22 @@ function commitPreparedPocketDocument(norm, sourceInfo = {}, options = {}) {
     } catch {}
     return { ok: false, reason: "adoption-failed", error };
   }
-  try {
-    if (typeof finishLoadedStateAdoption === "function") {
-      const finished = finishLoadedStateAdoption(norm, sourceInfo, loadedStateOptions);
-      if (finished !== true) {
-        throw new Error("Pocket could not finish adopting the prepared document.");
-      }
-    }
-  } catch (error) {
-    restorePocketDocumentStateAfterFailedAdoption(rollback);
-    restorePocketFileOwnerAfterFailedAdoption(ownerRollback);
-    try {
-      refreshMeta();
-      renderTree();
-      refocusTreeNavigation(state.selectedId || "");
-    } catch {}
-    return { ok: false, reason: "adoption-failed", error };
+  if (typeof options.beforeFinishLoadedStateAdoption === "function") {
+    return Promise.resolve()
+      .then(() => options.beforeFinishLoadedStateAdoption())
+      .then(finishAdoption)
+      .catch((error) => {
+        restorePocketDocumentStateAfterFailedAdoption(rollback);
+        restorePocketFileOwnerAfterFailedAdoption(ownerRollback);
+        try {
+          refreshMeta();
+          renderTree();
+          refocusTreeNavigation(state.selectedId || "");
+        } catch {}
+        return { ok: false, reason: "adoption-failed", error };
+      });
   }
-  return {
-    ok: true,
-    sourceIdentity: capturePocketEditorSourceIdentity(),
-  };
+  return finishAdoption();
 }
 
 function downloadPocketBackupCopy(payload = buildPocketPayload(nowIso()), reason = "copy") {
@@ -1757,12 +1775,13 @@ async function loadFromFile(file, options = {}) {
           && fileLoadIsCurrent()
         );
         if (!sourceStillCurrent()) return false;
-        const committed = commitPreparedPocketDocument(norm, sourceInfo, {
+        const committed = await commitPreparedPocketDocument(norm, sourceInfo, {
           handle: pendingFileSession.handle,
           displayName: pendingFileSession.displayName || file.name || pendingFileSession.handle.name,
           ownerKind: "json",
           forceNewSession: true,
           canContinue: sourceStillCurrent,
+          beforeFinishLoadedStateAdoption: () => window.hydrateLocalSafetySnapshotForCurrentJsonOwner?.(),
           loadedStateOptions: loadedStateOptions(extraOptions),
         });
         if (!committed.ok) return false;

@@ -111,6 +111,7 @@ function createLocalSafetyIndexedDb() {
 
 function createBrowserContext(options = {}) {
   const storage = new Map();
+  const localSafetyIndexedDb = options.indexedDB || createLocalSafetyIndexedDb().indexedDB;
   const storageWrites = [];
   const surfaceCalls = {
     exportTree: 0,
@@ -138,7 +139,7 @@ function createBrowserContext(options = {}) {
     console: { log() {}, info() {}, warn() {}, error() {} },
     document: options.document || defaultDocument,
     navigator: { clipboard: {} },
-    indexedDB: options.indexedDB,
+    indexedDB: localSafetyIndexedDb,
     localStorage: {
       getItem(key) { return storage.has(String(key)) ? storage.get(String(key)) : null; },
       setItem(key, value) {
@@ -2149,8 +2150,8 @@ test("pe retirement is load-only normalisation until a real edit, and all newly 
   for (const key of ["pocketLite.lastSaveSnapshot.v1", "pocketLite.pip.snapshot.v1"]) {
     assertNoRetiredPe(JSON.parse(context.__storage.get(key)), key);
   }
-  assert.equal(context.saveLocalSafetySnapshot("p014"), true);
-  assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1")), "new local safety");
+  assert.equal(await context.saveLocalSafetySnapshotDurably("p014"), true);
+  assertNoRetiredPe((await context.readLocalSafetySnapshotDurably()).parsed, "new local safety");
   assertNoRetiredPe(JSON.parse(context.__storage.get("pocketLite.localSafety.trail.v1")), "new local safety trail");
   context.saveAutoCache(normalised, {
     schema: normalised.schema,
@@ -4778,6 +4779,75 @@ test("P105j commits the JSON current safety slot in dedicated IndexedDB without 
   resetState(reopened, [node]);
   const afterRestart = await reopened.readLocalSafetySnapshotDurably();
   assert.equal(afterRestart.norm.nodes[0].details, "IndexedDB safety");
+});
+
+test("P105k hydrates committed JSON safety before the real reopened-file stale decision", async () => {
+  const idb = createLocalSafetyIndexedDb();
+  const fileName = "p105k-local.json";
+  const writer = createFullContractContext({ indexedDB: idb.indexedDB });
+  const savedNode = syntheticNode("p105k_saved", { details: "Committed IndexedDB safety" });
+  const writerState = resetState(writer, [savedNode]);
+  writerState.source = { schema: "portal.export.v1", fileName, writtenAt: "2026-08-28T12:00:00.000Z" };
+  writer.setPocketFileSession({ name: fileName }, fileName, { forceNewSession: true });
+  assert.equal(await writer.saveLocalSafetySnapshotDurably("p105k-current"), true);
+  assert.equal(writer.__storage.has("pocketLite.localSafety.snapshot.v1"), false);
+
+  const reopened = createFullContractContext({ indexedDB: idb.indexedDB });
+  resetState(reopened, [syntheticNode("p105k_before", { details: "Fresh runtime" })]);
+  const handle = {
+    name: fileName,
+    async queryPermission() { return "granted"; },
+    async getFile() {
+      return {
+        name: fileName,
+        async text() {
+          return JSON.stringify({
+            schema: "portal.export.v1",
+            writtenAt: "2000-01-01T00:00:00.000Z",
+            mainThoughtTree: [syntheticNode("p105k_file", { details: "Older file truth" })],
+            mainThoughtTreeTombstones: [],
+          });
+        },
+      };
+    },
+  };
+
+  const file = await handle.getFile();
+  assert.equal(await reopened.loadFromFile(file, {
+    fileSession: { handle, displayName: fileName },
+  }), true);
+  assert.equal(reopened.readLocalSafetySnapshot().norm.nodes[0].details, "Committed IndexedDB safety");
+  assert.equal(lexicalState(reopened).conflictGuard.active, true);
+  assert.match(lexicalState(reopened).conflictGuard.reason, /local safety copy is newer/i);
+});
+
+test("P105k keeps legacy current safety available when IndexedDB is unavailable and never hydrates private owners", async () => {
+  const legacyWriter = createFullContractContext({ indexedDB: createLocalSafetyIndexedDb().indexedDB });
+  const node = syntheticNode("p105k_legacy", { details: "Legacy fallback" });
+  const state = resetState(legacyWriter, [node]);
+  state.source = { schema: "portal.export.v1", fileName: "p105k-legacy.json", writtenAt: "2026-08-28T12:00:00.000Z" };
+  assert.equal(await legacyWriter.saveLocalSafetySnapshotDurably("p105k-legacy"), true);
+  const legacyRaw = JSON.stringify((await legacyWriter.readLocalSafetySnapshotDurably()).parsed);
+
+  const fallback = createFullContractContext();
+  resetState(fallback, [node]);
+  fallback.__storage.set("pocketLite.localSafety.snapshot.v1", legacyRaw);
+  assert.equal(await fallback.hydrateLocalSafetySnapshotForCurrentJsonOwner(), false);
+  assert.equal(fallback.readLocalSafetySnapshot().norm.nodes[0].details, "Legacy fallback");
+
+  for (const ownerKind of ["synced", "vault"]) {
+    const idb = createLocalSafetyIndexedDb();
+    idb.records.set("current", { key: "current", entry: JSON.parse(legacyRaw) });
+    const privateContext = createFullContractContext({ indexedDB: idb.indexedDB });
+    resetState(privateContext, [node]);
+    if (ownerKind === "synced") {
+      privateContext.setPocketFileSession(null, "Synced Pocket", { ownerKind: "synced", forceNewSession: true });
+    } else {
+      privateContext.isPocketVaultOwnerActive = () => true;
+    }
+    assert.equal(await privateContext.hydrateLocalSafetySnapshotForCurrentJsonOwner(), false, ownerKind);
+    assert.equal(privateContext.readLocalSafetySnapshot(), null, ownerKind);
+  }
 });
 
 test("P105j retains a legacy current snapshot until IndexedDB commits an equivalent-or-newer entry", async () => {
