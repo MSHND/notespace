@@ -6,6 +6,14 @@
   const EDITOR_SCHEMA = "pocket.nodeEditor.v1";
   const FIRST_CLASS_NODE_FIELDS = ["editor"];
 
+  function persistencePolicy() {
+    const policy = global.PocketOutlinePersistencePolicy;
+    if (!policy || typeof policy.assessOutline !== "function") {
+      throw new Error("PocketOutlinePersistencePolicy is not loaded.");
+    }
+    return policy;
+  }
+
   function clean(value, max = 80) {
     return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
   }
@@ -72,7 +80,9 @@
   function normaliseSupportedEditorValue(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     if (value.schema !== EDITOR_SCHEMA || value.mode !== "outline" || !Array.isArray(value.outline)) return null;
-    const outline = value.outline.slice(0, 400).map(normaliseEditorBlock);
+    if (!persistencePolicy().assessOutline(value.outline).ok) return null;
+    const outline = value.outline.map(normaliseEditorBlock);
+    if (!persistencePolicy().assessOutline(outline).ok) return null;
     if (!isMeaningfulOutline(outline)) return null;
     return { schema: EDITOR_SCHEMA, mode: "outline", outline };
   }

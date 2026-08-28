@@ -115,6 +115,47 @@
     return next;
   }
 
+  function cloneNodeForRollback(node) {
+    try { return JSON.parse(JSON.stringify(node)); }
+    catch (_error) { return null; }
+  }
+
+  function restoreNodeFromRollback(node, snapshot) {
+    if (!node || !snapshot || typeof snapshot !== "object") return false;
+    Object.keys(node).forEach((key) => { delete node[key]; });
+    Object.assign(node, snapshot);
+    return true;
+  }
+
+  function largeJsonOutlineSave(prepared, payload) {
+    return prepared.editorChanged === true
+      && Array.isArray(prepared.editorMeta?.outline)
+      && prepared.editorMeta.outline.length > 400
+      && payload?.sourceOwnerKind === "json"
+      && global.capturePocketFileSaveSession?.()?.ownerKind === "json";
+  }
+
+  function verifyLargeJsonOutlineSafety() {
+    const policy = global.PocketOutlinePersistencePolicy;
+    let data;
+    try {
+      const prospective = typeof global.buildPocketPayload === "function"
+        ? global.buildPocketPayload()
+        : null;
+      data = prospective ? `${JSON.stringify(prospective, null, 2)}\n` : "";
+    } catch (_error) {
+      return { ok: false, reason: "large-outline-local-envelope-unavailable" };
+    }
+    if (!policy || typeof policy.allowsLocalFileText !== "function" || !policy.allowsLocalFileText(data)) {
+      return { ok: false, reason: "large-outline-local-file-too-large" };
+    }
+    if (typeof global.saveLocalSafetySnapshot !== "function"
+        || global.saveLocalSafetySnapshot("large-outline-before-truth-save") !== true) {
+      return { ok: false, reason: "large-outline-safety-copy-failed" };
+    }
+    return { ok: true };
+  }
+
   function applyPayload(payload, options = {}) {
     if (typeof global.isPocketFilePermissionPromptOpen === "function"
         && global.isPocketFilePermissionPromptOpen()) {
@@ -217,6 +258,15 @@
       };
     }
 
+    const needsLargeOutlineSafety = largeJsonOutlineSave(prepared, payload);
+    const rollback = needsLargeOutlineSafety ? cloneNodeForRollback(node) : null;
+    if (needsLargeOutlineSafety && !rollback) {
+      return rejection(
+        "large-outline-rollback-unavailable",
+        "Pocket could not prepare a safe rollback for this large Outline. Nothing was changed.",
+        "Large Outline safety check failed — not saved"
+      );
+    }
     const updatedAt = nextNodeUpdatedAt(currentUpdatedAt);
     if (prepared.titleChanged) node.label = prepared.nextLabel;
     if (prepared.notesChanged) {
@@ -228,6 +278,22 @@
       else delete node.editor;
     }
     node.updatedAt = updatedAt;
+
+    if (rollback) {
+      const safety = verifyLargeJsonOutlineSafety();
+      if (!safety.ok) {
+        restoreNodeFromRollback(node, rollback);
+        return rejection(
+          safety.reason,
+          safety.reason === "large-outline-local-file-too-large"
+            ? "This Outline would create a Pocket file that cannot be safely reopened. Nothing was changed."
+            : "Pocket could not retain a complete current safety copy for this large Outline. Nothing was changed.",
+          safety.reason === "large-outline-local-file-too-large"
+            ? "Outline is too large for this Pocket file — not saved"
+            : "Large Outline safety copy failed — not saved"
+        );
+      }
+    }
 
     const changedSections = [];
     if (prepared.titleChanged) changedSections.push("title");

@@ -1025,6 +1025,9 @@ async function openPocketFile() {
 
 async function writePocketPayloadToHandle(payload, handle, options = {}) {
   const data = `${JSON.stringify(payload, null, 2)}\n`;
+  if (window.PocketOutlinePersistencePolicy?.allowsLocalFileText?.(data) !== true) {
+    return { ok: false, reason: "file-too-large" };
+  }
   if (!handle || typeof handle.createWritable !== "function") {
     return { ok: false, reason: "unsupported" };
   }

@@ -890,6 +890,7 @@ function createVaultContext(options = {}) {
   const productionSources = [
     "js/pocket-state.js",
     "js/pocket-data.js",
+    "js/pocket-outline-persistence-policy.js",
     "js/pocket-editor-metadata.js",
     "js/pocket-pe-import-preserve.js",
     "js/pocket-storage.js",
@@ -4081,7 +4082,7 @@ test("P023 one smart Choose file path classifies and opens plain JSON or Vault b
 
 test("P026 offline shell refreshes the tightened recovery prompt", () => {
   const serviceWorkerSource = source("sw.js");
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v8";/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v9";/);
   assert.equal(
     (serviceWorkerSource.match(/\.\/vault\.css/g) || []).length,
     1,

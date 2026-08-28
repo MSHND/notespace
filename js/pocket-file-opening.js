@@ -2,7 +2,13 @@
 (function initialisePocketFileOpening(global) {
   "use strict";
 
-  const MAX_FILE_CHARS = 5000000;
+  function maximumFileChars() {
+    const policy = global.PocketOutlinePersistencePolicy;
+    if (!Number.isSafeInteger(policy?.LIMITS?.localFileChars)) {
+      throw new Error("PocketOutlinePersistencePolicy is not loaded.");
+    }
+    return policy.LIMITS.localFileChars;
+  }
 
   function clean(value, max = 120) {
     return typeof global.cleanText === "function"
@@ -31,7 +37,8 @@
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
       return { ok: false, kind: "unsupported", reason: "unsupported-content" };
     }
-    const looksLikeVault = parsed.kind === global.PocketCrypto?.FORMAT?.kind;
+    const vaultKind = global.PocketCrypto?.FORMAT?.kind;
+    const looksLikeVault = typeof vaultKind === "string" && parsed.kind === vaultKind;
     if (global.PocketCrypto?.isVaultEnvelope?.(parsed) === true) {
       try {
         global.PocketCrypto?.validateEnvelope?.(parsed);
@@ -68,7 +75,7 @@
       if (!canContinue()) {
         return { ok: false, kind: "unsupported", reason: "candidate-changed" };
       }
-      if (raw.length > MAX_FILE_CHARS) {
+      if (raw.length > maximumFileChars()) {
         return { ok: false, kind: "unsupported", reason: "file-too-large" };
       }
       parsed = JSON.parse(raw);
@@ -174,7 +181,7 @@
   }
 
   global.PocketFileOpening = Object.freeze({
-    MAX_FILE_CHARS,
+    get MAX_FILE_CHARS() { return maximumFileChars(); },
     pickerOptions,
     classifyParsed,
     inspectHandle,

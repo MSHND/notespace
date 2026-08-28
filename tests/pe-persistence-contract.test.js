@@ -13,6 +13,7 @@ const UNKNOWN_EDITOR_MESSAGE = "This item uses editor data that this version of 
 const CORE_INDEX_SCRIPTS = [
   "js/pocket-state.js",
   "js/pocket-data.js",
+  "js/pocket-outline-persistence-policy.js",
   "js/pocket-editor-metadata.js",
   "js/pocket-pe-import-preserve.js",
   "js/pocket-storage.js",
@@ -348,6 +349,16 @@ function largeLegacyPe() {
 
 function outlineMeta(outline) {
   return { schema: EDITOR_SCHEMA, mode: "outline", outline };
+}
+
+function creditorScaleOutline(groups = 3000) {
+  return Array.from({ length: groups }, (_unused, index) => [
+    { id: `creditor_${index}_0`, text: `Creditor ${index}`, depth: 0, collapsed: true },
+    { id: `creditor_${index}_1`, text: `Datascape ${index}`, depth: 1, collapsed: false },
+    { id: `creditor_${index}_2`, text: `Synergy ${index}`, depth: 1, collapsed: false },
+    { id: `creditor_${index}_3`, text: `Email creditor${index}@example.test`, depth: 1, collapsed: false },
+    { id: `creditor_${index}_4`, text: "Notes:", depth: 1, collapsed: false },
+  ]).flat();
 }
 
 function normaliseOne(context, node) {
@@ -1055,15 +1066,17 @@ test("index load order establishes pocket-import.js as the deliberate first-clas
   assert.equal(typeof context.normaliseNodes, "undefined");
   runScript(context, requested[2]);
   assert.equal(typeof context.normaliseNodes, "undefined");
+  assert.equal(context.PocketOutlinePersistencePolicy.LIMITS.outlineBlocks, 15000);
+  runScript(context, requested[3]);
   assert.equal(context.PocketEditorMetadata.EDITOR_SCHEMA, EDITOR_SCHEMA);
   assert.equal(typeof context.PocketEditorMetadata.classifyEditorMeta, "function");
   assert.equal(typeof context.PocketEditorMetadata.copyFirstClassNodeFields, "function");
-  runScript(context, requested[3]);
-  assert.equal(typeof context.normaliseNodes, "undefined");
-  assert.equal(context.__pocketPeImportPreserveInstalled, undefined);
   runScript(context, requested[4]);
   assert.equal(typeof context.normaliseNodes, "undefined");
+  assert.equal(context.__pocketPeImportPreserveInstalled, undefined);
   runScript(context, requested[5]);
+  assert.equal(typeof context.normaliseNodes, "undefined");
+  runScript(context, requested[6]);
   const finalOwner = context.normaliseNodes;
 
   assert.equal(typeof finalOwner, "function");
@@ -1642,21 +1655,70 @@ test("active PE model clamps depths, rounds fractions, truncates IDs, and regene
   assert.equal(Object.hasOwn(result.outline[0], "unknown"), false);
 });
 
-test("active PE model retains 399 and 400 outline blocks", () => {
+test("active PE model retains 400, 401, and 15,000 outline blocks losslessly", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  for (const count of [399, 400]) {
+  for (const count of [400, 401, 15000]) {
     const outline = Array.from({ length: count }, (_, index) => ({ id: `b_${index}`, text: `Block ${index}`, depth: index ? 1 : 0 }));
-    assert.equal(model.normaliseEditorMeta(outlineMeta(outline)).outline.length, count);
+    const result = model.normaliseEditorMeta(outlineMeta(outline));
+    assert.equal(result.outline.length, count);
+    assert.equal(result.outline.at(-1).id, `b_${count - 1}`);
   }
 });
 
-test("CURRENT-RISK: Outline normalisation silently slices block 401", () => {
+test("Outline normalisation rejects 15,001 blocks without slicing", () => {
   const model = createFullContractContext().PocketNodePopoutModel;
-  const outline = Array.from({ length: 401 }, (_, index) => ({ id: `b_${index}`, text: `Block ${index}`, depth: index ? 1 : 0 }));
-  const result = model.normaliseEditorMeta(outlineMeta(outline));
-  assert.equal(result.outline.length, 400);
-  assert.equal(result.outline[399].id, "b_399");
-  assert.equal(result.outline.some((block) => block.id === "b_400"), false);
+  const outline = Array.from({ length: 15001 }, (_, index) => ({ id: `b_${index}`, text: `Block ${index}`, depth: index ? 1 : 0 }));
+  assert.equal(model.normaliseEditorMeta(outlineMeta(outline)), null);
+});
+
+test("P105f enforces the exact 2,000,000-byte canonical Outline boundary", () => {
+  const context = createFullContractContext();
+  const policy = context.PocketOutlinePersistencePolicy;
+  const outline = Array.from({ length: 500 }, (_, index) => ({
+    id: `boundary_${index}`,
+    text: "",
+    depth: index ? 1 : 0,
+    collapsed: false,
+  }));
+  const baseBytes = policy.utf8ByteLength(policy.serialiseEditorMeta(outline));
+  const available = policy.LIMITS.editorBytes - baseBytes;
+  const each = Math.floor(available / outline.length);
+  outline.forEach((block) => { block.text = "x".repeat(each); });
+  const remainder = policy.LIMITS.editorBytes - policy.utf8ByteLength(policy.serialiseEditorMeta(outline));
+  outline.at(-1).text += "x".repeat(remainder);
+  assert.equal(policy.utf8ByteLength(policy.serialiseEditorMeta(outline)), policy.LIMITS.editorBytes);
+  assert.equal(policy.assessOutline(outline).ok, true);
+  outline.at(-1).text += "x";
+  assert.deepEqual(plain(policy.assessOutline(outline)), {
+    ok: false,
+    reason: "outline-too-large",
+    actual: policy.LIMITS.editorBytes + 1,
+    limit: policy.LIMITS.editorBytes,
+  });
+});
+
+test("P105f model accepts the creditor-scale Outline with exact rows and rejects 15,001 before mutation", () => {
+  const context = createFullContractContext();
+  const model = context.PocketNodePopoutModel;
+  const outline = creditorScaleOutline();
+  const accepted = model.validateSavePayload({
+    title: "Creditors",
+    body: "",
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline,
+  });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.editorMeta.outline.length, 15000);
+  assert.deepEqual(plain(accepted.editorMeta.outline.slice(0, 5)), plain(outline.slice(0, 5).map((block, index) => ({ ...block, order: index + 1 }))));
+  const rejected = model.validateSavePayload({
+    title: "Creditors",
+    body: "",
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline: outline.concat({ id: "overflow", text: "Overflow", depth: 0, collapsed: false }),
+  });
+  assert.equal(rejected.reason, "outline-too-many-blocks");
 });
 
 test("active PE model retains block text at 3,999 and 4,000 characters", () => {
@@ -2366,12 +2428,12 @@ test("lossy PE save preflight rejects over-limit and structurally unsafe payload
   const cases = [
     ["title 221", { title: "T".repeat(221), mode: "text", body: "Body" }, "title-too-long"],
     ["body 4001", { title: "Title", mode: "text", body: "B".repeat(4001) }, "details-too-long"],
-    ["Outline 401", {
+    ["Outline 15,001", {
       title: "Title",
       body: "Body",
       schema: EDITOR_SCHEMA,
       mode: "outline",
-      outline: Array.from({ length: 401 }, (_, index) => ({ id: `b_${index}`, text: "B", depth: 0, collapsed: false })),
+      outline: Array.from({ length: 15001 }, (_, index) => ({ id: `b_${index}`, text: "B", depth: 0, collapsed: false })),
     }, "outline-too-many-blocks"],
     ["block text 4001", {
       title: "Title",
@@ -2451,12 +2513,6 @@ test("lossy PE save preflight rejects over-limit and structurally unsafe payload
 
 test("unchanged unsafe raw Outline survives Notes and title saves while actual Outline edits remain blocked", async () => {
   const cases = [
-    ["401 rows", Array.from({ length: 401 }, (_, index) => ({
-      id: `loaded_${index}`,
-      text: `Loaded ${index}`,
-      depth: index === 0 ? 0 : 1,
-      collapsed: false,
-    })), "outline-too-many-blocks"],
     ["4,001-character row", [{
       id: "loaded_long",
       text: "x".repeat(4001),
@@ -4357,7 +4413,7 @@ test("structural-only blank Outlines are meaningful, preserve raw data, and clea
   const unsafeContext = createFullContractContext();
   const unsafeNode = syntheticNode("p013_unsafe_clear", {
     details: "Keep unsafe Notes",
-    editor: outlineMeta(Array.from({ length: 401 }, (_, index) => ({
+    editor: outlineMeta(Array.from({ length: 15001 }, (_, index) => ({
       id: `unsafe_clear_${index}`,
       text: index === 0 ? "Root" : "",
       depth: index === 0 ? 0 : 1,
@@ -4370,7 +4426,7 @@ test("structural-only blank Outlines are meaningful, preserve raw data, and clea
     schema: EDITOR_SCHEMA,
     outline: [],
   }), { returnDetails: true });
-  assert.equal(rejected.reason, "outline-too-many-blocks");
+  assert.equal(rejected.reason, "unsupported-editor");
   assertSaveBoundaryUnchanged(unsafeContext, unsafeNode.id, before);
 });
 
@@ -4427,6 +4483,116 @@ test("applyAndSave requests the controlled export surface after a changed apply"
   assert.deepEqual(receivedOptions, { synthetic: true, returnDetails: true });
   assert.equal(context.__surfaceCalls.writeTruthFile, 0);
   assert.equal(context.__surfaceCalls.showSaveFilePicker, 0);
+});
+
+test("P105f saves and freshly reopens a creditor-scale Outline through the real JSON writer", async () => {
+  const context = createFullContractContext();
+  runScript(context, "js/pocket-file-opening.js");
+  const outline = creditorScaleOutline();
+  const node = syntheticNode("p105f_creditors", { details: "", editor: null });
+  const state = resetState(context, [node]);
+  let written = "";
+  let safetyAtWrite = "";
+  const handle = {
+    name: "p105f-creditors.json",
+    async queryPermission() { return "granted"; },
+    async createWritable() {
+      return {
+        async write(value) {
+          safetyAtWrite = context.__storage.get("pocketLite.localSafety.snapshot.v1") || "";
+          written = String(value);
+        },
+        async close() {},
+        async abort() {},
+      };
+    },
+    async getFile() {
+      return { name: "p105f-creditors.json", async text() { return written; } };
+    },
+  };
+  context.setPocketFileSession(handle, handle.name, { forceNewSession: true });
+  const payload = editorPayload(context, state.nodes[0], {
+    title: "Creditors",
+    body: "",
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline,
+  });
+  const result = await context.PocketNodePopoutEditor.applyAndSave(payload);
+  assert.equal(result.ok, true);
+  assert.equal(result.exported, true);
+  assert.ok(written.length <= context.PocketOutlinePersistencePolicy.LIMITS.localFileChars);
+  const capturedSafety = JSON.parse(safetyAtWrite);
+  assert.equal(capturedSafety.payload.mainThoughtTree[0].editor.outline.length, 15000);
+  const inspected = await context.PocketFileOpening.inspectHandle(handle);
+  assert.equal(inspected.ok, true);
+  const reopened = context.normaliseInput(inspected.parsed);
+  const reopenedOutline = reopened.nodes[0].editor.outline;
+  assert.equal(reopenedOutline.length, 15000);
+  assert.deepEqual(
+    plain(reopenedOutline.map((block) => [block.id, block.text, block.depth, block.collapsed, block.order])),
+    plain(outline.map((block, index) => [block.id, block.text, block.depth, block.collapsed, index + 1]))
+  );
+});
+
+test("P105f restores a large JSON-owner edit before export when the local envelope or current safety copy fails", () => {
+  const outline = Array.from({ length: 401 }, (_, index) => ({
+    id: `large_${index}`,
+    text: `Large ${index}`,
+    depth: index ? 1 : 0,
+    collapsed: false,
+  }));
+  for (const [label, configure, reason] of [
+    ["local envelope", (context) => {
+      context.buildPocketPayload = () => ({ padding: "x".repeat(8000001) });
+    }, "large-outline-local-file-too-large"],
+    ["current safety", (context) => {
+      context.localStorage.setItem = () => { throw new Error("quota"); };
+    }, "large-outline-safety-copy-failed"],
+  ]) {
+    const context = createFullContractContext();
+    const node = syntheticNode(`p105f_${label}`, { details: "Before" });
+    const state = resetState(context, [node]);
+    let exports = 0;
+    context.exportTree = async () => { exports += 1; return { ok: true }; };
+    configure(context);
+    const before = snapshotSaveBoundary(context, node.id);
+    const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+      schema: EDITOR_SCHEMA,
+      mode: "outline",
+      outline,
+    }), { returnDetails: true });
+    assert.equal(result.reason, reason, label);
+    assertSaveBoundaryUnchanged(context, node.id, before);
+    assert.equal(exports, 0, label);
+  }
+});
+
+test("P105f continues after a bounded trail failure when the complete current safety slot succeeds", () => {
+  const context = createFullContractContext();
+  const node = syntheticNode("p105f_trail", { details: "Before" });
+  const state = resetState(context, [node]);
+  const originalSetItem = context.localStorage.setItem.bind(context.localStorage);
+  context.localStorage.setItem = (key, value) => {
+    if (key === "pocketLite.localSafety.trail.v1") throw new Error("trail quota");
+    return originalSetItem(key, value);
+  };
+  const outline = Array.from({ length: 401 }, (_, index) => ({
+    id: `trail_${index}`,
+    text: `Trail ${index}`,
+    depth: index ? 1 : 0,
+    collapsed: false,
+  }));
+  const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline,
+  }), { returnDetails: true });
+  assert.equal(result.ok, true);
+  const current = context.readLocalSafetySnapshot();
+  assert.equal(current.norm.nodes[0].editor.outline.length, 401);
+  assert.equal(context.readLocalSafetyTrail().length, 0);
+  assert.equal(state.nodes[0].editor.outline.length, 401);
 });
 
 test("P043a PE Save under synced ownership reaches exportTree and the P042 save seam", async () => {

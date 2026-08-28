@@ -7,7 +7,6 @@
   const SAVE_LIMITS = Object.freeze({
     title: 220,
     details: 4000,
-    outlineBlocks: 400,
     blockText: 4000,
     blockId: 80,
     depth: 8
@@ -27,6 +26,14 @@
       throw new Error("PocketEditorMetadata is not loaded.");
     }
     return contract;
+  }
+
+  function persistencePolicy() {
+    const policy = global.PocketOutlinePersistencePolicy;
+    if (!policy || typeof policy.assessOutline !== "function") {
+      throw new Error("PocketOutlinePersistencePolicy is not loaded.");
+    }
+    return policy;
   }
 
   function classifyEditorMeta(value, options = {}) {
@@ -69,12 +76,13 @@
         "Outline is not valid — not saved"
       );
     }
-    if (rawOutline.length > SAVE_LIMITS.outlineBlocks) {
+    const envelope = persistencePolicy().assessOutline(rawOutline);
+    if (envelope.reason === "outline-too-many-blocks") {
       return saveIssue(
         "outline-too-many-blocks",
-        `This outline has ${rawOutline.length} rows. Pocket can safely save up to ${SAVE_LIMITS.outlineBlocks}. Nothing was changed.`,
+        `This outline has ${rawOutline.length} rows. Pocket can safely save up to ${envelope.limit}. Nothing was changed.`,
         "Too many outline rows — not saved",
-        { actual: rawOutline.length, limit: SAVE_LIMITS.outlineBlocks }
+        { actual: rawOutline.length, limit: envelope.limit }
       );
     }
 
@@ -161,6 +169,21 @@
           { blockIndex: index }
         );
       }
+    }
+    if (envelope.reason === "outline-too-large") {
+      return saveIssue(
+        "outline-too-large",
+        `This outline uses ${envelope.actual.toLocaleString()} UTF-8 bytes. Pocket can safely save up to ${envelope.limit.toLocaleString()} bytes. Nothing was changed.`,
+        "Outline is too large — not saved",
+        { actual: envelope.actual, limit: envelope.limit }
+      );
+    }
+    if (!envelope.ok) {
+      return saveIssue(
+        "invalid-outline",
+        "Pocket could not safely read this outline. Nothing was changed.",
+        "Outline is not valid — not saved"
+      );
     }
     return { ok: true };
   }

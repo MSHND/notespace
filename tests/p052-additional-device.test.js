@@ -108,7 +108,7 @@ function loadProduction(options = {}) {
   context.window = context; context.globalThis = context;
   vm.createContext(context);
   const browserFiles = options.browserPersistence === true ? [
-    "js/pocket-state.js", "js/pocket-data.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js",
+    "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js",
     "js/pocket-storage.js", "js/pocket-import.js", "js/pocket-editor-copy.js", "js/pocket-history-status.js",
     "js/pocket-render.js", "js/pocket-io-browser.js", "js/pocket-device-changes.js",
   ] : [];
