@@ -275,6 +275,16 @@ function localSafetyEntryWithoutChangeMetadata(value, options = {}) {
   }
 }
 
+function isLocalStorageQuotaError(error) {
+  if (!error || typeof error !== "object") return false;
+  const name = typeof error.name === "string" ? error.name : "";
+  const code = Number(error.code);
+  return name === "QuotaExceededError"
+    || name === "NS_ERROR_DOM_QUOTA_REACHED"
+    || code === 22
+    || code === 1014;
+}
+
 function storeLocalSafetyEntry(entry) {
   if (isPocketBrowserStoragePrivate()) {
     return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
@@ -334,7 +344,10 @@ function storeLocalSafetyEntry(entry) {
         localStorage.setItem(LOCAL_SAFETY_KEY, candidate.serialised);
         storedEntry = candidate.entry;
         break;
-      } catch {
+      } catch (error) {
+        if (!isLocalStorageQuotaError(error)) {
+          return { ok: false, baseStored: false, deviceChangesStored: false, entry: null };
+        }
         if (!pruneOneLocalSafetyTrailEntry()) break;
       }
     }

@@ -369,6 +369,10 @@ function assertExactOutline(actual, expected) {
   );
 }
 
+function quotaExceededError() {
+  return new DOMException("Storage quota exceeded", "QuotaExceededError");
+}
+
 function normaliseOne(context, node) {
   const result = context.normaliseInput({
     schema: "portal.export.v1",
@@ -4602,10 +4606,12 @@ test("P105h prunes expendable safety trail before a creditor-scale JSON Outline 
   context.localStorage.setItem = (key, value) => {
     const next = new Map(context.__storage);
     next.set(String(key), String(value));
-    if (storageSize(next) > quota) throw new Error("quota exceeded");
+    if (storageSize(next) > quota) throw quotaExceededError();
     context.__storage.set(String(key), String(value));
   };
-  assert.throws(() => context.localStorage.setItem("pocketLite.localSafety.snapshot.v1", nextRaw), /quota exceeded/);
+  assert.throws(() => context.localStorage.setItem("pocketLite.localSafety.snapshot.v1", nextRaw), {
+    name: "QuotaExceededError",
+  });
 
   let written = "";
   let safetyAtWrite = "";
@@ -4649,7 +4655,7 @@ test("P105h fails closed after clearing an expendable safety trail that cannot f
   context.localStorage.setItem = (key, value) => {
     const next = new Map(context.__storage);
     next.set(String(key), String(value));
-    throw new Error("quota exceeded");
+    throw quotaExceededError();
   };
   let exports = 0;
   context.exportTree = async () => { exports += 1; return { ok: true }; };
@@ -4673,6 +4679,48 @@ test("P105h fails closed after clearing an expendable safety trail that cannot f
       .map((block) => [block.id, block.text, block.depth, block.collapsed])),
     plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
   );
+});
+
+test("P105i preserves current safety and history when local storage is denied without quota pressure", () => {
+  const context = createFullContractContext();
+  const oldOutline = creditorScaleOutline();
+  oldOutline.at(-1).text = "Old safety tail";
+  const nextOutline = oldOutline.map((block, index) => index === oldOutline.length - 1
+    ? { ...block, text: "Replacement safety tail denied by storage" }
+    : block);
+  const node = syntheticNode("p105i_storage_denied", { details: "", editor: outlineMeta(oldOutline) });
+  const state = resetState(context, [node]);
+  assert.equal(context.saveLocalSafetySnapshot("p105i-old"), true);
+  const oldRaw = context.__storage.get("pocketLite.localSafety.snapshot.v1");
+  const trailRaw = JSON.stringify([JSON.parse(oldRaw)]);
+  context.__storage.set("pocketLite.localSafety.trail.v1", trailRaw);
+  const originalSetItem = context.localStorage.setItem.bind(context.localStorage);
+  const writes = [];
+  context.localStorage.setItem = (key, value) => {
+    writes.push(String(key));
+    if (key === "pocketLite.localSafety.snapshot.v1") {
+      throw new DOMException("Storage access denied", "SecurityError");
+    }
+    return originalSetItem(key, value);
+  };
+  let exports = 0;
+  context.exportTree = async () => { exports += 1; return { ok: true }; };
+
+  const result = context.PocketNodePopoutEditor.apply(editorPayload(context, state.nodes[0], {
+    schema: EDITOR_SCHEMA,
+    mode: "outline",
+    outline: nextOutline,
+  }), { returnDetails: true });
+
+  assert.equal(result.reason, "large-outline-safety-copy-failed");
+  assert.equal(exports, 0);
+  assert.deepEqual(writes, ["pocketLite.localSafety.snapshot.v1"]);
+  assert.deepEqual(
+    plain(state.nodes[0].editor.outline.map((block) => [block.id, block.text, block.depth, block.collapsed])),
+    plain(oldOutline.map((block) => [block.id, block.text, block.depth, block.collapsed]))
+  );
+  assert.equal(context.__storage.get("pocketLite.localSafety.snapshot.v1"), oldRaw);
+  assert.equal(context.__storage.get("pocketLite.localSafety.trail.v1"), trailRaw);
 });
 
 test("P105f continues after a bounded trail failure when the complete current safety slot succeeds", () => {

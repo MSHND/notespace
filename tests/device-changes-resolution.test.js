@@ -413,9 +413,12 @@ function createIntegrationContext(options = {}) {
         const safeKey = String(key);
         const safeValue = String(value);
         storageAttempts.push({ key: safeKey, value: safeValue });
-        if (typeof options.failStorageWrite === "function"
-            && options.failStorageWrite(safeKey, safeValue, storageCalls.length)) {
-          throw new Error("synthetic storage quota");
+        const failure = typeof options.failStorageWrite === "function"
+          ? options.failStorageWrite(safeKey, safeValue, storageCalls.length)
+          : null;
+        if (failure) {
+          if (typeof failure === "object") throw failure;
+          throw new DOMException("Synthetic storage quota", "QuotaExceededError");
         }
         storage.set(safeKey, safeValue);
         storageCalls.push({ key: safeKey, value: safeValue });
