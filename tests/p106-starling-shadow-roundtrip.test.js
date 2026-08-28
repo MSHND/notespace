@@ -80,7 +80,7 @@ function canonical(context, norm, writtenAt) {
   return vm.runInContext("buildCanonicalPocketPayload(__p106Norm, { writtenAt: __p106WrittenAt })", context);
 }
 
-function rawPortalExport() {
+function representativePortalInput() {
   return {
     schema: "portal.mtt.web.v1",
     writtenAt: "2026-08-28T00:00:00.000Z",
@@ -136,26 +136,34 @@ function findById(records, nodeId) {
   return records.find((record) => record.nodeId === nodeId);
 }
 
-test("P106 round-trips today's normaliseInput and canonical payload boundary exactly", () => {
+test("P106a round-trips a current canonical portal.export.v1 payload exactly", () => {
   const context = createContext();
-  const norm = normalise(context, rawPortalExport());
+  const fixedWrittenAt = "2026-08-28T12:00:00.000Z";
+  const representativeNorm = normalise(context, representativePortalInput());
+  const canonicalInput = canonical(context, representativeNorm, fixedWrittenAt);
+  assert.equal(canonicalInput.schema, "portal.export.v1");
+  assert.equal(canonicalInput.writtenAt, fixedWrittenAt);
+  assert.equal(canonicalInput.exportedAt, fixedWrittenAt);
+  assert.deepEqual(plain(canonicalInput.mainThoughtTree), plain(canonicalInput.data.mainThoughtTree));
+  assert.deepEqual(plain(canonicalInput.mainThoughtTreeTombstones), plain(canonicalInput.data.mainThoughtTreeTombstones));
+
+  const norm = normalise(context, canonicalInput);
   const encoded = context.PocketStarlingShadow.encode(norm);
   assert.equal(encoded.ok, true);
   const decoded = context.PocketStarlingShadow.decode(encoded.shadow);
   assert.equal(decoded.ok, true);
   assert.deepEqual(plain(decoded.norm), plain(norm));
 
-  const writtenAt = "2026-08-28T12:00:00.000Z";
   assert.deepEqual(
-    plain(canonical(context, norm, writtenAt)),
-    plain(canonical(context, decoded.norm, writtenAt)),
+    plain(canonical(context, norm, fixedWrittenAt)),
+    plain(canonical(context, decoded.norm, fixedWrittenAt)),
   );
   assert.equal(source("index.html").includes(SHADOW), false, "shadow module must remain dormant");
 });
 
 test("P106 separates node identity, placement and payload without reinterpreting editors", () => {
   const context = createContext();
-  const norm = normalise(context, rawPortalExport());
+  const norm = normalise(context, representativePortalInput());
   const { shadow } = context.PocketStarlingShadow.encode(norm);
 
   for (const node of norm.nodes) {
@@ -174,7 +182,7 @@ test("P106 separates node identity, placement and payload without reinterpreting
 
 test("P106 local payload edits and subtree-root moves isolate the intended shadow records", () => {
   const context = createContext();
-  const before = plain(normalise(context, rawPortalExport()));
+  const before = plain(normalise(context, representativePortalInput()));
   const payloadEdit = plain(before);
   payloadEdit.nodes.find((node) => node.id === "child-a").label = "Child A edited";
   payloadEdit.nodes.find((node) => node.id === "child-a").details = "Only payload changed";
@@ -206,7 +214,7 @@ test("P106 local payload edits and subtree-root moves isolate the intended shado
 
 test("P106 fails closed for malformed membership and JSON-incompatible material", () => {
   const context = createContext();
-  const norm = normalise(context, rawPortalExport());
+  const norm = normalise(context, representativePortalInput());
   const encoded = context.PocketStarlingShadow.encode(norm);
   const duplicateInput = plain(norm);
   duplicateInput.nodes.push(plain(duplicateInput.nodes[0]));
@@ -232,7 +240,7 @@ test("P106 fails closed for malformed membership and JSON-incompatible material"
 
 test("P106 produces detached deterministic values in both directions", () => {
   const context = createContext();
-  const norm = normalise(context, rawPortalExport());
+  const norm = normalise(context, representativePortalInput());
   const first = context.PocketStarlingShadow.encode(norm);
   const second = context.PocketStarlingShadow.encode(norm);
   assert.deepEqual(plain(first.shadow), plain(second.shadow));
