@@ -322,6 +322,7 @@ test("P117 preserves object scope, exact bounded presence and corrupt-row failur
 test("P117 keeps missing Head distinct, initialises genesis, and advances only for an existing object", async () => {
   const candidate = object(6),
     abandoned = object(7),
+    foreign = object(12),
     controlled = createPool(),
     store = createObjectHeadPostgresStore({ pool: controlled.pool });
   assert.equal(await store.readHead("pocket-head"), null);
@@ -347,6 +348,42 @@ test("P117 keeps missing Head distinct, initialises genesis, and advances only f
   assert.deepEqual(await store.initialiseHead("pocket-head"), advanced.head);
   assert.deepEqual(await store.readHead("pocket-head"), advanced.head);
   assert.equal(await store.getObject("pocket-head", abandoned.storageRef) !== null, true);
+  const revisionOne = advanced.head,
+    advancedAgain = await store.compareAndSetHead(
+      "pocket-head",
+      revisionOne,
+      abandoned.storageRef,
+    );
+  assert.deepEqual(advancedAgain, {
+    ok: true,
+    head: {
+      schema: HEAD_SCHEMA,
+      revision: 2,
+      sealRef: abandoned.storageRef,
+    },
+  });
+  assert.equal(Object.isFrozen(advancedAgain.head), true);
+  assert.equal(await store.getObject("pocket-head", candidate.storageRef) !== null, true);
+  assert.deepEqual(await store.readHead("pocket-head"), advancedAgain.head);
+  assert.deepEqual(
+    await store.compareAndSetHead(
+      "pocket-head",
+      revisionOne,
+      abandoned.storageRef,
+    ),
+    { ok: false, reason: "head-conflict" },
+  );
+  assert.deepEqual(await store.readHead("pocket-head"), advancedAgain.head);
+  await store.putObject("pocket-other", foreign.storageRef, foreign.record);
+  assert.deepEqual(
+    await store.compareAndSetHead(
+      "pocket-head",
+      advancedAgain.head,
+      foreign.storageRef,
+    ),
+    { ok: false, reason: "candidate-object-missing" },
+  );
+  assert.deepEqual(await store.readHead("pocket-head"), advancedAgain.head);
   const wrongRevision = await store.compareAndSetHead(
     "pocket-head",
     genesis,
@@ -405,10 +442,21 @@ test("P117 maps Head races, exhausted revisions, corrupt state and transaction f
   );
 
   const corruptControlled = createPool({
-      heads: [{ syncedPocketId: "pocket-bad", revision: 1, seal_storage_ref: null }],
+      heads: [
+        { syncedPocketId: "pocket-bad", revision: 1, seal_storage_ref: null },
+        {
+          syncedPocketId: "pocket-nonopaque",
+          revision: 1,
+          seal_storage_ref: "proof-ref:v1:candidate-seal:00000000",
+        },
+      ],
     }),
     corruptStore = createObjectHeadPostgresStore({ pool: corruptControlled.pool });
   await assert.rejects(corruptStore.readHead("pocket-bad"), code("object-head-store-state-invalid"));
+  await assert.rejects(
+    corruptStore.readHead("pocket-nonopaque"),
+    code("object-head-store-state-invalid"),
+  );
 
   const failure = object(11),
     failingControlled = createPool({ failCommit: nativeError("08006", "postgres://secret") }),
