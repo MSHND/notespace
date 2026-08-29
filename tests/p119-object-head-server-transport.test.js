@@ -92,6 +92,19 @@ test("P119d executes all object authority and exact object operation outcomes", 
   for (const [method, throwMethod] of [["putOpaqueObject",undefined],["objectPresence","presence"]]) { const bad=authenticatedCore({throwCode:"object-head-store-ref-invalid",throwMethod}); await assert.rejects(bad.core[method]({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:bad.sessionId},body:body[method](bad)}),(error)=>error.code==="service-request-invalid"&&error.status===400); }
 });
 
+test("P119e PUT delegates exactly and redacts request errors", async () => {
+  const h=authenticatedCore(), request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record}};
+  assert.deepEqual((await h.core.putOpaqueObject(request)).body,{apiVersion:1,ok:true,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref,created:true});
+  const bad=authenticatedCore({throwCode:"object-head-store-ref-invalid"}); await assert.rejects(bad.core.putOpaqueObject({...request,context:{...request.context,sessionId:bad.sessionId},body:{...request.body,syncedPocketId:bad.pocket,storageRef:bad.ref,record:bad.record}}),(e)=>e.code==="service-request-invalid"&&e.status===400);
+});
+
+test("P119e GET and presence preserve exact delegated values", async () => {
+  const h=authenticatedCore(), context={method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId};
+  assert.equal((await h.core.getOpaqueObject({context,body:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref}})).body.present,true);
+  assert.equal((await h.core.getOpaqueObject({context,body:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:"missing"}})).body.record,null);
+  assert.deepEqual((await h.core.objectPresence({context,body:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRefs:["b","a"]}})).body.rows,[{storageRef:"b",present:true},{storageRef:"a",present:true}]);
+});
+
 test("P119 requires the exact object/Head store surface and rejects unauthenticated calls", async () => {
   const config = coreConfig();
   for (const candidate of [undefined, {}, { ...objectHeadStore(), extra() {} },
