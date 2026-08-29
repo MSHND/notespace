@@ -98,6 +98,17 @@ test("P119e PUT delegates exactly and redacts request errors", async () => {
   const bad=authenticatedCore({throwCode:"object-head-store-ref-invalid"}); await assert.rejects(bad.core.putOpaqueObject({...request,context:{...request.context,sessionId:bad.sessionId},body:{...request.body,syncedPocketId:bad.pocket,storageRef:bad.ref,record:bad.record}}),(e)=>e.code==="service-request-invalid"&&e.status===400);
 });
 
+test("P119f PUT object service contract proves both outcomes and redaction", async () => {
+  const run=async (options={},storageRef="proof-ref:v1:seal")=>{const h=authenticatedCore(options), value={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"put",syncedPocketId:h.pocket,storageRef,record:h.record}}; return {h,value,result:await h.core.putOpaqueObject(value)};};
+  const created=await run();
+  assert.equal(created.h.calls(),1); assert.deepEqual(created.h.argumentsSeen[0],["putObject",[created.h.pocket,created.h.ref,created.h.record]]);
+  assert.deepEqual(created.result,{status:200,body:{apiVersion:1,ok:true,operationId:"put",syncedPocketId:created.h.pocket,storageRef:created.h.ref,created:true},session:null});
+  const existing=await run({},"again");
+  assert.equal(existing.h.calls(),1); assert.deepEqual(existing.h.argumentsSeen[0],["putObject",[existing.h.pocket,"again",existing.h.record]]); assert.equal(existing.result.body.created,false);
+  const h=authenticatedCore({throwCode:"object-head-store-ref-invalid"}), value={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"put",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record}};
+  await assert.rejects(h.core.putOpaqueObject(value),(error)=>error.code==="service-request-invalid"&&error.status===400&&!JSON.stringify(error).includes("provider SQL sentinel")); assert.equal(h.calls(),1);
+});
+
 test("P119e GET and presence preserve exact delegated values", async () => {
   const h=authenticatedCore(), context={method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId};
   assert.equal((await h.core.getOpaqueObject({context,body:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref}})).body.present,true);
