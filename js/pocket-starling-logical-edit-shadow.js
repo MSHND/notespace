@@ -1,4 +1,4 @@
-/* Dormant P114/P115 fresh logical working-set experiment. It path-copies only
+/* Dormant P114/P115/P116 fresh logical working-set experiment. It path-copies only
    an authenticated mutation neighbourhood into an unadopted P109 frontier. */
 (function (global) {
   "use strict";
@@ -797,6 +797,97 @@
     return Object.freeze({ ok: true, candidate });
   }
 
+  async function reorderWithinParent(base, nodeId, fromIndex, toIndex) {
+    const state = baseStates.get(base);
+    if (!state) return fail("invalid-base-token");
+    if (
+      typeof nodeId !== "string" ||
+      nodeId.length === 0 ||
+      nodeId === "root"
+    )
+      return fail("invalid-node-id");
+    const moved = await readPlacement(state, nodeId, "unknown-node");
+    if (!moved.ok) return moved;
+    const parentId = moved.record.parentId,
+      located = await readChildrenRef(state, parentId);
+    if (!located.ok) return located;
+    if (!located.found) return fail("placement-membership-mismatch");
+    const current = await sequenceRoot(state, located.valueRef);
+    if (!current.ok) return current;
+    const membership = await sequenceItemAt(state, current.page, fromIndex);
+    if (!membership.ok) return membership;
+    if (membership.item !== nodeId)
+      return fail("placement-membership-mismatch");
+
+    const requested = destinationIndex(toIndex, current.page.count),
+      adjusted = requested > fromIndex ? requested - 1 : requested;
+    if (adjusted === fromIndex)
+      return Object.freeze({ ok: true, changed: false, reason: "no-change" });
+
+    const frontier = new Map(),
+      removed = await removeSequenceItem(
+        state,
+        frontier,
+        current.page,
+        fromIndex,
+      );
+    if (!removed.ok) return removed;
+    const added = await addSequenceItem(
+      state,
+      frontier,
+      removed.page,
+      adjusted,
+      nodeId,
+    );
+    if (!added.ok) return added;
+    if (added.page.ref === current.page.ref)
+      return Object.freeze({ ok: true, changed: false, reason: "no-change" });
+
+    const children = await copyTrieValue(
+      state,
+      frontier,
+      state.root.childrenRef,
+      "children-trie",
+      parentId,
+      added.page.ref,
+    );
+    if (!children.ok) return children;
+    const root = materialise(state, frontier, "pocket-root", {
+      schema: state.logical.ROOT_SCHEMA,
+      kind: "pocket-root",
+      capacity: state.root.capacity,
+      contentRef: state.root.contentRef,
+      placementRef: state.root.placementRef,
+      childrenRef: children.ref,
+      preservationRef: state.root.preservationRef,
+    });
+    if (!root.ok) return root;
+    const seal = materialise(state, frontier, "candidate-seal", {
+      schema: state.logical.SEAL_SCHEMA,
+      kind: "candidate-seal",
+      rootRef: root.ref,
+      previousSealRef: state.acceptedSealRef,
+    });
+    if (!seal.ok) return seal;
+    const published = reachableFrontier(frontier, seal.ref),
+      newLogicalRefs = Object.freeze(Array.from(published.keys())),
+      resolveLogical = (logicalRef) => published.get(logicalRef),
+      candidate = Object.freeze({
+        rootRef: root.ref,
+        sealRef: seal.ref,
+        newLogicalRefs,
+        resolveLogical,
+        diagnostics: Object.freeze({
+          logicalFetches: state.stats.logicalFetches,
+          logicalCacheHits: state.stats.logicalCacheHits,
+          destinationAncestryReads: 0,
+          descendantReads: 0,
+          newLogicalObjectCount: newLogicalRefs.length,
+        }),
+      });
+    return Object.freeze({ ok: true, changed: true, candidate });
+  }
+
   async function editPayload(base, nodeId, newPayload) {
     const state = baseStates.get(base);
     if (!state) return fail("invalid-base-token");
@@ -905,6 +996,7 @@
     createBase,
     editPayload,
     move,
+    reorder: reorderWithinParent,
     diagnostics,
   });
 })(typeof window !== "undefined" ? window : globalThis);
