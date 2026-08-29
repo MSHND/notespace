@@ -39,7 +39,7 @@ function authenticatedCore(options = {}) {
   const ref = "proof-ref:v1:seal";
   const heads = new Map(), argumentsSeen = [], reads = []; let calls = 0;
   const objectHeadStore = Object.freeze({
-    async putObject(...args) { calls += 1; argumentsSeen.push(["putObject", args]); if (options.throwCode) { const error = new Error(options.throwCode); error.code = options.throwCode; throw error; } return { ok: true, created: args[1] !== "again" }; },
+    async putObject(...args) { calls += 1; argumentsSeen.push(["putObject", args]); if (options.throwCode) { const error = new Error("provider SQL sentinel"); error.code = options.throwCode; error.providerCode = "PG-23505"; error.sql = "SELECT provider sentinel"; options.capturedError = error; throw error; } return { ok: true, created: args[1] !== "again" }; },
     async getObject(...args) { calls += 1; argumentsSeen.push(["getObject", args]); if (options.throwMethod === "get") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; throw error; } return args[1] === "missing" ? null : record; },
     async presence(_pocket, refs) { calls += 1; argumentsSeen.push(["presence", [_pocket,refs]]); if (options.throwMethod === "presence") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; throw error; } return refs.map((storageRef) => ({ storageRef, present: true })); },
     async initialiseHead(pocket) { calls += 1; if (!heads.has(pocket)) heads.set(pocket, { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); return heads.get(pocket); },
@@ -104,9 +104,9 @@ test("P119f PUT object service contract proves both outcomes and redaction", asy
   assert.equal(created.h.calls(),1); assert.deepEqual(created.h.argumentsSeen[0],["putObject",[created.h.pocket,created.h.ref,created.h.record]]);
   assert.deepEqual(created.result,{status:200,body:{apiVersion:1,ok:true,operationId:"put",syncedPocketId:created.h.pocket,storageRef:created.h.ref,created:true},session:null});
   const existing=await run({},"again");
-  assert.equal(existing.h.calls(),1); assert.deepEqual(existing.h.argumentsSeen[0],["putObject",[existing.h.pocket,"again",existing.h.record]]); assert.equal(existing.result.body.created,false);
-  const h=authenticatedCore({throwCode:"object-head-store-ref-invalid"}), value={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"put",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record}};
-  await assert.rejects(h.core.putOpaqueObject(value),(error)=>error.code==="service-request-invalid"&&error.status===400&&!JSON.stringify(error).includes("provider SQL sentinel")); assert.equal(h.calls(),1);
+  assert.equal(existing.h.calls(),1); assert.deepEqual(existing.h.argumentsSeen[0],["putObject",[existing.h.pocket,"again",existing.h.record]]); assert.deepEqual(existing.result,{status:200,body:{apiVersion:1,ok:true,operationId:"put",syncedPocketId:existing.h.pocket,storageRef:"again",created:false},session:null});
+  const options={throwCode:"object-head-store-ref-invalid"}, h=authenticatedCore(options), value={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"put",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record}};
+  await assert.rejects(h.core.putOpaqueObject(value),(error)=>{const exposed={message:error.message,...error}; return error.code==="service-request-invalid"&&error.status===400&&!JSON.stringify(exposed).match(/provider SQL sentinel|PG-23505|SELECT provider sentinel/);}); assert.equal(h.calls(),1); assert.match(options.capturedError.message,/provider SQL sentinel/); assert.equal(options.capturedError.providerCode,"PG-23505"); assert.equal(options.capturedError.sql,"SELECT provider sentinel");
 });
 
 test("P119e GET and presence preserve exact delegated values", async () => {
