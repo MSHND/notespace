@@ -12,7 +12,8 @@
       "links",
     ]),
     LINK_FIELDS = Object.freeze(["logicalRef", "storageRef"]),
-    stageProofs = new WeakMap();
+    stageProofs = new WeakMap(),
+    reuseProofs = new WeakMap();
 
   function storageError(code) {
     const error = new Error(`Pocket Starling storage ${code}.`);
@@ -319,19 +320,48 @@
       typeof input.resolveLogical !== "function"
     )
       throw storageError("stage-input-invalid");
+    const baseStageSupplied =
+        input.baseStage !== undefined && input.baseStage !== null,
+      freshProofSupplied =
+        input.freshBaseProof !== undefined && input.freshBaseProof !== null,
+      frontierSupplied = Object.prototype.hasOwnProperty.call(
+        input,
+        "newLogicalRefs",
+      );
+    if (baseStageSupplied && freshProofSupplied)
+      throw storageError("base-mode-invalid");
+    if (!freshProofSupplied && frontierSupplied)
+      throw storageError("base-mode-invalid");
     const key = sync.validateNonExtractableAesKey(input.masterKey),
       context = crypto.validateContext(input.context),
-      base =
-        input.baseStage === undefined || input.baseStage === null
-          ? null
-          : stageProofs.get(input.baseStage);
-    if (input.baseStage && !base) throw storageError("base-stage-invalid");
+      base = baseStageSupplied ? stageProofs.get(input.baseStage) : null,
+      freshBase = freshProofSupplied
+        ? reuseProofs.get(input.freshBaseProof)
+        : null;
+    if (baseStageSupplied && !base) throw storageError("base-stage-invalid");
     if (base && !base.complete) throw storageError("base-stage-incomplete");
+    if (freshProofSupplied && !freshBase)
+      throw storageError("fresh-base-invalid");
     if (
       base &&
       (base.masterKey !== key || base.syncedPocketId !== context.syncedPocketId)
     )
       throw storageError("base-stage-mismatch");
+    if (
+      freshBase &&
+      (!freshBase.acceptedComplete ||
+        freshBase.masterKey !== key ||
+        freshBase.syncedPocketId !== context.syncedPocketId)
+    )
+      throw storageError("fresh-base-mismatch");
+    if (
+      freshBase &&
+      (!Array.isArray(input.newLogicalRefs) ||
+        !input.newLogicalRefs.every(logicalRef) ||
+        new Set(input.newLogicalRefs).size !== input.newLogicalRefs.length)
+    )
+      throw storageError("new-logical-frontier-invalid");
+    const newLogicalRefs = freshBase ? new Set(input.newLogicalRefs) : null;
     const entries = new Map(),
       visiting = new Set(),
       diagnostics = {
@@ -342,7 +372,7 @@
       };
 
     function inheritedEntry(ref) {
-      if (!base) return null;
+      if (!base && !freshBase) return null;
       diagnostics.inheritedLookups += 1;
       for (let proof = base; proof; proof = proof.base) {
         diagnostics.baseProofSteps += 1;
@@ -350,6 +380,22 @@
         if (entry) {
           diagnostics.exactReuseHits += 1;
           return entry;
+        }
+        if (proof.freshBase) {
+          diagnostics.baseProofSteps += 1;
+          const inheritedStorageRef = proof.freshBase.bindings.get(ref);
+          if (inheritedStorageRef) {
+            diagnostics.exactReuseHits += 1;
+            return Object.freeze({ storageRef: inheritedStorageRef });
+          }
+        }
+      }
+      if (freshBase) {
+        diagnostics.baseProofSteps += 1;
+        const inheritedStorageRef = freshBase.bindings.get(ref);
+        if (inheritedStorageRef) {
+          diagnostics.exactReuseHits += 1;
+          return Object.freeze({ storageRef: inheritedStorageRef });
         }
       }
       return null;
@@ -359,6 +405,8 @@
       if (entries.has(ref)) return entries.get(ref);
       const inherited = inheritedEntry(ref);
       if (inherited) return inherited;
+      if (freshBase && !newLogicalRefs.has(ref))
+        throw storageError("base-binding-unavailable");
       if (!logicalRef(ref) || visiting.has(ref))
         throw storageError("logical-cycle");
       visiting.add(ref);
@@ -403,7 +451,12 @@
     if (seal.logicalKind !== "candidate-seal")
       throw storageError("candidate-seal-required");
     const previousSealRef = JSON.parse(seal.logicalBytes).previousSealRef;
-    if (previousSealRef !== (base ? base.sealLogicalRef : null))
+    const expectedPreviousSealRef = base
+      ? base.sealLogicalRef
+      : freshBase
+        ? freshBase.acceptedSealLogicalRef
+        : null;
+    if (previousSealRef !== expectedPreviousSealRef)
       throw storageError("candidate-lineage-mismatch");
     const newRecords = Object.freeze(
         Array.from(entries.values())
@@ -424,6 +477,7 @@
       stage,
       entries,
       base,
+      freshBase,
       complete: false,
       sealLogicalRef: input.sealRef,
       masterKey: key,
@@ -443,6 +497,7 @@
       throw storageError("resolver-input-invalid");
     const key = sync.validateNonExtractableAesKey(input.masterKey),
       context = crypto.validateContext(input.context),
+      acceptedComplete = input.acceptedBaseComplete === true,
       bindings = new Map(),
       logicalCache = new Map(),
       storageCache = new Map(),
@@ -513,10 +568,27 @@
       );
     }
 
+    function createReuseProof() {
+      if (!acceptedComplete)
+        throw storageError("accepted-base-completeness-required");
+      const token = Object.freeze({});
+      reuseProofs.set(token, {
+        token,
+        acceptedComplete,
+        acceptedSealLogicalRef: accepted.logicalRef,
+        acceptedSealStorageRef: input.acceptedSealStorageRef,
+        masterKey: key,
+        syncedPocketId: context.syncedPocketId,
+        bindings,
+      });
+      return token;
+    }
+
     return Object.freeze({
       acceptedSealRef: accepted.logicalRef,
       logicalResolver,
       resolveLogical,
+      createReuseProof,
       openAccepted,
       readContent: (handle, nodeId) =>
         settle(() => logical.readContent(handle, nodeId)),
