@@ -36,7 +36,10 @@ function invocation(body) {
 
 test("P119 requires the exact object/Head store surface and rejects unauthenticated calls", async () => {
   const config = coreConfig();
-  assert.throws(() => createServiceCore(({ objectHeadStore, ...rest }) => rest)(config));
+  for (const candidate of [undefined, {}, { ...objectHeadStore(), extra() {} },
+    { ...objectHeadStore(), putObject: null }]) {
+    assert.throws(() => createServiceCore({ ...config, objectHeadStore: candidate }), /service-core-invalid/);
+  }
   const core = createServiceCore(config);
   for (const [method, body] of [
     ["putOpaqueObject", { apiVersion: 1, operationId: "op", syncedPocketId: "pocket", storageRef: "opaque", record: {} }],
@@ -46,6 +49,19 @@ test("P119 requires the exact object/Head store surface and rejects unauthentica
     ["readShadowHead", { apiVersion: 1, operationId: "op", syncedPocketId: "pocket" }],
     ["compareAndSetShadowHead", { apiVersion: 1, operationId: "op", syncedPocketId: "pocket", expectedHead: {}, candidateSealStorageRef: "opaque" }],
   ]) await assert.rejects(core[method](invocation(body)), (error) => error?.code === "service-authentication-required");
+});
+
+test("P119 keeps the transport contract bounded and maps safe object-store errors", async () => {
+  const coreSource = fs.readFileSync(path.join(ROOT, "sync-service/pocket-sync-service-core.js"), "utf8");
+  const adapterSource = fs.readFileSync(path.join(ROOT, "sync-service/pocket-sync-http-adapter.js"), "utf8");
+  const runtimeSource = fs.readFileSync(path.join(ROOT, "sync-service/pocket-sync-server-runtime.js"), "utf8");
+  assert.match(coreSource, /object-head-store-state-invalid[\s\S]*service-state-invalid/);
+  assert.match(coreSource, /object-head-store-storage-failed[\s\S]*service-storage-failed/);
+  assert.match(adapterSource, /putOpaqueObject[\s\S]*contentJsonLimitBytes/);
+  assert.match(adapterSource, /getOpaqueObject[\s\S]*contentJsonLimitBytes/);
+  assert.match(adapterSource, /compareAndSetShadowHead[\s\S]*Object\.freeze\(\[200, 409\]\)/);
+  assert.match(runtimeSource, /createPostgresStore\(\{ pool \}\)[\s\S]*createObjectHeadPostgresStore\(\{ pool \}\)/);
+  assert.doesNotMatch([coreSource, adapterSource].join("\n"), /deleteOpaqueObject|updateOpaqueObject|listOpaqueObject|forceSetHead|deleteHead/);
 });
 
 test("P119 exposes exactly six authenticated POST transport routes without browser adoption", () => {
