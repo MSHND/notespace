@@ -109,6 +109,20 @@ test("P119f PUT object service contract proves both outcomes and redaction", asy
   await assert.rejects(h.core.putOpaqueObject(value),(error)=>{const exposed={message:error.message,...error}; return error.code==="service-request-invalid"&&error.status===400&&!JSON.stringify(exposed).match(/provider SQL sentinel|PG-23505|SELECT provider sentinel/);}); assert.equal(h.calls(),1); assert.match(options.capturedError.message,/provider SQL sentinel/); assert.equal(options.capturedError.providerCode,"PG-23505"); assert.equal(options.capturedError.sql,"SELECT provider sentinel");
 });
 
+test("P119h rejects a nonexistent session for every object service method before delegation", async () => {
+  const h=authenticatedCore(), context={method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:"does-not-exist"};
+  for (const [method,body] of [["putOpaqueObject",{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record}],["getOpaqueObject",{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref}],["objectPresence",{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRefs:[h.ref]}]]) {
+    const before=h.calls(); await assert.rejects(h.core[method]({context,body}),(error)=>error.code==="service-session-invalid"); assert.equal(h.calls(),before);
+  }
+  assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+});
+
+test("P119h rejects a nonexistent session before every object store call", async () => {
+  const h=authenticatedCore(), context={method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:"does-not-exist"}, bodies={putOpaqueObject:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record},getOpaqueObject:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref},objectPresence:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRefs:[h.ref]}};
+  for (const method of Object.keys(bodies)) await assert.rejects(h.core[method]({context,body:bodies[method]}),(error)=>error.code==="service-session-invalid");
+  assert.equal(h.calls(),0); assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+});
+
 test("P119e GET and presence preserve exact delegated values", async () => {
   const h=authenticatedCore(), context={method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId};
   assert.equal((await h.core.getOpaqueObject({context,body:{apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref}})).body.present,true);
