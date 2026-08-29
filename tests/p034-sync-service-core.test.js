@@ -130,6 +130,15 @@ function plain(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function objectHeadStore() {
+  return Object.freeze({
+    async putObject() { return { ok: true, created: true }; }, async getObject() { return null; },
+    async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+    async initialiseHead() { return { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }; },
+    async readHead() { return null; }, async compareAndSetHead() { return { ok: false, reason: "head-conflict" }; },
+  });
+}
+
 function errorCode(code) {
   return (error) => error && error.code === code;
 }
@@ -203,6 +212,7 @@ function createHarness(options = {}) {
   });
   const config = {
     store: driver.store,
+    objectHeadStore: objectHeadStore(),
     webAuthnVerifier: verifier,
     recoveryProofVerifier: Object.freeze({
       async verifyRecoveryProof() {
@@ -343,6 +353,12 @@ test("factory configuration, store boundary, origin and lifetimes are exact", ()
     "beginRecovery",
     "finishRecovery",
     "rotateRecovery",
+    "putOpaqueObject",
+    "getOpaqueObject",
+    "objectPresence",
+    "initialiseShadowHead",
+    "readShadowHead",
+    "compareAndSetShadowHead",
   ]);
   assert.equal(Object.isFrozen(harness.core), true);
   for (const field of Object.keys(harness.config)) {

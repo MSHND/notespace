@@ -48,6 +48,7 @@ const COLLECTIONS = Object.freeze({
 const COLLECTION_NAMES = Object.freeze(Object.values(COLLECTIONS));
 const FACTORY_FIELDS = Object.freeze([
   "store",
+  "objectHeadStore",
   "webAuthnVerifier",
   "recoveryProofVerifier",
   "randomBytes",
@@ -1173,6 +1174,9 @@ function validateFactoryConfig(input) {
   if (!isObject(input.store)
       || !sameKeys(input.store, ["transact"])
       || typeof input.store.transact !== "function"
+      || !isObject(input.objectHeadStore)
+      || !sameKeys(input.objectHeadStore, ["putObject", "getObject", "presence", "initialiseHead", "readHead", "compareAndSetHead"])
+      || ["putObject", "getObject", "presence", "initialiseHead", "readHead", "compareAndSetHead"].some((field) => typeof input.objectHeadStore[field] !== "function")
       || !isObject(input.webAuthnVerifier)
       || !sameKeys(input.webAuthnVerifier, ["verifyRegistration", "verifyAuthentication"])
       || typeof input.webAuthnVerifier.verifyRegistration !== "function"
@@ -1449,6 +1453,14 @@ function validateConditionalRequest(input) {
   });
 }
 
+function validateObjectHeadRequest(input, fields) {
+  const value = exactObject(input, fields, fields);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  identifier(value.operationId);
+  identifier(value.syncedPocketId);
+  return frozen(value);
+}
+
 function validateKeyMutation(value, fields) {
   exactObject(value, fields, fields);
   if (value.apiVersion !== 1
@@ -1550,6 +1562,7 @@ function createServiceCore(input) {
   const config = validateFactoryConfig(input);
   const {
     store,
+    objectHeadStore,
     webAuthnVerifier,
     recoveryProofVerifier,
     randomBytes,
@@ -1963,6 +1976,79 @@ function createServiceCore(input) {
       throw serviceError("service-state-invalid", 500);
     }
     return Object.freeze({ session, account, credential, credentials });
+  }
+
+  async function authoriseObjectHead(context, syncedPocketId) {
+    const at = clockMilliseconds();
+    return transact("readonly", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      if (account.syncedPocketId !== syncedPocketId) throw serviceError("service-authorisation-failed", 403);
+      return account;
+    });
+  }
+
+  async function objectHeadCall(method, args) {
+    try { return await objectHeadStore[method](...args); }
+    catch (error) {
+      if (error?.code === "object-head-store-state-invalid") throw serviceError("service-state-invalid", 500);
+      if (error?.code === "object-head-store-storage-failed") throw serviceError("service-storage-failed", 503, { retryable: true });
+      if (typeof error?.code === "string" && error.code.startsWith("object-head-store-")) {
+        throw serviceError("service-request-invalid", 400);
+      }
+      throw serviceError("service-storage-failed", 503, { retryable: true });
+    }
+  }
+
+  async function putOpaqueObject(value) {
+    const { context, body } = invocation(value);
+    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId", "storageRef", "record"]);
+    await authoriseObjectHead(context, request.syncedPocketId);
+    const result = await objectHeadCall("putObject", [request.syncedPocketId, request.storageRef, request.record]);
+    return frozen({ status: 200, body: { apiVersion: 1, ok: true, operationId: request.operationId,
+      syncedPocketId: request.syncedPocketId, storageRef: request.storageRef, created: result.created === true }, session: null });
+  }
+
+  async function getOpaqueObject(value) {
+    const { context, body } = invocation(value);
+    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId", "storageRef"]);
+    await authoriseObjectHead(context, request.syncedPocketId);
+    const record = await objectHeadCall("getObject", [request.syncedPocketId, request.storageRef]);
+    return frozen({ status: 200, body: { apiVersion: 1, ok: true, operationId: request.operationId,
+      syncedPocketId: request.syncedPocketId, storageRef: request.storageRef, present: record !== null, record }, session: null });
+  }
+
+  async function objectPresence(value) {
+    const { context, body } = invocation(value);
+    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId", "storageRefs"]);
+    await authoriseObjectHead(context, request.syncedPocketId);
+    const rows = await objectHeadCall("presence", [request.syncedPocketId, request.storageRefs]);
+    return frozen({ status: 200, body: { apiVersion: 1, ok: true, operationId: request.operationId,
+      syncedPocketId: request.syncedPocketId, rows }, session: null });
+  }
+
+  async function initialiseShadowHead(value) {
+    const { context, body } = invocation(value);
+    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId"]);
+    await authoriseObjectHead(context, request.syncedPocketId);
+    const head = await objectHeadCall("initialiseHead", [request.syncedPocketId]);
+    return frozen({ status: 200, body: { apiVersion: 1, ok: true, operationId: request.operationId, syncedPocketId: request.syncedPocketId, head }, session: null });
+  }
+
+  async function readShadowHead(value) {
+    const { context, body } = invocation(value);
+    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId"]);
+    await authoriseObjectHead(context, request.syncedPocketId);
+    const head = await objectHeadCall("readHead", [request.syncedPocketId]);
+    return frozen({ status: 200, body: { apiVersion: 1, ok: true, operationId: request.operationId, syncedPocketId: request.syncedPocketId, head }, session: null });
+  }
+
+  async function compareAndSetShadowHead(value) {
+    const { context, body } = invocation(value);
+    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId", "expectedHead", "candidateSealStorageRef"]);
+    await authoriseObjectHead(context, request.syncedPocketId);
+    const result = await objectHeadCall("compareAndSetHead", [request.syncedPocketId, request.expectedHead, request.candidateSealStorageRef]);
+    return frozen({ status: result.ok ? 200 : 409, body: { apiVersion: 1, ok: result.ok === true,
+      operationId: request.operationId, syncedPocketId: request.syncedPocketId, ...result }, session: null });
   }
 
   async function completedReplay(transaction, ceremony, digest, atMilliseconds) {
@@ -3506,6 +3592,12 @@ function createServiceCore(input) {
     beginRecovery,
     finishRecovery,
     rotateRecovery,
+    putOpaqueObject,
+    getOpaqueObject,
+    objectPresence,
+    initialiseShadowHead,
+    readShadowHead,
+    compareAndSetShadowHead,
   });
 }
 

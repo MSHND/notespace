@@ -76,10 +76,20 @@ function encryptedRecord() {
   };
 }
 
+function objectHeadStore() {
+  return Object.freeze({
+    async putObject() { return { ok: true, created: true }; }, async getObject() { return null; },
+    async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+    async initialiseHead() { return { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }; },
+    async readHead() { return null; }, async compareAndSetHead() { return { ok: false, reason: "head-conflict" }; },
+  });
+}
+
 function createCoreHarness(options = {}) {
   const driver = createMemoryServiceStore();
   const core = createServiceCore({
     store: driver.store,
+    objectHeadStore: objectHeadStore(),
     webAuthnVerifier: Object.freeze({
       async verifyRegistration(input) {
         return {

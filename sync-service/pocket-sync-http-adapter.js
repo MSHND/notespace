@@ -19,6 +19,12 @@ const CLIENT_ROUTES = Object.freeze({
   beginRecovery: "/account/recovery/begin",
   finishRecovery: "/account/recovery/finish",
   rotateRecovery: "/account/recovery/rotate",
+  putOpaqueObject: "/pockets/objects/put",
+  getOpaqueObject: "/pockets/objects/get",
+  objectPresence: "/pockets/objects/presence",
+  initialiseShadowHead: "/pockets/head/initialise",
+  readShadowHead: "/pockets/head/read",
+  compareAndSetShadowHead: "/pockets/head/compare-and-set",
 });
 
 const POLICY = Object.freeze({
@@ -109,11 +115,11 @@ function normaliseServiceRoot(value) {
 
 function limitsFor(routeName) {
   return frozen({
-    request: routeName === "conditionalUpload"
+    request: ["conditionalUpload", "putOpaqueObject"].includes(routeName)
       ? POLICY.contentJsonLimitBytes : POLICY.smallJsonLimitBytes,
-    response: routeName === "downloadEncryptedRecord"
+    response: ["downloadEncryptedRecord", "getOpaqueObject"].includes(routeName)
       ? POLICY.contentJsonLimitBytes : POLICY.smallJsonLimitBytes,
-    statuses: ["conditionalUpload", "addEnvelope", "revokeEnvelope", "initialiseRecovery", "rotateRecovery"].includes(routeName)
+    statuses: ["conditionalUpload", "addEnvelope", "revokeEnvelope", "initialiseRecovery", "rotateRecovery", "compareAndSetShadowHead"].includes(routeName)
       ? Object.freeze([200, 409]) : Object.freeze([200]),
   });
 }

@@ -8,6 +8,7 @@ const { Pool } = require("pg");
 const { createHttpAdapter } = require("./pocket-sync-http-adapter.js");
 const { createServiceCore } = require("./pocket-sync-service-core.js");
 const { createPostgresStore } = require("./pocket-sync-postgres-store.js");
+const { createObjectHeadPostgresStore } = require("./pocket-sync-object-head-postgres-store.js");
 const { createWebAuthnVerifier } = require("./pocket-sync-webauthn-verifier.js");
 const { verifyPocketSyncSchema } = require("./pocket-sync-postgres-schema.js");
 
@@ -197,8 +198,10 @@ function createSyncServerApplication(configuration) {
     throw runtimeError();
   }
   const store = createPostgresStore({ pool });
+  const objectHeadStore = createObjectHeadPostgresStore({ pool });
   const core = createServiceCore({
     store,
+    objectHeadStore,
     webAuthnVerifier: createWebAuthnVerifier(),
     recoveryProofVerifier: config.recoveryProofVerifier,
     randomBytes(count) { return new Uint8Array(randomBytes(count)); },
