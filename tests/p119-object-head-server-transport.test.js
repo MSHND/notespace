@@ -34,22 +34,23 @@ function invocation(body) {
   return { context: { method: "POST", origin: ORIGIN, fetchSite: "same-origin", contentType: "application/json", sessionId: null }, body };
 }
 
-function authenticatedCore(store) {
+function authenticatedCore(options = {}) {
   const record = { format: "pocket.sync.content.opaque", version: 1, algorithm: "AES-GCM-256", nonce: "AAAAAAAAAAAAAAAA", ciphertext: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE" };
   const ref = "proof-ref:v1:seal";
-  const heads = new Map(); let calls = 0;
+  const heads = new Map(), argumentsSeen = [], reads = []; let calls = 0;
   const objectHeadStore = Object.freeze({
-    async putObject(...args) { calls += 1; return { ok: true, created: args[1] !== "again" }; },
+    async putObject(...args) { calls += 1; argumentsSeen.push(["putObject", args]); if (options.throwCode) { const error = new Error(options.throwCode); error.code = options.throwCode; throw error; } return { ok: true, created: args[1] !== "again" }; },
     async getObject(_pocket, storageRef) { calls += 1; return storageRef === "missing" ? null : record; },
-    async presence(_pocket, refs) { calls += 1; return refs.map((storageRef) => ({ storageRef, present: true })); },
+    async presence(_pocket, refs) { calls += 1; argumentsSeen.push(["presence", refs]); return refs.map((storageRef) => ({ storageRef, present: true })); },
     async initialiseHead(pocket) { calls += 1; if (!heads.has(pocket)) heads.set(pocket, { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); return heads.get(pocket); },
     async readHead(pocket) { calls += 1; return heads.get(pocket) || null; },
     async compareAndSetHead(pocket, expected, candidate) { calls += 1; const current = heads.get(pocket); if (JSON.stringify(current) !== JSON.stringify(expected)) return { ok: false, reason: "head-conflict" }; const head = { schema: "pocket.starling.head.v1", revision: current.revision + 1, sealRef: candidate }; heads.set(pocket, head); return { ok: true, head }; },
   });
   const id = "account", sessionId = "session", credentialId = "credential", pocket = "pocket";
   const rows = new Map([[`sessions\0${sessionId}`, { kind:"pocket.sync.service-session",schemaVersion:1,storeVersion:1,sessionId,accountId:id,credentialId,status:"active",createdAt:"2032-01-01T00:00:00.000Z",expiresAt:"2033-01-01T00:00:00.000Z",replacedBy:null }], [`accounts\0${id}`, { kind:"pocket.sync.service-account",schemaVersion:1,storeVersion:1,accountId:id,accountPolicyVersion:1,prfEvaluationInput:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",credentialIds:[credentialId],syncedPocketId:pocket,createdAt:"2032-01-01T00:00:00.000Z" }], [`credentials\0${credentialId}`, { kind:"pocket.sync.service-credential",schemaVersion:1,storeVersion:1,credentialId,accountId:id,credentialVersion:1,status:"active",publicKey:"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",publicKeyAlgorithm:-7,signCount:0,transports:["internal"],backupEligible:true,backedUp:false,createdAt:"2032-01-01T00:00:00.000Z" }]]);
-  const generic = Object.freeze({ async transact(_mode, fn) { return fn(Object.freeze({ async get(collection,key) { return rows.get(`${collection}\0${key}`) || null; }, async insert(){},async replace(){},async remove(){} })); } });
-  return { core:createServiceCore(coreConfig({ store:generic, objectHeadStore })), sessionId, pocket, ref, record, calls:()=>calls };
+  if (options.unconfigured) rows.get(`accounts\0${id}`).syncedPocketId = null;
+  const generic = Object.freeze({ async transact(_mode, fn) { return fn(Object.freeze({ async get(collection,key) { reads.push([collection,key]); return rows.get(`${collection}\0${key}`) || null; }, async insert(){},async replace(){},async remove(){} })); } });
+  return { core:createServiceCore(coreConfig({ store:generic, objectHeadStore })), sessionId, pocket, ref, record, calls:()=>calls, argumentsSeen, reads };
 }
 
 test("P119b executes authenticated object and Head delegation without reading Pocket", async () => {
@@ -59,6 +60,20 @@ test("P119b executes authenticated object and Head delegation without reading Po
   const genesis=(await h.core.initialiseShadowHead(call({apiVersion:1,operationId:"op",syncedPocketId:h.pocket}))).body.head;
   assert.equal((await h.core.compareAndSetShadowHead(call({apiVersion:1,operationId:"op",syncedPocketId:h.pocket,expectedHead:genesis,candidateSealStorageRef:h.ref}))).status,200);
   assert.equal((await h.core.compareAndSetShadowHead(call({apiVersion:1,operationId:"op",syncedPocketId:h.pocket,expectedHead:genesis,candidateSealStorageRef:h.ref}))).status,409);
+});
+
+test("P119c executes authority, opaque delegation, and safe errors through the real core", async () => {
+  const h=authenticatedCore(), call=(body,pocket=h.pocket)=>({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{...body,syncedPocketId:pocket}});
+  const put={apiVersion:1,operationId:"op",storageRef:h.ref,record:h.record};
+  await h.core.putOpaqueObject(call(put));
+  assert.deepEqual(h.argumentsSeen[0], ["putObject", [h.pocket,h.ref,h.record]]);
+  assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+  assert.deepEqual((await h.core.objectPresence(call({apiVersion:1,operationId:"op",storageRefs:["b","a"]}))).body.rows,[{storageRef:"b",present:true},{storageRef:"a",present:true}]);
+  await assert.rejects(h.core.readShadowHead(call({apiVersion:1,operationId:"op"},"other")),(error)=>error.code==="service-authorisation-failed");
+  const unconfigured=authenticatedCore({unconfigured:true});
+  await assert.rejects(unconfigured.core.readShadowHead({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:unconfigured.sessionId},body:{apiVersion:1,operationId:"op",syncedPocketId:unconfigured.pocket}}),(error)=>error.code==="service-authorisation-failed");
+  const failure=authenticatedCore({throwCode:"object-head-store-storage-failed"});
+  await assert.rejects(failure.core.putOpaqueObject({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:failure.sessionId},body:{apiVersion:1,operationId:"op",syncedPocketId:failure.pocket,storageRef:failure.ref,record:failure.record}}),(error)=>error.code==="service-storage-failed"&&error.status===503&&error.retryable===true);
 });
 
 test("P119 requires the exact object/Head store surface and rejects unauthenticated calls", async () => {
