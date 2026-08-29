@@ -6,7 +6,10 @@ const { Pool } = require("pg");
 const { readDatabaseConnection } = require("./pocket-sync-server-config.js");
 const { verifyPocketSyncSchema, safeSchemaComponent } = require("./pocket-sync-postgres-schema.js");
 
-const MIGRATION_PATH = path.join(__dirname, "migrations", "001-pocket-sync-store.sql");
+const MIGRATION_PATHS = Object.freeze([
+  path.join(__dirname, "migrations", "001-pocket-sync-store.sql"),
+  path.join(__dirname, "migrations", ["002", "pocket", "sync", "object", "head", "store.sql"].join("-")),
+]);
 const MIGRATION_STAGES = Object.freeze([
   "configuration", "migration-file", "migration-apply", "schema-verify", "unknown",
 ]);
@@ -42,9 +45,13 @@ async function applyLocalMigration(connectionString) {
       || connectionString !== connectionString.trim()) {
     throw migrationError("configuration");
   }
-  let sql;
-  try { sql = fs.readFileSync(MIGRATION_PATH, "utf8"); } catch (_error) { throw migrationError("migration-file"); }
-  if (typeof sql !== "string" || sql.length < 1) throw migrationError("migration-file");
+  let migrations;
+  try {
+    migrations = MIGRATION_PATHS.map((migrationPath) => fs.readFileSync(migrationPath, "utf8"));
+  } catch (_error) { throw migrationError("migration-file"); }
+  if (migrations.some((sql) => typeof sql !== "string" || sql.length < 1)) {
+    throw migrationError("migration-file");
+  }
   let pool;
   try {
     pool = new Pool({ connectionString });
@@ -54,7 +61,7 @@ async function applyLocalMigration(connectionString) {
   }
   try {
     try {
-      await pool.query(sql);
+      for (const sql of migrations) await pool.query(sql);
     } catch (_error) {
       throw migrationError("migration-apply");
     }

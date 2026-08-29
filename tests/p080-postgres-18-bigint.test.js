@@ -16,6 +16,12 @@ function validColumns() {
     { table_name: "pocket_sync_records", column_name: "record", data_type: "jsonb", is_nullable: "NO" },
     { table_name: "pocket_sync_schema", column_name: "schema_name", data_type: "text", is_nullable: "NO" },
     { table_name: "pocket_sync_schema", column_name: "schema_version", data_type: "integer", is_nullable: "NO" },
+    { table_name: "pocket_sync_objects", column_name: "synced_pocket_id", data_type: "text", is_nullable: "NO" },
+    { table_name: "pocket_sync_objects", column_name: "storage_ref", data_type: "text", is_nullable: "NO" },
+    { table_name: "pocket_sync_objects", column_name: "record", data_type: "jsonb", is_nullable: "NO" },
+    { table_name: "pocket_sync_heads", column_name: "synced_pocket_id", data_type: "text", is_nullable: "NO" },
+    { table_name: "pocket_sync_heads", column_name: "revision", data_type: "bigint", is_nullable: "NO" },
+    { table_name: "pocket_sync_heads", column_name: "seal_storage_ref", data_type: "text", is_nullable: "YES" },
   ];
 }
 
@@ -28,15 +34,26 @@ function validConstraints(bounds = UNQUOTED_BOUNDS) {
     { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" },
     { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)" },
     { relation: "public.pocket_sync_schema", contype: "p", definition: "PRIMARY KEY (schema_name)" },
+    { relation: "public.pocket_sync_objects", contype: "p", definition: "PRIMARY KEY (synced_pocket_id, storage_ref)" },
+    { relation: "public.pocket_sync_objects", contype: "c", definition: "CHECK (length(synced_pocket_id)>0)" },
+    { relation: "public.pocket_sync_objects", contype: "c", definition: "CHECK (length(storage_ref)>0)" },
+    { relation: "public.pocket_sync_objects", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" },
+    { relation: "public.pocket_sync_heads", contype: "p", definition: "PRIMARY KEY (synced_pocket_id)" },
+    { relation: "public.pocket_sync_heads", contype: "c", definition: "CHECK (length(synced_pocket_id)>0)" },
+    { relation: "public.pocket_sync_heads", contype: "c", definition: "CHECK (revision>=0 AND revision<=9007199254740991)" },
+    { relation: "public.pocket_sync_heads", contype: "c", definition: "CHECK ((revision=0 AND seal_storage_ref IS NULL) OR (revision>0 AND seal_storage_ref IS NOT NULL AND length(seal_storage_ref)>0))" },
   ];
 }
 
 function schemaPool(constraints) {
   return {
     async query(sql) {
-      if (sql.includes("information_schema.columns")) return { rows: validColumns(), rowCount: 6 };
+      if (sql.includes("information_schema.columns")) return { rows: validColumns(), rowCount: 12 };
       if (sql.includes("FROM pg_constraint")) return { rows: constraints, rowCount: constraints.length };
-      if (sql.includes("SELECT schema_version")) return { rows: [{ schema_version: 1 }], rowCount: 1 };
+      if (sql.includes("SELECT schema_name,schema_version")) return { rows: [
+        { schema_name: "pocket-sync-store", schema_version: 1 },
+        { schema_name: "pocket-sync-object-head-store", schema_version: 1 },
+      ], rowCount: 2 };
       throw new Error("unexpected query");
     },
   };

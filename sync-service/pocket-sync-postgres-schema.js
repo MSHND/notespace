@@ -4,6 +4,12 @@ const RECORD_COLUMNS = Object.freeze([
   ["collection", "text"], ["record_key", "text"], ["store_version", "bigint"], ["record", "jsonb"],
 ]);
 const SCHEMA_COLUMNS = Object.freeze([["schema_name", "text"], ["schema_version", "integer"]]);
+const OBJECT_COLUMNS = Object.freeze([
+  ["synced_pocket_id", "text", "NO"], ["storage_ref", "text", "NO"], ["record", "jsonb", "NO"],
+]);
+const HEAD_COLUMNS = Object.freeze([
+  ["synced_pocket_id", "text", "NO"], ["revision", "bigint", "NO"], ["seal_storage_ref", "text", "YES"],
+]);
 const COLLECTIONS = Object.freeze([
   "accounts", "credentials", "sessions", "ceremonies", "pockets", "operations",
   "keySets", "envelopes", "recoveryLocators", "recoveryCeremonies", "keyOperations",
@@ -13,7 +19,12 @@ const SCHEMA_COMPONENTS = Object.freeze([
   "metadata-identity", "collection-check", "record-key-check", "store-version-bounds-check",
   "record-json-object-check", "record-store-version-check", "schema-version-query",
   "record-store-version-json-type", "record-store-version-extract",
-  "record-store-version-pattern", "record-store-version-equality", "schema-version-value", "unknown",
+  "record-store-version-pattern", "record-store-version-equality", "schema-version-value",
+  "object-columns-contract", "head-columns-contract", "objects-primary-key",
+  "objects-synced-pocket-id-check", "objects-storage-ref-check", "objects-record-json-object-check",
+  "heads-primary-key", "heads-synced-pocket-id-check", "heads-revision-bounds-check",
+  "heads-revision-seal-check", "heads-seal-storage-ref-nullability", "object-head-schema-version-value",
+  "unknown",
 ]);
 
 function safeSchemaComponent(error) {
@@ -56,9 +67,9 @@ async function query(pool, text, values, component) {
   } catch (_error) { throw schemaError(component); }
 }
 
-function hasColumn(rows, table, name, type) {
+function hasColumn(rows, table, name, type, nullable = "NO") {
   return rows.some((row) => row.table_name === table && row.column_name === name
-    && row.data_type === type && row.is_nullable === "NO");
+    && row.data_type === type && row.is_nullable === nullable);
 }
 
 function hasExactIdentity(rows, type, definition) {
@@ -86,18 +97,29 @@ function recordStoreVersionComponent(records) {
 async function verifyPocketSyncSchema(pool) {
   if (!pool || typeof pool.query !== "function") throw schemaError("columns-catalog");
   const columns = await query(pool,
-    "SELECT table_name,column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('pocket_sync_records','pocket_sync_schema')",
+    "SELECT table_name,column_name,data_type,is_nullable FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('pocket_sync_records','pocket_sync_schema','pocket_sync_objects','pocket_sync_heads')",
     undefined, "columns-catalog");
   if (RECORD_COLUMNS.some(([name, type]) => !hasColumn(columns.rows, "pocket_sync_records", name, type))
       || SCHEMA_COLUMNS.some(([name, type]) => !hasColumn(columns.rows, "pocket_sync_schema", name, type))) {
     throw schemaError("columns-contract");
   }
+  if (OBJECT_COLUMNS.some(([name, type, nullable]) => !hasColumn(columns.rows, "pocket_sync_objects", name, type, nullable))) {
+    throw schemaError("object-columns-contract");
+  }
+  if (HEAD_COLUMNS.slice(0, 2).some(([name, type, nullable]) => !hasColumn(columns.rows, "pocket_sync_heads", name, type, nullable))) {
+    throw schemaError("head-columns-contract");
+  }
+  if (!hasColumn(columns.rows, "pocket_sync_heads", "seal_storage_ref", "text", "YES")) {
+    throw schemaError("heads-seal-storage-ref-nullability");
+  }
 
   const constraints = await query(pool,
-    "SELECT n.nspname || '.' || r.relname AS relation, c.contype, pg_get_constraintdef(c.oid) AS definition FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid JOIN pg_namespace n ON n.oid=r.relnamespace WHERE c.conrelid IN ('public.pocket_sync_records'::regclass,'public.pocket_sync_schema'::regclass)",
+    "SELECT n.nspname || '.' || r.relname AS relation, c.contype, pg_get_constraintdef(c.oid) AS definition FROM pg_constraint c JOIN pg_class r ON r.oid=c.conrelid JOIN pg_namespace n ON n.oid=r.relnamespace WHERE c.conrelid IN ('public.pocket_sync_records'::regclass,'public.pocket_sync_schema'::regclass,'public.pocket_sync_objects'::regclass,'public.pocket_sync_heads'::regclass)",
     undefined, "constraints-catalog");
   const records = constraints.rows.filter((row) => row.relation === "public.pocket_sync_records");
   const metadata = constraints.rows.filter((row) => row.relation === "public.pocket_sync_schema");
+  const objects = constraints.rows.filter((row) => row.relation === "public.pocket_sync_objects");
+  const heads = constraints.rows.filter((row) => row.relation === "public.pocket_sync_heads");
   if (!hasExactIdentity(records, "p", "primarykeycollection,record_key")) throw schemaError("records-primary-key");
   if (!(hasExactIdentity(metadata, "p", "primarykeyschema_name")
       || hasExactIdentity(metadata, "u", "uniqueschema_name"))) throw schemaError("metadata-identity");
@@ -123,9 +145,44 @@ async function verifyPocketSyncSchema(pool) {
       && value.includes("=store_version");
   })) throw schemaError(recordStoreVersionComponent(records));
 
+  if (!hasExactIdentity(objects, "p", "primarykeysynced_pocket_id,storage_ref")) {
+    throw schemaError("objects-primary-key");
+  }
+  if (!hasCheck(objects, (_definition, value) => value.includes("lengthsynced_pocket_id>0"))) {
+    throw schemaError("objects-synced-pocket-id-check");
+  }
+  if (!hasCheck(objects, (_definition, value) => value.includes("lengthstorage_ref>0"))) {
+    throw schemaError("objects-storage-ref-check");
+  }
+  if (!hasCheck(objects, (_definition, value) => value.includes("jsonb_typeofrecord='object'"))) {
+    throw schemaError("objects-record-json-object-check");
+  }
+
+  if (!hasExactIdentity(heads, "p", "primarykeysynced_pocket_id")) throw schemaError("heads-primary-key");
+  if (!hasCheck(heads, (_definition, value) => value.includes("lengthsynced_pocket_id>0"))) {
+    throw schemaError("heads-synced-pocket-id-check");
+  }
+  if (!hasCheck(heads, (definition) => {
+    const value = normaliseBigintBounds(definition);
+    return value.includes("revision>=0") && value.includes("revision<=9007199254740991");
+  })) throw schemaError("heads-revision-bounds-check");
+  if (!hasCheck(heads, (_definition, value) => value.includes("revision=0andseal_storage_refisnull")
+      && value.includes("revision>0andseal_storage_refisnotnull")
+      && value.includes("lengthseal_storage_ref>0") && value.includes("or"))) {
+    throw schemaError("heads-revision-seal-check");
+  }
+
   const version = await query(pool,
-    "SELECT schema_version FROM public.pocket_sync_schema WHERE schema_name=$1", ["pocket-sync-store"], "schema-version-query");
-  if (version.rowCount !== 1 || version.rows[0]?.schema_version !== 1) throw schemaError("schema-version-value");
+    "SELECT schema_name,schema_version FROM public.pocket_sync_schema WHERE schema_name IN ($1,$2)",
+    ["pocket-sync-store", "pocket-sync-object-head-store"], "schema-version-query");
+  const legacyVersions = version.rows.filter((row) => row?.schema_name === "pocket-sync-store");
+  const objectHeadVersions = version.rows.filter((row) => row?.schema_name === "pocket-sync-object-head-store");
+  if (legacyVersions.length !== 1 || legacyVersions[0]?.schema_version !== 1) {
+    throw schemaError("schema-version-value");
+  }
+  if (objectHeadVersions.length !== 1 || objectHeadVersions[0]?.schema_version !== 1) {
+    throw schemaError("object-head-schema-version-value");
+  }
   return true;
 }
 
