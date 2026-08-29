@@ -163,25 +163,37 @@ async function physicalStage(c, logicalStager, logical, key, baseStage = null) {
   });
 }
 
-function publicStore(stage) {
+function physicalConfirm(c, stage, store = publicStore(stage)) {
+  const result = c.PocketStarlingStorageShadow.verifyNewRecordPresence(
+    stage,
+    (ref) => store.has(ref),
+  );
+  assert.equal(result.ok, true, JSON.stringify(result));
+  return result;
+}
+
+function publicStore(...stages) {
   return new Map(
-    stage.records.map((entry) => [entry.storageRef, entry.record]),
+    stages.flatMap((stage) =>
+      stage.newRecords.map((entry) => [entry.storageRef, entry.record]),
+    ),
   );
 }
 
-async function capsuleIndex(c, stage, key) {
+async function capsuleIndex(c, stages, key) {
   const result = new Map();
-  for (const entry of stage.records) {
+  const store = publicStore(...(Array.isArray(stages) ? stages : [stages]));
+  for (const [storageRef, record] of store) {
     const bytes = await c.PocketStarlingCryptoShadow.openObject(
-        entry.record,
-        entry.storageRef,
+        record,
+        storageRef,
         key,
         storageContext(),
       ),
       capsule = c.PocketStarlingStorageShadow.validateCapsuleBytes(bytes);
     result.set(capsule.logicalRef, {
-      storageRef: entry.storageRef,
-      record: entry.record,
+      storageRef,
+      record,
       capsule,
     });
   }
@@ -232,7 +244,7 @@ test("P112 fresh runtime lazily reopens a real encrypted P109 graph", async () =
   assert.equal(read.ok, true, JSON.stringify(read));
   assert.equal(read.payload.label, "P112 distinctive payload");
   assert.equal(read.payload.edgeLike, "proof-ref:v1:content-record:deadbeef");
-  assert.ok(fetched.size < physical.records.length);
+  assert.ok(fetched.size < physical.newRecords.length);
 
   const index = await capsuleIndex(c, physical, key),
     contentRecordRef = cachedRef(
@@ -310,7 +322,7 @@ test("P112 rejects tampered storage and malformed or dishonest capsules", async 
     "object-authentication-failed",
   );
 
-  const validExtraStorageRef = physical.records[0].storageRef,
+  const validExtraStorageRef = physical.newRecords[0].storageRef,
     fakeLogicalRef = "proof-ref:v1:content-record:deadbeef",
     variants = [
       "{",
@@ -362,8 +374,9 @@ test("P112 lazy reads and successor encryption stay frontier-bounded at 2000 nod
     logicalBase = logicalStage(c, logicalStager, state);
   confirm(c, logicalStager, logicalBase);
   const key = await masterKey(c),
-    physicalBase = await physicalStage(c, logicalStager, logicalBase, key),
-    store = publicStore(physicalBase),
+    physicalBase = await physicalStage(c, logicalStager, logicalBase, key);
+  physicalConfirm(c, physicalBase);
+  const store = publicStore(physicalBase),
     fresh = context(),
     fetched = new Set(),
     resolver = await fresh.PocketStarlingStorageShadow.createResolver({
@@ -380,7 +393,7 @@ test("P112 lazy reads and successor encryption stay frontier-bounded at 2000 nod
   assert.equal(read.ok, true);
   assert.equal(read.payload.label, "Node 0002");
   assert.ok(fetched.size < 40, `${fetched.size} physical fetches`);
-  assert.ok(fetched.size * 100 < physicalBase.records.length);
+  assert.ok(fetched.size * 100 < physicalBase.newRecords.length);
 
   const edited = c.PocketStarlingRootShadow.editPayload(state, "n2", {
     label: "changed",
@@ -396,18 +409,55 @@ test("P112 lazy reads and successor encryption stay frontier-bounded at 2000 nod
       key,
       physicalBase,
     ),
-    nextStore = publicStore(physicalNext);
+    nextStore = publicStore(physicalNext),
+    combinedStore = publicStore(physicalBase, physicalNext);
   assert.equal(
     physicalNext.diagnostics.newEncryptions,
     logicalNext.newRefs.length,
   );
   assert.ok(physicalNext.diagnostics.newEncryptions < 30);
-  for (const [ref, record] of store)
-    assert.strictEqual(nextStore.get(ref), record);
   assert.equal(
-    physicalNext.records.length,
-    physicalBase.records.length + physicalNext.diagnostics.newEncryptions,
+    physicalNext.newRecords.length,
+    physicalNext.diagnostics.newEncryptions,
   );
+  assert.ok(physicalNext.diagnostics.inheritedLookups < 30);
+  assert.ok(physicalNext.diagnostics.baseProofSteps < 30);
+  for (const [ref, record] of store)
+    assert.equal(nextStore.has(ref), false, `${ref} was re-listed`);
+  assert.equal(combinedStore.size, store.size + physicalNext.newRecords.length);
+  let frontierPresenceChecks = 0;
+  const nextPresence = c.PocketStarlingStorageShadow.verifyNewRecordPresence(
+    physicalNext,
+    (ref) => {
+      frontierPresenceChecks += 1;
+      return combinedStore.has(ref);
+    },
+  );
+  assert.equal(nextPresence.checked, physicalNext.newRecords.length);
+  assert.equal(frontierPresenceChecks, physicalNext.newRecords.length);
+  const nextSealPlaintext = await c.PocketStarlingCryptoShadow.openObject(
+      nextStore.get(physicalNext.sealStorageRef),
+      physicalNext.sealStorageRef,
+      key,
+      storageContext(),
+    ),
+    nextSealCapsule =
+      c.PocketStarlingStorageShadow.validateCapsuleBytes(nextSealPlaintext),
+    priorSealLink = nextSealCapsule.links.find(
+      (link) => link.logicalRef === logicalBase.sealRef,
+    );
+  assert.equal(priorSealLink.storageRef, physicalBase.sealStorageRef);
+
+  const nextFresh = context(),
+    nextResolver = await nextFresh.PocketStarlingStorageShadow.createResolver({
+      acceptedSealStorageRef: physicalNext.sealStorageRef,
+      resolveStorage: (ref) => combinedStore.get(ref),
+      masterKey: key,
+      context: storageContext(),
+    }),
+    nextOpened = await nextResolver.openAccepted(),
+    nextRead = await nextResolver.readContent(nextOpened.handle, "n2");
+  assert.equal(nextRead.payload.label, "changed");
 });
 
 test("P112 branch move preserves descendant logical and physical identity", async () => {
@@ -444,8 +494,9 @@ test("P112 branch move preserves descendant logical and physical identity", asyn
       `sequence-${descendantChildren.kind}`,
     ),
     key = await masterKey(c),
-    physicalBase = await physicalStage(c, logicalStager, logicalBase, key),
-    baseIndex = await capsuleIndex(c, physicalBase, key),
+    physicalBase = await physicalStage(c, logicalStager, logicalBase, key);
+  physicalConfirm(c, physicalBase);
+  const baseIndex = await capsuleIndex(c, physicalBase, key),
     moved = rootApi.move(state, "branch", 0, "dest", 0);
   assert.equal(moved.ok, true);
   const logicalNext = logicalStage(c, logicalStager, moved.state, logicalBase);
@@ -457,7 +508,7 @@ test("P112 branch move preserves descendant logical and physical identity", asyn
       key,
       physicalBase,
     ),
-    nextIndex = await capsuleIndex(c, physicalNext, key);
+    nextIndex = await capsuleIndex(c, [physicalBase, physicalNext], key);
   for (const ref of [contentRef, placementRef, sequenceRef]) {
     assert.ok(ref);
     assert.equal(nextIndex.get(ref).storageRef, baseIndex.get(ref).storageRef);
@@ -465,6 +516,11 @@ test("P112 branch move preserves descendant logical and physical identity", asyn
   }
   assert.ok(physicalNext.diagnostics.newEncryptions < 100);
   assert.ok(physicalNext.diagnostics.newEncryptions * 10 < 512);
+  assert.ok(physicalNext.diagnostics.baseProofSteps < 100);
+  assert.equal(
+    physicalNext.newRecords.length,
+    physicalNext.diagnostics.newEncryptions,
+  );
 });
 
 test("P112 private base provenance rejects lookalikes and survives failed successors", async () => {
@@ -491,10 +547,66 @@ test("P112 private base provenance rejects lookalikes and survives failed succes
     logicalNext = logicalStage(c, logicalStager, edited.state, logicalBase);
   confirm(c, logicalStager, logicalNext);
   await expectCode(
+    physicalStage(c, logicalStager, logicalNext, key, physicalBase),
+    "base-stage-incomplete",
+  );
+  const missingBaseRef = physicalBase.newRecords[0].storageRef,
+    incomplete = c.PocketStarlingStorageShadow.verifyNewRecordPresence(
+      physicalBase,
+      (ref) => ref !== missingBaseRef && baseStore.has(ref),
+    );
+  assert.deepEqual(plain(incomplete), {
+    ok: false,
+    reason: "missing-new-record",
+    storageRef: missingBaseRef,
+  });
+  await expectCode(
+    physicalStage(c, logicalStager, logicalNext, key, physicalBase),
+    "base-stage-incomplete",
+  );
+  physicalConfirm(c, physicalBase, baseStore);
+  await expectCode(
     physicalStage(c, logicalStager, logicalNext, key, {
       ...plain(physicalBase),
     }),
     "base-stage-invalid",
+  );
+  const abandoned = await physicalStage(
+      c,
+      logicalStager,
+      logicalNext,
+      key,
+      physicalBase,
+    ),
+    abandonedStore = publicStore(physicalBase, abandoned),
+    secondEdit = c.PocketStarlingRootShadow.editPayload(edited.state, "n3", {
+      label: "second",
+      value: 3,
+    }),
+    logicalSecond = logicalStage(
+      c,
+      logicalStager,
+      secondEdit.state,
+      logicalNext,
+    );
+  confirm(c, logicalStager, logicalSecond);
+  assert.equal(
+    abandoned.newRecords.every((entry) => abandonedStore.has(entry.storageRef)),
+    true,
+  );
+  await expectCode(
+    physicalStage(c, logicalStager, logicalSecond, key, abandoned),
+    "base-stage-incomplete",
+  );
+  const missingAbandonedRef = abandoned.newRecords[0].storageRef,
+    abandonedPresence = c.PocketStarlingStorageShadow.verifyNewRecordPresence(
+      abandoned,
+      (ref) => ref !== missingAbandonedRef && abandonedStore.has(ref),
+    );
+  assert.equal(abandonedPresence.reason, "missing-new-record");
+  await expectCode(
+    physicalStage(c, logicalStager, logicalSecond, key, abandoned),
+    "base-stage-incomplete",
   );
   control.fail = true;
   await expectCode(

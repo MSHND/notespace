@@ -293,6 +293,23 @@
     });
   }
 
+  function proofFailure(reason, extra = {}) {
+    return Object.freeze({ ok: false, reason, ...extra });
+  }
+
+  function verifyNewRecordPresence(stage, hasStorageRef) {
+    const proof = stageProofs.get(stage);
+    if (!proof || proof.stage !== stage || typeof hasStorageRef !== "function")
+      return proofFailure("invalid-presence-proof");
+    for (const entry of proof.entries.values())
+      if (!hasStorageRef(entry.storageRef))
+        return proofFailure("missing-new-record", {
+          storageRef: entry.storageRef,
+        });
+    proof.complete = true;
+    return Object.freeze({ ok: true, checked: proof.entries.size });
+  }
+
   async function stageCandidate(input) {
     const { crypto, sync } = dependencies();
     if (
@@ -309,6 +326,7 @@
           ? null
           : stageProofs.get(input.baseStage);
     if (input.baseStage && !base) throw storageError("base-stage-invalid");
+    if (base && !base.complete) throw storageError("base-stage-incomplete");
     if (
       base &&
       (base.masterKey !== key || base.syncedPocketId !== context.syncedPocketId)
@@ -316,24 +334,31 @@
       throw storageError("base-stage-mismatch");
     const entries = new Map(),
       visiting = new Set(),
-      diagnostics = { newEncryptions: 0, exactReuseHits: 0 };
+      diagnostics = {
+        newEncryptions: 0,
+        exactReuseHits: 0,
+        inheritedLookups: 0,
+        baseProofSteps: 0,
+      };
 
-    function includeBase(ref) {
-      const entry = base && base.entries.get(ref);
-      if (!entry) return false;
-      function include(value) {
-        if (entries.has(value.logicalRef)) return;
-        entries.set(value.logicalRef, value);
-        diagnostics.exactReuseHits += 1;
-        for (const link of value.links)
-          include(base.entries.get(link.logicalRef));
+    function inheritedEntry(ref) {
+      if (!base) return null;
+      diagnostics.inheritedLookups += 1;
+      for (let proof = base; proof; proof = proof.base) {
+        diagnostics.baseProofSteps += 1;
+        const entry = proof.entries.get(ref);
+        if (entry) {
+          diagnostics.exactReuseHits += 1;
+          return entry;
+        }
       }
-      include(entry);
-      return true;
+      return null;
     }
 
     async function visit(ref) {
-      if (entries.has(ref) || includeBase(ref)) return entries.get(ref);
+      if (entries.has(ref)) return entries.get(ref);
+      const inherited = inheritedEntry(ref);
+      if (inherited) return inherited;
       if (!logicalRef(ref) || visiting.has(ref))
         throw storageError("logical-cycle");
       visiting.add(ref);
@@ -380,7 +405,7 @@
     const previousSealRef = JSON.parse(seal.logicalBytes).previousSealRef;
     if (previousSealRef !== (base ? base.sealLogicalRef : null))
       throw storageError("candidate-lineage-mismatch");
-    const records = Object.freeze(
+    const newRecords = Object.freeze(
         Array.from(entries.values())
           .map((entry) =>
             Object.freeze({
@@ -392,12 +417,14 @@
       ),
       stage = Object.freeze({
         sealStorageRef: seal.storageRef,
-        records,
+        newRecords,
         diagnostics: Object.freeze({ ...diagnostics }),
       });
     stageProofs.set(stage, {
       stage,
       entries,
+      base,
+      complete: false,
       sealLogicalRef: input.sealRef,
       masterKey: key,
       syncedPocketId: context.syncedPocketId,
@@ -505,6 +532,7 @@
     canonicalCapsule,
     validateCapsuleBytes,
     stageCandidate,
+    verifyNewRecordPresence,
     createResolver,
   });
 })(typeof window !== "undefined" ? window : globalThis);
