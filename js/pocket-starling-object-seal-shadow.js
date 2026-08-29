@@ -6,6 +6,7 @@
   const ROOT_SCHEMA = "pocket.starling.logical-root.v1",
     SEAL_SCHEMA = "pocket.starling.candidate-seal.v1",
     OBJECT_SCHEMA = "pocket.starling.logical-object.v1";
+  const stageProofs = new WeakMap();
   const fail = (reason, extra = {}) => ({ ok: false, reason, ...extra });
   function plain(value, seen = new Set()) {
     if (
@@ -78,17 +79,39 @@
       cache = new WeakMap();
     return Object.freeze({ store, cache });
   }
-  function put(stager, kind, object, source, newRefs) {
+  function rememberSource(proof, source, kind, ref) {
+    if (!source || typeof source !== "object") return;
+    let refs = proof.sources.get(source);
+    if (!refs) {
+      refs = new Map();
+      proof.sources.set(source, refs);
+    }
+    refs.set(kind, ref);
+  }
+  function inheritedRef(proof, source, kind) {
+    if (!proof || !source || typeof source !== "object") return null;
+    const local = proof.sources.get(source);
+    if (local && local.has(kind)) return local.get(kind);
+    const inherited = inheritedRef(proof.base, source, kind);
+    if (inherited) rememberSource(proof, source, kind, inherited);
+    return inherited;
+  }
+  function retainedRef(proof, source, kind) {
+    const ref = inheritedRef(proof.base, source, kind);
+    if (ref) rememberSource(proof, source, kind, ref);
+    return ref;
+  }
+  function requireRef(proof, ref) {
+    proof.requiredRefs.add(ref);
+  }
+  function put(stager, kind, object, source, proof, required = true) {
     const encoded = canonical(object);
     if (!encoded.ok) return encoded;
     const ref = refFor(kind, encoded.bytes),
       existing = stager.store.get(ref);
     if (existing !== undefined && existing !== encoded.bytes)
       return fail("proof-ref-collision", { ref });
-    if (existing === undefined) {
-      stager.store.set(ref, encoded.bytes);
-      newRefs.push(ref);
-    }
+    if (existing === undefined) stager.store.set(ref, encoded.bytes);
     if (source && typeof source === "object") {
       let refs = stager.cache.get(source);
       if (!refs) {
@@ -97,16 +120,13 @@
       }
       refs.set(kind, ref);
     }
+    rememberSource(proof, source, kind, ref);
+    if (required) requireRef(proof, ref);
     return { ok: true, ref };
   }
-  function cached(stager, source, kind) {
-    if (!source || typeof source !== "object") return null;
-    const refs = stager.cache.get(source);
-    return refs ? refs.get(kind) : null;
-  }
-  function encodeRecord(stager, record, kind, newRefs, stats) {
+  function encodeRecord(stager, record, kind, proof, stats) {
     stats.sourceObjectVisits += 1;
-    const prior = cached(stager, record, kind);
+    const prior = retainedRef(proof, record, kind);
     if (prior) return { ok: true, ref: prior };
     const object =
       kind === "content-record"
@@ -122,11 +142,11 @@
             nodeId: record.nodeId,
             parentId: record.parentId,
           };
-    return put(stager, kind, object, record, newRefs);
+    return put(stager, kind, object, record, proof);
   }
-  function encodeSequence(stager, page, newRefs, stats) {
+  function encodeSequence(stager, page, proof, stats) {
     stats.sourceObjectVisits += 1;
-    const prior = cached(stager, page, `sequence-${page.kind}`);
+    const prior = retainedRef(proof, page, `sequence-${page.kind}`);
     if (prior) return { ok: true, ref: prior };
     let object;
     if (page.kind === "leaf")
@@ -140,7 +160,7 @@
     else {
       const childRefs = [];
       for (const child of page.children) {
-        const encoded = encodeSequence(stager, child, newRefs, stats);
+        const encoded = encodeSequence(stager, child, proof, stats);
         if (!encoded.ok) return encoded;
         childRefs.push(encoded.ref);
       }
@@ -152,15 +172,15 @@
         childRefs,
       };
     }
-    return put(stager, object.kind, object, page, newRefs);
+    return put(stager, object.kind, object, page, proof);
   }
-  function encodeTrie(stager, node, kind, valueEncoder, newRefs, stats) {
+  function encodeTrie(stager, node, kind, valueEncoder, proof, stats) {
     stats.sourceObjectVisits += 1;
-    const prior = cached(stager, node, kind);
+    const prior = retainedRef(proof, node, kind);
     if (prior) return { ok: true, ref: prior };
     let valueRef = null;
     if (node.hasValue) {
-      const value = valueEncoder(stager, node.value, newRefs, stats);
+      const value = valueEncoder(stager, node.value, proof, stats);
       if (!value.ok) return value;
       valueRef = value.ref;
     }
@@ -171,7 +191,7 @@
         child,
         kind,
         valueEncoder,
-        newRefs,
+        proof,
         stats,
       );
       if (!encoded.ok) return encoded;
@@ -184,13 +204,28 @@
       valueRef,
       children,
     };
-    return put(stager, kind, object, node, newRefs);
+    return put(stager, kind, object, node, proof);
   }
-  const contentValue = (s, v, n, d) =>
-      encodeRecord(s, v, "content-record", n, d),
-    placementValue = (s, v, n, d) =>
-      encodeRecord(s, v, "placement-record", n, d),
-    childrenValue = (s, v, n, d) => encodeSequence(s, v, n, d);
+  const contentValue = (s, v, p, d) =>
+      encodeRecord(s, v, "content-record", p, d),
+    placementValue = (s, v, p, d) =>
+      encodeRecord(s, v, "placement-record", p, d),
+    childrenValue = (s, v, p, d) => encodeSequence(s, v, p, d);
+  function suppliedBaseProof(stager, previousSealRef, baseStage) {
+    if (previousSealRef === null)
+      return baseStage === undefined || baseStage === null
+        ? { ok: true, proof: null }
+        : fail("invalid-base-proof");
+    if (baseStage === undefined || baseStage === null)
+      return fail("base-proof-required");
+    const proof = stageProofs.get(baseStage);
+    if (!proof || proof.stage !== baseStage || proof.stager !== stager)
+      return fail("invalid-base-proof");
+    if (baseStage.sealRef !== previousSealRef)
+      return fail("base-seal-mismatch");
+    if (!proof.complete) return fail("base-proof-incomplete");
+    return { ok: true, proof };
+  }
   function stageCandidate(stager, state, options = {}) {
     if (
       !stager ||
@@ -205,14 +240,27 @@
       options.previousSealRef === undefined ? null : options.previousSealRef;
     if (previousSealRef !== null && typeof previousSealRef !== "string")
       return fail("invalid-previous-seal-ref");
-    const newRefs = [],
+    const supplied = suppliedBaseProof(
+      stager,
+      previousSealRef,
+      options.baseStage,
+    );
+    if (!supplied.ok) return supplied;
+    const proof = {
+        stager,
+        base: supplied.proof,
+        sources: new WeakMap(),
+        requiredRefs: new Set(),
+        complete: false,
+        stage: null,
+      },
       stats = { sourceObjectVisits: 0 };
     const content = encodeTrie(
       stager,
       state.content,
       "content-trie",
       contentValue,
-      newRefs,
+      proof,
       stats,
     );
     if (!content.ok) return content;
@@ -221,7 +269,7 @@
       state.structural.placements,
       "placement-trie",
       placementValue,
-      newRefs,
+      proof,
       stats,
     );
     if (!placements.ok) return placements;
@@ -230,12 +278,16 @@
       state.structural.children,
       "children-trie",
       childrenValue,
-      newRefs,
+      proof,
       stats,
     );
     if (!children.ok) return children;
     stats.sourceObjectVisits += 1;
-    let preservationRef = cached(stager, state.preservation, "preservation");
+    let preservationRef = retainedRef(
+      proof,
+      state.preservation,
+      "preservation",
+    );
     if (!preservationRef) {
       const stored = put(
         stager,
@@ -246,7 +298,7 @@
           value: state.preservation,
         },
         state.preservation,
-        newRefs,
+        proof,
       );
       if (!stored.ok) return stored;
       preservationRef = stored.ref;
@@ -260,19 +312,20 @@
       childrenRef: children.ref,
       preservationRef,
     };
-    const root = put(stager, "pocket-root", rootObject, null, newRefs);
+    const root = put(stager, "pocket-root", rootObject, null, proof, false);
     if (!root.ok) return root;
+    if (!options.baseStage || root.ref !== options.baseStage.rootRef)
+      requireRef(proof, root.ref);
     const sealObject = {
       schema: SEAL_SCHEMA,
       kind: "candidate-seal",
       rootRef: root.ref,
       previousSealRef,
     };
-    const seal = put(stager, "candidate-seal", sealObject, null, newRefs);
+    const seal = put(stager, "candidate-seal", sealObject, null, proof);
     if (!seal.ok) return seal;
-    return {
-      ok: true,
-      stage: Object.freeze({
+    const newRefs = Array.from(proof.requiredRefs),
+      stage = Object.freeze({
         rootRef: root.ref,
         sealRef: seal.ref,
         rootObject: Object.freeze(rootObject),
@@ -282,8 +335,10 @@
           newObjectCount: newRefs.length,
           sourceObjectVisits: stats.sourceObjectVisits,
         }),
-      }),
-    };
+      });
+    proof.stage = stage;
+    stageProofs.set(stage, proof);
+    return { ok: true, stage };
   }
   function exportEntries(stager) {
     return Array.from(stager.store.entries()).map(([ref, bytes]) => [
@@ -294,13 +349,24 @@
   function verifyNewObjectPresence(stage, hasRef, options = {}) {
     if (!stage || !Array.isArray(stage.newRefs) || typeof hasRef !== "function")
       return fail("invalid-presence-proof");
+    const proof = stageProofs.get(stage);
+    if (!proof)
+      return stage.sealObject &&
+        stage.sealObject.previousSealRef !== null &&
+        options.baseComplete === true
+        ? fail("continuity-provenance-required")
+        : fail("invalid-presence-proof");
+    if (proof.stage !== stage) return fail("invalid-presence-proof");
     if (
       options.baseComplete !== true &&
       stage.sealObject.previousSealRef !== null
     )
       return fail("base-completeness-required");
+    if (stage.sealObject.previousSealRef !== null && !proof.base)
+      return fail("continuity-provenance-required");
     for (const ref of stage.newRefs)
       if (!hasRef(ref)) return fail("missing-new-object", { ref });
+    proof.complete = true;
     return {
       ok: true,
       checked: stage.newRefs.length,
@@ -569,7 +635,15 @@
     seen.delete(ref);
     return { ok: true, page };
   }
-  function decodeTrie(io, ref, trieKind, recordKind, seen, capacity) {
+  function decodeTrie(
+    io,
+    ref,
+    trieKind,
+    recordKind,
+    seen,
+    capacity,
+    prefix = "",
+  ) {
     if (seen.has(ref)) return fail("object-cycle");
     seen.add(ref);
     const loaded = io.load(ref, trieKind);
@@ -592,14 +666,25 @@
         if (!record.ok) return record;
         const o = record.object;
         if (recordKind === "content-record") {
-          if (!exact(o, ["schema", "kind", "nodeId", "payload"]))
+          if (
+            !exact(o, ["schema", "kind", "nodeId", "payload"]) ||
+            typeof o.nodeId !== "string" ||
+            o.nodeId.length === 0 ||
+            o.nodeId !== prefix
+          )
             return fail("invalid-content-record");
           value = Object.freeze({
             nodeId: o.nodeId,
             payload: Object.freeze(o.payload),
           });
         } else {
-          if (!exact(o, ["schema", "kind", "nodeId", "parentId"]))
+          if (
+            !exact(o, ["schema", "kind", "nodeId", "parentId"]) ||
+            typeof o.nodeId !== "string" ||
+            o.nodeId.length === 0 ||
+            o.nodeId !== prefix ||
+            typeof o.parentId !== "string"
+          )
             return fail("invalid-placement-record");
           value = Object.freeze({ nodeId: o.nodeId, parentId: o.parentId });
         }
@@ -614,6 +699,7 @@
         recordKind,
         seen,
         capacity,
+        prefix + edge.key,
       );
       if (!child.ok) return child;
       children.push(Object.freeze([edge.key, child.node]));

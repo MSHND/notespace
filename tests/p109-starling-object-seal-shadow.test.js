@@ -127,10 +127,27 @@ function cachedRef(stager, source, kind) {
   return refs ? refs.get(kind) : null;
 }
 
-function stage(api, stager, state, previousSealRef = null) {
-  const result = api.stageCandidate(stager, state, { previousSealRef });
+function stage(api, stager, state, baseStage = null) {
+  const options = baseStage
+      ? { previousSealRef: baseStage.sealRef, baseStage }
+      : { previousSealRef: null },
+    result = api.stageCandidate(stager, state, options);
   assert.equal(result.ok, true);
   return result.stage;
+}
+
+function confirm(api, stager, candidate) {
+  const options =
+      candidate.sealObject.previousSealRef === null
+        ? {}
+        : { baseComplete: true },
+    result = api.verifyNewObjectPresence(
+      candidate,
+      (ref) => stager.store.has(ref),
+      options,
+    );
+  assert.equal(result.ok, true);
+  return candidate;
 }
 
 function rawPut(api, entries, kind, object) {
@@ -310,7 +327,8 @@ test("P109 payload edits stage only the content frontier across 2000 nodes", () 
       value: 2,
     });
   assert.equal(edited.ok, true);
-  const successor = stage(api, stager, edited.state, base.sealRef);
+  confirm(api, stager, base);
+  const successor = stage(api, stager, edited.state, base);
 
   assert.notEqual(successor.rootObject.contentRef, base.rootObject.contentRef);
   assert.equal(successor.rootObject.placementRef, base.rootObject.placementRef);
@@ -346,6 +364,37 @@ test("P109 payload edits stage only the content frontier across 2000 nodes", () 
     api.auditCandidateSeal(base.sealRef, resolverFor(stager)).ok,
     true,
   );
+
+  const secondEdit = rootApi.editPayload(edited.state, "n3", {
+    label: "second generation",
+    value: 3,
+  });
+  assert.equal(secondEdit.ok, true);
+  const secondSuccessor = stage(api, stager, secondEdit.state, successor),
+    secondNewObjectBound = 3 * ("n3".length + 1) + 8,
+    secondSourceVisitBound = triePathVisitBound(edited.state.content, "n3") + 3;
+  assert.equal(
+    secondSuccessor.rootObject.placementRef,
+    successor.rootObject.placementRef,
+  );
+  assert.equal(
+    secondSuccessor.rootObject.childrenRef,
+    successor.rootObject.childrenRef,
+  );
+  // The newly confirmed successor is the explicit base proof. A second local
+  // edit remains path/fanout bounded, with no 2,000-node enumeration term.
+  assert.ok(secondSuccessor.diagnostics.newObjectCount <= secondNewObjectBound);
+  assert.ok(
+    secondSuccessor.diagnostics.sourceObjectVisits <= secondSourceVisitBound,
+  );
+  assert.equal(
+    api.verifyNewObjectPresence(
+      secondSuccessor,
+      (ref) => stager.store.has(ref),
+      { baseComplete: true },
+    ).ok,
+    true,
+  );
 });
 
 test("P109 reorder stages a bounded children frontier and preserves full order", () => {
@@ -360,7 +409,8 @@ test("P109 reorder stages a bounded children frontier and preserves full order",
     oldSequence = placementApi.getChildrenRoot(baseState.structural, "root"),
     reordered = rootApi.reorder(baseState, "n0", 0, 5);
   assert.equal(reordered.ok, true);
-  const successor = stage(api, stager, reordered.state, base.sealRef);
+  confirm(api, stager, base);
+  const successor = stage(api, stager, reordered.state, base);
 
   assert.equal(successor.rootObject.contentRef, base.rootObject.contentRef);
   assert.equal(successor.rootObject.placementRef, base.rootObject.placementRef);
@@ -460,7 +510,8 @@ test("P109 branch moves do not restage descendants or unrelated pages", () => {
     ],
     moved = rootApi.move(baseState, "branch", 0, "dest", 0);
   assert.equal(moved.ok, true);
-  const successor = stage(api, stager, moved.state, base.sealRef);
+  confirm(api, stager, base);
+  const successor = stage(api, stager, moved.state, base);
 
   assert.equal(successor.rootObject.contentRef, base.rootObject.contentRef);
   assert.notEqual(
@@ -525,8 +576,9 @@ test("P109 fresh runtimes open only Seal and Root then fetch lazy paths", () => 
     producerApi = producer.PocketStarlingObjectSealShadow,
     state = stateFor(producer, normalised(rootNodes(2000))),
     stager = producerApi.createStager(),
-    missingHistory = "proof-ref:v1:candidate-seal:00000000",
-    staged = stage(producerApi, stager, state, missingHistory),
+    base = confirm(producerApi, stager, stage(producerApi, stager, state)),
+    staged = stage(producerApi, stager, state, base),
+    missingHistory = base.sealRef,
     exported = plain(producerApi.exportEntries(stager)),
     consumer = context(),
     api = consumer.PocketStarlingObjectSealShadow,
@@ -535,8 +587,9 @@ test("P109 fresh runtimes open only Seal and Root then fetch lazy paths", () => 
     resolver = (ref) => {
       requested.push(ref);
       return entries.get(ref);
-    },
-    opened = api.openFromAcceptedSealRef(staged.sealRef, resolver);
+    };
+  entries.delete(missingHistory);
+  const opened = api.openFromAcceptedSealRef(staged.sealRef, resolver);
 
   assert.equal(opened.ok, true);
   assert.ok(entries.size > 2000);
@@ -696,6 +749,47 @@ test("P109 rejects damaged graphs and semantic contradictions", () => {
     );
   }
 
+  const placementDamage = new Map(api.exportEntries(stager)),
+    placementRecordRef = trieValueRefAt(
+      placementDamage,
+      staged.rootObject.placementRef,
+      "n0",
+    ),
+    placementRecord = objectAt(placementDamage, placementRecordRef),
+    wrongPlacementRecordRef = rawPut(api, placementDamage, "placement-record", {
+      ...placementRecord,
+      nodeId: "different-node",
+    }),
+    placementRef = rewriteTrieAt(
+      api,
+      placementDamage,
+      staged.rootObject.placementRef,
+      "n0",
+      (node) => ({ ...node, valueRef: wrongPlacementRecordRef }),
+    ),
+    wrongPlacement = forgeComponent(
+      api,
+      placementDamage,
+      staged,
+      "placementRef",
+      placementRef,
+    ),
+    wrongPlacementOpen = api.openFromAcceptedSealRef(
+      wrongPlacement.sealRef,
+      (ref) => placementDamage.get(ref),
+    );
+  assert.equal(wrongPlacementOpen.ok, true);
+  assert.equal(
+    api.readPlacement(wrongPlacementOpen.handle, "n0").reason,
+    "invalid-placement-record",
+  );
+  assert.equal(
+    api.auditCandidateSeal(wrongPlacement.sealRef, (ref) =>
+      placementDamage.get(ref),
+    ).reason,
+    "invalid-placement-record",
+  );
+
   const relation = plain(placementApi.audit(state.structural).relation);
   relation.parents.n0 = "n1";
   relation.children.root = relation.children.root.filter((id) => id !== "n0");
@@ -799,6 +893,146 @@ test("P109 rejects self-authenticating invalid ordered-sequence objects", () => 
   }
 });
 
+test("P109 required presence is relative to the supplied complete base", () => {
+  const c = context(),
+    rootApi = c.PocketStarlingRootShadow,
+    api = c.PocketStarlingObjectSealShadow,
+    baseState = stateFor(c, normalised(rootNodes(64))),
+    stager = api.createStager(),
+    base = stage(api, stager, baseState),
+    durable = new Map();
+  for (const ref of base.newRefs) durable.set(ref, stager.store.get(ref));
+  assert.equal(
+    api.verifyNewObjectPresence(base, (ref) => durable.has(ref)).ok,
+    true,
+  );
+
+  const changedA = rootApi.editPayload(baseState, "n2", {
+    label: "same changed content",
+    value: 2,
+  });
+  assert.equal(changedA.ok, true);
+  const candidateA = stage(api, stager, changedA.state, base);
+  assert.ok(candidateA.newRefs.some((ref) => !durable.has(ref)));
+
+  // "staged before" != "committed in the accepted base". Candidate A is
+  // abandoned, but its bytes and exact source identities remain in the stager.
+  const exactIdentityB = stage(api, stager, changedA.state, base),
+    changedFresh = rootApi.editPayload(baseState, "n2", {
+      value: 2,
+      label: "same changed content",
+    });
+  assert.equal(changedFresh.ok, true);
+  assert.notStrictEqual(changedFresh.state.content, changedA.state.content);
+  const freshIdentityB = stage(api, stager, changedFresh.state, base);
+
+  assert.deepEqual(
+    exactIdentityB.newRefs.slice().sort(),
+    candidateA.newRefs.slice().sort(),
+  );
+  assert.deepEqual(
+    freshIdentityB.newRefs.slice().sort(),
+    candidateA.newRefs.slice().sort(),
+  );
+  assert.equal(exactIdentityB.rootRef, freshIdentityB.rootRef);
+  assert.equal(exactIdentityB.sealRef, freshIdentityB.sealRef);
+  for (const candidate of [exactIdentityB, freshIdentityB]) {
+    assert.ok(candidate.newRefs.length > 0);
+    assert.equal(
+      candidate.newRefs.every((ref) => stager.store.has(ref)),
+      true,
+    );
+    const missing = api.verifyNewObjectPresence(
+      candidate,
+      (ref) => durable.has(ref),
+      { baseComplete: true },
+    );
+    assert.equal(missing.reason, "missing-new-object");
+    assert.equal(candidate.newRefs.includes(missing.ref), true);
+  }
+
+  for (const ref of exactIdentityB.newRefs)
+    durable.set(ref, stager.store.get(ref));
+  assert.equal(
+    api.verifyNewObjectPresence(exactIdentityB, (ref) => durable.has(ref), {
+      baseComplete: true,
+    }).ok,
+    true,
+  );
+  assert.equal(
+    api.verifyNewObjectPresence(freshIdentityB, (ref) => durable.has(ref), {
+      baseComplete: true,
+    }).ok,
+    true,
+  );
+  assert.equal(
+    api.auditCandidateSeal(freshIdentityB.sealRef, (ref) => durable.get(ref))
+      .ok,
+    true,
+  );
+  assert.equal(
+    api
+      .exportEntries(stager)
+      .every(
+        ([, bytes]) =>
+          !/baseStage|provenance|sourceObjectVisits|newRefs/.test(bytes),
+      ),
+    true,
+  );
+});
+
+test("P109 successor continuity requires a matching complete stage proof", () => {
+  const c = context(),
+    rootApi = c.PocketStarlingRootShadow,
+    api = c.PocketStarlingObjectSealShadow,
+    state = stateFor(c, normalised(rootNodes(8))),
+    stager = api.createStager(),
+    base = stage(api, stager, state),
+    edited = rootApi.editPayload(state, "n2", { label: "changed" });
+  assert.equal(edited.ok, true);
+
+  assert.equal(
+    api.stageCandidate(stager, edited.state, {
+      previousSealRef: base.sealRef,
+      baseStage: base,
+    }).reason,
+    "base-proof-incomplete",
+  );
+  confirm(api, stager, base);
+  assert.equal(
+    api.stageCandidate(stager, edited.state, {
+      previousSealRef: base.sealRef,
+    }).reason,
+    "base-proof-required",
+  );
+  assert.equal(
+    api.stageCandidate(stager, edited.state, {
+      previousSealRef: base.sealRef,
+      baseStage: {},
+    }).reason,
+    "invalid-base-proof",
+  );
+  assert.equal(
+    api.stageCandidate(stager, edited.state, {
+      previousSealRef: "proof-ref:v1:candidate-seal:ffffffff",
+      baseStage: base,
+    }).reason,
+    "base-seal-mismatch",
+  );
+
+  // These checks prove only private continuity bookkeeping, never authority.
+  const unprovedSuccessor = {
+    newRefs: [],
+    sealObject: { previousSealRef: base.sealRef },
+  };
+  assert.equal(
+    api.verifyNewObjectPresence(unprovedSuccessor, () => true, {
+      baseComplete: true,
+    }).reason,
+    "continuity-provenance-required",
+  );
+});
+
 test("P109 completeness, retention, determinism and lineage stay separate", () => {
   const first = context(),
     firstApi = first.PocketStarlingObjectSealShadow,
@@ -812,13 +1046,14 @@ test("P109 completeness, retention, determinism and lineage stay separate", () =
   );
   assert.equal(missingGenesis.reason, "missing-new-object");
   assert.equal(missingGenesis.ref, missingGenesisRef);
+  confirm(firstApi, stager, genesis);
 
   const distantRecord = first.PocketStarlingRootShadow.getContent(state, "n31"),
     retainedRef = cachedRef(stager, distantRecord, "content-record"),
     edited = first.PocketStarlingRootShadow.editPayload(state, "n2", {
       label: "changed",
     }),
-    successor = stage(firstApi, stager, edited.state, genesis.sealRef),
+    successor = stage(firstApi, stager, edited.state, genesis),
     durable = new Map(firstApi.exportEntries(stager)),
     missingSuccessorRef = successor.newRefs.at(0),
     missingSuccessorBytes = durable.get(missingSuccessorRef);
@@ -867,24 +1102,32 @@ test("P109 completeness, retention, determinism and lineage stay separate", () =
     thirdApi = third.PocketStarlingObjectSealShadow,
     secondState = stateFor(second, normalised(rootNodes(32))),
     thirdState = stateFor(third, normalised(rootNodes(32))),
-    secondStage = stage(
+    secondStager = secondApi.createStager(),
+    thirdStager = thirdApi.createStager(),
+    secondBase = confirm(
       secondApi,
-      secondApi.createStager(),
-      secondState,
-      "proof-ref:v1:candidate-seal:11111111",
+      secondStager,
+      stage(secondApi, secondStager, secondState),
     ),
-    thirdStage = stage(
+    thirdBase = confirm(
       thirdApi,
-      thirdApi.createStager(),
-      thirdState,
-      "proof-ref:v1:candidate-seal:11111111",
+      thirdStager,
+      stage(thirdApi, thirdStager, thirdState),
     ),
-    otherLineage = stage(
-      thirdApi,
-      thirdApi.createStager(),
+    secondStage = stage(secondApi, secondStager, secondState, secondBase),
+    thirdStage = stage(thirdApi, thirdStager, thirdState, thirdBase),
+    lineageStager = thirdApi.createStager(),
+    lineageBaseState = third.PocketStarlingRootShadow.editPayload(
       thirdState,
-      "proof-ref:v1:candidate-seal:22222222",
-    );
+      "n0",
+      { lineage: true },
+    ).state,
+    lineageBase = confirm(
+      thirdApi,
+      lineageStager,
+      stage(thirdApi, lineageStager, lineageBaseState),
+    ),
+    otherLineage = stage(thirdApi, lineageStager, thirdState, lineageBase);
   assert.equal(secondStage.rootRef, thirdStage.rootRef);
   assert.equal(secondStage.sealRef, thirdStage.sealRef);
   assert.equal(otherLineage.rootRef, thirdStage.rootRef);
