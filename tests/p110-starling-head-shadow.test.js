@@ -80,6 +80,27 @@ function context() {
   return c;
 }
 
+function headBoundaryContext(openFromAcceptedSealRef) {
+  const c = {
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    Set,
+    PocketStarlingObjectSealShadow: Object.freeze({
+      openFromAcceptedSealRef,
+    }),
+  };
+  c.window = c;
+  c.globalThis = c;
+  vm.createContext(c);
+  vm.runInContext(fs.readFileSync(path.join(ROOT, MODULE), "utf8"), c, {
+    filename: MODULE,
+  });
+  return c;
+}
+
 function normalised(nodes) {
   return {
     schema: "portal.mtt.web.v1",
@@ -329,6 +350,11 @@ test("P110 lets only one same-base candidate win while retaining the rival", () 
     "head-conflict",
   );
   assert.strictEqual(authority.readHead(), head2);
+  assert.equal(
+    authority.conditionalAdopt(head2, candidateB.sealRef).reason,
+    "candidate-lineage-mismatch",
+  );
+  assert.strictEqual(authority.readHead(), head2);
   assert.equal(head2.sealRef, candidateA.sealRef);
   for (const [ref, bytes] of rivalEntries)
     assert.equal(stager.store.get(ref), bytes);
@@ -467,6 +493,130 @@ test("P110 reconciles lost outcomes without mutating or retrying authority", () 
     ).ok,
     true,
   );
+});
+
+test("P110a bounds throwing candidate resolution without moving Head", () => {
+  const c = context(),
+    sealApi = c.PocketStarlingObjectSealShadow,
+    stager = sealApi.createStager(),
+    gate = eligibleHarness(c, stager),
+    candidate = gate.register(stage(c, stager, stateFor(c, rootNodes(3)))),
+    entriesBefore = new Map(stager.store),
+    authority = c.PocketStarlingHeadShadow.createAuthority({
+      isCandidateEligible: (ref) => gate.eligible.has(ref),
+      resolveSeal() {
+        throw new Error("synthetic candidate read failure");
+      },
+    }),
+    head = authority.readHead(),
+    result = authority.conditionalAdopt(head, candidate.sealRef);
+
+  assert.deepEqual(plain(result), { ok: false, reason: "candidate-invalid" });
+  assert.strictEqual(authority.readHead(), head);
+  assert.equal(Object.isFrozen(head), true);
+  assert.equal(stager.store.size, entriesBefore.size);
+  for (const [ref, bytes] of entriesBefore)
+    assert.equal(stager.store.get(ref), bytes);
+});
+
+test("P110a makes throwing reconciliation resolution unknown and read-only", () => {
+  const c = context(),
+    stager = c.PocketStarlingObjectSealShadow.createStager(),
+    gate = eligibleHarness(c, stager),
+    state = stateFor(c, rootNodes(3)),
+    genesis = gate.register(stage(c, stager, state)),
+    authority = gate.authority(),
+    head1 = adopt(authority, authority.readHead(), genesis),
+    candidateState = c.PocketStarlingRootShadow.editPayload(state, "n0", {
+      label: "candidate",
+      value: 0,
+    }).state,
+    candidate = gate.register(stage(c, stager, candidateState, genesis)),
+    head2 = adopt(authority, head1, candidate);
+  let resolutionCalls = 0,
+    retryCalls = 0;
+  const result = c.PocketStarlingHeadShadow.reconcileAmbiguous({
+    expectedHead: head1,
+    candidateSealRef: candidate.sealRef,
+    readCurrentHead: authority.readHead,
+    resolveSeal() {
+      resolutionCalls += 1;
+      throw new Error("synthetic lineage read failure");
+    },
+    conditionalAdopt() {
+      retryCalls += 1;
+    },
+  });
+
+  assert.equal(result.outcome, "unknown");
+  assert.equal(resolutionCalls, 1);
+  assert.equal(retryCalls, 0);
+  assert.strictEqual(authority.readHead(), head2);
+});
+
+test("P110a rejects cyclic accepted-lineage evidence within the revision bound", () => {
+  // P109 content-addressed refs cannot form an authenticated self-cycle. This
+  // fixture isolates P110's guard at the already-authenticated Seal boundary.
+  const seals = new Map([
+      ["seal-a", Object.freeze({ previousSealRef: "seal-b" })],
+      ["seal-b", Object.freeze({ previousSealRef: "seal-a" })],
+    ]),
+    c = headBoundaryContext((ref, resolver) => {
+      const seal = resolver(ref);
+      return seal
+        ? { ok: true, handle: Object.freeze({ seal }) }
+        : { ok: false, reason: "missing-object" };
+    });
+  let reads = 0;
+  const result = c.PocketStarlingHeadShadow.reconcileAmbiguous({
+    expectedHead: {
+      schema: "pocket.starling.head.v1",
+      revision: 1,
+      sealRef: "base-seal",
+    },
+    candidateSealRef: "attempted-seal",
+    readCurrentHead: () => ({
+      schema: "pocket.starling.head.v1",
+      revision: 4,
+      sealRef: "seal-a",
+    }),
+    resolveSeal(ref) {
+      reads += 1;
+      return seals.get(ref);
+    },
+  });
+
+  assert.equal(result.outcome, "unknown");
+  assert.equal(result.examined, 2);
+  assert.equal(reads, 2);
+  assert.ok(result.examined <= 4 - 1);
+});
+
+test("P110a rejects malformed current Head before Seal resolution", () => {
+  const c = context(),
+    stager = c.PocketStarlingObjectSealShadow.createStager(),
+    gate = eligibleHarness(c, stager),
+    candidate = gate.register(stage(c, stager, stateFor(c, rootNodes(2)))),
+    authority = gate.authority(),
+    head = authority.readHead();
+  let resolutionCalls = 0;
+  const result = c.PocketStarlingHeadShadow.reconcileAmbiguous({
+    expectedHead: head,
+    candidateSealRef: candidate.sealRef,
+    readCurrentHead: () => ({
+      schema: "pocket.starling.head.v1",
+      revision: "1",
+      sealRef: candidate.sealRef,
+    }),
+    resolveSeal() {
+      resolutionCalls += 1;
+      return gate.resolver(candidate.sealRef);
+    },
+  });
+
+  assert.equal(result.outcome, "unknown");
+  assert.equal(resolutionCalls, 0);
+  assert.strictEqual(authority.readHead(), head);
 });
 
 test("P110 returns unknown for broken or impossible reconciliation lineage", () => {

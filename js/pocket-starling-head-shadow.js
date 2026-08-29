@@ -48,17 +48,21 @@
   }
 
   function openSeal(sealRef, resolver) {
-    const boundary = global.PocketStarlingObjectSealShadow;
-    if (
-      !boundary ||
-      typeof boundary.openFromAcceptedSealRef !== "function" ||
-      typeof sealRef !== "string" ||
-      sealRef.length === 0 ||
-      typeof resolver !== "function"
-    )
+    try {
+      const boundary = global.PocketStarlingObjectSealShadow;
+      if (
+        !boundary ||
+        typeof boundary.openFromAcceptedSealRef !== "function" ||
+        typeof sealRef !== "string" ||
+        sealRef.length === 0 ||
+        typeof resolver !== "function"
+      )
+        return null;
+      const opened = boundary.openFromAcceptedSealRef(sealRef, resolver);
+      return opened && opened.ok ? opened.handle.seal : null;
+    } catch (_error) {
       return null;
-    const opened = boundary.openFromAcceptedSealRef(sealRef, resolver);
-    return opened && opened.ok ? opened.handle.seal : null;
+    }
   }
 
   function createAuthority(config) {
