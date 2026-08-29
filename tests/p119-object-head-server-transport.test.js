@@ -40,8 +40,8 @@ function authenticatedCore(options = {}) {
   const heads = new Map(), argumentsSeen = [], reads = []; let calls = 0;
   const objectHeadStore = Object.freeze({
     async putObject(...args) { calls += 1; argumentsSeen.push(["putObject", args]); if (options.throwCode) { const error = new Error(options.throwCode); error.code = options.throwCode; throw error; } return { ok: true, created: args[1] !== "again" }; },
-    async getObject(_pocket, storageRef) { calls += 1; return storageRef === "missing" ? null : record; },
-    async presence(_pocket, refs) { calls += 1; argumentsSeen.push(["presence", refs]); return refs.map((storageRef) => ({ storageRef, present: true })); },
+    async getObject(...args) { calls += 1; argumentsSeen.push(["getObject", args]); if (options.throwMethod === "get") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; throw error; } return args[1] === "missing" ? null : record; },
+    async presence(_pocket, refs) { calls += 1; argumentsSeen.push(["presence", [_pocket,refs]]); if (options.throwMethod === "presence") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; throw error; } return refs.map((storageRef) => ({ storageRef, present: true })); },
     async initialiseHead(pocket) { calls += 1; if (!heads.has(pocket)) heads.set(pocket, { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); return heads.get(pocket); },
     async readHead(pocket) { calls += 1; return heads.get(pocket) || null; },
     async compareAndSetHead(pocket, expected, candidate) { calls += 1; const current = heads.get(pocket); if (JSON.stringify(current) !== JSON.stringify(expected)) return { ok: false, reason: "head-conflict" }; const head = { schema: "pocket.starling.head.v1", revision: current.revision + 1, sealRef: candidate }; heads.set(pocket, head); return { ok: true, head }; },
@@ -49,6 +49,7 @@ function authenticatedCore(options = {}) {
   const id = "account", sessionId = "session", credentialId = "credential", pocket = "pocket";
   const rows = new Map([[`sessions\0${sessionId}`, { kind:"pocket.sync.service-session",schemaVersion:1,storeVersion:1,sessionId,accountId:id,credentialId,status:"active",createdAt:"2032-01-01T00:00:00.000Z",expiresAt:"2033-01-01T00:00:00.000Z",replacedBy:null }], [`accounts\0${id}`, { kind:"pocket.sync.service-account",schemaVersion:1,storeVersion:1,accountId:id,accountPolicyVersion:1,prfEvaluationInput:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",credentialIds:[credentialId],syncedPocketId:pocket,createdAt:"2032-01-01T00:00:00.000Z" }], [`credentials\0${credentialId}`, { kind:"pocket.sync.service-credential",schemaVersion:1,storeVersion:1,credentialId,accountId:id,credentialVersion:1,status:"active",publicKey:"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",publicKeyAlgorithm:-7,signCount:0,transports:["internal"],backupEligible:true,backedUp:false,createdAt:"2032-01-01T00:00:00.000Z" }]]);
   if (options.unconfigured) rows.get(`accounts\0${id}`).syncedPocketId = null;
+  if (options.boundPocket) rows.get(`accounts\0${id}`).syncedPocketId = options.boundPocket;
   const generic = Object.freeze({ async transact(_mode, fn) { return fn(Object.freeze({ async get(collection,key) { reads.push([collection,key]); return rows.get(`${collection}\0${key}`) || null; }, async insert(){},async replace(){},async remove(){} })); } });
   return { core:createServiceCore(coreConfig({ store:generic, objectHeadStore })), sessionId, pocket, ref, record, calls:()=>calls, argumentsSeen, reads };
 }
@@ -74,6 +75,21 @@ test("P119c executes authority, opaque delegation, and safe errors through the r
   await assert.rejects(unconfigured.core.readShadowHead({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:unconfigured.sessionId},body:{apiVersion:1,operationId:"op",syncedPocketId:unconfigured.pocket}}),(error)=>error.code==="service-authorisation-failed");
   const failure=authenticatedCore({throwCode:"object-head-store-storage-failed"});
   await assert.rejects(failure.core.putOpaqueObject({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:failure.sessionId},body:{apiVersion:1,operationId:"op",syncedPocketId:failure.pocket,storageRef:failure.ref,record:failure.record}}),(error)=>error.code==="service-storage-failed"&&error.status===503&&error.retryable===true);
+});
+
+test("P119d executes all object authority and exact object operation outcomes", async () => {
+  const body={putOpaqueObject:(h)=>({apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref,record:h.record}),getOpaqueObject:(h)=>({apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRef:h.ref}),objectPresence:(h)=>({apiVersion:1,operationId:"op",syncedPocketId:h.pocket,storageRefs:["z","a"]})};
+  for (const [label, options, code] of [["missing",{},"service-authentication-required"],["different",{boundPocket:"other"},"service-authorisation-failed"],["unconfigured",{unconfigured:true},"service-authorisation-failed"]]) {
+    const h=authenticatedCore(options); for (const method of Object.keys(body)) await assert.rejects(h.core[method]({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:label==="missing"?null:h.sessionId},body:body[method](h)}),(error)=>error.code===code);
+  }
+  const h=authenticatedCore(), call=(method, extra={})=>({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{...body[method](h),...extra}});
+  assert.equal((await h.core.putOpaqueObject(call("putOpaqueObject"))).body.created,true);
+  assert.equal((await h.core.putOpaqueObject(call("putOpaqueObject",{storageRef:"again"}))).body.created,false);
+  assert.equal((await h.core.getOpaqueObject(call("getOpaqueObject"))).body.present,true);
+  assert.deepEqual((await h.core.getOpaqueObject(call("getOpaqueObject",{storageRef:"missing"}))).body,{apiVersion:1,ok:true,operationId:"op",syncedPocketId:h.pocket,storageRef:"missing",present:false,record:null});
+  assert.deepEqual((await h.core.objectPresence(call("objectPresence"))).body.rows,[{storageRef:"z",present:true},{storageRef:"a",present:true}]);
+  assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+  for (const [method, throwMethod] of [["putOpaqueObject",undefined],["objectPresence","presence"]]) { const bad=authenticatedCore({throwCode:"object-head-store-ref-invalid",throwMethod}); await assert.rejects(bad.core[method]({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:bad.sessionId},body:body[method](bad)}),(error)=>error.code==="service-request-invalid"&&error.status===400); }
 });
 
 test("P119 requires the exact object/Head store surface and rejects unauthenticated calls", async () => {
