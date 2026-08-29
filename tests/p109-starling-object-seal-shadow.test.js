@@ -122,6 +122,11 @@ function resolverFor(stager) {
   return (ref) => stager.store.get(ref);
 }
 
+function cachedRef(stager, source, kind) {
+  const refs = stager.cache.get(source);
+  return refs ? refs.get(kind) : null;
+}
+
 function stage(api, stager, state, previousSealRef = null) {
   const result = api.stageCandidate(stager, state, { previousSealRef });
   assert.equal(result.ok, true);
@@ -134,6 +139,90 @@ function rawPut(api, entries, kind, object) {
   const ref = api.refFor(kind, encoded.bytes);
   entries.set(ref, encoded.bytes);
   return ref;
+}
+
+function objectAt(entries, ref) {
+  const bytes = entries.get(ref);
+  assert.equal(typeof bytes, "string");
+  return JSON.parse(bytes);
+}
+
+function rewriteTrieAt(api, entries, ref, key, mutate, offset = 0) {
+  const object = objectAt(entries, ref);
+  if (offset === key.length)
+    return rawPut(api, entries, object.kind, mutate(object));
+  const edgeIndex = object.children.findIndex(
+    (edge) => edge.key === key[offset],
+  );
+  assert.notEqual(edgeIndex, -1);
+  const childRef = rewriteTrieAt(
+      api,
+      entries,
+      object.children[edgeIndex].ref,
+      key,
+      mutate,
+      offset + 1,
+    ),
+    children = object.children.map((edge, index) =>
+      index === edgeIndex ? { ...edge, ref: childRef } : edge,
+    );
+  return rawPut(api, entries, object.kind, { ...object, children });
+}
+
+function trieValueRefAt(entries, ref, key) {
+  let object = objectAt(entries, ref);
+  for (const character of key) {
+    const edge = object.children.find((item) => item.key === character);
+    assert.ok(edge);
+    object = objectAt(entries, edge.ref);
+  }
+  assert.equal(object.hasValue, true);
+  return object.valueRef;
+}
+
+function forgeRoot(api, entries, staged, rootObject) {
+  const rootRef = rawPut(api, entries, "pocket-root", rootObject),
+    sealObject = { ...staged.sealObject, rootRef },
+    sealRef = rawPut(api, entries, "candidate-seal", sealObject);
+  return { rootRef, sealRef, rootObject, sealObject };
+}
+
+function forgeComponent(api, entries, staged, field, componentRef) {
+  return forgeRoot(api, entries, staged, {
+    ...staged.rootObject,
+    [field]: componentRef,
+  });
+}
+
+function forgeSequence(api, entries, staged, mutate) {
+  const sequenceRef = trieValueRefAt(
+      entries,
+      staged.rootObject.childrenRef,
+      "root",
+    ),
+    sequence = objectAt(entries, sequenceRef),
+    replacementRef = rawPut(api, entries, sequence.kind, mutate(sequence)),
+    childrenRef = rewriteTrieAt(
+      api,
+      entries,
+      staged.rootObject.childrenRef,
+      "root",
+      (node) => ({ ...node, valueRef: replacementRef }),
+    );
+  return forgeComponent(api, entries, staged, "childrenRef", childrenRef);
+}
+
+function triePathVisitBound(root, key, includesValueRecord = true) {
+  let node = root,
+    visits = 1;
+  for (const character of key) {
+    visits += node.children.length;
+    const edge = node.children.find((pair) => pair[0] === character);
+    assert.ok(edge);
+    node = edge[1];
+  }
+  visits += node.children.length;
+  return visits + (includesValueRecord ? 1 : 0);
 }
 
 test("P109 stages canonical ingress as fixed Root and Seal objects", () => {
@@ -169,6 +258,16 @@ test("P109 stages canonical ingress as fixed Root and Seal objects", () => {
   assert.equal("manifest" in staged.rootObject, false);
   assert.equal("newRefs" in staged.sealObject, false);
   assert.equal("manifest" in staged.sealObject, false);
+  for (const forbidden of [
+    "timestamp",
+    "nonce",
+    "newRefs",
+    "manifest",
+    "physicalLocation",
+  ]) {
+    assert.equal(forbidden in staged.rootObject, false);
+    assert.equal(forbidden in staged.sealObject, false);
+  }
   assert.match(staged.rootRef, /^proof-ref:v1:pocket-root:/);
   assert.equal(api.acceptSeal, undefined);
   assert.equal(api.authoriseSeal, undefined);
@@ -222,8 +321,12 @@ test("P109 payload edits stage only the content frontier across 2000 nodes", () 
   );
   for (const [ref, bytes] of oldEntries)
     assert.equal(stager.store.get(ref), bytes);
-  const frontierBound = 3 * ("n2".length + 1) + 8;
-  assert.ok(successor.diagnostics.newObjectCount <= frontierBound);
+  // One changed record, the fanout encountered along its nodeId trie path,
+  // and three cached component roots. No total-node term appears.
+  const newObjectBound = 3 * ("n2".length + 1) + 8,
+    sourceVisitBound = triePathVisitBound(baseState.content, "n2") + 3;
+  assert.ok(successor.diagnostics.newObjectCount <= newObjectBound);
+  assert.ok(successor.diagnostics.sourceObjectVisits <= sourceVisitBound);
   assert.equal(
     api.verifyNewObjectPresence(successor, (ref) => stager.store.has(ref), {
       baseComplete: true,
@@ -237,6 +340,10 @@ test("P109 payload edits stage only the content frontier across 2000 nodes", () 
   );
   assert.equal(
     api.auditCandidateSeal(successor.sealRef, resolverFor(stager)).ok,
+    true,
+  );
+  assert.equal(
+    api.auditCandidateSeal(base.sealRef, resolverFor(stager)).ok,
     true,
   );
 });
@@ -279,9 +386,16 @@ test("P109 reorder stages a bounded children frontier and preserves full order",
     ),
     expected,
   );
-  const frontierBound =
-    8 * (2 * (sequenceApi.height(oldSequence) + 1) + "root".length + 2);
-  assert.ok(successor.diagnostics.newObjectCount <= frontierBound);
+  // Two bounded sequence paths, their capacity-bounded fanout, the parent-key
+  // trie path, and fixed component-root visits. No sibling-count term appears.
+  const sequenceFrontier =
+      2 * (sequenceApi.height(oldSequence) + 1) + "root".length + 2,
+    newObjectBound = 8 * sequenceFrontier,
+    sourceVisitBound = baseState.capacity * sequenceFrontier + 8;
+  assert.ok(successor.diagnostics.newObjectCount <= newObjectBound);
+  assert.ok(successor.diagnostics.sourceObjectVisits <= sourceVisitBound);
+  assert.equal("manifest" in successor.rootObject, false);
+  assert.equal("newRefs" in successor.sealObject, false);
 });
 
 test("P109 branch moves do not restage descendants or unrelated pages", () => {
@@ -334,11 +448,15 @@ test("P109 branch moves do not restage descendants or unrelated pages", () => {
     stager = api.createStager(),
     base = stage(api, stager, baseState),
     retainedRefs = [
-      stager.cache.get(descendantContent),
-      stager.cache.get(descendantPlacement),
-      stager.cache.get(branchChildren),
-      stager.cache.get(unrelatedChildren),
-      stager.cache.get(unrelatedPage),
+      cachedRef(stager, descendantContent, "content-record"),
+      cachedRef(stager, descendantPlacement, "placement-record"),
+      cachedRef(stager, branchChildren, `sequence-${branchChildren.kind}`),
+      cachedRef(
+        stager,
+        unrelatedChildren,
+        `sequence-${unrelatedChildren.kind}`,
+      ),
+      cachedRef(stager, unrelatedPage, `sequence-${unrelatedPage.kind}`),
     ],
     moved = rootApi.move(baseState, "branch", 0, "dest", 0);
   assert.equal(moved.ok, true);
@@ -359,29 +477,43 @@ test("P109 branch moves do not restage descendants or unrelated pages", () => {
   );
   assert.deepEqual(
     [
-      stager.cache.get(rootApi.getContent(moved.state, "d400")),
-      stager.cache.get(
+      cachedRef(
+        stager,
+        rootApi.getContent(moved.state, "d400"),
+        "content-record",
+      ),
+      cachedRef(
+        stager,
         placementApi.getPlacement(moved.state.structural, "d400"),
+        "placement-record",
       ),
-      stager.cache.get(
+      cachedRef(
+        stager,
         placementApi.getChildrenRoot(moved.state.structural, "branch"),
+        `sequence-${branchChildren.kind}`,
       ),
-      stager.cache.get(
+      cachedRef(
+        stager,
         placementApi.getChildrenRoot(moved.state.structural, "unrelated"),
+        `sequence-${unrelatedChildren.kind}`,
       ),
-      stager.cache.get(unrelatedPage),
+      cachedRef(stager, unrelatedPage, `sequence-${unrelatedPage.kind}`),
     ],
     retainedRefs,
   );
-  const frontierBound =
-    10 *
-    ("branch".length +
+  // Three changed trie paths and two capacity-bounded sequence frontiers.
+  // Descendant count is deliberately absent from both locality ceilings.
+  const pathFrontier =
+      "branch".length +
       "source".length +
       "dest".length +
       sequenceApi.height(sourceChildren) +
       (destinationChildren ? sequenceApi.height(destinationChildren) : 0) +
-      6);
-  assert.ok(successor.diagnostics.newObjectCount <= frontierBound);
+      6,
+    newObjectBound = 10 * pathFrontier,
+    sourceVisitBound = (baseState.capacity + 4) * pathFrontier;
+  assert.ok(successor.diagnostics.newObjectCount <= newObjectBound);
+  assert.ok(successor.diagnostics.sourceObjectVisits <= sourceVisitBound);
   assert.equal(
     api.auditCandidateSeal(successor.sealRef, resolverFor(stager)).ok,
     true,
@@ -407,6 +539,7 @@ test("P109 fresh runtimes open only Seal and Root then fetch lazy paths", () => 
     opened = api.openFromAcceptedSealRef(staged.sealRef, resolver);
 
   assert.equal(opened.ok, true);
+  assert.ok(entries.size > 2000);
   assert.equal(opened.diagnostics.fetches, 2);
   assert.deepEqual(requested, [staged.sealRef, staged.rootRef]);
   assert.equal(requested.includes(missingHistory), false);
@@ -485,6 +618,83 @@ test("P109 rejects damaged graphs and semantic contradictions", () => {
       .reason,
     "invalid-seal",
   );
+  const missingSeal = { ...staged.sealObject };
+  delete missingSeal.rootRef;
+  const missingSealRef = rawPut(api, wrongShape, "candidate-seal", missingSeal);
+  assert.equal(
+    api.openFromAcceptedSealRef(missingSealRef, (ref) => wrongShape.get(ref))
+      .reason,
+    "invalid-seal",
+  );
+
+  const rootShapes = new Map(api.exportEntries(stager)),
+    extraRoot = forgeRoot(api, rootShapes, staged, {
+      ...staged.rootObject,
+      manifest: ["not-sealed-truth"],
+    });
+  assert.equal(
+    api.openFromAcceptedSealRef(extraRoot.sealRef, (ref) => rootShapes.get(ref))
+      .reason,
+    "invalid-root-object",
+  );
+  const missingRootObject = { ...staged.rootObject };
+  delete missingRootObject.contentRef;
+  const missingRoot = forgeRoot(api, rootShapes, staged, missingRootObject);
+  assert.equal(
+    api.openFromAcceptedSealRef(missingRoot.sealRef, (ref) =>
+      rootShapes.get(ref),
+    ).reason,
+    "invalid-root-object",
+  );
+
+  for (const [label, mutate] of [
+    [
+      "duplicate",
+      (node) => ({
+        ...node,
+        children: [
+          node.children[0],
+          node.children[0],
+          ...node.children.slice(1),
+        ],
+      }),
+    ],
+    [
+      "out-of-order",
+      (node) => ({ ...node, children: node.children.slice().reverse() }),
+    ],
+  ]) {
+    const trieDamage = new Map(api.exportEntries(stager)),
+      contentRef = rewriteTrieAt(
+        api,
+        trieDamage,
+        staged.rootObject.contentRef,
+        "n",
+        mutate,
+      ),
+      forged = forgeComponent(
+        api,
+        trieDamage,
+        staged,
+        "contentRef",
+        contentRef,
+      ),
+      opened = api.openFromAcceptedSealRef(forged.sealRef, (ref) =>
+        trieDamage.get(ref),
+      );
+    assert.equal(opened.ok, true, label);
+    assert.equal(
+      api.readContent(opened.handle, "n0").reason,
+      "invalid-trie-object",
+      label,
+    );
+    assert.equal(
+      api.auditCandidateSeal(forged.sealRef, (ref) => trieDamage.get(ref))
+        .reason,
+      "invalid-trie-object",
+      label,
+    );
+  }
 
   const relation = plain(placementApi.audit(state.structural).relation);
   relation.parents.n0 = "n1";
@@ -508,6 +718,8 @@ test("P109 rejects damaged graphs and semantic contradictions", () => {
     ).ok,
     true,
   );
+  // Matching refs authenticate bytes. They neither choose authority nor prove
+  // that Placement's independently encoded parent/membership views agree.
   assert.equal(
     api.auditCandidateSeal(
       contradiction.sealRef,
@@ -524,6 +736,69 @@ test("P109 rejects damaged graphs and semantic contradictions", () => {
   assert.equal(rootApi.auditCandidate(state).ok, true);
 });
 
+test("P109 rejects self-authenticating invalid ordered-sequence objects", () => {
+  const c = context(),
+    api = c.PocketStarlingObjectSealShadow,
+    state = stateFor(c, normalised(rootNodes(20))),
+    stager = api.createStager(),
+    staged = stage(api, stager, state),
+    cases = [
+      ["capacity", (page) => ({ ...page, capacity: page.capacity + 1 })],
+      ["count", (page) => ({ ...page, count: page.count + 1 })],
+      [
+        "fanout",
+        (page) => {
+          assert.equal(page.kind, "sequence-branch");
+          const childRefs = Array(page.capacity + 1).fill(page.childRefs[0]),
+            child = objectAt(stager.store, page.childRefs[0]);
+          return {
+            ...page,
+            childRefs,
+            count: child.count * childRefs.length,
+          };
+        },
+      ],
+    ];
+
+  // Twenty items at capacity four create a valid nested one-child branch.
+  const sequenceRoot = objectAt(
+    stager.store,
+    trieValueRefAt(stager.store, staged.rootObject.childrenRef, "root"),
+  );
+  assert.ok(
+    sequenceRoot.childRefs.some((ref) => {
+      const child = objectAt(stager.store, ref);
+      return child.kind === "sequence-branch" && child.childRefs.length === 1;
+    }),
+  );
+  assert.equal(
+    api.auditCandidateSeal(staged.sealRef, resolverFor(stager)).ok,
+    true,
+  );
+  const emptyStager = api.createStager(),
+    empty = stage(api, emptyStager, stateFor(c, normalised([]))),
+    emptyAudit = api.auditCandidateSeal(
+      empty.sealRef,
+      resolverFor(emptyStager),
+    );
+  assert.notEqual(empty.rootObject.placementRef, empty.rootObject.childrenRef);
+  assert.equal(emptyAudit.ok, true, JSON.stringify(plain(emptyAudit)));
+
+  for (const [label, mutate] of cases) {
+    const entries = new Map(api.exportEntries(stager)),
+      forged = forgeSequence(api, entries, staged, mutate),
+      opened = api.openFromAcceptedSealRef(forged.sealRef, (ref) =>
+        entries.get(ref),
+      );
+    assert.equal(opened.ok, true, label);
+    assert.equal(
+      api.auditCandidateSeal(forged.sealRef, (ref) => entries.get(ref)).reason,
+      "invalid-sequence-object",
+      label,
+    );
+  }
+});
+
 test("P109 completeness, retention, determinism and lineage stay separate", () => {
   const first = context(),
     firstApi = first.PocketStarlingObjectSealShadow,
@@ -531,38 +806,60 @@ test("P109 completeness, retention, determinism and lineage stay separate", () =
     stager = firstApi.createStager(),
     genesis = stage(firstApi, stager, state),
     missingGenesisRef = genesis.newRefs.at(0);
-  assert.equal(
-    firstApi.verifyNewObjectPresence(
-      genesis,
-      (ref) => ref !== missingGenesisRef && stager.store.has(ref),
-    ).reason,
-    "missing-new-object",
+  const missingGenesis = firstApi.verifyNewObjectPresence(
+    genesis,
+    (ref) => ref !== missingGenesisRef && stager.store.has(ref),
   );
+  assert.equal(missingGenesis.reason, "missing-new-object");
+  assert.equal(missingGenesis.ref, missingGenesisRef);
 
   const distantRecord = first.PocketStarlingRootShadow.getContent(state, "n31"),
-    retainedRef = stager.cache.get(distantRecord),
+    retainedRef = cachedRef(stager, distantRecord, "content-record"),
     edited = first.PocketStarlingRootShadow.editPayload(state, "n2", {
       label: "changed",
     }),
-    successor = stage(firstApi, stager, edited.state, genesis.sealRef);
-  stager.store.delete(retainedRef);
+    successor = stage(firstApi, stager, edited.state, genesis.sealRef),
+    durable = new Map(firstApi.exportEntries(stager)),
+    missingSuccessorRef = successor.newRefs.at(0),
+    missingSuccessorBytes = durable.get(missingSuccessorRef);
+  durable.delete(missingSuccessorRef);
+  const missingSuccessor = firstApi.verifyNewObjectPresence(
+    successor,
+    (ref) => durable.has(ref),
+    { baseComplete: true },
+  );
+  assert.equal(missingSuccessor.reason, "missing-new-object");
+  assert.equal(missingSuccessor.ref, missingSuccessorRef);
+  durable.set(missingSuccessorRef, missingSuccessorBytes);
   assert.equal(
-    firstApi.verifyNewObjectPresence(
-      successor,
-      (ref) => stager.store.has(ref),
-      { baseComplete: true },
-    ).ok,
+    firstApi.verifyNewObjectPresence(successor, (ref) => durable.has(ref), {
+      baseComplete: true,
+    }).ok,
+    true,
+  );
+
+  // Authentication cannot manufacture redundant bytes. The successor-frontier
+  // proof can pass while a separately required retained base object is absent.
+  durable.delete(retainedRef);
+  assert.equal(
+    firstApi.verifyNewObjectPresence(successor, (ref) => durable.has(ref), {
+      baseComplete: true,
+    }).ok,
     true,
   );
   const retainedOpen = firstApi.openFromAcceptedSealRef(
     successor.sealRef,
-    resolverFor(stager),
+    (ref) => durable.get(ref),
   );
   assert.equal(retainedOpen.ok, true);
-  assert.equal(
-    firstApi.readContent(retainedOpen.handle, "n31").reason,
-    "missing-object",
+  const missingLazy = firstApi.readContent(retainedOpen.handle, "n31");
+  assert.equal(missingLazy.reason, "missing-object");
+  assert.equal(missingLazy.ref, retainedRef);
+  const missingAudit = firstApi.auditCandidateSeal(successor.sealRef, (ref) =>
+    durable.get(ref),
   );
+  assert.equal(missingAudit.reason, "missing-object");
+  assert.equal(missingAudit.ref, retainedRef);
 
   const second = context(),
     third = context(),
@@ -605,4 +902,24 @@ test("P109 completeness, retention, determinism and lineage stay separate", () =
     orderBStage = stage(firstApi, firstApi.createStager(), orderB);
   assert.equal(orderAStage.rootRef, orderBStage.rootRef);
   assert.equal(orderAStage.sealRef, orderBStage.sealRef);
+
+  const reordered = first.PocketStarlingRootShadow.reorder(state, "n0", 0, 2);
+  assert.equal(reordered.ok, true);
+  const reorderedStage = stage(
+    firstApi,
+    firstApi.createStager(),
+    reordered.state,
+  );
+  assert.notEqual(reorderedStage.rootRef, genesis.rootRef);
+
+  const collisionStager = firstApi.createStager([
+      [genesis.rootRef, "different canonical bytes"],
+    ]),
+    collision = firstApi.stageCandidate(collisionStager, state);
+  assert.equal(collision.reason, "proof-ref-collision");
+  assert.equal(collision.ref, genesis.rootRef);
+  assert.equal(
+    collisionStager.store.get(genesis.rootRef),
+    "different canonical bytes",
+  );
 });

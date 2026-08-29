@@ -89,16 +89,24 @@
       stager.store.set(ref, encoded.bytes);
       newRefs.push(ref);
     }
-    if (source && typeof source === "object") stager.cache.set(source, ref);
+    if (source && typeof source === "object") {
+      let refs = stager.cache.get(source);
+      if (!refs) {
+        refs = new Map();
+        stager.cache.set(source, refs);
+      }
+      refs.set(kind, ref);
+    }
     return { ok: true, ref };
   }
-  function cached(stager, source) {
-    return source && typeof source === "object"
-      ? stager.cache.get(source)
-      : null;
+  function cached(stager, source, kind) {
+    if (!source || typeof source !== "object") return null;
+    const refs = stager.cache.get(source);
+    return refs ? refs.get(kind) : null;
   }
-  function encodeRecord(stager, record, kind, newRefs) {
-    const prior = cached(stager, record);
+  function encodeRecord(stager, record, kind, newRefs, stats) {
+    stats.sourceObjectVisits += 1;
+    const prior = cached(stager, record, kind);
     if (prior) return { ok: true, ref: prior };
     const object =
       kind === "content-record"
@@ -116,8 +124,9 @@
           };
     return put(stager, kind, object, record, newRefs);
   }
-  function encodeSequence(stager, page, newRefs) {
-    const prior = cached(stager, page);
+  function encodeSequence(stager, page, newRefs, stats) {
+    stats.sourceObjectVisits += 1;
+    const prior = cached(stager, page, `sequence-${page.kind}`);
     if (prior) return { ok: true, ref: prior };
     let object;
     if (page.kind === "leaf")
@@ -131,7 +140,7 @@
     else {
       const childRefs = [];
       for (const child of page.children) {
-        const encoded = encodeSequence(stager, child, newRefs);
+        const encoded = encodeSequence(stager, child, newRefs, stats);
         if (!encoded.ok) return encoded;
         childRefs.push(encoded.ref);
       }
@@ -145,18 +154,26 @@
     }
     return put(stager, object.kind, object, page, newRefs);
   }
-  function encodeTrie(stager, node, kind, valueEncoder, newRefs) {
-    const prior = cached(stager, node);
+  function encodeTrie(stager, node, kind, valueEncoder, newRefs, stats) {
+    stats.sourceObjectVisits += 1;
+    const prior = cached(stager, node, kind);
     if (prior) return { ok: true, ref: prior };
     let valueRef = null;
     if (node.hasValue) {
-      const value = valueEncoder(stager, node.value, newRefs);
+      const value = valueEncoder(stager, node.value, newRefs, stats);
       if (!value.ok) return value;
       valueRef = value.ref;
     }
     const children = [];
     for (const [key, child] of node.children) {
-      const encoded = encodeTrie(stager, child, kind, valueEncoder, newRefs);
+      const encoded = encodeTrie(
+        stager,
+        child,
+        kind,
+        valueEncoder,
+        newRefs,
+        stats,
+      );
       if (!encoded.ok) return encoded;
       children.push({ key, ref: encoded.ref });
     }
@@ -169,9 +186,11 @@
     };
     return put(stager, kind, object, node, newRefs);
   }
-  const contentValue = (s, v, n) => encodeRecord(s, v, "content-record", n),
-    placementValue = (s, v, n) => encodeRecord(s, v, "placement-record", n),
-    childrenValue = (s, v, n) => encodeSequence(s, v, n);
+  const contentValue = (s, v, n, d) =>
+      encodeRecord(s, v, "content-record", n, d),
+    placementValue = (s, v, n, d) =>
+      encodeRecord(s, v, "placement-record", n, d),
+    childrenValue = (s, v, n, d) => encodeSequence(s, v, n, d);
   function stageCandidate(stager, state, options = {}) {
     if (
       !stager ||
@@ -186,13 +205,15 @@
       options.previousSealRef === undefined ? null : options.previousSealRef;
     if (previousSealRef !== null && typeof previousSealRef !== "string")
       return fail("invalid-previous-seal-ref");
-    const newRefs = [];
+    const newRefs = [],
+      stats = { sourceObjectVisits: 0 };
     const content = encodeTrie(
       stager,
       state.content,
       "content-trie",
       contentValue,
       newRefs,
+      stats,
     );
     if (!content.ok) return content;
     const placements = encodeTrie(
@@ -201,6 +222,7 @@
       "placement-trie",
       placementValue,
       newRefs,
+      stats,
     );
     if (!placements.ok) return placements;
     const children = encodeTrie(
@@ -209,9 +231,11 @@
       "children-trie",
       childrenValue,
       newRefs,
+      stats,
     );
     if (!children.ok) return children;
-    let preservationRef = cached(stager, state.preservation);
+    stats.sourceObjectVisits += 1;
+    let preservationRef = cached(stager, state.preservation, "preservation");
     if (!preservationRef) {
       const stored = put(
         stager,
@@ -254,7 +278,10 @@
         rootObject: Object.freeze(rootObject),
         sealObject: Object.freeze(sealObject),
         newRefs: Object.freeze(newRefs.slice()),
-        diagnostics: Object.freeze({ newObjectCount: newRefs.length }),
+        diagnostics: Object.freeze({
+          newObjectCount: newRefs.length,
+          sourceObjectVisits: stats.sourceObjectVisits,
+        }),
       }),
     };
   }
@@ -376,21 +403,35 @@
     };
   }
   function validateTrie(object, kind) {
-    return (
-      exact(object, ["schema", "kind", "hasValue", "valueRef", "children"]) &&
-      object.kind === kind &&
-      typeof object.hasValue === "boolean" &&
-      ((object.hasValue && typeof object.valueRef === "string") ||
-        (!object.hasValue && object.valueRef === null)) &&
-      Array.isArray(object.children) &&
-      object.children.every(
-        (edge) =>
-          exact(edge, ["key", "ref"]) &&
-          typeof edge.key === "string" &&
-          edge.key.length === 1 &&
-          typeof edge.ref === "string",
+    if (
+      !exact(object, ["schema", "kind", "hasValue", "valueRef", "children"]) ||
+      object.kind !== kind ||
+      typeof object.hasValue !== "boolean" ||
+      !(
+        (object.hasValue && typeof object.valueRef === "string") ||
+        (!object.hasValue && object.valueRef === null)
+      ) ||
+      !Array.isArray(object.children)
+    )
+      return false;
+    const keys = [],
+      seenKeys = new Set();
+    for (const edge of object.children) {
+      if (
+        !exact(edge, ["key", "ref"]) ||
+        typeof edge.key !== "string" ||
+        edge.key.length !== 1 ||
+        typeof edge.ref !== "string" ||
+        seenKeys.has(edge.key)
       )
-    );
+        return false;
+      seenKeys.add(edge.key);
+      keys.push(edge.key);
+    }
+    const sorted = keys
+      .slice()
+      .sort((left, right) => left.localeCompare(right));
+    return keys.every((key, index) => key === sorted[index]);
   }
   function readTrie(handle, rootRef, trieKind, recordKind, nodeId) {
     if (typeof nodeId !== "string" || nodeId.length === 0)
@@ -464,18 +505,32 @@
       diagnostics: result.diagnostics,
     };
   }
-  function decodeSequence(io, ref, seen) {
+  function decodeSequence(io, ref, seen, capacity, isRoot = true) {
     if (seen.has(ref)) return fail("object-cycle");
     seen.add(ref);
-    const kind = kindFromRef(ref),
-      loaded = io.load(ref, kind);
-    if (!loaded.ok) return loaded;
+    const kind = kindFromRef(ref);
+    if (kind !== "sequence-leaf" && kind !== "sequence-branch")
+      return fail("invalid-sequence-object", { ref });
+    const loaded = io.load(ref, kind);
+    if (!loaded.ok)
+      return loaded.reason === "invalid-object-kind"
+        ? fail("invalid-sequence-object", { ref })
+        : loaded;
     const o = loaded.object;
     let page;
     if (
       kind === "sequence-leaf" &&
       exact(o, ["schema", "kind", "capacity", "count", "items"]) &&
-      Array.isArray(o.items)
+      Number.isInteger(o.capacity) &&
+      o.capacity >= 2 &&
+      o.capacity === capacity &&
+      Number.isInteger(o.count) &&
+      o.count >= 0 &&
+      Array.isArray(o.items) &&
+      o.count === o.items.length &&
+      o.items.length <= capacity &&
+      (isRoot || o.items.length > 0) &&
+      o.items.every((item) => typeof item === "string")
     )
       page = Object.freeze({
         kind: "leaf",
@@ -486,14 +541,24 @@
     else if (
       kind === "sequence-branch" &&
       exact(o, ["schema", "kind", "capacity", "count", "childRefs"]) &&
-      Array.isArray(o.childRefs)
+      Number.isInteger(o.capacity) &&
+      o.capacity >= 2 &&
+      o.capacity === capacity &&
+      Number.isInteger(o.count) &&
+      o.count >= 0 &&
+      Array.isArray(o.childRefs) &&
+      o.childRefs.length >= (isRoot ? 2 : 1) &&
+      o.childRefs.length <= capacity &&
+      o.childRefs.every((childRef) => typeof childRef === "string")
     ) {
       const children = [];
       for (const childRef of o.childRefs) {
-        const child = decodeSequence(io, childRef, seen);
+        const child = decodeSequence(io, childRef, seen, capacity, false);
         if (!child.ok) return child;
         children.push(child.page);
       }
+      if (o.count !== children.reduce((sum, child) => sum + child.count, 0))
+        return fail("invalid-sequence-object", { ref });
       page = Object.freeze({
         kind: "branch",
         capacity: o.capacity,
@@ -504,7 +569,7 @@
     seen.delete(ref);
     return { ok: true, page };
   }
-  function decodeTrie(io, ref, trieKind, recordKind, seen) {
+  function decodeTrie(io, ref, trieKind, recordKind, seen, capacity) {
     if (seen.has(ref)) return fail("object-cycle");
     seen.add(ref);
     const loaded = io.load(ref, trieKind);
@@ -514,7 +579,12 @@
     let value = null;
     if (loaded.object.hasValue) {
       if (recordKind === "sequence") {
-        const decoded = decodeSequence(io, loaded.object.valueRef, new Set());
+        const decoded = decodeSequence(
+          io,
+          loaded.object.valueRef,
+          new Set(),
+          capacity,
+        );
         if (!decoded.ok) return decoded;
         value = decoded.page;
       } else {
@@ -537,7 +607,14 @@
     }
     const children = [];
     for (const edge of loaded.object.children) {
-      const child = decodeTrie(io, edge.ref, trieKind, recordKind, seen);
+      const child = decodeTrie(
+        io,
+        edge.ref,
+        trieKind,
+        recordKind,
+        seen,
+        capacity,
+      );
       if (!child.ok) return child;
       children.push(Object.freeze([edge.key, child.node]));
     }
@@ -561,6 +638,7 @@
         "content-trie",
         "content-record",
         new Set(),
+        handle.root.capacity,
       );
     if (!content.ok) return content;
     const placements = decodeTrie(
@@ -569,6 +647,7 @@
       "placement-trie",
       "placement-record",
       new Set(),
+      handle.root.capacity,
     );
     if (!placements.ok) return placements;
     const children = decodeTrie(
@@ -577,6 +656,7 @@
       "children-trie",
       "sequence",
       new Set(),
+      handle.root.capacity,
     );
     if (!children.ok) return children;
     const preservation = handle.io.load(
