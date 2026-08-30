@@ -231,7 +231,17 @@ test("P122 publishes a genuine initial stage in put, presence, CAS order and com
   const c = context(),
     base = await initialStage(c),
     calls = [],
-    result = await publisher(c, calls).publishCandidate({
+    returnedRows = [],
+    result = await publisher(c, calls, {
+      presence: (input) => {
+        const rows = input.storageRefs.map((storageRef) => ({
+          storageRef,
+          present: true,
+        }));
+        returnedRows.push(rows);
+        return { rows };
+      },
+    }).publishCandidate({
       stage: base.physical,
       expectedHead: genesis(),
     });
@@ -258,6 +268,18 @@ test("P122 publishes a genuine initial stage in put, presence, CAS order and com
       record: plain(entry.record),
     })),
   );
+  assert.deepEqual(calls[base.physical.newRecords.length], ["presence", {
+    apiVersion: 1,
+    operationId: operationIds("presence", 0),
+    syncedPocketId: "p122",
+    storageRefs: base.physical.newRecords.map((entry) => entry.storageRef),
+  }]);
+  assert.deepEqual(
+    returnedRows.flat().map((row) => row.storageRef),
+    base.physical.newRecords.map((entry) => entry.storageRef),
+  );
+  assert.equal(returnedRows.flat().every((row) => row.present === true), true);
+  assert.equal(calls.filter(([kind]) => kind === "cas").length, 1);
   assert.equal(calls.at(-1)[0], "cas");
   assert.deepEqual(calls.at(-1)[1], {
     apiVersion: 1,
@@ -269,6 +291,66 @@ test("P122 publishes a genuine initial stage in put, presence, CAS order and com
   assert.equal(calls.some(([kind]) => ["read", "init", "get"].includes(kind)), false);
   const next = await successor(c, base);
   assert.ok(next.physical.newRecords.length > 0);
+});
+
+test("P122 snapshots a mutable non-genesis expected Head before factory and remote mutation windows", async () => {
+  for (const mutationWindow of ["factory", "remote"]) {
+    const c = context(),
+      base = await initialStage(c),
+      initialCalls = [];
+    await publisher(c, initialCalls).publishCandidate({
+      stage: base.physical,
+      expectedHead: genesis(),
+    });
+    const next = await successor(c, base, `mutable-${mutationWindow}`),
+      supplied = {
+        schema: HEAD_SCHEMA,
+        revision: 1,
+        sealRef: base.physical.sealStorageRef,
+      },
+      accepted = plain(supplied),
+      calls = [];
+    let casRequest = null,
+      factoryMutated = false;
+    const result = await publisher(
+      c,
+      calls,
+      {
+        presence: (input) => {
+          if (mutationWindow === "remote") {
+            supplied.revision = 99;
+            supplied.sealRef = "redirected-after-presence";
+          }
+          return {
+            rows: input.storageRefs.map((storageRef) => ({ storageRef, present: true })),
+          };
+        },
+        cas: (input) => {
+          casRequest = input;
+          return {
+            ok: true,
+            head: {
+              schema: HEAD_SCHEMA,
+              revision: input.expectedHead.revision + 1,
+              sealRef: input.candidateSealStorageRef,
+            },
+          };
+        },
+      },
+      (kind, index) => {
+        if (mutationWindow === "factory" && !factoryMutated) {
+          factoryMutated = true;
+          supplied.revision = 99;
+          supplied.sealRef = "redirected-by-factory";
+        }
+        return operationIds(kind, index);
+      },
+    ).publishCandidate({ stage: next.physical, expectedHead: supplied });
+    assert.equal(result.outcome, "committed");
+    assert.deepEqual(plain(casRequest.expectedHead), accepted);
+    assert.equal(Object.isFrozen(casRequest.expectedHead), true);
+    assert.notDeepEqual(supplied, accepted);
+  }
 });
 
 test("P122 uses physical Head lineage for non-genesis stages and rejects a logical Seal before I/O", async () => {
@@ -375,8 +457,29 @@ test("P122 presence, put, and presence failures leave the genuine stage incomple
       item.name,
     );
     assert.equal(calls.filter(([kind]) => kind === "cas").length, 0);
+    if (item.name === "missing") {
+      assert.equal(calls.filter(([kind]) => kind === "put").length, base.physical.newRecords.length);
+      assert.equal(calls.filter(([kind]) => kind === "presence").length, 1);
+    } else if (item.name === "put") {
+      assert.equal(calls.filter(([kind]) => kind === "put").length, 1);
+      assert.equal(calls.filter(([kind]) => kind === "presence").length, 0);
+    } else {
+      assert.equal(calls.filter(([kind]) => kind === "put").length, base.physical.newRecords.length);
+      assert.equal(calls.filter(([kind]) => kind === "presence").length, 1);
+    }
     await expectIncomplete(c, base);
   }
+});
+
+test("P122 accepts immutable pre-existing records before normal presence and CAS success", async () => {
+  const c = context(), base = await initialStage(c), calls = [];
+  const result = await publisher(c, calls, {
+    put: () => ({ created: false }),
+  }).publishCandidate({ stage: base.physical, expectedHead: genesis() });
+  assert.equal(result.outcome, "committed");
+  assert.equal(calls.filter(([kind]) => kind === "put").length, base.physical.newRecords.length);
+  assert.equal(calls.filter(([kind]) => kind === "presence").length, 1);
+  assert.equal(calls.filter(([kind]) => kind === "cas").length, 1);
 });
 
 test("P122 maps every definite CAS conflict once and never completes the stage", async () => {
@@ -427,6 +530,7 @@ test("P122 batches genuine large stages at 512 refs after all puts and before on
     expectedRefs = base.physical.newRecords.map((entry) => entry.storageRef);
   assert.equal(calls.slice(0, putCount).every(([kind]) => kind === "put"), true);
   assert.equal(calls.at(-1)[0], "cas");
+  assert.equal(calls.filter(([kind]) => kind === "cas").length, 1);
   assert.ok(presence.every(([, body]) => body.storageRefs.length <= 512));
   assert.deepEqual(
     presence.flatMap(([, body]) => body.storageRefs),
@@ -476,19 +580,51 @@ test("P122 composes with the real P120 object Head service over its transport co
     }).publishCandidate({ stage: base.physical, expectedHead: genesis() });
   assert.equal(result.outcome, "committed");
   assert.deepEqual(
-    transportCalls.map(([route]) => route),
+    transportCalls,
     [
-      ...Array(base.physical.newRecords.length).fill("putOpaqueObject"),
-      "objectPresence",
-      "compareAndSetShadowHead",
+      ...base.physical.newRecords.map((entry, index) => ["putOpaqueObject", {
+        apiVersion: 1,
+        operationId: operationIds("put-object", index),
+        syncedPocketId: "p122",
+        storageRef: entry.storageRef,
+        record: plain(entry.record),
+      }]),
+      ["objectPresence", {
+        apiVersion: 1,
+        operationId: operationIds("presence", 0),
+        syncedPocketId: "p122",
+        storageRefs: base.physical.newRecords.map((entry) => entry.storageRef),
+      }],
+      ["compareAndSetShadowHead", {
+        apiVersion: 1,
+        operationId: operationIds("compare-and-set-head", 0),
+        syncedPocketId: "p122",
+        expectedHead: genesis(),
+        candidateSealStorageRef: base.physical.sealStorageRef,
+      }],
     ],
   );
-  assert.deepEqual(transportCalls.at(-1)[1], {
-    apiVersion: 1,
-    operationId: operationIds("compare-and-set-head", 0),
-    syncedPocketId: "p122",
-    expectedHead: genesis(),
-    candidateSealStorageRef: base.physical.sealStorageRef,
-  });
   assert.equal(calls.length, 0);
+});
+
+test("P122 remains absent from live assets and owner, Save, Sync, and open paths", () => {
+  const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8"),
+    assets = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(
+      (match) => match[1],
+    ),
+    liveSources = assets
+      .filter((asset) => asset.startsWith("js/"))
+      .map((asset) => ({
+        asset,
+        source: fs.readFileSync(path.join(ROOT, asset), "utf8"),
+      }));
+  assert.equal(html.includes("pocket-starling-publication-shadow.js"), false);
+  assert.equal(assets.includes("js/pocket-starling-publication-shadow.js"), false);
+  for (const { asset, source } of liveSources)
+    if (/(owner|save|sync|open)/i.test(asset))
+      assert.equal(
+        source.includes("PocketStarlingPublicationShadow"),
+        false,
+        asset,
+      );
 });

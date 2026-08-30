@@ -65,9 +65,22 @@
       throw publicationError("publication-input-invalid");
     const { storage, head } = dependencies(),
       binding = storage.publicationBinding(input.stage),
-      stage = input.stage,
-      expectedHead = input.expectedHead;
-    if (!head.validHead(expectedHead)) throw publicationError("publication-head-invalid");
+      stage = input.stage;
+    let expectedHead;
+    try {
+      if (!head.validHead(input.expectedHead))
+        throw publicationError("publication-head-invalid");
+      expectedHead = Object.freeze({
+        schema: input.expectedHead.schema,
+        revision: input.expectedHead.revision,
+        sealRef: input.expectedHead.sealRef,
+      });
+      if (!head.validHead(expectedHead))
+        throw publicationError("publication-head-invalid");
+    } catch (error) {
+      if (error && error.code === "publication-head-invalid") throw error;
+      throw publicationError("publication-head-invalid");
+    }
     if (expectedHead.sealRef !== binding.expectedSealStorageRef)
       throw publicationError("publication-head-lineage-mismatch");
     if (
