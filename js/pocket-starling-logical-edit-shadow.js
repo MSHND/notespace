@@ -254,6 +254,55 @@
       : fail("invalid-placement-record");
   }
 
+  async function placementDomain(state, nodeId, record, cycleNode = null) {
+    const seen = new Set([nodeId]);
+    let current = record,
+      ancestryReads = 0;
+    while (true) {
+      const parentId = current.parentId;
+      if (parentId === "root" || parentId === "")
+        return { ok: true, terminal: parentId, ancestryReads };
+      if (parentId === cycleNode) return fail("move-would-cycle");
+      if (seen.has(parentId)) return fail("invalid-parent-chain");
+      seen.add(parentId);
+      const parent = await readPlacement(state, parentId, "unknown-parent");
+      if (!parent.ok) return parent;
+      current = parent.record;
+      ancestryReads += 1;
+    }
+  }
+
+  async function currentNode(state, nodeId, record) {
+    const domain = await placementDomain(state, nodeId, record);
+    if (!domain.ok) return domain;
+    return domain.terminal === ""
+      ? fail("retained-node-not-current")
+      : { ok: true, record, ancestryReads: domain.ancestryReads };
+  }
+
+  async function currentParent(state, parentId, cycleNode = null) {
+    if (parentId === "root") return { ok: true, ancestryReads: 0 };
+    if (parentId === "") return fail("retained-parent-not-current");
+    if (typeof parentId !== "string") return fail("unknown-parent");
+    if (parentId === cycleNode) return fail("move-would-cycle");
+    const parent = await readPlacement(state, parentId, "unknown-parent");
+    if (!parent.ok) return parent;
+    const domain = await placementDomain(
+      state,
+      parentId,
+      parent.record,
+      cycleNode,
+    );
+    if (!domain.ok) return domain;
+    return domain.terminal === ""
+      ? fail("retained-parent-not-current")
+      : {
+          ok: true,
+          record: parent.record,
+          ancestryReads: domain.ancestryReads + 1,
+        };
+  }
+
   async function readChildrenRef(state, parentId) {
     return readTrieValue(
       state,
@@ -670,7 +719,7 @@
       nodeId === "root"
     )
       return fail("invalid-node-id");
-    if (typeof parentId !== "string" || parentId.length === 0)
+    if (typeof parentId !== "string")
       return fail("unknown-parent");
     const payload = state.logical.canonical(input.payload);
     if (!payload.ok) return fail("unsupported-payload-material");
@@ -706,10 +755,8 @@
         return fail("invalid-placement-record");
       return fail("duplicate-node-id");
     }
-    if (parentId !== "root") {
-      const parent = await readPlacement(state, parentId, "unknown-parent");
-      if (!parent.ok) return parent;
-    }
+    const parent = await currentParent(state, parentId);
+    if (!parent.ok) return parent;
     const destinationLocated = await readChildrenRef(state, parentId);
     if (!destinationLocated.ok) return destinationLocated;
     let destination;
@@ -817,23 +864,18 @@
     const moved = await readPlacement(state, nodeId, "unknown-node");
     if (!moved.ok) return moved;
     const oldParentId = moved.record.parentId;
+    if (newParentId === oldParentId || newParentId === nodeId) {
+      const sourceDomain = await currentNode(state, nodeId, moved.record);
+      if (!sourceDomain.ok) return sourceDomain;
+    }
     if (newParentId === oldParentId)
       return fail("same-parent-reorder-not-in-scope");
     if (newParentId === nodeId) return fail("move-would-cycle");
-    if (typeof newParentId !== "string" || newParentId.length === 0)
-      return fail("unknown-parent");
-    let ancestryReads = 0,
-      cursor = newParentId;
-    const ancestors = new Set();
-    while (cursor !== "root") {
-      if (cursor === nodeId) return fail("move-would-cycle");
-      if (ancestors.has(cursor)) return fail("invalid-parent-chain");
-      ancestors.add(cursor);
-      const ancestor = await readPlacement(state, cursor, "unknown-parent");
-      if (!ancestor.ok) return ancestor;
-      ancestryReads += 1;
-      cursor = ancestor.record.parentId;
-    }
+    const destinationDomain = await currentParent(state, newParentId, nodeId);
+    if (!destinationDomain.ok) return destinationDomain;
+    const sourceDomain = await currentNode(state, nodeId, moved.record);
+    if (!sourceDomain.ok) return sourceDomain;
+    const ancestryReads = destinationDomain.ancestryReads;
 
     const sourceLocated = await readChildrenRef(state, oldParentId);
     if (!sourceLocated.ok) return sourceLocated;
@@ -955,6 +997,8 @@
       return fail("invalid-node-id");
     const moved = await readPlacement(state, nodeId, "unknown-node");
     if (!moved.ok) return moved;
+    const sourceDomain = await currentNode(state, nodeId, moved.record);
+    if (!sourceDomain.ok) return sourceDomain;
     const parentId = moved.record.parentId,
       located = await readChildrenRef(state, parentId);
     if (!located.ok) return located;
@@ -1066,6 +1110,17 @@
       return fail("invalid-content-record");
     const priorPayload = state.logical.canonical(record.object.payload);
     if (!priorPayload.ok) return fail("invalid-content-record");
+    const placement = await readPlacement(state, nodeId, "unknown-node");
+    if (!placement.ok) {
+      if (
+        placement.reason === "missing-logical-object" &&
+        priorPayload.bytes === payload.bytes
+      )
+        return Object.freeze({ ok: true, changed: false, reason: "no-change" });
+      return placement;
+    }
+    const sourceDomain = await currentNode(state, nodeId, placement.record);
+    if (!sourceDomain.ok) return sourceDomain;
     if (priorPayload.bytes === payload.bytes)
       return Object.freeze({ ok: true, changed: false, reason: "no-change" });
 
