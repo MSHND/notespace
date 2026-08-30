@@ -16,22 +16,25 @@
     if (!service(input.objectHeadService) || typeof input.operationIdFactory !== "function") throw fail("remote-save-input-invalid");
     const editor = await edit.createEditor({ opened: input.opened, masterKey, context }), publisher = publication.createPublisher({ objectHeadService: input.objectHeadService, operationIdFactory: input.operationIdFactory }), reconciler = publication.createReconciler({ objectHeadService: input.objectHeadService, operationIdFactory: input.operationIdFactory });
     let state = "ready", pending = null;
-    async function savePayload(value) {
+    async function save(value, fields, prepare) {
       if (state !== "ready") throw fail("remote-save-state-invalid");
-      if (!exact(value, ["nodeId", "payload"])) throw fail("remote-save-input-invalid");
-      const prepared = await editor.preparePayloadEdit(value);
+      if (!exact(value, fields)) throw fail("remote-save-input-invalid");
+      const prepared = await editor[prepare](value);
       if (prepared && prepared.outcome === "unchanged") return Object.freeze({ outcome: "unchanged" });
       if (!prepared || prepared.outcome !== "prepared") return prepared;
       try { const result = await publisher.publishCandidate({ stage: prepared.stage, expectedHead: prepared.expectedHead }); state = "terminal"; return result; }
       catch (error) { if (error && error.code === "publication-outcome-unknown") { pending = { stage: prepared.stage, expectedHead: prepared.expectedHead }; state = "ambiguous"; return Object.freeze({ outcome: "ambiguous" }); } state = "terminal"; throw error; }
     }
+    async function savePayload(value) { return save(value, ["nodeId", "payload"], "preparePayloadEdit"); }
+    async function saveMove(value) { return save(value, ["nodeId", "fromIndex", "newParentId", "toIndex"], "prepareMove"); }
+    async function saveReorder(value) { return save(value, ["nodeId", "fromIndex", "toIndex"], "prepareReorder"); }
     async function reconcileAmbiguous() {
       if (state !== "ambiguous" || !pending) throw fail("remote-save-state-invalid");
       const result = await reconciler.reconcileAmbiguousPublication({ stage: pending.stage, expectedHead: pending.expectedHead, masterKey, context });
       if (result.outcome !== "unknown") { state = "terminal"; pending = null; }
       return result;
     }
-    return Object.freeze({ savePayload, reconcileAmbiguous });
+    return Object.freeze({ savePayload, saveMove, saveReorder, reconcileAmbiguous });
   }
   global.PocketStarlingRemoteSaveShadow = Object.freeze({ createTransaction });
 })(typeof window !== "undefined" ? window : globalThis);
