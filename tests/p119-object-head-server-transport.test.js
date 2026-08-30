@@ -40,7 +40,7 @@ function authenticatedCore(options = {}) {
   const heads = new Map(), argumentsSeen = [], reads = []; let calls = 0;
   const objectHeadStore = Object.freeze({
     async putObject(...args) { calls += 1; argumentsSeen.push(["putObject", args]); if (options.throwCode) { const error = new Error("provider SQL sentinel"); error.code = options.throwCode; error.providerCode = "PG-23505"; error.sql = "SELECT provider sentinel"; options.capturedError = error; throw error; } return { ok: true, created: args[1] !== "again" }; },
-    async getObject(...args) { calls += 1; argumentsSeen.push(["getObject", args]); if (options.throwMethod === "get") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; throw error; } return args[1] === "missing" ? null : record; },
+    async getObject(...args) { calls += 1; argumentsSeen.push(["getObject", args]); if (options.throwMethod === "get") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; error.providerCode="PG-23505"; error.sql="SELECT provider sentinel"; options.capturedError=error; throw error; } return args[1] === "missing" ? null : record; },
     async presence(_pocket, refs) { calls += 1; argumentsSeen.push(["presence", [_pocket,refs]]); if (options.throwMethod === "presence") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; throw error; } return refs.map((storageRef) => ({ storageRef, present: true })); },
     async initialiseHead(pocket) { calls += 1; if (!heads.has(pocket)) heads.set(pocket, { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); return heads.get(pocket); },
     async readHead(pocket) { calls += 1; return heads.get(pocket) || null; },
@@ -115,6 +115,16 @@ test("P119h rejects a nonexistent session for every object service method before
     const before=h.calls(); await assert.rejects(h.core[method]({context,body}),(error)=>error.code==="service-session-invalid"); assert.equal(h.calls(),before);
   }
   assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+});
+
+test("P119i GET object returns exact present and absent service results", async () => {
+  const run=async(ref)=>{const h=authenticatedCore(), request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"get",syncedPocketId:h.pocket,storageRef:ref}}; return {h,request,result:await h.core.getOpaqueObject(request)};};
+  const present=await run("proof-ref:v1:seal"); assert.equal(present.h.calls(),1); assert.deepEqual(present.h.argumentsSeen[0],["getObject",[present.h.pocket,"proof-ref:v1:seal"]]); assert.deepEqual(present.result,{status:200,body:{apiVersion:1,ok:true,operationId:"get",syncedPocketId:present.h.pocket,storageRef:"proof-ref:v1:seal",present:true,record:present.h.record},session:null}); assert.equal(present.h.reads.some(([c])=>c==="pockets"),false);
+  const absent=await run("missing"); assert.equal(absent.h.calls(),1); assert.deepEqual(absent.h.argumentsSeen[0],["getObject",[absent.h.pocket,"missing"]]); assert.deepEqual(absent.result,{status:200,body:{apiVersion:1,ok:true,operationId:"get",syncedPocketId:absent.h.pocket,storageRef:"missing",present:false,record:null},session:null}); assert.equal(absent.h.reads.some(([c])=>c==="pockets"),false);
+});
+
+test("P119i GET object maps and redacts request and storage failures", async () => {
+  for (const [code,status,retryable] of [["object-head-store-ref-invalid",400,undefined],["object-head-store-storage-failed",503,true]]) { const options={throwMethod:"get",throwCode:code},h=authenticatedCore(options),request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"get",syncedPocketId:h.pocket,storageRef:h.ref}}; await assert.rejects(h.core.getOpaqueObject(request),(error)=>{const exposed={message:error.message,...error}; return error.status===status&&error.retryable===retryable&&!JSON.stringify(exposed).match(/provider SQL sentinel|PG-23505|SELECT provider sentinel/);}); assert.equal(h.calls(),1); assert.match(options.capturedError.message,/provider SQL sentinel/); assert.equal(options.capturedError.providerCode,"PG-23505"); assert.equal(h.reads.some(([c])=>c==="pockets"),false); }
 });
 
 test("P119h rejects a nonexistent session before every object store call", async () => {
