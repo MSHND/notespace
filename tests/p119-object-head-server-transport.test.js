@@ -9,6 +9,7 @@ const { ROUTES, createHttpAdapter } = require("../sync-service/pocket-sync-http-
 
 const ROOT = path.resolve(__dirname, "..");
 const ORIGIN = "https://sync.pocket.example";
+const GENESIS_HEAD = Object.freeze({ schema: "pocket.starling.head.v1", revision: 0, sealRef: null });
 
 function objectHeadStore() {
   return Object.freeze({
@@ -42,9 +43,9 @@ function authenticatedCore(options = {}) {
     async putObject(...args) { calls += 1; argumentsSeen.push(["putObject", args]); if (options.throwCode) { const error = new Error("provider SQL sentinel"); error.code = options.throwCode; error.providerCode = "PG-23505"; error.sql = "SELECT provider sentinel"; options.capturedError = error; throw error; } return { ok: true, created: args[1] !== "again" }; },
     async getObject(...args) { calls += 1; argumentsSeen.push(["getObject", args]); if (options.throwMethod === "get") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; error.providerCode="PG-23505"; error.sql="SELECT provider sentinel"; options.capturedError=error; throw error; } return args[1] === "missing" ? null : record; },
     async presence(_pocket, refs) { calls += 1; argumentsSeen.push(["presence", [_pocket,refs]]); if (options.throwMethod === "presence") { const error=new Error("provider SQL sentinel"); error.code=options.throwCode; error.providerCode="PG-23505"; error.sql="SELECT provider sentinel"; options.capturedError=error; throw error; } return refs.map((storageRef,index) => ({ storageRef, present: options.mixed ? index % 2 === 0 : true })); },
-    async initialiseHead(pocket) { calls += 1; if (!heads.has(pocket)) heads.set(pocket, { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); return heads.get(pocket); },
-    async readHead(pocket) { calls += 1; return heads.get(pocket) || null; },
-    async compareAndSetHead(pocket, expected, candidate) { calls += 1; const current = heads.get(pocket); if (JSON.stringify(current) !== JSON.stringify(expected)) return { ok: false, reason: "head-conflict" }; const head = { schema: "pocket.starling.head.v1", revision: current.revision + 1, sealRef: candidate }; heads.set(pocket, head); return { ok: true, head }; },
+    async initialiseHead(pocket) { calls += 1; argumentsSeen.push(["initialiseHead", [pocket]]); if (!heads.has(pocket)) heads.set(pocket, GENESIS_HEAD); return heads.get(pocket); },
+    async readHead(pocket) { calls += 1; argumentsSeen.push(["readHead", [pocket]]); return heads.get(pocket) || null; },
+    async compareAndSetHead(pocket, expected, candidate) { calls += 1; argumentsSeen.push(["compareAndSetHead", [pocket, expected, candidate]]); const current = heads.get(pocket); if (JSON.stringify(current) !== JSON.stringify(expected)) return { ok: false, reason: "head-conflict" }; const head = { schema: "pocket.starling.head.v1", revision: current.revision + 1, sealRef: candidate }; heads.set(pocket, head); return { ok: true, head }; },
   });
   const id = "account", sessionId = "session", credentialId = "credential", pocket = "pocket";
   const rows = new Map([[`sessions\0${sessionId}`, { kind:"pocket.sync.service-session",schemaVersion:1,storeVersion:1,sessionId,accountId:id,credentialId,status:"active",createdAt:"2032-01-01T00:00:00.000Z",expiresAt:"2033-01-01T00:00:00.000Z",replacedBy:null }], [`accounts\0${id}`, { kind:"pocket.sync.service-account",schemaVersion:1,storeVersion:1,accountId:id,accountPolicyVersion:1,prfEvaluationInput:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",credentialIds:[credentialId],syncedPocketId:pocket,createdAt:"2032-01-01T00:00:00.000Z" }], [`credentials\0${credentialId}`, { kind:"pocket.sync.service-credential",schemaVersion:1,storeVersion:1,credentialId,accountId:id,credentialVersion:1,status:"active",publicKey:"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",publicKeyAlgorithm:-7,signCount:0,transports:["internal"],backupEligible:true,backedUp:false,createdAt:"2032-01-01T00:00:00.000Z" }]]);
@@ -138,6 +139,26 @@ test("P119k presence maps limit and duplicate request errors with redaction", as
 
 test("P119k presence maps retryable storage failure with redaction", async () => {
   const options={throwMethod:"presence",throwCode:"object-head-store-storage-failed"},h=authenticatedCore(options),refs=["z"],request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"presence",syncedPocketId:h.pocket,storageRefs:refs}}; await assert.rejects(h.core.objectPresence(request),(e)=>{const x={message:e.message,...e};return e.code==="service-storage-failed"&&e.status===503&&e.retryable===true&&!JSON.stringify(x).match(/provider SQL sentinel|PG-23505|SELECT provider sentinel/);});assert.equal(h.calls(),1);assert.deepEqual(h.argumentsSeen[0],["presence",[h.pocket,refs]]);assert.match(options.capturedError.message,/provider SQL sentinel/);assert.equal(options.capturedError.providerCode,"PG-23505");assert.equal(options.capturedError.sql,"SELECT provider sentinel");assert.equal(h.reads.some(([c])=>c==="pockets"),false);
+});
+
+test("P119l rejects all Head methods before delegation for every authority state", async () => {
+  const bodies={initialiseShadowHead:(h)=>({apiVersion:1,operationId:"initialise",syncedPocketId:h.pocket}),readShadowHead:(h)=>({apiVersion:1,operationId:"read",syncedPocketId:h.pocket}),compareAndSetShadowHead:(h)=>({apiVersion:1,operationId:"compare",syncedPocketId:h.pocket,expectedHead:GENESIS_HEAD,candidateSealStorageRef:h.ref})};
+  for (const method of Object.keys(bodies)) for (const [options,sessionId,code,status] of [[{},null,"service-authentication-required",401],[{},"nonexistent-session","service-session-invalid",401],[{boundPocket:"different-pocket"},"session","service-authorisation-failed",403],[{unconfigured:true},"session","service-authorisation-failed",403]]) {
+    const h=authenticatedCore(options), before=h.calls(); await assert.rejects(h.core[method]({context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:sessionId===null?null:h.sessionId===sessionId?h.sessionId:sessionId},body:bodies[method](h)}),(error)=>error.code===code&&error.status===status); assert.equal(h.calls(),before); assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+  }
+});
+
+test("P119l initialises exact frozen genesis idempotently", async () => {
+  const h=authenticatedCore(), request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"initialise",syncedPocketId:h.pocket}}, expected={status:200,body:{apiVersion:1,ok:true,operationId:"initialise",syncedPocketId:h.pocket,head:GENESIS_HEAD},session:null};
+  const first=await h.core.initialiseShadowHead(request); assert.equal(h.calls(),1); assert.deepEqual(h.argumentsSeen[0],["initialiseHead",[h.pocket]]); assert.deepEqual(first,expected); assert.equal(Object.isFrozen(first.body.head),true);
+  const second=await h.core.initialiseShadowHead(request); assert.equal(h.calls(),2); assert.deepEqual(h.argumentsSeen[1],["initialiseHead",[h.pocket]]); assert.deepEqual(second,expected); assert.equal(Object.isFrozen(second.body.head),true); assert.equal(h.reads.some(([collection])=>collection==="pockets"),false);
+});
+
+test("P119l reads exact missing and genesis Heads", async () => {
+  const missing=authenticatedCore(), missingRequest={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:missing.sessionId},body:{apiVersion:1,operationId:"read",syncedPocketId:missing.pocket}}, missingResult=await missing.core.readShadowHead(missingRequest);
+  assert.equal(missing.calls(),1); assert.deepEqual(missing.argumentsSeen[0],["readHead",[missing.pocket]]); assert.deepEqual(missingResult,{status:200,body:{apiVersion:1,ok:true,operationId:"read",syncedPocketId:missing.pocket,head:null},session:null}); assert.equal(missing.reads.some(([collection])=>collection==="pockets"),false);
+  const genesis=authenticatedCore(), request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:genesis.sessionId},body:{apiVersion:1,operationId:"read",syncedPocketId:genesis.pocket}}; await genesis.core.initialiseShadowHead({...request,body:{...request.body,operationId:"initialise"}}); const before=genesis.calls(); const result=await genesis.core.readShadowHead(request);
+  assert.equal(before,1); assert.equal(genesis.calls(),2); assert.deepEqual(genesis.argumentsSeen[1],["readHead",[genesis.pocket]]); assert.equal(genesis.argumentsSeen.filter(([method])=>method==="readHead").length,1); assert.deepEqual(result,{status:200,body:{apiVersion:1,ok:true,operationId:"read",syncedPocketId:genesis.pocket,head:GENESIS_HEAD},session:null}); assert.equal(Object.isFrozen(result.body.head),true); assert.equal(genesis.reads.some(([collection])=>collection==="pockets"),false);
 });
 
 test("P119h rejects a nonexistent session before every object store call", async () => {
