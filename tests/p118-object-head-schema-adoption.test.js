@@ -222,10 +222,9 @@ test("P118 requires both version-one metadata rows and preserves bigint normalis
   await assert.doesNotReject(verifyPocketSyncSchema(schemaPool(fixture)));
 });
 
-test("P118 does not adopt the dormant object/Head store into production paths", () => {
-  const production = [
-    "sync-service/pocket-sync-service-core.js", "sync-service/pocket-sync-http-adapter.js",
-    "sync-service/pocket-sync-server.js", "sync-service/pocket-sync-server-runtime.js", "index.html",
+test("P118 keeps object/Head browser adoption dormant", () => {
+  const browser = [
+    "js/pocket-sync-remote-client.js", "js/pocket-sync-owner-controller.js", "index.html", "sw.js",
   ].map((file) => fs.readFileSync(path.join(ROOT, file), "utf8")).join("\n");
-  assert.doesNotMatch(production, /pocket-sync-object-head-postgres-store|object.?head|\/objects|\/heads/i);
+  assert.doesNotMatch(browser, /pocket-sync-object-head-postgres-store|object.?head|\/objects|\/heads/i);
 });

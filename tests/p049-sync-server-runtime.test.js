@@ -10,6 +10,7 @@ const { Readable } = require("node:stream");
 
 const { createLocalServerConfig, createUnavailableRecoveryProofVerifier } = require("../sync-service/pocket-sync-server-config.js");
 const { verifyPocketSyncSchema } = require("../sync-service/pocket-sync-postgres-schema.js");
+const { ROUTES } = require("../sync-service/pocket-sync-http-adapter.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const RUNTIME_PATH = require.resolve("../sync-service/pocket-sync-server-runtime.js");
@@ -102,10 +103,12 @@ function createPoolClass(state) {
   return class ControlledPool {
     constructor(options) {
       state.options.push(copy(options));
+      state.pools.push(this);
     }
 
     async query(sql) {
       state.preflight.push(sql);
+      if (sql === "SELECT 1") state.events.push("health");
       if (sql.includes("information_schema.columns")) {
         const fixture = validSchemaFixture(); return { rowCount: fixture.columns.length, rows: fixture.columns };
       }
@@ -174,7 +177,7 @@ function createPoolClass(state) {
       return client;
     }
 
-    async end() { state.ends += 1; }
+    async end() { state.ends += 1; state.endPools.push(this); }
   };
 }
 
@@ -234,8 +237,8 @@ function runtimeConfig(recoveryProofVerifier = createUnavailableRecoveryProofVer
   };
 }
 
-async function withRuntime(callback) {
-  const state = { options: [], preflight: [], sql: [], rows: new Map(), connects: 0, releases: 0, ends: 0, listens: [], closes: 0 };
+async function withRuntime(callback, createLocalModules = null) {
+  const state = { options: [], pools: [], endPools: [], events: [], preflight: [], sql: [], rows: new Map(), connects: 0, releases: 0, ends: 0, listens: [], closes: 0 };
   let server;
   const originalLoad = Module._load;
   const cachedRuntime = require.cache[RUNTIME_PATH];
@@ -250,17 +253,20 @@ async function withRuntime(callback) {
     async verifyAuthenticationResponse() { throw new Error("not used"); },
   });
   const helpers = Object.freeze({ decodeCredentialPublicKey() { return new Map([[3, -7]]); }, cose: Object.freeze({ COSEKEYS: Object.freeze({ alg: 3 }) }) });
+  const localModules = createLocalModules ? createLocalModules(state) : Object.create(null);
   Module._load = function patchedLoad(name, parent, isMain) {
     if (name === "pg") return { Pool };
     if (name === "node:https") return { createServer(_tls, handler) { server = new ControlledServer(handler, state); return server; } };
     if (name === "@simplewebauthn/server") return library;
     if (name === "@simplewebauthn/server/helpers") return helpers;
+    if (Object.hasOwn(localModules, name)) return localModules[name];
     return originalLoad.call(this, name, parent, isMain);
   };
   delete require.cache[RUNTIME_PATH];
   delete require.cache[VERIFIER_PATH];
   try {
-    await callback({ createSyncServerRuntime: require(RUNTIME_PATH).createSyncServerRuntime, state, get server() { return server; } });
+    const runtime = require(RUNTIME_PATH);
+    await callback({ createSyncServerApplication: runtime.createSyncServerApplication, createSyncServerRuntime: runtime.createSyncServerRuntime, state, get server() { return server; } });
   } finally {
     Module._load = originalLoad;
     require.cache[RUNTIME_PATH] = cachedRuntime;
@@ -333,6 +339,28 @@ test("P049 composes the real adapter, core, P047 store and P048 verifier through
     await runtime.close();
     assert.equal(state.closes, 1);
     assert.equal(state.ends, 1);
+  });
+});
+
+test("P119o composes one exact Pool through both stores, core and preflight", async () => {
+  await withRuntime(async ({ createSyncServerApplication, state }) => {
+    const recoveryProofVerifier={ async verifyRecoveryProof() { throw new Error("not used"); } }; Object.defineProperty(recoveryProofVerifier,"assertSupported",{value:async()=>{ state.events.push("recovery"); }}); Object.freeze(recoveryProofVerifier); const { tls: _tls, ...applicationConfig }=runtimeConfig(recoveryProofVerifier);
+    const application=createSyncServerApplication(applicationConfig), pool=state.pools[0];
+    assert.equal(state.pools.length,1); assert.deepEqual(state.options,[{connectionString:"postgres://operator:secret@127.0.0.1/pocket"}]); assert.equal(state.legacyFactoryInputs.length,1); assert.equal(state.objectHeadFactoryInputs.length,1); assert.strictEqual(state.legacyFactoryInputs[0].pool,pool); assert.strictEqual(state.objectHeadFactoryInputs[0].pool,pool);
+    assert.equal(state.coreConfigs.length,1); assert.strictEqual(state.coreConfigs[0].store,state.legacyStore); assert.strictEqual(state.coreConfigs[0].objectHeadStore,state.objectHeadStore); assert.notStrictEqual(state.coreConfigs[0].store,state.coreConfigs[0].objectHeadStore);
+    const response=new ControlledResponse(), done=new Promise((resolve)=>response.once("ended",resolve)); application.handle(request(`${SERVICE_ROOT}${ROUTES.readShadowHead}`,{marker:"request-wiring"}),response); await done; assert.equal(response.statusCode,200); assert.equal(state.pools.length,1);
+    await application.preflight(); assert.deepEqual(state.events,["recovery","health","schema"]); assert.deepEqual(state.preflight,["SELECT 1"]); assert.deepEqual(state.schemaPools,[pool]); assert.equal(state.pools.length,1);
+    const first=application.close(), second=application.close(); assert.strictEqual(first,second); await Promise.all([first,second]); assert.equal(state.ends,1); assert.deepEqual(state.endPools,[pool]); assert.equal(state.pools.length,1);
+  }, (state) => {
+    state.legacyFactoryInputs=[]; state.objectHeadFactoryInputs=[]; state.coreConfigs=[]; state.schemaPools=[]; state.legacyStore=Object.freeze({kind:"legacy-store"}); state.objectHeadStore=Object.freeze({kind:"object-head-store"});
+    const core=Object.freeze(Object.fromEntries(Object.keys(ROUTES).map((method)=>[method,async()=>({status:200,body:{apiVersion:1,ok:true},session:null})])));
+    return Object.freeze({
+      "./pocket-sync-postgres-store.js":Object.freeze({createPostgresStore(input) { state.legacyFactoryInputs.push(input); return state.legacyStore; }}),
+      "./pocket-sync-object-head-postgres-store.js":Object.freeze({createObjectHeadPostgresStore(input) { state.objectHeadFactoryInputs.push(input); return state.objectHeadStore; }}),
+      "./pocket-sync-service-core.js":Object.freeze({createServiceCore(config) { state.coreConfigs.push(config); return core; }}),
+      "./pocket-sync-webauthn-verifier.js":Object.freeze({createWebAuthnVerifier() { return Object.freeze({}); }}),
+      "./pocket-sync-postgres-schema.js":Object.freeze({async verifyPocketSyncSchema(pool) { state.schemaPools.push(pool); state.events.push("schema"); }}),
+    });
   });
 });
 
