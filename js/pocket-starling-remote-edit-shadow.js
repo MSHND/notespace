@@ -27,6 +27,8 @@
       typeof head.validHead !== "function" ||
       typeof logical.createBase !== "function" ||
       typeof logical.editPayload !== "function" ||
+      typeof logical.move !== "function" ||
+      typeof logical.reorder !== "function" ||
       typeof storage.stageCandidate !== "function" ||
       typeof storage.publicationBinding !== "function") throw fail("remote-edit-input-invalid");
     return { sync, crypto, head, logical, storage };
@@ -68,14 +70,8 @@
     if (!baseResult || baseResult.ok !== true || !baseResult.base) return baseResult;
     const base = baseResult.base, expectedHead = opened.expectedHead;
 
-    async function preparePayloadEdit(editInput) {
-      if (!exact(editInput, ["nodeId", "payload"])) throw fail("remote-edit-input-invalid");
-      const edited = await logical.editPayload(base, editInput.nodeId, editInput.payload);
-      if (!edited || edited.ok !== true) return edited;
-      if (edited.changed === false) return Object.freeze({ outcome: "unchanged" });
-      if (edited.changed !== true || !edited.candidate) throw fail("remote-edit-input-invalid");
-      const candidate = edited.candidate,
-        stage = await storage.stageCandidate({
+    async function prepareCandidate(candidate) {
+      const stage = await storage.stageCandidate({
           sealRef: candidate.sealRef,
           resolveLogical: candidate.resolveLogical,
           masterKey,
@@ -91,7 +87,33 @@
       return Object.freeze({ outcome: "prepared", expectedHead, stage, binding });
     }
 
-    return Object.freeze({ preparePayloadEdit });
+    async function preparePayloadEdit(editInput) {
+      if (!exact(editInput, ["nodeId", "payload"])) throw fail("remote-edit-input-invalid");
+      const edited = await logical.editPayload(base, editInput.nodeId, editInput.payload);
+      if (!edited || edited.ok !== true) return edited;
+      if (edited.changed === false) return Object.freeze({ outcome: "unchanged" });
+      if (edited.changed !== true || !edited.candidate) throw fail("remote-edit-input-invalid");
+      return prepareCandidate(edited.candidate);
+    }
+
+    async function prepareMove(moveInput) {
+      if (!exact(moveInput, ["nodeId", "fromIndex", "newParentId", "toIndex"])) throw fail("remote-edit-input-invalid");
+      const moved = await logical.move(base, moveInput.nodeId, moveInput.fromIndex, moveInput.newParentId, moveInput.toIndex);
+      if (!moved || moved.ok !== true) return moved;
+      if (!moved.candidate) throw fail("remote-edit-input-invalid");
+      return prepareCandidate(moved.candidate);
+    }
+
+    async function prepareReorder(reorderInput) {
+      if (!exact(reorderInput, ["nodeId", "fromIndex", "toIndex"])) throw fail("remote-edit-input-invalid");
+      const reordered = await logical.reorder(base, reorderInput.nodeId, reorderInput.fromIndex, reorderInput.toIndex);
+      if (!reordered || reordered.ok !== true) return reordered;
+      if (reordered.changed === false && reordered.reason === "no-change") return Object.freeze({ outcome: "unchanged" });
+      if (reordered.changed !== true || !reordered.candidate) throw fail("remote-edit-input-invalid");
+      return prepareCandidate(reordered.candidate);
+    }
+
+    return Object.freeze({ preparePayloadEdit, prepareMove, prepareReorder });
   }
 
   global.PocketStarlingRemoteEditShadow = Object.freeze({ createEditor });
