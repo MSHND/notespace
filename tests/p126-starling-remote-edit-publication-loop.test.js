@@ -110,10 +110,15 @@ async function expectIncomplete(c, stage, key) {
 
 test("P126 definite commit closes the manual remote edit publication loop", async () => {
   const fixture = await setup(), first = await openFresh(fixture, "open-one"), revisionOne = plain(fixture.remote.head), afterOpen = fixture.remote.calls.length,
-    prepared = await prepare(first.reader, first.opened, fixture.key, "n1337", { label: "committed", value: 126 });
+    mutableOpened = { outcome: "opened", head: { ...first.opened.head }, session: first.opened.session },
+    editor = await first.reader.PocketStarlingRemoteEditShadow.createEditor({ opened: mutableOpened, masterKey: fixture.key, context: context() });
+  mutableOpened.head.revision = 99; mutableOpened.head.sealRef = "redirected-before-prepare";
+  const prepared = await editor.preparePayloadEdit({ nodeId: "n1337", payload: { label: "committed", value: 126 } });
+  mutableOpened.head.revision = 100; mutableOpened.head.sealRef = "redirected-after-prepare";
   assert.equal(prepared.outcome, "prepared"); assert.equal(Object.isFrozen(prepared.expectedHead), true);
   assert.deepEqual(plain(prepared.expectedHead), revisionOne); assert.equal(prepared.binding.expectedSealStorageRef, revisionOne.sealRef);
   assert.equal(prepared.binding.candidateSealStorageRef, prepared.stage.sealStorageRef); assert.notEqual(prepared.stage.sealStorageRef, revisionOne.sealRef);
+  assert.notDeepEqual(mutableOpened.head, revisionOne);
   assert.ok(prepared.stage.newRecords.length < 30); assert.ok(prepared.stage.newRecords.length * 20 < fixture.physical.newRecords.length);
   const beforePublish = fixture.remote.calls.length, result = await publisher(first.reader, fixture.remote, "publish-one").publishCandidate({ stage: prepared.stage, expectedHead: prepared.expectedHead });
   assert.deepEqual(plain(result), { outcome: "committed", head: { schema: HEAD_SCHEMA, revision: 2, sealRef: prepared.stage.sealStorageRef } });
@@ -147,6 +152,7 @@ test("P126 conflict preserves material but Head selects the competing candidate"
   assert.equal(committedB.outcome, "committed"); assert.equal(casCalls(fixture.remote, beforeB).length, 1);
   const beforeA = fixture.remote.calls.length, rejectedA = await publisher(a.reader, fixture.remote, "publish-a").publishCandidate({ stage: candidateA.stage, expectedHead: candidateA.expectedHead });
   assert.deepEqual(plain(rejectedA), { outcome: "conflict", reason: "head-conflict" }); assert.equal(casCalls(fixture.remote, beforeA).length, 1);
+  assert.equal(callsSince(fixture.remote, beforeA).some(([route]) => ["readShadowHead", "getOpaqueObject"].includes(route)), false);
   assert.equal(fixture.remote.head.sealRef, candidateB.binding.candidateSealStorageRef); assert.equal(fixture.remote.objects.has(candidateA.stage.sealStorageRef), true);
   await expectIncomplete(a.reader, candidateA.stage, fixture.key);
   const fresh = await openFresh(fixture, "conflict-open"), content = await fresh.opened.session.readContent("n20");
@@ -161,13 +167,19 @@ test("P126 explicit reconciliation observes an ambiguously committed CAS without
     (error) => error && error.code === "publication-outcome-unknown");
   assert.equal(casCalls(fixture.remote, beforePublish).length, 1); assert.equal(callsSince(fixture.remote, beforePublish).some(([route]) => route === "readShadowHead"), false);
   await expectIncomplete(opened.reader, prepared.stage, fixture.key);
-  fixture.remote.casMode = "normal"; const beforeReconcile = fixture.remote.calls.length,
+  fixture.remote.casMode = "normal"; const beforeRejectedReconcile = fixture.remote.calls.length;
+  await assert.rejects(reconciler(opened.reader, fixture.remote, "ambiguous-commit-reject").reconcileAmbiguousPublication({ stage: prepared.stage, expectedHead: prepared.expectedHead, masterKey: fixture.key, context: context(), sealRef: "redirect" }),
+    (error) => error && error.code === "publication-input-invalid");
+  assert.equal(fixture.remote.calls.length, beforeRejectedReconcile);
+  const beforeReconcile = fixture.remote.calls.length,
     reconciled = await reconciler(opened.reader, fixture.remote, "ambiguous-commit-reconcile").reconcileAmbiguousPublication({ stage: prepared.stage, expectedHead: prepared.expectedHead, masterKey: fixture.key, context: context() });
   assert.deepEqual(plain(reconciled), { outcome: "committed", examined: 1 });
   assert.equal(callsSince(fixture.remote, beforeReconcile).every(([route]) => ["readShadowHead", "getOpaqueObject"].includes(route)), true);
   await expectIncomplete(opened.reader, prepared.stage, fixture.key);
   const fresh = await openFresh(fixture, "ambiguous-commit-reopen"), content = await fresh.opened.session.readContent("n20");
   assert.deepEqual(plain(content.payload), { label: "ambiguous committed", value: 3 });
+  assert.equal(casCalls(fixture.remote, beforePublish).length, 1);
+  assert.equal(callsSince(fixture.remote, beforeReconcile).every(([route]) => ["readShadowHead", "getOpaqueObject"].includes(route)), true);
 });
 
 test("P126 explicit reconciliation leaves an ambiguously uncommitted candidate unadopted", async () => {
@@ -184,6 +196,8 @@ test("P126 explicit reconciliation leaves an ambiguously uncommitted candidate u
   await expectIncomplete(opened.reader, prepared.stage, fixture.key);
   const fresh = await openFresh(fixture, "ambiguous-none-reopen"), content = await fresh.opened.session.readContent("n20");
   assert.deepEqual(plain(content.payload), plain(original.payload)); assert.equal(fixture.remote.objects.has(prepared.stage.sealStorageRef), true);
+  assert.deepEqual(plain(fixture.remote.head), plain(prepared.expectedHead)); assert.equal(casCalls(fixture.remote, beforePublish).length, 1);
+  assert.equal(callsSince(fixture.remote, beforeReconcile).every(([route]) => ["readShadowHead", "getOpaqueObject"].includes(route)), true);
 });
 
 test("P126 keeps P125 dormant outside this proof", () => {
