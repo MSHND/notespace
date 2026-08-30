@@ -3,6 +3,7 @@
   "use strict";
 
   const ROOT = "root";
+  const RETAINED_PARENT = "";
   const EMPTY = freezeTrie(false, null, []);
 
   function fail(reason) {
@@ -79,7 +80,12 @@
 
     const membership = new Map();
     for (const [parentId, children] of Object.entries(relation.children)) {
-      if (parentId !== ROOT && !nodeIds.has(parentId)) return fail("unknown-parent");
+      if (
+        parentId !== ROOT &&
+        parentId !== RETAINED_PARENT &&
+        !nodeIds.has(parentId)
+      )
+        return fail("unknown-parent");
       if (!Array.isArray(children)) return fail("invalid-child-sequence");
       for (const nodeId of children) {
         if (!nodeIds.has(nodeId)) return fail("unknown-child");
@@ -92,14 +98,19 @@
       if (!own(relation.parents, nodeId)) return fail("invalid-parent-placement");
       const parentId = relation.parents[nodeId];
       if (typeof parentId !== "string") return fail("invalid-parent-placement");
-      if (parentId !== ROOT && !nodeIds.has(parentId)) return fail("unknown-parent");
+      if (
+        parentId !== ROOT &&
+        parentId !== RETAINED_PARENT &&
+        !nodeIds.has(parentId)
+      )
+        return fail("unknown-parent");
       if (membership.get(nodeId) !== parentId) return fail("placement-membership-mismatch");
     }
 
     for (const nodeId of nodeIds) {
       const seen = new Set([nodeId]);
       let cursor = relation.parents[nodeId];
-      while (cursor !== ROOT) {
+      while (cursor !== ROOT && cursor !== RETAINED_PARENT) {
         if (seen.has(cursor)) return fail("parent-cycle");
         seen.add(cursor);
         cursor = relation.parents[cursor];
@@ -132,8 +143,34 @@
     return model && trieGet(model.children, parentId);
   }
 
-  function parentExists(model, parentId) {
-    return parentId === ROOT || Boolean(getPlacement(model, parentId));
+  function domainForNode(model, nodeId) {
+    const seen = new Set();
+    let cursor = nodeId;
+    while (true) {
+      if (seen.has(cursor)) return null;
+      seen.add(cursor);
+      const record = getPlacement(model, cursor);
+      if (!record || typeof record.parentId !== "string") return null;
+      if (record.parentId === ROOT || record.parentId === RETAINED_PARENT)
+        return record.parentId;
+      cursor = record.parentId;
+    }
+  }
+
+  function sourceAdmission(model, nodeId) {
+    if (!getPlacement(model, nodeId)) return "unknown-node";
+    const domain = domainForNode(model, nodeId);
+    if (domain === RETAINED_PARENT) return "retained-node-not-current";
+    return domain === ROOT ? null : "unknown-node";
+  }
+
+  function parentAdmission(model, parentId) {
+    if (parentId === ROOT) return null;
+    if (parentId === RETAINED_PARENT) return "retained-parent-not-current";
+    if (!getPlacement(model, parentId)) return "unknown-parent";
+    const domain = domainForNode(model, parentId);
+    if (domain === RETAINED_PARENT) return "retained-parent-not-current";
+    return domain === ROOT ? null : "unknown-parent";
   }
 
   function itemAt(root, index) {
@@ -202,7 +239,8 @@
   function insert(model, nodeId, parentId, index) {
     if (!model || !nodeIdIsValid(nodeId)) return fail("invalid-node-id");
     if (getPlacement(model, nodeId)) return fail("duplicate-node-id");
-    if (!parentExists(model, parentId)) return fail("unknown-parent");
+    const parentProblem = parentAdmission(model, parentId);
+    if (parentProblem) return fail(parentProblem);
 
     const sequence = sequenceApi();
     if (!sequence) return fail("sequence-unavailable");
@@ -228,6 +266,8 @@
   function reorder(model, nodeId, fromIndex, toIndex) {
     const record = getPlacement(model, nodeId);
     if (!record) return fail("unknown-node");
+    const sourceProblem = sourceAdmission(model, nodeId);
+    if (sourceProblem) return fail(sourceProblem);
 
     const sequence = sequenceApi();
     if (!sequence) return fail("sequence-unavailable");
@@ -250,7 +290,10 @@
   function move(model, nodeId, fromIndex, newParentId, toIndex) {
     const record = getPlacement(model, nodeId);
     if (!record) return fail("unknown-node");
-    if (!parentExists(model, newParentId)) return fail("unknown-parent");
+    const sourceProblem = sourceAdmission(model, nodeId);
+    if (sourceProblem) return fail(sourceProblem);
+    const parentProblem = parentAdmission(model, newParentId);
+    if (parentProblem) return fail(parentProblem);
     if (newParentId === record.parentId) return reorder(model, nodeId, fromIndex, toIndex);
 
     const sequence = sequenceApi();
@@ -287,6 +330,7 @@
 
   global.PocketStarlingPlacementShadow = Object.freeze({
     ROOT,
+    RETAINED_PARENT,
     build,
     validate,
     materialise,
