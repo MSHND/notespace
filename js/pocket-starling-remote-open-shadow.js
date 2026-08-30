@@ -72,9 +72,12 @@
         masterKey,
         context,
         async resolveStorage(storageRef) {
+          const index = getIndex,
+            operationId = claim("get-object", index);
+          getIndex += 1;
           const response = await objectHeadService.getOpaqueObject({
             apiVersion: API_VERSION,
-            operationId: claim("get-object", getIndex++),
+            operationId,
             syncedPocketId: context.syncedPocketId,
             storageRef,
           });
