@@ -311,6 +311,21 @@
     return Object.freeze({ ok: true, checked: proof.entries.size });
   }
 
+  function publicationBinding(stage) {
+    const proof = stageProofs.get(stage);
+    if (!proof || proof.stage !== stage) throw storageError("publication-stage-invalid");
+    return Object.freeze({
+      syncedPocketId: proof.syncedPocketId,
+      expectedSealStorageRef: proof.base
+        ? proof.base.stage.sealStorageRef
+        : proof.freshBase
+          ? proof.freshBase.acceptedSealStorageRef
+          : null,
+      candidateSealStorageRef: proof.stage.sealStorageRef,
+      newRecordCount: proof.entries.size,
+    });
+  }
+
   async function stageCandidate(input) {
     const { crypto, sync } = dependencies();
     if (
@@ -605,6 +620,7 @@
     validateCapsuleBytes,
     stageCandidate,
     verifyNewRecordPresence,
+    publicationBinding,
     createResolver,
   });
 })(typeof window !== "undefined" ? window : globalThis);
