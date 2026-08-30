@@ -224,7 +224,7 @@ test("P118 requires both version-one metadata rows and preserves bigint normalis
 
 test("P118 keeps object/Head browser adoption dormant", () => {
   const browser = [
-    "js/pocket-sync-remote-client.js", "js/pocket-sync-owner-controller.js", "index.html", "sw.js",
+    "js/pocket-sync-owner-controller.js", "index.html", "sw.js",
   ].map((file) => fs.readFileSync(path.join(ROOT, file), "utf8")).join("\n");
   assert.doesNotMatch(browser, /pocket-sync-object-head-postgres-store|object.?head|\/objects|\/heads/i);
 });

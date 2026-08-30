@@ -135,6 +135,12 @@ test("policy and route map are exact and deeply frozen", () => {
     beginRecovery: "/account/recovery/begin",
     finishRecovery: "/account/recovery/finish",
     rotateRecovery: "/account/recovery/rotate",
+    putOpaqueObject: "/pockets/objects/put",
+    getOpaqueObject: "/pockets/objects/get",
+    objectPresence: "/pockets/objects/presence",
+    initialiseShadowHead: "/pockets/head/initialise",
+    readShadowHead: "/pockets/head/read",
+    compareAndSetShadowHead: "/pockets/head/compare-and-set",
   });
   assert.equal(Object.isFrozen(api.POLICY), true);
   assert.equal(Object.isFrozen(api.ROUTES), true);
@@ -185,6 +191,14 @@ test("browser transport and injected services enforce exact method surfaces", ()
   assert.throws(() => api.createContentService({
     transport: { async request() {}, extra() {} },
   }), remoteErrorCode("remote-transport-invalid"));
+});
+
+test("P120 validates dormant object Head requests, responses and conflicts exactly once", async () => {
+  const { api }=loadProduction(), digest=Buffer.alloc(32,7).toString("base64url"), nonce=Buffer.alloc(12,8).toString("base64url"), ciphertext=Buffer.alloc(16,9).toString("base64url"), ref=`pocket.sync.starling-object.reference.v1:sha256:${digest}`, record={format:"pocket.sync.starling-object.opaque",version:1,algorithm:"AES-GCM-256",nonce,ciphertext}, head={schema:"pocket.starling.head.v1",revision:0,sealRef:null}, calls=[];
+  const service=api.createObjectHeadService({transport:validTransport(async(route,body)=>{calls.push([route,body]); if(route==="putOpaqueObject") return {status:200,body:{apiVersion:1,ok:true,operationId:body.operationId,syncedPocketId:body.syncedPocketId,storageRef:body.storageRef,created:true}}; if(route==="getOpaqueObject") return {status:200,body:{apiVersion:1,ok:true,operationId:body.operationId,syncedPocketId:body.syncedPocketId,storageRef:body.storageRef,present:true,record}}; if(route==="objectPresence") return {status:200,body:{apiVersion:1,ok:true,operationId:body.operationId,syncedPocketId:body.syncedPocketId,rows:body.storageRefs.map((storageRef)=>({storageRef,present:true}))}}; if(route==="initialiseShadowHead") return {status:200,body:{apiVersion:1,ok:true,operationId:body.operationId,syncedPocketId:body.syncedPocketId,head}}; return {status:409,body:{apiVersion:1,ok:false,operationId:body.operationId,syncedPocketId:body.syncedPocketId,reason:"head-conflict"}};})});
+  assert.deepEqual(Object.keys(service),["putOpaqueObject","getOpaqueObject","objectPresence","initialiseShadowHead","readShadowHead","compareAndSetShadowHead"]); const base={apiVersion:1,operationId:"operation",syncedPocketId:"pocket"};
+  assert.equal((await service.putOpaqueObject({...base,storageRef:ref,record})).created,true); assert.deepEqual(plain((await service.getOpaqueObject({...base,storageRef:ref})).record),record); assert.deepEqual(plain((await service.objectPresence({...base,storageRefs:[ref]})).rows),[{storageRef:ref,present:true}]); assert.deepEqual(plain((await service.initialiseShadowHead(base)).head),head); assert.equal((await service.compareAndSetShadowHead({...base,expectedHead:head,candidateSealStorageRef:ref})).reason,"head-conflict"); assert.deepEqual(calls.map(([route])=>route),["putOpaqueObject","getOpaqueObject","objectPresence","initialiseShadowHead","compareAndSetShadowHead"]);
+  await assert.rejects(service.getOpaqueObject({...base,storageRef:"bad"}),remoteErrorCode("remote-request-invalid"));
 });
 
 test("fetch uses the exact same-origin POST policy without identifiers in the path", async () => {

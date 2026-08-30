@@ -42,6 +42,12 @@ persisting session state, retrying work, or changing a Pocket owner.
     beginRecovery: "/account/recovery/begin",
     finishRecovery: "/account/recovery/finish",
     rotateRecovery: "/account/recovery/rotate",
+    putOpaqueObject: "/pockets/objects/put",
+    getOpaqueObject: "/pockets/objects/get",
+    objectPresence: "/pockets/objects/presence",
+    initialiseShadowHead: "/pockets/head/initialise",
+    readShadowHead: "/pockets/head/read",
+    compareAndSetShadowHead: "/pockets/head/compare-and-set",
   });
 
   const IDENTIFIER_LIMIT = 160;
@@ -129,10 +135,10 @@ persisting session state, retrying work, or changing a Pocket owner.
       throw remoteError("remote-route-invalid");
     }
     return Object.freeze({
-      request: routeName === "conditionalUpload"
+      request: ["conditionalUpload", "putOpaqueObject"].includes(routeName)
         ? POLICY.contentJsonLimitBytes
         : POLICY.smallJsonLimitBytes,
-      response: routeName === "downloadEncryptedRecord"
+      response: ["downloadEncryptedRecord", "getOpaqueObject"].includes(routeName)
         ? POLICY.contentJsonLimitBytes
         : POLICY.smallJsonLimitBytes,
       statuses: [
@@ -140,7 +146,7 @@ persisting session state, retrying work, or changing a Pocket owner.
         "addEnvelope",
         "revokeEnvelope",
         "initialiseRecovery",
-        "rotateRecovery",
+        "rotateRecovery", "compareAndSetShadowHead",
       ].includes(routeName) ? Object.freeze([200, 409]) : Object.freeze([200]),
     });
   }
@@ -1320,6 +1326,57 @@ persisting session state, retrying work, or changing a Pocket owner.
     return Object.freeze(service);
   }
 
+  function validateObjectRecord(input, code = "remote-request-invalid") {
+    const value = exactObject(input, ["format", "version", "algorithm", "nonce", "ciphertext"], ["format", "version", "algorithm", "nonce", "ciphertext"], code);
+    if (value.format !== "pocket.sync.starling-object.opaque" || value.version !== 1 || value.algorithm !== "AES-GCM-256" || canonicalBase64urlByteLength(value.nonce) !== 12 || canonicalBase64urlByteLength(value.ciphertext) < 16) throw remoteError(code);
+    return frozen(value);
+  }
+
+  function validateObjectRef(value, code = "remote-request-invalid") {
+    const prefix = "pocket.sync.starling-object.reference.v1:sha256:";
+    if (typeof value !== "string" || !value.startsWith(prefix) || canonicalBase64urlByteLength(value.slice(prefix.length)) !== 32) throw remoteError(code);
+    return value;
+  }
+
+  function validateShadowHead(input, code = "remote-request-invalid") {
+    const value = exactObject(input, ["schema", "revision", "sealRef"], ["schema", "revision", "sealRef"], code);
+    if (value.schema !== "pocket.starling.head.v1" || !Number.isSafeInteger(value.revision) || value.revision < 0 || (value.revision === 0 && value.sealRef !== null) || (value.revision > 0 && typeof value.sealRef !== "string")) throw remoteError(code);
+    if (value.revision > 0) validateObjectRef(value.sealRef, code);
+    return frozen(value);
+  }
+
+  function validateObjectHeadRequest(input, fields, code = "remote-request-invalid") {
+    const value = exactObject(input, fields, fields, code);
+    if (value.apiVersion !== POLICY.apiVersion) throw remoteError(code);
+    return value;
+  }
+
+  function createObjectHeadService({ transport } = {}) {
+    const remote = validateTransport(transport);
+    async function putOpaqueObject(input) {
+      const value=validateObjectHeadRequest(input,["apiVersion","operationId","syncedPocketId","storageRef","record"]), request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId),storageRef:validateObjectRef(value.storageRef),record:validateObjectRecord(value.record)}), result=validateTransportResult(await callTransport(remote,"putOpaqueObject",request),[200]), body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","storageRef","created"],["apiVersion","ok","operationId","syncedPocketId","storageRef","created"]);
+      if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || body.storageRef!==request.storageRef || typeof body.created!=="boolean") throw remoteError("remote-response-invalid"); return frozen(body);
+    }
+    async function getOpaqueObject(input) {
+      const value=validateObjectHeadRequest(input,["apiVersion","operationId","syncedPocketId","storageRef"]), request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId),storageRef:validateObjectRef(value.storageRef)}), result=validateTransportResult(await callTransport(remote,"getOpaqueObject",request),[200]), body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","storageRef","present","record"],["apiVersion","ok","operationId","syncedPocketId","storageRef","present","record"]);
+      if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || body.storageRef!==request.storageRef || typeof body.present!=="boolean" || (body.present ? body.record===null : body.record!==null)) throw remoteError("remote-response-invalid"); return frozen({...body,record:body.present?validateObjectRecord(body.record,"remote-response-invalid"):null});
+    }
+    async function objectPresence(input) {
+      const value=validateObjectHeadRequest(input,["apiVersion","operationId","syncedPocketId","storageRefs"]); if (!Array.isArray(value.storageRefs) || value.storageRefs.length>512) throw remoteError("remote-request-invalid"); const refs=value.storageRefs.map((ref)=>validateObjectRef(ref)); if (new Set(refs).size!==refs.length) throw remoteError("remote-request-invalid"); const request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId),storageRefs:refs}), result=validateTransportResult(await callTransport(remote,"objectPresence",request),[200]), body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","rows"],["apiVersion","ok","operationId","syncedPocketId","rows"]);
+      if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || !Array.isArray(body.rows) || body.rows.length!==refs.length) throw remoteError("remote-response-invalid"); const rows=body.rows.map((row,index)=>{ const item=exactObject(row,["storageRef","present"],["storageRef","present"]); if (item.storageRef!==refs[index] || typeof item.present!=="boolean") throw remoteError("remote-response-invalid"); return frozen(item); }); return frozen({...body,rows});
+    }
+    async function headCall(route,input,allowNull=false) {
+      const value=validateObjectHeadRequest(input,["apiVersion","operationId","syncedPocketId"]), request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId)}), result=validateTransportResult(await callTransport(remote,route,request),[200]), body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","head"],["apiVersion","ok","operationId","syncedPocketId","head"]);
+      if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || (!allowNull && body.head===null)) throw remoteError("remote-response-invalid"); return frozen({...body,head:body.head===null?null:validateShadowHead(body.head,"remote-response-invalid")});
+    }
+    async function compareAndSetShadowHead(input) {
+      const value=validateObjectHeadRequest(input,["apiVersion","operationId","syncedPocketId","expectedHead","candidateSealStorageRef"]), request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId),expectedHead:validateShadowHead(value.expectedHead),candidateSealStorageRef:validateObjectRef(value.candidateSealStorageRef)}), result=validateTransportResult(await callTransport(remote,"compareAndSetShadowHead",request),[200,409]);
+      if (result.status===409) { const body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","reason"],["apiVersion","ok","operationId","syncedPocketId","reason"]); if (body.apiVersion!==1 || body.ok!==false || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || !["head-conflict","candidate-object-missing","head-revision-exhausted"].includes(body.reason)) throw remoteError("remote-response-invalid"); return frozen(body); }
+      const body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","head"],["apiVersion","ok","operationId","syncedPocketId","head"]), head=validateShadowHead(body.head,"remote-response-invalid"); if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || head.revision!==request.expectedHead.revision+1 || head.sealRef!==request.candidateSealStorageRef) throw remoteError("remote-response-invalid"); return frozen({...body,head});
+    }
+    return Object.freeze({putOpaqueObject,getOpaqueObject,objectPresence,initialiseShadowHead:(input)=>headCall("initialiseShadowHead",input),readShadowHead:(input)=>headCall("readShadowHead",input,true),compareAndSetShadowHead});
+  }
+
   function createPocketDiscoveryService({ transport } = {}) {
     const remote = validateTransport(transport);
     return Object.freeze({
@@ -1361,6 +1418,7 @@ persisting session state, retrying work, or changing a Pocket owner.
     createBrowserJsonTransport,
     createAccountService,
     createContentService,
+    createObjectHeadService,
     createPocketDiscoveryService,
     createEnvelopeService,
     createRecoveryService,
