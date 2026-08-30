@@ -60,6 +60,17 @@
     return value;
   }
 
+  function requireReconciliationService(value) {
+    if (
+      !value ||
+      typeof value !== "object" ||
+      typeof value.readShadowHead !== "function" ||
+      typeof value.getOpaqueObject !== "function"
+    )
+      throw publicationError("publication-input-invalid");
+    return value;
+  }
+
   function preflight(input, operationIdFactory) {
     if (!exact(input, ["stage", "expectedHead"]))
       throw publicationError("publication-input-invalid");
@@ -139,6 +150,85 @@
     )
       return Object.freeze({ kind: result.reason });
     throw publicationError("publication-outcome-unknown");
+  }
+
+  function reconciliationDependencies() {
+    const storage = global.PocketStarlingStorageShadow,
+      head = global.PocketStarlingHeadShadow,
+      crypto = global.PocketStarlingCryptoShadow,
+      sync = global.PocketSyncCrypto;
+    if (
+      !storage ||
+      !head ||
+      !crypto ||
+      !sync ||
+      typeof storage.publicationBinding !== "function" ||
+      typeof storage.validateCapsuleBytes !== "function" ||
+      typeof head.validHead !== "function" ||
+      !head.OUTCOME ||
+      typeof crypto.openObject !== "function" ||
+      typeof crypto.validateContext !== "function" ||
+      typeof sync.validateNonExtractableAesKey !== "function"
+    )
+      throw publicationError("publication-input-invalid");
+    return { storage, head, crypto, sync };
+  }
+
+  function reconciliationResult(outcome, examined = 0) {
+    return Object.freeze({ outcome, examined });
+  }
+
+  function reconciliationPreflight(input, operationIdFactory) {
+    if (!exact(input, ["stage", "expectedHead", "masterKey", "context"]))
+      throw publicationError("publication-input-invalid");
+    const { storage, head, crypto, sync } = reconciliationDependencies(),
+      binding = storage.publicationBinding(input.stage);
+    let expectedHead, masterKey, context;
+    try {
+      if (!head.validHead(input.expectedHead))
+        throw publicationError("publication-head-invalid");
+      expectedHead = Object.freeze({
+        schema: input.expectedHead.schema,
+        revision: input.expectedHead.revision,
+        sealRef: input.expectedHead.sealRef,
+      });
+      if (!head.validHead(expectedHead))
+        throw publicationError("publication-head-invalid");
+      masterKey = sync.validateNonExtractableAesKey(input.masterKey);
+      const suppliedContext = crypto.validateContext(input.context);
+      context = Object.freeze({ syncedPocketId: suppliedContext.syncedPocketId });
+    } catch (error) {
+      if (error && error.code === "publication-head-invalid") throw error;
+      throw publicationError("publication-input-invalid");
+    }
+    if (expectedHead.sealRef !== binding.expectedSealStorageRef)
+      throw publicationError("publication-head-lineage-mismatch");
+    if (context.syncedPocketId !== binding.syncedPocketId)
+      throw publicationError("publication-input-invalid");
+    const seen = new Set();
+    function claim(kind, index) {
+      let value;
+      try {
+        value = operationIdFactory(kind, index);
+      } catch (_error) {
+        throw publicationError("publication-operation-id-invalid");
+      }
+      value = operationId(value);
+      if (seen.has(value)) throw publicationError("publication-operation-id-invalid");
+      seen.add(value);
+      return value;
+    }
+    return Object.freeze({
+      storage,
+      head,
+      crypto,
+      binding,
+      expectedHead,
+      candidateSealStorageRef: binding.candidateSealStorageRef,
+      masterKey,
+      context,
+      claim,
+    });
   }
 
   function createPublisher({ objectHeadService, operationIdFactory } = {}) {
@@ -221,5 +311,99 @@
     return Object.freeze({ publishCandidate });
   }
 
-  global.PocketStarlingPublicationShadow = Object.freeze({ createPublisher });
+  function createReconciler({ objectHeadService, operationIdFactory } = {}) {
+    const service = requireReconciliationService(objectHeadService);
+    if (typeof operationIdFactory !== "function")
+      throw publicationError("publication-input-invalid");
+
+    async function reconcileAmbiguousPublication(input) {
+      const prepared = reconciliationPreflight(input, operationIdFactory),
+        outcomes = prepared.head.OUTCOME;
+      let current;
+      try {
+        const response = await service.readShadowHead({
+          apiVersion: API_VERSION,
+          operationId: prepared.claim("read-head", 0),
+          syncedPocketId: prepared.binding.syncedPocketId,
+        });
+        if (!response || !prepared.head.validHead(response.head))
+          return reconciliationResult(outcomes.UNKNOWN);
+        current = Object.freeze({
+          schema: response.head.schema,
+          revision: response.head.revision,
+          sealRef: response.head.sealRef,
+        });
+      } catch (_error) {
+        return reconciliationResult(outcomes.UNKNOWN);
+      }
+      if (
+        current.revision === prepared.expectedHead.revision &&
+        current.sealRef === prepared.expectedHead.sealRef
+      )
+        return reconciliationResult(outcomes.NOT_COMMITTED);
+      if (current.revision <= prepared.expectedHead.revision)
+        return reconciliationResult(outcomes.UNKNOWN);
+
+      const delta = current.revision - prepared.expectedHead.revision;
+      let ref = current.sealRef,
+        candidateDepth = -1;
+      const seen = new Set();
+      for (let depth = 0; depth < delta; depth += 1) {
+        if (seen.has(ref)) return reconciliationResult(outcomes.UNKNOWN, depth);
+        seen.add(ref);
+        let capsule;
+        try {
+          const response = await service.getOpaqueObject({
+            apiVersion: API_VERSION,
+            operationId: prepared.claim("get-seal", depth),
+            syncedPocketId: prepared.binding.syncedPocketId,
+            storageRef: ref,
+          });
+          if (!response || response.present !== true || !response.record)
+            return reconciliationResult(outcomes.UNKNOWN, depth + 1);
+          capsule = prepared.storage.validateCapsuleBytes(
+            await prepared.crypto.openObject(
+              response.record,
+              ref,
+              prepared.masterKey,
+              prepared.context,
+            ),
+          );
+        } catch (_error) {
+          return reconciliationResult(outcomes.UNKNOWN, depth + 1);
+        }
+        if (capsule.logicalKind !== "candidate-seal")
+          return reconciliationResult(outcomes.UNKNOWN, depth + 1);
+        if (ref === prepared.candidateSealStorageRef) candidateDepth = depth;
+        const previousLogicalRef = capsule.object.previousSealRef;
+        if (previousLogicalRef === null) ref = null;
+        else {
+          const link = capsule.links.find(
+            (entry) => entry.logicalRef === previousLogicalRef,
+          );
+          if (!link) return reconciliationResult(outcomes.UNKNOWN, depth + 1);
+          ref = link.storageRef;
+        }
+        if (depth + 1 < delta && (typeof ref !== "string" || ref.length === 0))
+          return reconciliationResult(outcomes.UNKNOWN, depth + 1);
+      }
+      if (ref !== prepared.expectedHead.sealRef)
+        return reconciliationResult(outcomes.UNKNOWN, delta);
+      if (candidateDepth === delta - 1)
+        return reconciliationResult(
+          delta === 1 ? outcomes.COMMITTED : outcomes.COMMITTED_AND_SUPERSEDED,
+          delta,
+        );
+      if (candidateDepth !== -1)
+        return reconciliationResult(outcomes.UNKNOWN, delta);
+      return reconciliationResult(outcomes.CONFLICT, delta);
+    }
+
+    return Object.freeze({ reconcileAmbiguousPublication });
+  }
+
+  global.PocketStarlingPublicationShadow = Object.freeze({
+    createPublisher,
+    createReconciler,
+  });
 })(typeof window !== "undefined" ? window : globalThis);
