@@ -204,6 +204,33 @@ test("P124c failed lazy ID claim preserves index in same session", async () => {
   await result.session.readContent("n20"); assert.equal(calls[before][1].operationId, "get-object-2");
 });
 
+test("P124e lazy operation ID failures stay local and preserve the GET index", async () => {
+  for (const [name, failClaim] of [
+    ["throw", () => { throw new Error("factory"); }],
+    ["invalid", () => " "],
+    ["duplicate", () => "get-object-1"],
+  ]) {
+    const { stage, remote } = await publishedFixture(), calls = [];
+    let fail = true;
+    const result = await openRemote(runtime(), stage, remote, calls, { factory(kind, index) {
+      if (kind === "get-object" && index === 2 && fail) {
+        fail = false;
+        return failClaim();
+      }
+      return operationId(kind, index);
+    } });
+    assert.deepEqual(calls.map(([, body]) => body.operationId), ["read-head-0", "get-object-0", "get-object-1"], name);
+    const before = calls.length;
+    await assert.rejects(result.session.readContent("n20"),
+      (error) => error && error.code === "remote-open-operation-id-invalid", name);
+    assert.equal(calls.length, before, `${name} sent a network GET`);
+    const content = await result.session.readContent("n20");
+    assert.deepEqual(plain(content.payload), { label: "Node 20", value: 20 }, name);
+    assert.equal(calls[before][0], "getOpaqueObject", name);
+    assert.equal(calls[before][1].operationId, "get-object-2", name);
+  }
+});
+
 test("P124c attempted remote GET consumes index", async () => {
   const { stage, remote } = await publishedFixture(), calls = []; let fail = true;
   const result = await openRemote(runtime(), stage, remote, calls, { hooks: { before(route, body) {
@@ -218,12 +245,13 @@ test("P124c attempted remote GET consumes index", async () => {
 test("P124c context and Head authority survive mutation", async () => {
   const { stage, remote } = await publishedFixture(), reader = runtime(), calls = [], supplied = context(),
     originalSeal = remote.head.sealRef, mutableHead = { ...remote.head };
-  let factoryMutated = false, transportMutated = false;
+  let factoryMutated = false, transportMutated = false, headMutatedAtGetBoundary = false;
   const service = reader.PocketSyncRemoteClient.createObjectHeadService({ transport: { async request(route, body) {
     calls.push([route, plain(body)]);
-    if (route === "readShadowHead") {
-      setTimeout(() => { mutableHead.sealRef = "redirected"; }, 0);
-      return { status: 200, body: { ...responseBase(body), head: mutableHead } };
+    if (route === "readShadowHead") return { status: 200, body: { ...responseBase(body), head: mutableHead } };
+    if (route === "getOpaqueObject" && !headMutatedAtGetBoundary) {
+      headMutatedAtGetBoundary = true;
+      mutableHead.sealRef = "redirected";
     }
     if (!transportMutated) { transportMutated = true; supplied.syncedPocketId = "transport-redirect"; }
     const record = remote.objects.get(body.storageRef);
@@ -234,9 +262,30 @@ test("P124c context and Head authority survive mutation", async () => {
       return operationId(kind, index);
     },
   }), result = await opener.openRemote({ masterKey: stage.key, context: supplied });
-  await new Promise((resolve) => setTimeout(resolve, 0)); await result.session.readContent("n20");
+  assert.equal(factoryMutated, true); assert.equal(transportMutated, true);
+  assert.equal(headMutatedAtGetBoundary, true); assert.equal(mutableHead.sealRef, "redirected");
+  assert.equal(calls[1][0], "getOpaqueObject"); assert.equal(calls[1][1].storageRef, originalSeal);
+  assert.equal(result.head.sealRef, originalSeal); assert.equal(Object.isFrozen(result.head), true);
+  await result.session.readContent("n20");
+  assert.ok(calls.length > 3);
   assert.equal(calls.every(([, body]) => body.syncedPocketId === "p124"), true);
-  assert.equal(calls[1][1].storageRef, originalSeal); assert.equal(result.head.sealRef, originalSeal);
+});
+
+test("P124e operation IDs are unique across Head and all object GETs", async () => {
+  const { stage, remote } = await publishedFixture(2000), calls = [],
+    result = await openRemote(runtime(), stage, remote, calls);
+  await result.session.readContent("n1337");
+  await result.session.readPlacement("n20");
+  await result.session.readContent("n777");
+  const bodies = calls.map(([, body]) => body), ids = bodies.map((body) => body.operationId),
+    getIds = calls.filter(([route]) => route === "getOpaqueObject").map(([, body]) => body.operationId);
+  assert.ok(getIds.length > 2);
+  for (const id of ids) {
+    assert.equal(typeof id, "string"); assert.ok(id.length > 0 && id.length <= 160); assert.equal(id, id.trim());
+  }
+  assert.equal(new Set(ids).size, ids.length);
+  assert.deepEqual(ids.slice(0, 3), ["read-head-0", "get-object-0", "get-object-1"]);
+  assert.deepEqual(getIds, getIds.map((_, index) => `get-object-${index}`));
 });
 
 test("P124c old unadopted Seal cannot override remote Head", async () => {
