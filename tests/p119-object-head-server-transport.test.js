@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { createServiceCore } = require("../sync-service/pocket-sync-service-core.js");
-const { ROUTES, createHttpAdapter } = require("../sync-service/pocket-sync-http-adapter.js");
+const { POLICY, ROUTES, createHttpAdapter } = require("../sync-service/pocket-sync-http-adapter.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const ORIGIN = "https://sync.pocket.example";
@@ -53,6 +53,17 @@ function authenticatedCore(options = {}) {
   if (options.boundPocket) rows.get(`accounts\0${id}`).syncedPocketId = options.boundPocket;
   const generic = Object.freeze({ async transact(_mode, fn) { return fn(Object.freeze({ async get(collection,key) { reads.push([collection,key]); return rows.get(`${collection}\0${key}`) || null; }, async insert(){},async replace(){},async remove(){} })); } });
   return { core:createServiceCore(coreConfig({ store:generic, objectHeadStore })), sessionId, pocket, ref, record, calls:()=>calls, argumentsSeen, reads, head:(syncedPocketId)=>heads.get(syncedPocketId) || null };
+}
+
+function objectHeadAdapter(resultFor = (_method, input) => ({ status: 200, body: { apiVersion: 1, ok: true, marker: input.body.marker }, session: null })) {
+  const calls=[];
+  const core=Object.fromEntries(Object.keys(ROUTES).map((method)=>[method,async(input)=>{ calls.push({method,input}); return resultFor(method,input); }]));
+  return { adapter:createHttpAdapter({core,trustedOrigin:ORIGIN,serviceRoot:"/pocket-sync/v1"}), calls };
+}
+
+function objectHeadRequest(route, body, overrides = {}) {
+  const headers=new Headers({Origin:ORIGIN,"Sec-Fetch-Site":"same-origin","Content-Type":"application/json",Cookie:"__Host-pocket-sync-session=session-id",...overrides.headers});
+  return new Request(`${ORIGIN}/pocket-sync/v1${ROUTES[route]}${overrides.query || ""}`,{method:"POST",headers,body:overrides.body===undefined?JSON.stringify(body):overrides.body});
 }
 
 test("P119b executes authenticated object and Head delegation without reading Pocket", async () => {
@@ -178,6 +189,39 @@ test("P119m preserves exact CAS non-success results", async () => {
 
 test("P119m maps and redacts every CAS store failure", async () => {
   for (const [throwCasCode,throwCasUnknown,code,status,retryable] of [["object-head-store-head-invalid",false,"service-request-invalid",400,undefined],["object-head-store-ref-invalid",false,"service-request-invalid",400,undefined],["object-head-store-state-invalid",false,"service-state-invalid",500,undefined],["object-head-store-storage-failed",false,"service-storage-failed",503,true],[undefined,true,"service-storage-failed",503,true]]) { const options={throwCasCode,throwCasUnknown},h=authenticatedCore(options),candidate="proof-ref:v1:failure",request={context:{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:h.sessionId},body:{apiVersion:1,operationId:"cas-failure",syncedPocketId:h.pocket,expectedHead:GENESIS_HEAD,candidateSealStorageRef:candidate}}; await assert.rejects(h.core.compareAndSetShadowHead(request),(error)=>{const exposed={message:error.message,...error}; return error.code===code&&error.status===status&&error.retryable===retryable&&!JSON.stringify(exposed).match(/provider SQL sentinel|PG-23505|SELECT provider sentinel/);}); assert.equal(h.calls(),1); assert.deepEqual(h.argumentsSeen[0],["compareAndSetHead",[h.pocket,GENESIS_HEAD,candidate]]); assert.match(options.capturedError.message,/provider SQL sentinel/); assert.equal(options.capturedError.providerCode,"PG-23505"); assert.equal(options.capturedError.sql,"SELECT provider sentinel"); assert.equal(h.reads.some(([collection])=>collection==="pockets"),false); }
+});
+
+test("P119n dispatches every object Head route once with exact cookie context", async () => {
+  const methods=["putOpaqueObject","getOpaqueObject","objectPresence","initialiseShadowHead","readShadowHead","compareAndSetShadowHead"];
+  for (const method of methods) { const h=objectHeadAdapter(), body={marker:"P119n-"+method}, request=objectHeadRequest(method,body), response=await h.adapter.handle(request); assert.equal(request.headers.get("Authorization"),null); assert.equal(new URL(request.url).search,""); assert.deepEqual(h.calls.map(({method:called})=>called),[method]); assert.equal(h.calls.filter(({method:called})=>called!==method).length,0); assert.deepEqual(h.calls[0].input.body,body); assert.deepEqual(h.calls[0].input.context,{method:"POST",origin:ORIGIN,fetchSite:"same-origin",contentType:"application/json",sessionId:"session-id"}); assert.equal(response.status,200); assert.equal(response.headers.get("Content-Type"),"application/json; charset=utf-8"); assert.equal(response.headers.get("Cache-Control"),"no-store"); assert.equal(response.headers.get("X-Content-Type-Options"),"nosniff"); assert.deepEqual(await response.json(),{apiVersion:1,ok:true,marker:body.marker}); }
+});
+
+test("P119n fails closed before dispatch for new-route request security", async () => {
+  const methods=["putOpaqueObject","getOpaqueObject","objectPresence","initialiseShadowHead","readShadowHead","compareAndSetShadowHead"], safe=(reason)=>({apiVersion:1,ok:false,reason});
+  for (const method of methods) { const h=objectHeadAdapter(), query=await h.adapter.handle(objectHeadRequest(method,{marker:method},{query:"?smuggle=1"})); assert.equal(query.status,404); assert.deepEqual(await query.json(),safe("http-route-rejected")); assert.equal(h.calls.length,0); const authorised=await h.adapter.handle(objectHeadRequest(method,{marker:method},{headers:{Authorization:"Bearer smuggle"}})); assert.equal(authorised.status,400); assert.deepEqual(await authorised.json(),safe("http-authorization-rejected")); assert.equal(h.calls.length,0); }
+  for (const [route,headers] of [["putOpaqueObject",{Origin:"https://other.example"}],["readShadowHead",{"Sec-Fetch-Site":"cross-site"}]]) { const h=objectHeadAdapter(), response=await h.adapter.handle(objectHeadRequest(route,{marker:route},{headers})); assert.equal(response.status,403); assert.deepEqual(await response.json(),safe("http-origin-rejected")); assert.equal(h.calls.length,0); }
+  const wrongType=objectHeadAdapter(), wrongTypeResponse=await wrongType.adapter.handle(objectHeadRequest("getOpaqueObject",{marker:"wrong-type"},{headers:{"Content-Type":"text/plain"}})); assert.equal(wrongTypeResponse.status,415); assert.deepEqual(await wrongTypeResponse.json(),safe("http-content-type-rejected")); assert.equal(wrongType.calls.length,0);
+  const malformed=objectHeadAdapter(), malformedResponse=await malformed.adapter.handle(objectHeadRequest("readShadowHead",{}, {body:new Uint8Array([0xc3,0x28])})); assert.equal(malformedResponse.status,400); assert.deepEqual(await malformedResponse.json(),safe("http-body-invalid")); assert.equal(malformed.calls.length,0);
+});
+
+test("P119n applies exact object Head request byte policies", async () => {
+  assert.equal(POLICY.smallJsonLimitBytes,262144); assert.equal(POLICY.contentJsonLimitBytes,16777216);
+  const contentBody={marker:"large-put",payload:"x".repeat(POLICY.smallJsonLimitBytes)}, contentBytes=Buffer.byteLength(JSON.stringify(contentBody)); assert.equal(contentBytes>POLICY.smallJsonLimitBytes,true); assert.equal(contentBytes<POLICY.contentJsonLimitBytes,true); const content=objectHeadAdapter(), contentResponse=await content.adapter.handle(objectHeadRequest("putOpaqueObject",contentBody)); assert.equal(contentResponse.status,200); assert.deepEqual(content.calls.map(({method})=>method),["putOpaqueObject"]);
+  const overContent=objectHeadAdapter(), overContentResponse=await overContent.adapter.handle(objectHeadRequest("putOpaqueObject",{marker:"declared"},{headers:{"Content-Length":String(POLICY.contentJsonLimitBytes+1)}})); assert.equal(overContentResponse.status,413); assert.deepEqual(await overContentResponse.json(),{apiVersion:1,ok:false,reason:"http-request-too-large"}); assert.equal(overContent.calls.length,0);
+  for (const route of ["objectPresence","compareAndSetShadowHead"]) { const h=objectHeadAdapter(), response=await h.adapter.handle(objectHeadRequest(route,{marker:route},{headers:{"Content-Length":String(POLICY.smallJsonLimitBytes+1)}})); assert.equal(response.status,413); assert.deepEqual(await response.json(),{apiVersion:1,ok:false,reason:"http-request-too-large"}); assert.equal(h.calls.length,0); }
+});
+
+test("P119n applies exact object Head response byte policies", async () => {
+  const largeBody={apiVersion:1,ok:true,payload:"x".repeat(POLICY.smallJsonLimitBytes)}; assert.equal(Buffer.byteLength(JSON.stringify(largeBody))>POLICY.smallJsonLimitBytes,true);
+  const get=objectHeadAdapter((method)=>({status:200,body:method==="getOpaqueObject"?largeBody:{apiVersion:1,ok:true},session:null})), getResponse=await get.adapter.handle(objectHeadRequest("getOpaqueObject",{marker:"get"})); assert.equal(getResponse.status,200); assert.deepEqual(await getResponse.json(),largeBody); assert.deepEqual(get.calls.map(({method})=>method),["getOpaqueObject"]);
+  const ordinary=objectHeadAdapter(()=>({status:200,body:largeBody,session:null})), ordinaryResponse=await ordinary.adapter.handle(objectHeadRequest("objectPresence",{marker:"presence"})); assert.equal(ordinaryResponse.status,500); assert.deepEqual(await ordinaryResponse.json(),{apiVersion:1,ok:false,reason:"http-core-result-invalid"}); assert.deepEqual(ordinary.calls.map(({method})=>method),["objectPresence"]);
+  const tooLargeBody={apiVersion:1,ok:true,payload:"x".repeat(POLICY.contentJsonLimitBytes)}, tooLarge=objectHeadAdapter(()=>({status:200,body:tooLargeBody,session:null})), tooLargeResponse=await tooLarge.adapter.handle(objectHeadRequest("getOpaqueObject",{marker:"too-large"})); assert.equal(Buffer.byteLength(JSON.stringify(tooLargeBody))>POLICY.contentJsonLimitBytes,true); assert.equal(tooLargeResponse.status,500); assert.deepEqual(await tooLargeResponse.json(),{apiVersion:1,ok:false,reason:"http-core-result-invalid"}); assert.deepEqual(tooLarge.calls.map(({method})=>method),["getOpaqueObject"]);
+});
+
+test("P119n preserves only compare-and-set Head conflict status", async () => {
+  const cas200=objectHeadAdapter(()=>({status:200,body:{apiVersion:1,ok:true,marker:"cas-200"},session:null})), cas200Response=await cas200.adapter.handle(objectHeadRequest("compareAndSetShadowHead",{marker:"cas-200"})); assert.equal(cas200Response.status,200); assert.deepEqual(await cas200Response.json(),{apiVersion:1,ok:true,marker:"cas-200"});
+  const conflictBody={apiVersion:1,ok:false,reason:"head-conflict"}, cas409=objectHeadAdapter(()=>({status:409,body:conflictBody,session:null})), cas409Response=await cas409.adapter.handle(objectHeadRequest("compareAndSetShadowHead",{marker:"cas-409"})); assert.equal(cas409Response.status,409); assert.deepEqual(await cas409Response.json(),conflictBody);
+  for (const [route,status] of [["objectPresence",409],["compareAndSetShadowHead",201]]) { const h=objectHeadAdapter(()=>({status,body:{apiVersion:1,ok:false,marker:"invalid-status"},session:null})), response=await h.adapter.handle(objectHeadRequest(route,{marker:route})); assert.equal(response.status,500); assert.deepEqual(await response.json(),{apiVersion:1,ok:false,reason:"http-core-result-invalid"}); assert.deepEqual(h.calls.map(({method})=>method),[route]); }
 });
 
 test("P119h rejects a nonexistent session before every object store call", async () => {
