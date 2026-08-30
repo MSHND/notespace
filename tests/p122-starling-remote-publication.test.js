@@ -6,6 +6,7 @@ const test = require("node:test"),
   path = require("node:path"),
   vm = require("node:vm"),
   { webcrypto } = require("node:crypto"),
+  { createProductionReleaseManifest } = require("../sync-service/pocket-sync-production-server.js"),
   ROOT = path.resolve(__dirname, ".."),
   SCRIPTS = [
     "js/pocket-state.js",
@@ -627,4 +628,22 @@ test("P122 remains absent from live assets and owner, Save, Sync, and open paths
         false,
         asset,
       );
+  const manifest = createProductionReleaseManifest({
+      browserRoot: ROOT,
+      serviceRoot: "/pocket-sync/v1",
+    }),
+    servedPaths = manifest.map((entry) => entry.path),
+    servedJavaScript = manifest.filter((entry) => entry.path.endsWith(".js"));
+  assert.equal(servedPaths.includes("/js/pocket-starling-publication-shadow.js"), false);
+  for (const expected of [
+    "/js/pocket-sync-local-integration.js",
+    "/js/pocket-sync-additional-device.js",
+    "/js/pocket-sync-emergency-recovery.js",
+    "/js/pocket-sync-production-bootstrap.js",
+  ])
+    assert.equal(servedPaths.includes(expected), true, expected);
+  for (const entry of servedJavaScript) {
+    const source = fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8");
+    assert.equal(source.includes("PocketStarlingPublicationShadow"), false, entry.path);
+  }
 });
