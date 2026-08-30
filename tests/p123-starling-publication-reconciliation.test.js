@@ -103,6 +103,19 @@ async function lineage(c) {
   return { state, stager, key, basePhysical, candidatePhysical, laterPhysical, competingPhysical, records };
 }
 
+async function incompleteCandidate(c) {
+  const state = stateFor(c), stager = c.PocketStarlingObjectSealShadow.createStager(), key = await keyFor(c),
+    baseLogical = logicalStage(c, stager, state), basePhysical = await physicalStage(c, stager, baseLogical, key);
+  complete(c, baseLogical, basePhysical, stager);
+  const candidateState = c.PocketStarlingRootShadow.editPayload(state, "n3", { label: "uncompleted candidate", value: 1231 }),
+    candidateLogical = logicalStage(c, stager, candidateState.state, baseLogical),
+    candidatePhysical = await physicalStage(c, stager, candidateLogical, key, basePhysical),
+    records = new Map([basePhysical, candidatePhysical].flatMap((stage) => stage.newRecords.map((entry) => [entry.storageRef, entry.record])));
+  assert.equal(candidateState.ok, true);
+  assert.equal(c.PocketStarlingObjectSealShadow.verifyNewObjectPresence(candidateLogical, (ref) => stager.store.has(ref), { baseComplete: true }).ok, true);
+  return { state, stager, key, basePhysical, candidateState, candidateLogical, candidatePhysical, records };
+}
+
 function operationId(kind, index) { return `${kind}-${index}`; }
 
 function service(calls, current, records, behaviour = {}) {
@@ -155,6 +168,7 @@ test("P123 observes a genuine encrypted physical lineage with exact P110 outcome
 test("P123 fails closed locally and returns unknown for remote absence, faults, invalid Head, crypto/capsule faults, and a broken physical chain", async () => {
   const c = runtime(), data = await lineage(c), current = head(2, data.candidatePhysical.sealStorageRef), invalids = [
     { name: "read throw", behaviour: { read: () => { throw new Error("lost"); } }, examined: 0 },
+    { name: "absent Head", behaviour: { read: () => null }, examined: 0 },
     { name: "invalid Head", behaviour: { read: () => ({ head: {} }) }, examined: 0 },
     { name: "missing object", behaviour: { get: () => ({ present: false, record: null }) }, examined: 1 },
     { name: "object throw", behaviour: { get: () => { throw new Error("lost"); } }, examined: 1 },
@@ -166,6 +180,7 @@ test("P123 fails closed locally and returns unknown for remote absence, faults, 
   for (const item of invalids) {
     const calls = [], result = await reconciler(c, calls, item.current || current, data.records, item.behaviour).reconcileAmbiguousPublication(input(data));
     assert.deepEqual(plain(result), { outcome: "unknown", examined: item.examined }, item.name);
+    assert.equal(Object.isFrozen(result), true, item.name);
     assert.equal(calls.filter(([kind]) => kind === "read").length, 1, item.name);
     assert.equal(calls.some(([kind]) => ["put", "presence", "cas", "initialise"].includes(kind)), false, item.name);
   }
@@ -179,6 +194,67 @@ test("P123 fails closed locally and returns unknown for remote absence, faults, 
     await assert.rejects(reconciler(c, calls, current, data.records).reconcileAmbiguousPublication(candidate));
     assert.equal(calls.length, 0);
   }
+});
+
+test("P123a preserves local operation-ID failures before their relevant remote boundary", async () => {
+  const c = runtime(), data = await lineage(c), committed = head(2, data.candidatePhysical.sealStorageRef),
+    superseded = head(3, data.laterPhysical.sealStorageRef), failure = (error) => error && error.code === "publication-operation-id-invalid";
+  for (const factory of [
+    () => { throw new Error("factory"); },
+    () => "",
+    () => " ",
+    () => 123,
+    () => "x".repeat(161),
+  ]) {
+    const calls = [];
+    await assert.rejects(reconciler(c, calls, committed, data.records, {}, factory).reconcileAmbiguousPublication(input(data)), failure);
+    assert.deepEqual(calls, []);
+  }
+  for (const factory of [
+    (kind) => kind === "read-head" ? "read" : "read",
+    (kind) => kind === "read-head" ? "read" : "",
+    (kind) => kind === "read-head" ? "read" : (() => { throw new Error("get"); })(),
+  ]) {
+    const calls = [];
+    await assert.rejects(reconciler(c, calls, committed, data.records, {}, factory).reconcileAmbiguousPublication(input(data)), failure);
+    assert.deepEqual(calls.map(([kind]) => kind), ["read"]);
+  }
+  const calls = [];
+  await assert.rejects(reconciler(c, calls, superseded, data.records, {}, (kind, index) => kind === "read-head" ? "read" : index === 0 ? "get" : "get").reconcileAmbiguousPublication(input(data)), failure);
+  assert.deepEqual(calls.map(([kind]) => kind), ["read"]);
+});
+
+test("P123a rejects an authenticated candidate capsule whose previous logical link names the wrong physical object", async () => {
+  const c = runtime(), data = await lineage(c), crypto = c.PocketStarlingCryptoShadow,
+    original = data.records.get(data.candidatePhysical.sealStorageRef),
+    capsule = JSON.parse(await crypto.openObject(original, data.candidatePhysical.sealStorageRef, data.key, context())),
+    seal = JSON.parse(capsule.logicalBytes),
+    wrongPhysicalRef = data.basePhysical.newRecords.find((entry) => entry.storageRef !== data.basePhysical.sealStorageRef).storageRef,
+    previous = capsule.links.find((entry) => entry.logicalRef === seal.previousSealRef);
+  previous.storageRef = wrongPhysicalRef;
+  const altered = await crypto.sealObject(c.PocketStarlingStorageShadow.canonicalCapsule(capsule), data.key, context()),
+    records = new Map(data.records);
+  records.set(altered.ref, altered.record);
+  const calls = [], result = await reconciler(c, calls, head(2, altered.ref), records).reconcileAmbiguousPublication(input(data));
+  assert.deepEqual(plain(result), { outcome: "unknown", examined: 1 });
+  assert.deepEqual(calls.map(([kind]) => kind), ["read", "get"]);
+});
+
+test("P123a reconciliation is observational and cannot complete a genuine P121 stage", async () => {
+  const c = runtime(), data = await incompleteCandidate(c), expected = head(1, data.basePhysical.sealStorageRef),
+    calls = [], result = await reconciler(c, calls, head(2, data.candidatePhysical.sealStorageRef), data.records).reconcileAmbiguousPublication({
+      stage: data.candidatePhysical, expectedHead: expected, masterKey: data.key, context: context(),
+    });
+  assert.deepEqual(plain(result), { outcome: "committed", examined: 1 });
+  const laterState = c.PocketStarlingRootShadow.editPayload(data.candidateState.state, "n3", { label: "after incomplete", value: 1232 }),
+    laterLogical = logicalStage(c, data.stager, laterState.state, data.candidateLogical);
+  assert.equal(laterState.ok, true);
+  await assert.rejects(
+    physicalStage(c, data.stager, laterLogical, data.key, data.candidatePhysical),
+    (error) => error && error.code === "base-stage-incomplete",
+  );
+  assert.equal(c.PocketStarlingStorageShadow.verifyNewRecordPresence(data.candidatePhysical, () => true).ok, true);
+  await physicalStage(c, data.stager, laterLogical, data.key, data.candidatePhysical);
 });
 
 test("P123 snapshots expected Head and context before callbacks and awaited remote reads", async () => {

@@ -318,12 +318,13 @@
 
     async function reconcileAmbiguousPublication(input) {
       const prepared = reconciliationPreflight(input, operationIdFactory),
-        outcomes = prepared.head.OUTCOME;
+        outcomes = prepared.head.OUTCOME,
+        readHeadOperationId = prepared.claim("read-head", 0);
       let current;
       try {
         const response = await service.readShadowHead({
           apiVersion: API_VERSION,
-          operationId: prepared.claim("read-head", 0),
+          operationId: readHeadOperationId,
           syncedPocketId: prepared.binding.syncedPocketId,
         });
         if (!response || !prepared.head.validHead(response.head))
@@ -345,6 +346,9 @@
         return reconciliationResult(outcomes.UNKNOWN);
 
       const delta = current.revision - prepared.expectedHead.revision;
+      const getSealOperationIds = [];
+      for (let depth = 0; depth < delta; depth += 1)
+        getSealOperationIds.push(prepared.claim("get-seal", depth));
       let ref = current.sealRef,
         candidateDepth = -1;
       const seen = new Set();
@@ -355,7 +359,7 @@
         try {
           const response = await service.getOpaqueObject({
             apiVersion: API_VERSION,
-            operationId: prepared.claim("get-seal", depth),
+            operationId: getSealOperationIds[depth],
             syncedPocketId: prepared.binding.syncedPocketId,
             storageRef: ref,
           });
