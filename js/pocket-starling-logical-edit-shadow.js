@@ -658,6 +658,153 @@
     return new Map([...frontier].filter(([ref]) => reachable.has(ref)));
   }
 
+  async function freshNode(base, input) {
+    const state = baseStates.get(base);
+    if (!state) return fail("invalid-base-token");
+    if (!exact(input, ["nodeId", "parentId", "toIndex", "payload"]))
+      return fail("invalid-insert-input");
+    const { nodeId, parentId, toIndex } = input;
+    if (
+      typeof nodeId !== "string" ||
+      nodeId.length === 0 ||
+      nodeId === "root"
+    )
+      return fail("invalid-node-id");
+    if (typeof parentId !== "string" || parentId.length === 0)
+      return fail("unknown-parent");
+    const payload = state.logical.canonical(input.payload);
+    if (!payload.ok) return fail("unsupported-payload-material");
+    const content = await readTrieValue(
+      state,
+      state.root.contentRef,
+      "content-trie",
+      nodeId,
+    );
+    if (!content.ok) return content;
+    if (content.found) {
+      const record = await load(state, content.valueRef, "content-record");
+      if (!record.ok) return record;
+      if (!validContentRecord(state.logical, record.object, nodeId))
+        return fail("invalid-content-record");
+      return fail("duplicate-node-id");
+    }
+    const placementTruth = await readTrieValue(
+      state,
+      state.root.placementRef,
+      "placement-trie",
+      nodeId,
+    );
+    if (!placementTruth.ok) return placementTruth;
+    if (placementTruth.found) {
+      const record = await load(
+        state,
+        placementTruth.valueRef,
+        "placement-record",
+      );
+      if (!record.ok) return record;
+      if (!validPlacementRecord(state.logical, record.object, nodeId))
+        return fail("invalid-placement-record");
+      return fail("duplicate-node-id");
+    }
+    if (parentId !== "root") {
+      const parent = await readPlacement(state, parentId, "unknown-parent");
+      if (!parent.ok) return parent;
+    }
+    const destinationLocated = await readChildrenRef(state, parentId);
+    if (!destinationLocated.ok) return destinationLocated;
+    let destination;
+    if (destinationLocated.found) {
+      const loaded = await sequenceRoot(state, destinationLocated.valueRef);
+      if (!loaded.ok) return loaded;
+      destination = loaded.page;
+    } else destination = emptySequence(state);
+
+    const frontier = new Map(),
+      contentRecord = materialise(state, frontier, "content-record", {
+        schema: state.logical.OBJECT_SCHEMA,
+        kind: "content-record",
+        nodeId,
+        payload: JSON.parse(payload.bytes),
+      });
+    if (!contentRecord.ok) return contentRecord;
+    const changedContent = await copyTrieValue(
+      state,
+      frontier,
+      state.root.contentRef,
+      "content-trie",
+      nodeId,
+      contentRecord.ref,
+    );
+    if (!changedContent.ok) return changedContent;
+    const placementRecord = materialise(state, frontier, "placement-record", {
+      schema: state.logical.OBJECT_SCHEMA,
+      kind: "placement-record",
+      nodeId,
+      parentId,
+    });
+    if (!placementRecord.ok) return placementRecord;
+    const changedPlacement = await copyTrieValue(
+      state,
+      frontier,
+      state.root.placementRef,
+      "placement-trie",
+      nodeId,
+      placementRecord.ref,
+    );
+    if (!changedPlacement.ok) return changedPlacement;
+    const added = await addSequenceItem(
+      state,
+      frontier,
+      destination,
+      destinationIndex(toIndex, destination.count),
+      nodeId,
+    );
+    if (!added.ok) return added;
+    const changedChildren = await copyTrieValue(
+      state,
+      frontier,
+      state.root.childrenRef,
+      "children-trie",
+      parentId,
+      added.page.ref,
+    );
+    if (!changedChildren.ok) return changedChildren;
+    const root = materialise(state, frontier, "pocket-root", {
+      schema: state.logical.ROOT_SCHEMA,
+      kind: "pocket-root",
+      capacity: state.root.capacity,
+      contentRef: changedContent.ref,
+      placementRef: changedPlacement.ref,
+      childrenRef: changedChildren.ref,
+      preservationRef: state.root.preservationRef,
+    });
+    if (!root.ok) return root;
+    const seal = materialise(state, frontier, "candidate-seal", {
+      schema: state.logical.SEAL_SCHEMA,
+      kind: "candidate-seal",
+      rootRef: root.ref,
+      previousSealRef: state.acceptedSealRef,
+    });
+    if (!seal.ok) return seal;
+    const published = reachableFrontier(frontier, seal.ref),
+      newLogicalRefs = Object.freeze(Array.from(published.keys())),
+      resolveLogical = (logicalRef) => published.get(logicalRef),
+      candidate = Object.freeze({
+        rootRef: root.ref,
+        sealRef: seal.ref,
+        newLogicalRefs,
+        resolveLogical,
+        diagnostics: Object.freeze({
+          logicalFetches: state.stats.logicalFetches,
+          logicalCacheHits: state.stats.logicalCacheHits,
+          destinationAncestryReads: 0,
+          descendantReads: 0,
+          newLogicalObjectCount: newLogicalRefs.length,
+        }),
+      });
+    return Object.freeze({ ok: true, candidate });
+  }
+
   async function move(base, nodeId, fromIndex, newParentId, toIndex) {
     const state = baseStates.get(base);
     if (!state) return fail("invalid-base-token");
@@ -994,6 +1141,7 @@
 
   global.PocketStarlingLogicalEditShadow = Object.freeze({
     createBase,
+    insert: freshNode,
     editPayload,
     move,
     reorder: reorderWithinParent,
