@@ -4,7 +4,8 @@ const test = require("node:test"),
   fs = require("node:fs"),
   path = require("node:path"),
   vm = require("node:vm"),
-  { webcrypto } = require("node:crypto");
+  { webcrypto } = require("node:crypto"),
+  { createBase, semanticBase, authenticateResolver } = require("./helpers/starling-semantic-test.js");
 
 const ROOT = path.resolve(__dirname, ".."),
   MODULE = "js/pocket-starling-logical-edit-shadow.js",
@@ -26,6 +27,7 @@ const ROOT = path.resolve(__dirname, ".."),
     "js/pocket-starling-crypto-shadow.js",
     "js/pocket-starling-storage-shadow.js",
     MODULE,
+    "js/pocket-starling-semantic-authority-shadow.js",
   ];
 
 function source(file) {
@@ -147,18 +149,25 @@ async function masterKey(c) {
     },
     bundle = await c.PocketSyncCrypto.createMasterKeyBundle([
       { context: envelopeContext, wrappingKey },
-    ]);
-  return bundle.masterKey;
+    ], { semanticAuthority: true });
+  return { ...bundle, wrappingKey, envelopeContext, record: bundle.envelopes[0].record };
 }
 
 const storageContext = () => ({ syncedPocketId: "pocket-p114-tests" });
 
 async function physicalGenesis(c, logicalStager, logical, key) {
+  const audit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(
+      logical.sealRef, (ref) => logicalStager.store.get(ref)),
+    auditProof = c.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit),
+    issued = await c.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority: key.semanticAuthority, auditProof });
+  assert.equal(audit.ok, true, JSON.stringify(audit)); assert.equal(issued.ok, true, JSON.stringify(issued));
   return c.PocketStarlingStorageShadow.stageCandidate({
     sealRef: logical.sealRef,
     resolveLogical: (ref) => logicalStager.store.get(ref),
-    masterKey: key,
+    masterKey: key.masterKey,
     context: storageContext(),
+    semanticAuthority: key.semanticAuthority,
+    semanticValidityProof: issued.proof,
   });
 }
 
@@ -188,7 +197,7 @@ async function capsuleAt(c, store, storageRef, key) {
   const bytes = await c.PocketStarlingCryptoShadow.openObject(
     store.get(storageRef),
     storageRef,
-    key,
+    key.masterKey || key,
     storageContext(),
   );
   return c.PocketStarlingStorageShadow.validateCapsuleBytes(bytes);
@@ -265,10 +274,10 @@ function tinyBase(c, options = {}) {
 }
 
 async function openTiny(c, fixture, resolver = null) {
-  return c.PocketStarlingLogicalEditShadow.createBase({
-    acceptedSealRef: fixture.sealRef,
-    resolveLogical: resolver || ((ref) => fixture.store.get(ref)),
-  });
+  const admission = await semanticBase(c, { acceptedSealRef: fixture.sealRef,
+    resolveLogical: (ref) => fixture.store.get(ref), syncedPocketId: "pocket-p114-tests" });
+  return c.PocketStarlingLogicalEditShadow.createBase({ acceptedSealRef: fixture.sealRef,
+    resolveLogical: resolver || ((ref) => fixture.store.get(ref)), ...admission });
 }
 
 test("P114 proves fresh object-native payload editing and direct P113 handoff", async () => {
@@ -305,7 +314,9 @@ test("P114 proves fresh object-native payload editing and direct P113 handoff", 
   const runtimeB = context(),
     fetched = new Set();
   let physicalFetches = 0;
-  const resolver = await runtimeB.PocketStarlingStorageShadow.createResolver({
+  const reopened = await runtimeB.PocketSyncCrypto.openMasterKeyBundle(
+      key.record, key.wrappingKey, key.envelopeContext, [], { semanticAuthority: true }),
+    resolver = await runtimeB.PocketStarlingStorageShadow.createResolver({
       acceptedSealStorageRef: physicalBase.sealStorageRef,
       acceptedBaseComplete: true,
       resolveStorage(ref) {
@@ -313,14 +324,20 @@ test("P114 proves fresh object-native payload editing and direct P113 handoff", 
         fetched.add(ref);
         return baseStore.get(ref);
       },
-      masterKey: key,
+      masterKey: reopened.masterKey,
       context: storageContext(),
     }),
+    accepted = await resolver.openAccepted(),
+    semanticBaseProof = await authenticateResolver(runtimeB, { resolver, accepted,
+      authority: reopened.semanticAuthority, syncedPocketId: storageContext().syncedPocketId }),
     freshBaseProof = resolver.createReuseProof(),
     editor = runtimeB.PocketStarlingLogicalEditShadow,
     opened = await editor.createBase({
       acceptedSealRef: resolver.acceptedSealRef,
       resolveLogical: resolver.resolveLogical,
+      syncedPocketId: storageContext().syncedPocketId,
+      semanticAuthority: reopened.semanticAuthority,
+      semanticBaseProof,
     });
   assert.equal(opened.ok, true, JSON.stringify(opened));
   assert.equal(Object.isFrozen(opened.base), true);
@@ -387,10 +404,14 @@ test("P114 proves fresh object-native payload editing and direct P113 handoff", 
       await runtimeB.PocketStarlingStorageShadow.stageCandidate({
         sealRef: candidate.sealRef,
         resolveLogical: candidate.resolveLogical,
-        masterKey: key,
+        masterKey: reopened.masterKey,
         context: storageContext(),
         freshBaseProof,
         newLogicalRefs: candidate.newLogicalRefs,
+        semanticAuthority: reopened.semanticAuthority,
+        semanticValidityProof: (await runtimeB.PocketStarlingSemanticAuthorityShadow.issueSuccessor({
+          authority: reopened.semanticAuthority, semanticBaseProof, candidate,
+        })).proof,
       });
   for (const entry of loadedIndex.values()) {
     loadedBindings.set(entry.capsule.logicalRef, entry.storageRef);
@@ -466,7 +487,7 @@ test("P114 proves fresh object-native payload editing and direct P113 handoff", 
       await runtimeC.PocketStarlingStorageShadow.createResolver({
         acceptedSealStorageRef: physicalNext.sealStorageRef,
         resolveStorage: (ref) => combinedStore.get(ref),
-        masterKey: key,
+        masterKey: reopened.masterKey,
         context: storageContext(),
       }),
     successorOpened = await successorResolver.openAccepted(),
@@ -483,8 +504,13 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
   const c = context(),
     api = c.PocketStarlingLogicalEditShadow,
     logical = c.PocketStarlingObjectSealShadow,
-    fixture = tinyBase(c),
-    opened = await openTiny(c, fixture);
+    stager = logical.createStager(),
+    genuine = logicalStage(c, stager, stateFor(c, rootNodes(2))),
+    fixture = { store: stager.store, sealRef: genuine.sealRef, rootRef: genuine.rootRef },
+    opened = await openTiny(c, fixture),
+    admission = await semanticBase(c, { acceptedSealRef: fixture.sealRef,
+      resolveLogical: (ref) => fixture.store.get(ref), syncedPocketId: "pocket-p114-tests" }),
+    admittedCreateBase = (input) => api.createBase({ ...input, ...admission });
   assert.equal(opened.ok, true, JSON.stringify(opened));
   assert.equal(
     (await api.editPayload({ ...opened.base }, "n1", { changed: true })).reason,
@@ -496,7 +522,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
   );
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: fixture.sealRef,
         resolveLogical: () => undefined,
       })
@@ -505,7 +531,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
   );
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: fixture.sealRef,
         resolveLogical() {
           throw new Error("boom");
@@ -516,7 +542,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
   );
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: fixture.sealRef,
         resolveLogical: () => Promise.reject(new Error("boom")),
       })
@@ -525,7 +551,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
   );
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: fixture.sealRef,
         resolveLogical: () => "{}",
       })
@@ -541,7 +567,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
     });
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: invalidSealRef,
         resolveLogical: (ref) => invalidSealStore.get(ref),
       })
@@ -550,7 +576,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
   );
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: fixture.sealRef,
         resolveLogical: (ref) =>
           ref === fixture.rootRef ? undefined : fixture.store.get(ref),
@@ -582,7 +608,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
     );
   assert.equal(
     (
-      await api.createBase({
+      await admittedCreateBase({
         acceptedSealRef: invalidRootSealRef,
         resolveLogical: (ref) => invalidRootStore.get(ref),
       })
@@ -595,17 +621,10 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
       '{"schema":"pocket.starling.logical-object.v1", "kind":"content-trie","hasValue":false,"valueRef":null,"children":[]}',
     noncanonicalRef = logical.refFor("content-trie", noncanonicalBytes);
   noncanonicalStore.set(noncanonicalRef, noncanonicalBytes);
-  const noncanonicalFixture = wrapContent(
-      c,
-      noncanonicalStore,
-      noncanonicalRef,
-    ),
-    noncanonicalBase = await openTiny(c, noncanonicalFixture);
-  assert.equal(noncanonicalBase.ok, true);
-  assert.equal(
-    (await api.editPayload(noncanonicalBase.base, "x", {})).reason,
-    "noncanonical-logical-object",
-  );
+  const noncanonicalFixture = wrapContent(c, noncanonicalStore, noncanonicalRef),
+    noncanonicalAudit = logical.auditCandidateSeal(noncanonicalFixture.sealRef,
+      (ref) => noncanonicalFixture.store.get(ref));
+  assert.equal(noncanonicalAudit.ok, false);
 
   const malformedStore = new Map(),
     malformedRef = putLogical(c, malformedStore, "content-trie", {
@@ -618,24 +637,16 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
         { key: "x", ref: "proof-ref:v1:content-trie:11111111" },
       ],
     }),
-    malformedFixture = wrapContent(c, malformedStore, malformedRef),
-    malformedBase = await openTiny(c, malformedFixture);
-  assert.equal(malformedBase.ok, true);
-  assert.equal(
-    (await api.editPayload(malformedBase.base, "x", {})).reason,
-    "invalid-content-trie",
-  );
+    malformedFixture = wrapContent(c, malformedStore, malformedRef);
+  assert.equal(logical.auditCandidateSeal(malformedFixture.sealRef,
+    (ref) => malformedFixture.store.get(ref)).ok, false);
 
   const mismatchFixture = tinyBase(c, {
       nodeId: "n1",
       recordNodeId: "other",
-    }),
-    mismatchBase = await openTiny(c, mismatchFixture);
-  assert.equal(mismatchBase.ok, true);
-  assert.equal(
-    (await api.editPayload(mismatchBase.base, "n1", {})).reason,
-    "invalid-content-record",
-  );
+    });
+  assert.equal(logical.auditCandidateSeal(mismatchFixture.sealRef,
+    (ref) => mismatchFixture.store.get(ref)).ok, false);
 
   const missingTouchedBase = await openTiny(
     c,
@@ -691,6 +702,7 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
     );
   assert.equal(api.diagnostics(opened.base).logicalFetches, beforeUnsupported);
 
+  fixture.store.delete(JSON.parse(fixture.store.get(fixture.rootRef)).placementRef);
   const missingPlacement = await api.editPayload(opened.base, "n1", { b: 2, a: 1 });
   assert.equal(missingPlacement.ok, false);
   assert.equal(missingPlacement.reason, "missing-logical-object");

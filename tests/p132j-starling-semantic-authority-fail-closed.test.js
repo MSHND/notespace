@@ -11,8 +11,8 @@ const SCRIPTS = [
   "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js",
   "js/pocket-sync-crypto.js", "js/pocket-starling-crypto-shadow.js",
   "js/pocket-starling-storage-shadow.js", "js/pocket-starling-head-shadow.js",
-  "js/pocket-starling-logical-edit-shadow.js", "js/pocket-starling-remote-open-shadow.js",
-  "js/pocket-starling-remote-edit-shadow.js",
+  "js/pocket-starling-logical-edit-shadow.js", "js/pocket-starling-publication-shadow.js", "js/pocket-starling-remote-open-shadow.js",
+  "js/pocket-starling-remote-edit-shadow.js", "js/pocket-starling-remote-save-shadow.js",
 ];
 
 function runtime() {
@@ -53,10 +53,18 @@ test("P132j fails closed when privileged Starling composition lacks semantic aut
     semanticAuthority: Object.freeze({}), semanticBaseProof: Object.freeze({}) })).reason,
   "logical-dependency-unavailable");
 
-  const opener = c.PocketStarlingRemoteOpenShadow.createRemoteOpener({ objectHeadService: {
-    async readShadowHead() { return { head: null }; }, async getOpaqueObject() { return { present: false, record: null }; },
-  }, operationIdFactory: () => "op" });
-  await assert.rejects(opener.openRemote({}), (error) => error.code === "remote-open-input-invalid");
-  await assert.rejects(c.PocketStarlingRemoteEditShadow.createEditor({ opened: {}, masterKey, context,
+  let reads = 0, reuseCalls = 0;
+  const service = { async readShadowHead() { reads += 1; return { head: null }; }, async getOpaqueObject() { reads += 1; return { present: false, record: null }; },
+      putOpaqueObject() {}, objectPresence() {}, compareAndSetShadowHead() {} },
+    opener = c.PocketStarlingRemoteOpenShadow.createRemoteOpener({ objectHeadService: service, operationIdFactory: () => "op" }),
+    opened = Object.freeze({ outcome: "opened", head: Object.freeze({ schema: "pocket.starling.head.v1", revision: 1, sealRef: stage.sealRef }), session: Object.freeze({
+      acceptedSealRef: stage.sealRef, semanticBaseProof: Object.freeze({}), resolveLogical: () => null,
+      createReuseProof() { reuseCalls += 1; return Object.freeze({}); }, readContent() {}, readPlacement() {}, diagnostics() {},
+    }) });
+  await assert.rejects(opener.openRemote({ masterKey, context, semanticAuthority: Object.freeze({}) }), (error) => error.code === "remote-open-input-invalid");
+  await assert.rejects(c.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey, context,
     semanticAuthority: Object.freeze({}) }), (error) => error.code === "remote-edit-input-invalid");
+  await assert.rejects(c.PocketStarlingRemoteSaveShadow.createTransaction({ opened, masterKey, context, semanticAuthority: Object.freeze({}),
+    objectHeadService: service, operationIdFactory: () => "save" }), (error) => error.code === "remote-edit-input-invalid");
+  assert.equal(reads, 0); assert.equal(reuseCalls, 0);
 });

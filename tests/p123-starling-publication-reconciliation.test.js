@@ -14,7 +14,7 @@ const test = require("node:test"),
     "js/pocket-import.js", "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js",
     "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js",
     "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js",
-    "js/pocket-sync-crypto.js", "js/pocket-starling-crypto-shadow.js",
+    "js/pocket-sync-crypto.js", "js/pocket-starling-semantic-authority-shadow.js", "js/pocket-starling-crypto-shadow.js",
     "js/pocket-starling-storage-shadow.js", "js/pocket-starling-head-shadow.js",
     "js/pocket-sync-remote-client.js", "js/pocket-starling-publication-shadow.js",
   ],
@@ -42,7 +42,7 @@ function runtime() {
 
 const plain = (value) => JSON.parse(JSON.stringify(value)),
   context = () => ({ syncedPocketId: "p123" }),
-  head = (revision, sealRef) => ({ schema: HEAD_SCHEMA, revision, sealRef });
+  head = (revision, sealRef) => ({ schema: HEAD_SCHEMA, revision, sealRef }), semanticAuthorities = new WeakMap();
 
 function stateFor(c) {
   const encoded = c.PocketStarlingBridgeShadow.encode({
@@ -58,7 +58,8 @@ function stateFor(c) {
 
 async function keyFor(c) {
   const wrappingKey = await c.PocketSyncCrypto.generateDeviceWrappingKey(),
-    bundle = await c.PocketSyncCrypto.createMasterKeyBundle([{ context: { syncedPocketId: "p123", envelopeId: "device-envelope", envelopeKind: "device", envelopeVersion: 1 }, wrappingKey }]);
+    bundle = await c.PocketSyncCrypto.createMasterKeyBundle([{ context: { syncedPocketId: "p123", envelopeId: "device-envelope", envelopeKind: "device", envelopeVersion: 1 }, wrappingKey }], { semanticAuthority: true });
+  semanticAuthorities.set(bundle.masterKey, bundle.semanticAuthority);
   return bundle.masterKey;
 }
 
@@ -69,9 +70,13 @@ function logicalStage(c, stager, state, base = null) {
 }
 
 async function physicalStage(c, stager, logical, key, baseStage = null) {
+  const audit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(logical.sealRef,
+      (ref) => stager.store.get(ref)), auditProof = c.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit),
+    authority = semanticAuthorities.get(key), issued = await c.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority, auditProof });
+  assert.equal(audit.ok, true); assert.equal(issued.ok, true);
   return c.PocketStarlingStorageShadow.stageCandidate({
     sealRef: logical.sealRef, resolveLogical: (ref) => stager.store.get(ref), masterKey: key, context: context(),
-    ...(baseStage ? { baseStage } : {}),
+    semanticAuthority: authority, semanticValidityProof: issued.proof, ...(baseStage ? { baseStage } : {}),
   });
 }
 

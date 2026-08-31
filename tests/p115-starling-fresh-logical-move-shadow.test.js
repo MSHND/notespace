@@ -4,7 +4,8 @@ const test = require("node:test"),
   fs = require("node:fs"),
   path = require("node:path"),
   vm = require("node:vm"),
-  { webcrypto } = require("node:crypto");
+  { webcrypto } = require("node:crypto"),
+  { createBase, semanticBase, authenticateResolver } = require("./helpers/starling-semantic-test.js");
 
 const ROOT = path.resolve(__dirname, ".."),
   MODULE = "js/pocket-starling-logical-edit-shadow.js",
@@ -25,7 +26,7 @@ const ROOT = path.resolve(__dirname, ".."),
     "js/pocket-sync-crypto.js",
     "js/pocket-starling-crypto-shadow.js",
     "js/pocket-starling-storage-shadow.js",
-    MODULE,
+    MODULE, "js/pocket-starling-semantic-authority-shadow.js",
   ];
 
 function source(file) {
@@ -169,18 +170,24 @@ async function masterKey(c) {
     },
     bundle = await c.PocketSyncCrypto.createMasterKeyBundle([
       { context: envelopeContext, wrappingKey },
-    ]);
-  return bundle.masterKey;
+    ], { semanticAuthority: true });
+  return { ...bundle, wrappingKey, envelopeContext, record: bundle.envelopes[0].record };
 }
 
 const storageContext = () => ({ syncedPocketId: "pocket-p115-tests" });
 
 async function physicalGenesis(c, logicalStager, logical, key) {
+  const audit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(logical.sealRef,
+      (ref) => logicalStager.store.get(ref)), auditProof = c.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit),
+    issued = await c.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority: key.semanticAuthority, auditProof });
+  assert.equal(audit.ok, true, JSON.stringify(audit)); assert.equal(issued.ok, true, JSON.stringify(issued));
   return c.PocketStarlingStorageShadow.stageCandidate({
     sealRef: logical.sealRef,
     resolveLogical: (ref) => logicalStager.store.get(ref),
-    masterKey: key,
+    masterKey: key.masterKey,
     context: storageContext(),
+    semanticAuthority: key.semanticAuthority,
+    semanticValidityProof: issued.proof,
   });
 }
 
@@ -210,7 +217,7 @@ async function capsuleAt(c, store, storageRef, key) {
   const bytes = await c.PocketStarlingCryptoShadow.openObject(
     store.get(storageRef),
     storageRef,
-    key,
+    key.masterKey || key,
     storageContext(),
   );
   return c.PocketStarlingStorageShadow.validateCapsuleBytes(bytes);
@@ -369,10 +376,10 @@ function manualFixture(c, options = {}) {
 }
 
 async function openFixture(c, fixture, resolver = null) {
-  return c.PocketStarlingLogicalEditShadow.createBase({
-    acceptedSealRef: fixture.sealRef,
-    resolveLogical: resolver || ((ref) => fixture.store.get(ref)),
-  });
+  const admission = await semanticBase(c, { acceptedSealRef: fixture.sealRef,
+    resolveLogical: (ref) => fixture.store.get(ref), syncedPocketId: storageContext().syncedPocketId });
+  return c.PocketStarlingLogicalEditShadow.createBase({ acceptedSealRef: fixture.sealRef,
+    resolveLogical: resolver || ((ref) => fixture.store.get(ref)), ...admission });
 }
 
 function expectFailure(result, reason) {
@@ -415,7 +422,9 @@ test("P115 proves a fresh huge-branch move and direct P113 handoff", async () =>
   const runtimeB = context(),
     fetched = new Set();
   let physicalFetches = 0;
-  const resolver = await runtimeB.PocketStarlingStorageShadow.createResolver({
+  const reopened = await runtimeB.PocketSyncCrypto.openMasterKeyBundle(
+      key.record, key.wrappingKey, key.envelopeContext, [], { semanticAuthority: true }),
+    resolver = await runtimeB.PocketStarlingStorageShadow.createResolver({
       acceptedSealStorageRef: physicalBase.sealStorageRef,
       acceptedBaseComplete: true,
       resolveStorage(ref) {
@@ -423,14 +432,20 @@ test("P115 proves a fresh huge-branch move and direct P113 handoff", async () =>
         fetched.add(ref);
         return baseStore.get(ref);
       },
-      masterKey: key,
+      masterKey: reopened.masterKey,
       context: storageContext(),
     }),
+    accepted = await resolver.openAccepted(),
+    semanticBaseProof = await authenticateResolver(runtimeB, { resolver, accepted,
+      authority: reopened.semanticAuthority, syncedPocketId: storageContext().syncedPocketId }),
     freshBaseProof = resolver.createReuseProof(),
     editor = runtimeB.PocketStarlingLogicalEditShadow,
     opened = await editor.createBase({
       acceptedSealRef: resolver.acceptedSealRef,
       resolveLogical: resolver.resolveLogical,
+      syncedPocketId: storageContext().syncedPocketId,
+      semanticAuthority: reopened.semanticAuthority,
+      semanticBaseProof,
     });
   assert.equal(opened.ok, true, JSON.stringify(opened));
   assert.equal(opened.diagnostics.logicalFetches, 2);
@@ -512,10 +527,14 @@ test("P115 proves a fresh huge-branch move and direct P113 handoff", async () =>
       await runtimeB.PocketStarlingStorageShadow.stageCandidate({
         sealRef: candidate.sealRef,
         resolveLogical: candidate.resolveLogical,
-        masterKey: key,
+        masterKey: reopened.masterKey,
         context: storageContext(),
         freshBaseProof,
         newLogicalRefs: candidate.newLogicalRefs,
+        semanticAuthority: reopened.semanticAuthority,
+        semanticValidityProof: (await runtimeB.PocketStarlingSemanticAuthorityShadow.issueSuccessor({
+          authority: reopened.semanticAuthority, semanticBaseProof, candidate,
+        })).proof,
       });
   assert.equal(physicalFetches, beforeStageFetches);
   assert.ok(physicalNext.newRecords.length < 100);
@@ -583,7 +602,7 @@ test("P115 proves a fresh huge-branch move and direct P113 handoff", async () =>
       await runtimeC.PocketStarlingStorageShadow.createResolver({
         acceptedSealStorageRef: physicalNext.sealStorageRef,
         resolveStorage: (ref) => combinedStore.get(ref),
-        masterKey: key,
+        masterKey: reopened.masterKey,
         context: storageContext(),
       }),
     successorOpened = await successorResolver.openAccepted(),
@@ -602,10 +621,8 @@ test("P115 preserves append/clamp and genuine empty-destination semantics", asyn
     base = logicalStage(c, stager, state);
   logicalConfirm(c, stager, base);
   const editor = c.PocketStarlingLogicalEditShadow,
-    opened = await editor.createBase({
-      acceptedSealRef: base.sealRef,
-      resolveLogical: (ref) => stager.store.get(ref),
-    }),
+    opened = await createBase(c, { acceptedSealRef: base.sealRef,
+      resolveLogical: (ref) => stager.store.get(ref), syncedPocketId: storageContext().syncedPocketId }),
     clamped = await editor.move(opened.base, "branch", 0, "dest", 99),
     appended = await editor.move(opened.base, "branch", 0, "dest"),
     oracleClampedState = c.PocketStarlingRootShadow.move(
@@ -629,10 +646,8 @@ test("P115 preserves append/clamp and genuine empty-destination semantics", asyn
     emptyStager = c.PocketStarlingObjectSealShadow.createStager(),
     emptyBase = logicalStage(c, emptyStager, emptyState);
   logicalConfirm(c, emptyStager, emptyBase);
-  const emptyOpened = await editor.createBase({
-      acceptedSealRef: emptyBase.sealRef,
-      resolveLogical: (ref) => emptyStager.store.get(ref),
-    }),
+  const emptyOpened = await createBase(c, { acceptedSealRef: emptyBase.sealRef,
+      resolveLogical: (ref) => emptyStager.store.get(ref), syncedPocketId: storageContext().syncedPocketId }),
     emptyMoved = await editor.move(
       emptyOpened.base,
       "branch",
@@ -659,7 +674,10 @@ test("P115 preserves append/clamp and genuine empty-destination semantics", asyn
 
 test("P115 failures are bounded, exact and publish no candidate", async () => {
   const c = context(),
-    fixture = manualFixture(c),
+    stager = c.PocketStarlingObjectSealShadow.createStager(),
+    staged = logicalStage(c, stager, stateFor(c, structuredNodes(8, 8))),
+    root = JSON.parse(stager.store.get(staged.rootRef)),
+    fixture = { store: stager.store, sealRef: staged.sealRef, placementRef: root.placementRef, childrenRef: root.childrenRef },
     opened = await openFixture(c, fixture),
     api = c.PocketStarlingLogicalEditShadow;
   assert.equal(opened.ok, true, JSON.stringify(opened));
@@ -698,7 +716,7 @@ test("P115 failures are bounded, exact and publish no candidate", async () => {
     "move-would-cycle",
   );
   expectFailure(
-    await api.move(opened.base, "branch", 0, "child", 0),
+    await api.move(opened.base, "branch", 0, "d0000", 0),
     "move-would-cycle",
   );
   expectFailure(
@@ -710,42 +728,16 @@ test("P115 failures are bounded, exact and publish no candidate", async () => {
     "placement-membership-mismatch",
   );
 
-  const badRecord = manualFixture(c, { badPlacementNodeId: "branch" }),
-    badRecordBase = await openFixture(c, badRecord);
-  expectFailure(
-    await api.move(badRecordBase.base, "branch", 0, "dest", 1),
-    "invalid-placement-record",
-  );
-  const badPlacementTrie = manualFixture(c, { invalidPlacementTrie: true }),
-    badPlacementBase = await openFixture(c, badPlacementTrie);
-  expectFailure(
-    await api.move(badPlacementBase.base, "branch", 0, "dest", 1),
-    "invalid-placement-trie",
-  );
-  const badChildrenTrie = manualFixture(c, { invalidChildrenTrie: true }),
-    badChildrenBase = await openFixture(c, badChildrenTrie);
-  expectFailure(
-    await api.move(badChildrenBase.base, "branch", 0, "dest", 1),
-    "invalid-children-trie",
-  );
-  const badCapacity = manualFixture(c, { capacityMismatch: true }),
-    badCapacityBase = await openFixture(c, badCapacity);
-  expectFailure(
-    await api.move(badCapacityBase.base, "branch", 0, "dest", 1),
-    "invalid-sequence-object",
-  );
-  const badCount = manualFixture(c, { branchCountMismatch: true }),
-    badCountBase = await openFixture(c, badCount);
-  expectFailure(
-    await api.move(badCountBase.base, "branch", 0, "dest", 1),
-    "invalid-sequence-object",
-  );
+  for (const invalid of [
+    manualFixture(c, { badPlacementNodeId: "branch" }), manualFixture(c, { invalidPlacementTrie: true }),
+    manualFixture(c, { invalidChildrenTrie: true }), manualFixture(c, { capacityMismatch: true }),
+    manualFixture(c, { branchCountMismatch: true }),
+  ]) assert.equal(c.PocketStarlingObjectSealShadow.auditCandidateSeal(invalid.sealRef,
+    (ref) => invalid.store.get(ref)).ok, false);
 
   for (const [targetRef, expected] of [
     [fixture.placementRef, "missing-logical-object"],
     [fixture.childrenRef, "missing-logical-object"],
-    [fixture.sourceSequenceRef, "missing-logical-object"],
-    [fixture.branchRecordRef, "missing-logical-object"],
   ]) {
     const missing = await openFixture(c, fixture, (ref) =>
       ref === targetRef ? undefined : fixture.store.get(ref),
@@ -759,8 +751,6 @@ test("P115 failures are bounded, exact and publish no candidate", async () => {
   for (const targetRef of [
     fixture.placementRef,
     fixture.childrenRef,
-    fixture.sourceSequenceRef,
-    fixture.branchRecordRef,
   ]) {
     const throwing = await openFixture(c, fixture, (ref) => {
       if (ref === targetRef) throw new Error("structural resolver failure");
@@ -773,7 +763,7 @@ test("P115 failures are bounded, exact and publish no candidate", async () => {
     );
   }
   const wrongBytes = await openFixture(c, fixture, (ref) =>
-    ref === fixture.sourceSequenceRef ? "{}" : fixture.store.get(ref),
+    ref === fixture.childrenRef ? "{}" : fixture.store.get(ref),
   );
   assert.equal(wrongBytes.ok, true);
   expectFailure(

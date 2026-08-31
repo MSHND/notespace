@@ -10,11 +10,11 @@
   }
   function service(value) { return value && typeof value === "object" && ["putOpaqueObject", "objectPresence", "compareAndSetShadowHead", "readShadowHead", "getOpaqueObject"].every((key) => typeof value[key] === "function"); }
   async function createTransaction(input) {
-    if (!exact(input, ["opened", "masterKey", "context", "objectHeadService", "operationIdFactory"])) throw fail("remote-save-input-invalid");
+    if (!exact(input, ["opened", "masterKey", "context", "semanticAuthority", "objectHeadService", "operationIdFactory"])) throw fail("remote-save-input-invalid");
     const { sync, crypto, edit, publication } = dependencies(); let masterKey, context;
     try { masterKey = sync.validateNonExtractableAesKey(input.masterKey); const supplied = crypto.validateContext(input.context); context = Object.freeze({ syncedPocketId: supplied.syncedPocketId }); } catch (_error) { throw fail("remote-save-input-invalid"); }
     if (!service(input.objectHeadService) || typeof input.operationIdFactory !== "function") throw fail("remote-save-input-invalid");
-    const editor = await edit.createEditor({ opened: input.opened, masterKey, context }), publisher = publication.createPublisher({ objectHeadService: input.objectHeadService, operationIdFactory: input.operationIdFactory }), reconciler = publication.createReconciler({ objectHeadService: input.objectHeadService, operationIdFactory: input.operationIdFactory });
+    const editor = await edit.createEditor({ opened: input.opened, masterKey, context, semanticAuthority: input.semanticAuthority }), publisher = publication.createPublisher({ objectHeadService: input.objectHeadService, operationIdFactory: input.operationIdFactory }), reconciler = publication.createReconciler({ objectHeadService: input.objectHeadService, operationIdFactory: input.operationIdFactory });
     let state = "ready", pending = null;
     async function save(value, fields, prepare) {
       if (state !== "ready") throw fail("remote-save-state-invalid");

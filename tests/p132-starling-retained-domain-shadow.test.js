@@ -5,6 +5,8 @@ const test = require("node:test"),
   fs = require("node:fs"),
   path = require("node:path"),
   vm = require("node:vm"),
+  { webcrypto } = require("node:crypto"),
+  { createBase } = require("./helpers/starling-semantic-test.js"),
   { createProductionReleaseManifest } = require("../sync-service/pocket-sync-production-server.js");
 
 const ROOT = path.resolve(__dirname, ".."),
@@ -21,7 +23,7 @@ const ROOT = path.resolve(__dirname, ".."),
     "js/pocket-starling-placement-shadow.js",
     "js/pocket-starling-bridge-shadow.js",
     "js/pocket-starling-root-shadow.js",
-    "js/pocket-starling-object-seal-shadow.js",
+    "js/pocket-starling-object-seal-shadow.js", "js/pocket-sync-crypto.js",
   ];
 
 function source(file) {
@@ -30,7 +32,7 @@ function source(file) {
 
 function context(logical = false) {
   const c = {
-    URL,
+    crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, URL,
     Date,
     Math,
     JSON,
@@ -45,6 +47,8 @@ function context(logical = false) {
     Boolean,
     Promise,
     Error,
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
     console: { log() {}, info() {}, warn() {}, error() {} },
     localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
     document: { body: { classList: { add() {}, remove() {}, toggle() {} } }, getElementById() {}, addEventListener() {} },
@@ -65,6 +69,10 @@ function context(logical = false) {
   if (logical)
     vm.runInContext(source("js/pocket-starling-logical-edit-shadow.js"), c, {
       filename: "js/pocket-starling-logical-edit-shadow.js",
+    });
+  if (logical)
+    vm.runInContext(source("js/pocket-starling-semantic-authority-shadow.js"), c, {
+      filename: "js/pocket-starling-semantic-authority-shadow.js",
     });
   return c;
 }
@@ -273,9 +281,10 @@ test("P132 retains P130 Insert compatibility including literal retained identity
   }, [{ id: "target", parentId: "root", order: 0, label: "Target" }]);
   const literalStager = sealApi.createStager(), literalStage = sealApi.stageCandidate(literalStager, literalBase, { previousSealRef: null });
   assert.equal(literalStage.ok, true, JSON.stringify(literalStage));
-  const literalReader = context(true), literalOpened = await literalReader.PocketStarlingLogicalEditShadow.createBase({
+  const literalReader = context(true), literalOpened = await createBase(literalReader, {
     acceptedSealRef: literalStage.stage.sealRef,
     resolveLogical: (ref) => literalStager.store.get(ref),
+    syncedPocketId: "p132",
   });
   assert.equal(literalOpened.ok, true, JSON.stringify(literalOpened));
   const literalInserted = await literalReader.PocketStarlingLogicalEditShadow.insert(literalOpened.base, {

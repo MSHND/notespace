@@ -5,7 +5,8 @@ const test = require("node:test"),
   path = require("node:path"),
   vm = require("node:vm"),
   { webcrypto } = require("node:crypto"),
-  { createProductionReleaseManifest } = require("../sync-service/pocket-sync-production-server.js");
+  { createProductionReleaseManifest } = require("../sync-service/pocket-sync-production-server.js"),
+  { createBase } = require("./helpers/starling-semantic-test.js");
 
 const ROOT = path.resolve(__dirname, ".."),
   MODULE = "js/pocket-starling-logical-edit-shadow.js",
@@ -14,7 +15,8 @@ const ROOT = path.resolve(__dirname, ".."),
     "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js",
     "js/pocket-import.js", "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js",
     "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js",
-    "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js", MODULE,
+    "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js",
+    "js/pocket-sync-crypto.js", MODULE, "js/pocket-starling-semantic-authority-shadow.js",
   ];
 
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -90,9 +92,8 @@ function confirm(c, stager, logicalStage) {
 }
 
 async function open(c, logicalStage, store) {
-  const result = await c.PocketStarlingLogicalEditShadow.createBase({
-    acceptedSealRef: logicalStage.sealRef, resolveLogical: (ref) => store.get(ref),
-  });
+  const result = await createBase(c, { acceptedSealRef: logicalStage.sealRef,
+    resolveLogical: (ref) => store.get(ref), syncedPocketId: "p130" });
   assert.equal(result.ok, true, JSON.stringify(result));
   return result;
 }
@@ -245,7 +246,9 @@ test("P130 rejects duplicate invalid and unknown-parent insertion without a cand
 test("P130 preserves accepted base authority across caller mutation and fresh reuse", async () => {
   const writer = runtime(), input = nodes(12, 4, 4), state = stateFor(writer, input), stager = writer.PocketStarlingObjectSealShadow.createStager(), base = stage(writer, stager, state);
   confirm(writer, stager, base);
-  const originalSeal = base.sealRef, baseStore = new Map(stager.store), reader = runtime(), callerOwned = { acceptedSealRef: originalSeal, resolveLogical: (ref) => baseStore.get(ref) }, opened = await reader.PocketStarlingLogicalEditShadow.createBase(callerOwned);
+  const originalSeal = base.sealRef, baseStore = new Map(stager.store), reader = runtime(), callerOwned = {
+    acceptedSealRef: originalSeal, resolveLogical: (ref) => baseStore.get(ref), syncedPocketId: "p130",
+  }, opened = await createBase(reader, callerOwned);
   assert.equal(opened.ok, true, JSON.stringify(opened));
   callerOwned.acceptedSealRef = "proof-ref:v1:candidate-seal:00000000";
   callerOwned.resolveLogical = () => undefined;

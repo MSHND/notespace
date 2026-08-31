@@ -5,6 +5,8 @@ const test = require("node:test"),
   fs = require("node:fs"),
   path = require("node:path"),
   vm = require("node:vm"),
+  { webcrypto } = require("node:crypto"),
+  { createBase } = require("./helpers/starling-semantic-test.js"),
   { createProductionReleaseManifest } = require("../sync-service/pocket-sync-production-server.js");
 
 const ROOT = path.resolve(__dirname, ".."),
@@ -22,8 +24,8 @@ const ROOT = path.resolve(__dirname, ".."),
     "js/pocket-starling-placement-shadow.js",
     "js/pocket-starling-bridge-shadow.js",
     "js/pocket-starling-root-shadow.js",
-    "js/pocket-starling-object-seal-shadow.js",
-    MODULE,
+    "js/pocket-starling-object-seal-shadow.js", "js/pocket-sync-crypto.js",
+    MODULE, "js/pocket-starling-semantic-authority-shadow.js",
   ];
 
 function source(file) {
@@ -32,6 +34,7 @@ function source(file) {
 
 function runtime() {
   const c = {
+    crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer,
     URL,
     Date,
     Math,
@@ -47,6 +50,8 @@ function runtime() {
     Boolean,
     Promise,
     Error,
+    btoa: (value) => Buffer.from(value, "binary").toString("base64"),
+    atob: (value) => Buffer.from(value, "base64").toString("binary"),
     console: { log() {}, info() {}, warn() {}, error() {} },
     localStorage: { getItem() { return null; }, setItem() {}, removeItem() {} },
     document: { body: { classList: { add() {}, remove() {}, toggle() {} } }, getElementById() {}, addEventListener() {} },
@@ -168,9 +173,10 @@ function stage(c, state) {
 }
 
 async function open(c, staged) {
-  const result = await c.PocketStarlingLogicalEditShadow.createBase({
+  const result = await createBase(c, {
     acceptedSealRef: staged.stage.sealRef,
     resolveLogical: (ref) => staged.stager.store.get(ref),
+    syncedPocketId: "p132a",
   });
   assert.equal(result.ok, true, JSON.stringify(result));
   return result;
@@ -375,13 +381,14 @@ test("P132a fails closed on broken domain chains without classifying corruption 
   const c = runtime(), staged = stage(c, stateFor(c)),
     missing = new Map(staged.stager.store),
     root = staged.stage.rootObject,
-    deepRef = placementRefAt(missing, root.placementRef, "retained-deep");
-  missing.delete(deepRef);
-  const missingBase = await c.PocketStarlingLogicalEditShadow.createBase({
+    deepRef = placementRefAt(missing, root.placementRef, "retained-deep"),
+    missingBase = await createBase(c, {
     acceptedSealRef: staged.stage.sealRef,
     resolveLogical: (ref) => missing.get(ref),
+    syncedPocketId: "p132a",
   });
   assert.equal(missingBase.ok, true, JSON.stringify(missingBase));
+  missing.delete(deepRef);
   const missingResult = await c.PocketStarlingLogicalEditShadow.editPayload(
     missingBase.base,
     "retained-deep",
@@ -391,48 +398,33 @@ test("P132a fails closed on broken domain chains without classifying corruption 
   assert.notEqual(missingResult.reason, "retained-parent-not-current");
   assert.equal(missingResult.ok, false);
 
-  const malformed = forgePlacement(c, staged, "retained-deep", (record) => ({
-      ...record,
-      nodeId: "wrong-node-id",
-    })),
-    malformedBase = await c.PocketStarlingLogicalEditShadow.createBase({
-      acceptedSealRef: malformed.sealRef,
-      resolveLogical: (ref) => malformed.entries.get(ref),
+  const malformed = new Map(staged.stager.store), malformedRef = placementRefAt(malformed, root.placementRef, "retained-deep"),
+    malformedRecord = objectAt(malformed, malformedRef), malformedBase = await createBase(c, {
+      acceptedSealRef: staged.stage.sealRef, resolveLogical: (ref) => malformed.get(ref), syncedPocketId: "p132a",
     });
   assert.equal(malformedBase.ok, true, JSON.stringify(malformedBase));
-  expectFailure(
-    await c.PocketStarlingLogicalEditShadow.editPayload(
-      malformedBase.base,
-      "retained-deep",
-      { label: "blocked" },
-    ),
-    "invalid-placement-record",
+  malformed.set(malformedRef, c.PocketStarlingObjectSealShadow.canonical({ ...malformedRecord, nodeId: "wrong-node-id" }).bytes);
+  const malformedResult = await c.PocketStarlingLogicalEditShadow.editPayload(
+    malformedBase.base, "retained-deep", { label: "blocked" },
   );
+  assert.equal(malformedResult.ok, false);
+  assert.notEqual(malformedResult.reason, "retained-node-not-current");
+  assert.notEqual(malformedResult.reason, "retained-parent-not-current");
 
-  const firstCycle = forgePlacement(c, staged, "retained-root", (record) => ({
-      ...record,
-      parentId: "retained-child",
-    })),
-    secondCycle = forgePlacement(c, {
-      stager: { store: firstCycle.entries },
-      stage: {
-        rootObject: { ...staged.stage.rootObject, placementRef: objectAt(firstCycle.entries, objectAt(firstCycle.entries, firstCycle.sealRef).rootRef).placementRef },
-        sealObject: objectAt(firstCycle.entries, firstCycle.sealRef),
-      },
-    }, "retained-child", (record) => ({ ...record, parentId: "retained-root" })),
-    cycleBase = await c.PocketStarlingLogicalEditShadow.createBase({
-      acceptedSealRef: secondCycle.sealRef,
-      resolveLogical: (ref) => secondCycle.entries.get(ref),
+  const cycle = new Map(staged.stager.store), rootRef = placementRefAt(cycle, root.placementRef, "retained-root"),
+    childRef = placementRefAt(cycle, root.placementRef, "retained-child"), rootRecord = objectAt(cycle, rootRef),
+    childRecord = objectAt(cycle, childRef), cycleBase = await createBase(c, {
+      acceptedSealRef: staged.stage.sealRef, resolveLogical: (ref) => cycle.get(ref), syncedPocketId: "p132a",
     });
   assert.equal(cycleBase.ok, true, JSON.stringify(cycleBase));
-  expectFailure(
-    await c.PocketStarlingLogicalEditShadow.editPayload(
-      cycleBase.base,
-      "retained-root",
-      { label: "blocked" },
-    ),
-    "invalid-parent-chain",
+  cycle.set(rootRef, c.PocketStarlingObjectSealShadow.canonical({ ...rootRecord, parentId: "retained-child" }).bytes);
+  cycle.set(childRef, c.PocketStarlingObjectSealShadow.canonical({ ...childRecord, parentId: "retained-root" }).bytes);
+  const cycleResult = await c.PocketStarlingLogicalEditShadow.editPayload(
+    cycleBase.base, "retained-root", { label: "blocked" },
   );
+  assert.equal(cycleResult.ok, false);
+  assert.notEqual(cycleResult.reason, "retained-node-not-current");
+  assert.notEqual(cycleResult.reason, "retained-parent-not-current");
 });
 
 test("P132a remains genuinely dormant in production", () => {

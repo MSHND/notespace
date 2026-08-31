@@ -21,7 +21,7 @@ const test = require("node:test"),
     "js/pocket-starling-bridge-shadow.js",
     "js/pocket-starling-root-shadow.js",
     "js/pocket-starling-object-seal-shadow.js",
-    "js/pocket-sync-crypto.js",
+    "js/pocket-sync-crypto.js", "js/pocket-starling-semantic-authority-shadow.js",
     "js/pocket-starling-crypto-shadow.js",
     "js/pocket-starling-storage-shadow.js",
   ];
@@ -137,18 +137,26 @@ async function masterKey(c) {
         },
         wrappingKey,
       },
-    ]);
-  return bundle.masterKey;
+    ], { semanticAuthority: true });
+  return { ...bundle, wrappingKey, envelopeContext: {
+    syncedPocketId: "p121a", envelopeId: "device-envelope", envelopeKind: "device", envelopeVersion: 1,
+  }, record: bundle.envelopes[0].record };
 }
 
 const storageContext = () => ({ syncedPocketId: "p121a" });
 
 async function physicalStage(c, stager, logical, key, baseStage = null) {
+  const audit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(logical.sealRef,
+      (ref) => stager.store.get(ref)), auditProof = c.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit),
+    issued = await c.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority: key.semanticAuthority, auditProof });
+  assert.equal(audit.ok, true); assert.equal(issued.ok, true);
   return c.PocketStarlingStorageShadow.stageCandidate({
     sealRef: logical.sealRef,
     resolveLogical: (ref) => stager.store.get(ref),
-    masterKey: key,
+    masterKey: key.masterKey || key,
     context: storageContext(),
+    semanticAuthority: key.semanticAuthority,
+    semanticValidityProof: issued.proof,
     ...(baseStage ? { baseStage } : {}),
   });
 }
@@ -257,11 +265,13 @@ test("P121a binds only authenticated initial, completed-base, and fresh-reuse st
       logicalFresh.newRefs.map((ref) => [ref, stager.store.get(ref)]),
     ),
     runtimeB = runtime(),
+    reopened = await runtimeB.PocketSyncCrypto.openMasterKeyBundle(key.record, key.wrappingKey,
+      key.envelopeContext, [], { semanticAuthority: true }),
     resolver = await runtimeB.PocketStarlingStorageShadow.createResolver({
       acceptedSealStorageRef: physicalBase.sealStorageRef,
       acceptedBaseComplete: true,
       resolveStorage: (ref) => baseStore.get(ref),
-      masterKey: key,
+      masterKey: reopened.masterKey,
       context: storageContext(),
     }),
     freshBaseProof = resolver.createReuseProof(),
@@ -272,13 +282,20 @@ test("P121a binds only authenticated initial, completed-base, and fresh-reuse st
   const read = await resolver.readContent(opened.handle, "n3");
   assert.equal(read.ok, true, JSON.stringify(read));
 
+  const freshAudit = runtimeB.PocketStarlingObjectSealShadow.auditCandidateSeal(logicalFresh.sealRef,
+      (ref) => stager.store.get(ref)), freshProof = runtimeB.PocketStarlingObjectSealShadow.semanticAuditProvenance(freshAudit),
+    freshIssued = await runtimeB.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority: reopened.semanticAuthority,
+      auditProof: freshProof });
+  assert.equal(freshAudit.ok, true); assert.equal(freshIssued.ok, true);
   const physicalFresh = await runtimeB.PocketStarlingStorageShadow.stageCandidate({
     sealRef: logicalFresh.sealRef,
     resolveLogical: (ref) => frontier.get(ref),
-    masterKey: key,
+    masterKey: reopened.masterKey,
     context: storageContext(),
     freshBaseProof,
     newLogicalRefs: logicalFresh.newRefs,
+    semanticAuthority: reopened.semanticAuthority,
+    semanticValidityProof: freshIssued.proof,
   });
   assert.notEqual(physicalBase.sealStorageRef, logicalBase.sealRef);
   assertBinding(

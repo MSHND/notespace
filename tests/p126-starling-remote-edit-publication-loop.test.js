@@ -3,6 +3,7 @@
 const test = require("node:test"), assert = require("node:assert/strict"),
   fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"),
   { webcrypto } = require("node:crypto"),
+  { semanticBase } = require("./helpers/starling-semantic-test.js"),
   { createProductionReleaseManifest } = require("../sync-service/pocket-sync-production-server.js"),
   ROOT = path.resolve(__dirname, ".."), HEAD_SCHEMA = "pocket.starling.head.v1",
   SCRIPTS = [
@@ -12,7 +13,7 @@ const test = require("node:test"), assert = require("node:assert/strict"),
     "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js", "js/pocket-sync-crypto.js",
     "js/pocket-starling-crypto-shadow.js", "js/pocket-starling-storage-shadow.js", "js/pocket-starling-head-shadow.js",
     "js/pocket-sync-remote-client.js", "js/pocket-starling-logical-edit-shadow.js", "js/pocket-starling-publication-shadow.js",
-    "js/pocket-starling-remote-open-shadow.js", "js/pocket-starling-remote-edit-shadow.js",
+    "js/pocket-starling-remote-open-shadow.js", "js/pocket-starling-remote-edit-shadow.js", "js/pocket-starling-semantic-authority-shadow.js",
   ];
 
 function runtime() {
@@ -35,13 +36,6 @@ function stateFor(c, count = 2000) {
       nodes: Array.from({ length: count }, (_, index) => ({ id: `n${index}`, parentId: "root", order: index, label: `Node ${index}`, value: index })),
       tombstones: [], rootExtras: {}, dataExtras: {} }, { capacity: 4 }), built = c.PocketStarlingRootShadow.build(encoded.bridge);
   assert.equal(encoded.ok, true); assert.equal(built.ok, true); return built.state;
-}
-
-async function keyFor(c) {
-  const wrappingKey = await c.PocketSyncCrypto.generateDeviceWrappingKey(), bundle = await c.PocketSyncCrypto.createMasterKeyBundle([{
-    context: { syncedPocketId: "p126", envelopeId: "device", envelopeKind: "device", envelopeVersion: 1 }, wrappingKey,
-  }]);
-  return bundle.masterKey;
 }
 
 function remoteState() { return { objects: new Map(), head: genesis(), calls: [], casMode: "normal" }; }
@@ -80,23 +74,23 @@ async function setup(count = 2000) {
   const writer = runtime(), state = stateFor(writer, count), stager = writer.PocketStarlingObjectSealShadow.createStager(),
     logical = writer.PocketStarlingObjectSealShadow.stageCandidate(stager, state, { previousSealRef: null });
   assert.equal(logical.ok, true);
-  const key = await keyFor(writer), physical = await writer.PocketStarlingStorageShadow.stageCandidate({
-    sealRef: logical.stage.sealRef, resolveLogical: (ref) => stager.store.get(ref), masterKey: key, context: context(),
+  const semantic = await semanticBase(writer, { acceptedSealRef: logical.stage.sealRef, resolveLogical: (ref) => stager.store.get(ref), syncedPocketId: "p126" }), physical = await writer.PocketStarlingStorageShadow.stageCandidate({
+    sealRef: logical.stage.sealRef, resolveLogical: (ref) => stager.store.get(ref), masterKey: semantic.masterKey, context: context(), semanticAuthority: semantic.semanticAuthority, semanticValidityProof: semantic.semanticValidityProof,
   }), confirmed = writer.PocketStarlingObjectSealShadow.verifyNewObjectPresence(logical.stage, (ref) => stager.store.has(ref), {});
   assert.equal(confirmed.ok, true);
   const remote = remoteState(), committed = await publisher(writer, remote, "genesis").publishCandidate({ stage: physical, expectedHead: genesis() });
-  assert.equal(committed.outcome, "committed"); return { writer, key, physical, remote };
+  assert.equal(committed.outcome, "committed"); return { writer, key: semantic.masterKey, wrappingKey: semantic.envelope.wrappingKey, envelopeContext: semantic.envelope.envelopeContext, record: semantic.envelope.record, physical, remote };
 }
 
 async function openFresh(fixture, prefix) {
-  const reader = runtime(), opened = await reader.PocketStarlingRemoteOpenShadow.createRemoteOpener({
+  const reader = runtime(), reopened = await reader.PocketSyncCrypto.openMasterKeyBundle(fixture.record, fixture.wrappingKey, fixture.envelopeContext, [], { semanticAuthority: true }), opened = await reader.PocketStarlingRemoteOpenShadow.createRemoteOpener({
     objectHeadService: service(reader, fixture.remote), operationIdFactory: factory(prefix),
-  }).openRemote({ masterKey: fixture.key, context: context() });
-  return { reader, opened };
+  }).openRemote({ masterKey: reopened.masterKey, context: context(), semanticAuthority: reopened.semanticAuthority });
+  return { reader, opened, key: reopened.masterKey, semanticAuthority: reopened.semanticAuthority };
 }
 
-async function prepare(reader, opened, key, nodeId, payload) {
-  const editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context() });
+async function prepare(reader, opened, key, semanticAuthority, nodeId, payload) {
+  const editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context(), semanticAuthority });
   return editor.preparePayloadEdit({ nodeId, payload });
 }
 
@@ -111,7 +105,7 @@ async function expectIncomplete(c, stage, key) {
 test("P126 definite commit closes the manual remote edit publication loop", async () => {
   const fixture = await setup(), first = await openFresh(fixture, "open-one"), revisionOne = plain(fixture.remote.head), afterOpen = fixture.remote.calls.length,
     mutableOpened = { outcome: "opened", head: { ...first.opened.head }, session: first.opened.session },
-    editor = await first.reader.PocketStarlingRemoteEditShadow.createEditor({ opened: mutableOpened, masterKey: fixture.key, context: context() });
+    editor = await first.reader.PocketStarlingRemoteEditShadow.createEditor({ opened: mutableOpened, masterKey: first.key, context: context(), semanticAuthority: first.semanticAuthority });
   mutableOpened.head.revision = 99; mutableOpened.head.sealRef = "redirected-before-prepare";
   const prepared = await editor.preparePayloadEdit({ nodeId: "n1337", payload: { label: "committed", value: 126 } });
   mutableOpened.head.revision = 100; mutableOpened.head.sealRef = "redirected-after-prepare";
@@ -128,17 +122,17 @@ test("P126 definite commit closes the manual remote edit publication loop", asyn
   assert.equal(callsSince(fixture.remote, beforePublish).some(([route]) => route === "readShadowHead"), false);
   await assert.rejects(first.reader.PocketStarlingStorageShadow.stageCandidate({
     sealRef: "proof-ref:v1:candidate-seal:00000000", resolveLogical() { throw new Error("reached traversal"); }, masterKey: fixture.key, context: context(), baseStage: prepared.stage,
-  }), (error) => error && error.code === "logical-resolution-failed");
+  }), (error) => error && error.code === "base-stage-mismatch");
   const second = await openFresh(fixture, "open-two"), edited = await second.opened.session.readContent("n1337");
   assert.deepEqual(plain(edited.payload), { label: "committed", value: 126 });
-  const next = await prepare(second.reader, second.opened, fixture.key, "n1337", { label: "second", value: 127 });
+  const next = await prepare(second.reader, second.opened, second.key, second.semanticAuthority, "n1337", { label: "second", value: 127 });
   assert.equal(next.outcome, "prepared"); assert.equal(next.binding.expectedSealStorageRef, fixture.remote.head.sealRef); assert.notEqual(next.binding.candidateSealStorageRef, fixture.remote.head.sealRef);
   assert.ok(next.stage.newRecords.length < 30); assert.ok(callsSince(fixture.remote, afterOpen).filter(([route]) => route === "getOpaqueObject").length < 40);
 });
 
 test("P126 unchanged P125 result never enters publication", async () => {
-  const fixture = await setup(), { reader, opened } = await openFresh(fixture, "unchanged-open"), before = fixture.remote.calls.length,
-    unchanged = await prepare(reader, opened, fixture.key, "n20", { label: "Node 20", value: 20 });
+  const fixture = await setup(), fresh = await openFresh(fixture, "unchanged-open"), before = fixture.remote.calls.length,
+    unchanged = await prepare(fresh.reader, fresh.opened, fresh.key, fresh.semanticAuthority, "n20", { label: "Node 20", value: 20 });
   assert.deepEqual(plain(unchanged), { outcome: "unchanged" }); assert.equal(Object.isFrozen(unchanged), true);
   const routes = callsSince(fixture.remote, before).map(([route]) => route);
   assert.equal(routes.some((route) => ["putOpaqueObject", "objectPresence", "compareAndSetShadowHead", "readShadowHead"].includes(route)), false);
@@ -146,8 +140,8 @@ test("P126 unchanged P125 result never enters publication", async () => {
 
 test("P126 conflict preserves material but Head selects the competing candidate", async () => {
   const fixture = await setup(), a = await openFresh(fixture, "a-open"), b = await openFresh(fixture, "b-open"),
-    candidateA = await prepare(a.reader, a.opened, fixture.key, "n20", { label: "A", value: 1 }),
-    candidateB = await prepare(b.reader, b.opened, fixture.key, "n20", { label: "B", value: 2 });
+    candidateA = await prepare(a.reader, a.opened, a.key, a.semanticAuthority, "n20", { label: "A", value: 1 }),
+    candidateB = await prepare(b.reader, b.opened, b.key, b.semanticAuthority, "n20", { label: "B", value: 2 });
   const beforeB = fixture.remote.calls.length, committedB = await publisher(b.reader, fixture.remote, "publish-b").publishCandidate({ stage: candidateB.stage, expectedHead: candidateB.expectedHead });
   assert.equal(committedB.outcome, "committed"); assert.equal(casCalls(fixture.remote, beforeB).length, 1);
   const beforeA = fixture.remote.calls.length, rejectedA = await publisher(a.reader, fixture.remote, "publish-a").publishCandidate({ stage: candidateA.stage, expectedHead: candidateA.expectedHead });
@@ -161,7 +155,7 @@ test("P126 conflict preserves material but Head selects the competing candidate"
 
 test("P126 explicit reconciliation observes an ambiguously committed CAS without completion", async () => {
   const fixture = await setup(), opened = await openFresh(fixture, "ambiguous-commit-open"),
-    prepared = await prepare(opened.reader, opened.opened, fixture.key, "n20", { label: "ambiguous committed", value: 3 });
+    prepared = await prepare(opened.reader, opened.opened, opened.key, opened.semanticAuthority, "n20", { label: "ambiguous committed", value: 3 });
   fixture.remote.casMode = "apply-throw"; const beforePublish = fixture.remote.calls.length;
   await assert.rejects(publisher(opened.reader, fixture.remote, "ambiguous-commit-publish").publishCandidate({ stage: prepared.stage, expectedHead: prepared.expectedHead }),
     (error) => error && error.code === "publication-outcome-unknown");
@@ -184,7 +178,7 @@ test("P126 explicit reconciliation observes an ambiguously committed CAS without
 
 test("P126 explicit reconciliation leaves an ambiguously uncommitted candidate unadopted", async () => {
   const fixture = await setup(), opened = await openFresh(fixture, "ambiguous-none-open"), original = await opened.opened.session.readContent("n20"),
-    prepared = await prepare(opened.reader, opened.opened, fixture.key, "n20", { label: "not committed", value: 4 });
+    prepared = await prepare(opened.reader, opened.opened, opened.key, opened.semanticAuthority, "n20", { label: "not committed", value: 4 });
   fixture.remote.casMode = "throw-before"; const beforePublish = fixture.remote.calls.length;
   await assert.rejects(publisher(opened.reader, fixture.remote, "ambiguous-none-publish").publishCandidate({ stage: prepared.stage, expectedHead: prepared.expectedHead }),
     (error) => error && error.code === "publication-outcome-unknown");
