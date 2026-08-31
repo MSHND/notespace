@@ -520,7 +520,7 @@ test("P122 treats a thrown CAS as unknown without read, retry, or stage completi
 });
 
 test("P122 batches genuine large stages at 512 refs after all puts and before one CAS", async () => {
-  const c = context(), base = await initialStage(c, 800, 2), calls = [];
+  const c = context(), base = await initialStage(c, 800, 3), calls = [];
   assert.ok(base.physical.newRecords.length > 512);
   await publisher(c, calls).publishCandidate({
     stage: base.physical,

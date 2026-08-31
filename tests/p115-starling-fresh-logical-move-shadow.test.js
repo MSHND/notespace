@@ -305,7 +305,7 @@ function manualFixture(c, options = {}) {
 
   const leaf = (items, leafCapacity = capacity) =>
       putLogical(c, store, "sequence-leaf", {
-        schema: logical.OBJECT_SCHEMA,
+        schema: logical.SEQUENCE_SCHEMA,
         kind: "sequence-leaf",
         capacity: leafCapacity,
         count: items.length,
@@ -316,7 +316,7 @@ function manualFixture(c, options = {}) {
   let sourceSequenceRef;
   if (options.branchCountMismatch)
     sourceSequenceRef = putLogical(c, store, "sequence-branch", {
-      schema: logical.OBJECT_SCHEMA,
+      schema: logical.SEQUENCE_SCHEMA,
       kind: "sequence-branch",
       capacity,
       count: 99,

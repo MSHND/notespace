@@ -5,7 +5,8 @@
   "use strict";
   const ROOT_SCHEMA = "pocket.starling.logical-root.v1",
     SEAL_SCHEMA = "pocket.starling.candidate-seal.v1",
-    OBJECT_SCHEMA = "pocket.starling.logical-object.v1";
+    OBJECT_SCHEMA = "pocket.starling.logical-object.v1",
+    SEQUENCE_SCHEMA = "pocket.starling.sequence-page.v2";
   const stageProofs = new WeakMap();
   const fail = (reason, extra = {}) => ({ ok: false, reason, ...extra });
   function plain(value, seen = new Set()) {
@@ -151,7 +152,7 @@
     let object;
     if (page.kind === "leaf")
       object = {
-        schema: OBJECT_SCHEMA,
+        schema: SEQUENCE_SCHEMA,
         kind: "sequence-leaf",
         capacity: page.capacity,
         count: page.count,
@@ -165,7 +166,7 @@
         childRefs.push(encoded.ref);
       }
       object = {
-        schema: OBJECT_SCHEMA,
+        schema: SEQUENCE_SCHEMA,
         kind: "sequence-branch",
         capacity: page.capacity,
         count: page.count,
@@ -408,7 +409,9 @@
             ? ROOT_SCHEMA
             : expectedKind === "candidate-seal"
               ? SEAL_SCHEMA
-              : OBJECT_SCHEMA)
+              : expectedKind === "sequence-leaf" || expectedKind === "sequence-branch"
+                ? SEQUENCE_SCHEMA
+                : OBJECT_SCHEMA)
       )
         return fail("invalid-object-kind", { ref });
       cache.set(ref, object);
@@ -440,7 +443,7 @@
       value.schema === ROOT_SCHEMA &&
       value.kind === "pocket-root" &&
       Number.isInteger(value.capacity) &&
-      value.capacity >= 2 &&
+      value.capacity >= 3 &&
       [
         value.contentRef,
         value.placementRef,
@@ -571,9 +574,10 @@
       diagnostics: result.diagnostics,
     };
   }
-  function decodeSequence(io, ref, seen, capacity, isRoot = true) {
-    if (seen.has(ref)) return fail("object-cycle");
-    seen.add(ref);
+  function decodeSequence(io, ref, graph, capacity, isRoot = true, depth = 0) {
+    if (graph.active.has(ref)) return fail("object-cycle");
+    if (graph.seen.has(ref)) return fail("invalid-sequence-object", { ref });
+    graph.active.add(ref); graph.seen.add(ref);
     const kind = kindFromRef(ref);
     if (kind !== "sequence-leaf" && kind !== "sequence-branch")
       return fail("invalid-sequence-object", { ref });
@@ -587,15 +591,16 @@
     if (
       kind === "sequence-leaf" &&
       exact(o, ["schema", "kind", "capacity", "count", "items"]) &&
+      o.schema === SEQUENCE_SCHEMA &&
       Number.isInteger(o.capacity) &&
-      o.capacity >= 2 &&
+      o.capacity >= 3 &&
       o.capacity === capacity &&
       Number.isInteger(o.count) &&
       o.count >= 0 &&
       Array.isArray(o.items) &&
       o.count === o.items.length &&
       o.items.length <= capacity &&
-      (isRoot || o.items.length > 0) &&
+      (isRoot || o.items.length >= Math.ceil(capacity / 2)) &&
       o.items.every((item) => typeof item === "string")
     )
       page = Object.freeze({
@@ -607,19 +612,20 @@
     else if (
       kind === "sequence-branch" &&
       exact(o, ["schema", "kind", "capacity", "count", "childRefs"]) &&
+      o.schema === SEQUENCE_SCHEMA &&
       Number.isInteger(o.capacity) &&
-      o.capacity >= 2 &&
+      o.capacity >= 3 &&
       o.capacity === capacity &&
       Number.isInteger(o.count) &&
       o.count >= 0 &&
       Array.isArray(o.childRefs) &&
-      o.childRefs.length >= (isRoot ? 2 : 1) &&
+      o.childRefs.length >= (isRoot ? 2 : Math.ceil(capacity / 2)) &&
       o.childRefs.length <= capacity &&
       o.childRefs.every((childRef) => typeof childRef === "string")
     ) {
       const children = [];
       for (const childRef of o.childRefs) {
-        const child = decodeSequence(io, childRef, seen, capacity, false);
+        const child = decodeSequence(io, childRef, graph, capacity, false, depth + 1);
         if (!child.ok) return child;
         children.push(child.page);
       }
@@ -632,7 +638,11 @@
         children: Object.freeze(children),
       });
     } else return fail("invalid-sequence-object", { ref });
-    seen.delete(ref);
+    graph.active.delete(ref);
+    if (page.kind === "leaf") {
+      if (graph.leafDepth === null) graph.leafDepth = depth;
+      else if (graph.leafDepth !== depth) return fail("invalid-sequence-object", { ref });
+    }
     return { ok: true, page };
   }
   function decodeTrie(
@@ -656,7 +666,7 @@
         const decoded = decodeSequence(
           io,
           loaded.object.valueRef,
-          new Set(),
+          { seen: new Set(), active: new Set(), leafDepth: null },
           capacity,
         );
         if (!decoded.ok) return decoded;
@@ -792,6 +802,7 @@
     ROOT_SCHEMA,
     SEAL_SCHEMA,
     OBJECT_SCHEMA,
+    SEQUENCE_SCHEMA,
     canonical,
     refFor,
     createStager,

@@ -199,7 +199,8 @@
     const sequence = sequenceApi();
     if (!sequence) return fail("sequence-unavailable");
 
-    const capacity = Number.isInteger(options.capacity) && options.capacity >= 2 ? options.capacity : 4;
+    const capacity = Object.prototype.hasOwnProperty.call(options, "capacity") ? options.capacity : 4;
+    if (!Number.isInteger(capacity) || capacity < 3) return fail("invalid-capacity");
     let placements = EMPTY;
     let children = EMPTY;
 
@@ -208,14 +209,16 @@
       placements = trieSet(placements, nodeId, record);
     }
     for (const [parentId, nodeIds] of Object.entries(relation.children)) {
-      children = trieSet(children, parentId, sequence.build(nodeIds, { capacity }).root);
+      const built = sequence.build(nodeIds, { capacity });
+      if (!built.ok) return built;
+      children = trieSet(children, parentId, built.root);
     }
 
     return { ok: true, model: modelFrom(capacity, placements, children) };
   }
 
   function materialise(model) {
-    if (!model || !Number.isInteger(model.capacity) || !model.placements || !model.children) {
+    if (!model || !Number.isInteger(model.capacity) || model.capacity < 3 || !model.placements || !model.children) {
       return fail("invalid-model");
     }
     const sequence = sequenceApi();
@@ -229,6 +232,8 @@
     }
     const children = Object.create(null);
     for (const [parentId, root] of trieEntries(model.children)) {
+      const sequenceCheck = sequence.audit(root);
+      if (!sequenceCheck.ok) return sequenceCheck;
       children[parentId] = sequence.materialise(root);
     }
     const relation = { nodeIds, parents, children };

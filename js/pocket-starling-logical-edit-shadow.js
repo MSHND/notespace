@@ -95,7 +95,7 @@
       value.schema === logical.ROOT_SCHEMA &&
       value.kind === "pocket-root" &&
       Number.isInteger(value.capacity) &&
-      value.capacity >= 2 &&
+      value.capacity >= 3 &&
       [
         value.contentRef,
         value.placementRef,
@@ -391,7 +391,7 @@
     if (
       kind === "sequence-leaf" &&
       exact(value, ["schema", "kind", "capacity", "count", "items"]) &&
-      value.schema === state.logical.OBJECT_SCHEMA &&
+      value.schema === state.logical.SEQUENCE_SCHEMA &&
       value.kind === kind &&
       value.capacity === capacity &&
       Number.isInteger(value.count) &&
@@ -399,7 +399,7 @@
       Array.isArray(value.items) &&
       value.count === value.items.length &&
       value.items.length <= capacity &&
-      (isRoot || value.items.length > 0) &&
+      (isRoot || value.items.length >= Math.ceil(capacity / 2)) &&
       value.items.every((item) => typeof item === "string")
     )
       return {
@@ -415,13 +415,13 @@
         "count",
         "childRefs",
       ]) &&
-      value.schema === state.logical.OBJECT_SCHEMA &&
+      value.schema === state.logical.SEQUENCE_SCHEMA &&
       value.kind === kind &&
       value.capacity === capacity &&
       Number.isInteger(value.count) &&
       value.count >= 0 &&
       Array.isArray(value.childRefs) &&
-      value.childRefs.length >= (isRoot ? 2 : 1) &&
+      value.childRefs.length >= (isRoot ? 2 : Math.ceil(capacity / 2)) &&
       value.childRefs.length <= capacity &&
       value.childRefs.every((childRef) => typeof childRef === "string")
     )
@@ -463,7 +463,7 @@
       kind: "sequence-leaf",
       count: 0,
       object: {
-        schema: state.logical.OBJECT_SCHEMA,
+        schema: state.logical.SEQUENCE_SCHEMA,
         kind: "sequence-leaf",
         capacity: state.root.capacity,
         count: 0,
@@ -475,7 +475,7 @@
 
   function sequenceLeaf(state, frontier, items) {
     const stored = materialise(state, frontier, "sequence-leaf", {
-      schema: state.logical.OBJECT_SCHEMA,
+      schema: state.logical.SEQUENCE_SCHEMA,
       kind: "sequence-leaf",
       capacity: state.root.capacity,
       count: items.length,
@@ -498,7 +498,7 @@
   function sequenceBranch(state, frontier, children) {
     const count = children.reduce((sum, child) => sum + child.count, 0),
       stored = materialise(state, frontier, "sequence-branch", {
-        schema: state.logical.OBJECT_SCHEMA,
+        schema: state.logical.SEQUENCE_SCHEMA,
         kind: "sequence-branch",
         capacity: state.root.capacity,
         count,
@@ -546,54 +546,90 @@
     return { ok: true, item: page.object.items[offset] };
   }
 
+  function sequenceEntries(page) {
+    return page.kind === "sequence-leaf" ? page.object.items : page.children;
+  }
+
+  function sequenceOccupancy(page) {
+    return page.kind === "sequence-leaf" ? page.object.items.length : page.children.length;
+  }
+
+  async function sequenceWithEntries(state, frontier, page, values) {
+    return page.kind === "sequence-leaf"
+      ? sequenceLeaf(state, frontier, values)
+      : sequenceBranch(state, frontier, values);
+  }
+
+  async function expandedSibling(state, page) {
+    return page.kind === "sequence-branch" ? expandedPage(state, page) : { ok: true, page };
+  }
+
+  async function rebalanceSequenceChildren(state, frontier, children, childIndex) {
+    const minimum = Math.ceil(state.root.capacity / 2), childExpanded = await expandedSibling(state, children[childIndex]);
+    if (!childExpanded.ok) return childExpanded;
+    children[childIndex] = childExpanded.page;
+    const child = children[childIndex], leftIndex = childIndex - 1, rightIndex = childIndex + 1;
+    if (sequenceOccupancy(child) >= minimum) return { ok: true, children };
+    if (leftIndex >= 0) {
+      const leftExpanded = await expandedSibling(state, children[leftIndex]);
+      if (!leftExpanded.ok) return leftExpanded;
+      children[leftIndex] = leftExpanded.page;
+      if (sequenceOccupancy(leftExpanded.page) > minimum) {
+        const left = sequenceEntries(leftExpanded.page).slice(), moved = left.pop(), values = sequenceEntries(child).slice();
+        values.unshift(moved);
+        const nextLeft = await sequenceWithEntries(state, frontier, leftExpanded.page, left), nextChild = await sequenceWithEntries(state, frontier, child, values);
+        if (!nextLeft.ok) return nextLeft; if (!nextChild.ok) return nextChild;
+        children.splice(leftIndex, 2, nextLeft.page, nextChild.page);
+        return { ok: true, children };
+      }
+    }
+    if (rightIndex < children.length) {
+      const rightExpanded = await expandedSibling(state, children[rightIndex]);
+      if (!rightExpanded.ok) return rightExpanded;
+      children[rightIndex] = rightExpanded.page;
+      if (sequenceOccupancy(rightExpanded.page) > minimum) {
+        const values = sequenceEntries(child).slice(), right = sequenceEntries(rightExpanded.page).slice();
+        values.push(right.shift());
+        const nextChild = await sequenceWithEntries(state, frontier, child, values), nextRight = await sequenceWithEntries(state, frontier, rightExpanded.page, right);
+        if (!nextChild.ok) return nextChild; if (!nextRight.ok) return nextRight;
+        children.splice(childIndex, 2, nextChild.page, nextRight.page);
+        return { ok: true, children };
+      }
+    }
+    if (leftIndex >= 0) {
+      const merged = await sequenceWithEntries(state, frontier, children[leftIndex], sequenceEntries(children[leftIndex]).concat(sequenceEntries(child)));
+      if (!merged.ok) return merged;
+      children.splice(leftIndex, 2, merged.page);
+    } else {
+      const merged = await sequenceWithEntries(state, frontier, child, sequenceEntries(child).concat(sequenceEntries(children[rightIndex])));
+      if (!merged.ok) return merged;
+      children.splice(childIndex, 2, merged.page);
+    }
+    return { ok: true, children };
+  }
+
   async function removeSequencePage(state, frontier, page, index) {
     const expanded = await expandedPage(state, page);
     if (!expanded.ok) return expanded;
     page = expanded.page;
     if (page.kind === "sequence-leaf") {
-      const items = page.object.items.slice();
-      items.splice(index, 1);
-      if (items.length === 0) return { ok: true, pages: [] };
-      const leaf = sequenceLeaf(state, frontier, items);
-      return leaf.ok ? { ok: true, pages: [leaf.page] } : leaf;
+      const items = page.object.items.slice(); items.splice(index, 1);
+      return sequenceLeaf(state, frontier, items);
     }
-    let child = 0,
-      offset = index;
-    while (
-      child < page.children.length - 1 &&
-      offset >= page.children[child].count
-    ) {
-      offset -= page.children[child].count;
-      child += 1;
-    }
-    const replacement = await removeSequencePage(
-      state,
-      frontier,
-      page.children[child],
-      offset,
-    );
+    let child = 0, offset = index;
+    while (child < page.children.length - 1 && offset >= page.children[child].count) { offset -= page.children[child].count; child += 1; }
+    const replacement = await removeSequencePage(state, frontier, page.children[child], offset);
     if (!replacement.ok) return replacement;
-    const children = page.children.slice();
-    children.splice(child, 1, ...replacement.pages);
-    if (children.length === 0) return { ok: true, pages: [] };
-    const branch = sequenceBranch(state, frontier, children);
-    return branch.ok ? { ok: true, pages: [branch.page] } : branch;
+    const children = page.children.slice(); children[child] = replacement.page;
+    const repaired = await rebalanceSequenceChildren(state, frontier, children, child);
+    if (!repaired.ok) return repaired;
+    return sequenceBranch(state, frontier, repaired.children);
   }
 
   async function removeSequenceItem(state, frontier, root, index) {
-    const removed = await removeSequencePage(
-      state,
-      frontier,
-      root,
-      index,
-    );
+    const removed = await removeSequencePage(state, frontier, root, index);
     if (!removed.ok) return removed;
-    let next;
-    if (removed.pages.length === 0) {
-      const empty = sequenceLeaf(state, frontier, []);
-      if (!empty.ok) return empty;
-      next = empty.page;
-    } else next = removed.pages[0];
+    let next = removed.page;
     while (next.kind === "sequence-branch") {
       const expanded = await expandedPage(state, next);
       if (!expanded.ok) return expanded;

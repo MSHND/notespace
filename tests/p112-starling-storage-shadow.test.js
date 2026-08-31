@@ -654,8 +654,9 @@ test("P112 rejects conflicting authenticated logical-to-physical bindings", asyn
     return { ref, storageRef: sealed.ref, record: sealed.record };
   }
   const objectSchema = p109.OBJECT_SCHEMA,
+    sequenceSchema = p109.SEQUENCE_SCHEMA,
     targetObject = {
-      schema: objectSchema,
+      schema: sequenceSchema,
       kind: "sequence-leaf",
       capacity: 4,
       count: 1,
@@ -664,7 +665,7 @@ test("P112 rejects conflicting authenticated logical-to-physical bindings", asyn
     targetA = await make("sequence-leaf", targetObject, []),
     targetB = await make("sequence-leaf", targetObject, []),
     parentAObject = {
-      schema: objectSchema,
+      schema: sequenceSchema,
       kind: "sequence-branch",
       capacity: 4,
       count: 1,

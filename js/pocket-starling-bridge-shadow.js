@@ -28,7 +28,8 @@
     const deps = dependencies(); if (!deps) return fail("bridge-dependency-unavailable");
     const compatibility = deps.shadow.encode(norm); if (!compatibility.ok) return compatibility;
     const derived = relationFrom(norm, deps.compare); if (!derived.ok) return derived;
-    const capacity = Number.isInteger(options.capacity) && options.capacity >= 2 ? options.capacity : 4;
+    const capacity = Object.prototype.hasOwnProperty.call(options, "capacity") ? options.capacity : 4;
+    if (!Number.isInteger(capacity) || capacity < 3) return fail("invalid-capacity");
     const structural = deps.placement.build(derived.relation, { capacity }); if (!structural.ok) return structural;
     return { ok: true, bridge: Object.freeze({ schema: SCHEMA, capacity, compatibility: compatibility.shadow, structural: structural.model }) };
   }

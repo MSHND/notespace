@@ -161,9 +161,9 @@
     } else if (logicalKind === "sequence-branch") {
       if (
         !exact(object, ["schema", "kind", "capacity", "count", "childRefs"]) ||
-        object.schema !== logical.OBJECT_SCHEMA ||
+        object.schema !== logical.SEQUENCE_SCHEMA ||
         !Number.isInteger(object.capacity) ||
-        object.capacity < 2 ||
+        object.capacity < 3 ||
         !Number.isInteger(object.count) ||
         object.count < 0 ||
         !Array.isArray(object.childRefs) ||
@@ -176,9 +176,9 @@
     } else if (logicalKind === "sequence-leaf") {
       if (
         !exact(object, ["schema", "kind", "capacity", "count", "items"]) ||
-        object.schema !== logical.OBJECT_SCHEMA ||
+        object.schema !== logical.SEQUENCE_SCHEMA ||
         !Number.isInteger(object.capacity) ||
-        object.capacity < 2 ||
+        object.capacity < 3 ||
         !Number.isInteger(object.count) ||
         object.count < 0 ||
         object.count !== object.items?.length ||

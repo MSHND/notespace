@@ -837,6 +837,7 @@ test("P109 rejects self-authenticating invalid ordered-sequence objects", () => 
     stager = api.createStager(),
     staged = stage(api, stager, state),
     cases = [
+      ["old-schema", (page) => ({ ...page, schema: api.OBJECT_SCHEMA })],
       ["capacity", (page) => ({ ...page, capacity: page.capacity + 1 })],
       ["count", (page) => ({ ...page, count: page.count + 1 })],
       [
@@ -854,16 +855,17 @@ test("P109 rejects self-authenticating invalid ordered-sequence objects", () => 
       ],
     ];
 
-  // Twenty items at capacity four create a valid nested one-child branch.
+  // Balanced build never emits a non-root one-child branch.
   const sequenceRoot = objectAt(
     stager.store,
     trieValueRefAt(stager.store, staged.rootObject.childrenRef, "root"),
   );
-  assert.ok(
+  assert.equal(
     sequenceRoot.childRefs.some((ref) => {
       const child = objectAt(stager.store, ref);
       return child.kind === "sequence-branch" && child.childRefs.length === 1;
     }),
+    false,
   );
   assert.equal(
     api.auditCandidateSeal(staged.sealRef, resolverFor(stager)).ok,

@@ -295,7 +295,7 @@ function manualFixture(c, options = {}) {
 
   const leaf = (items, leafCapacity = capacity) =>
       putLogical(c, store, "sequence-leaf", {
-        schema: logical.OBJECT_SCHEMA,
+        schema: logical.SEQUENCE_SCHEMA,
         kind: "sequence-leaf",
         capacity: leafCapacity,
         count: items.length,
@@ -306,7 +306,7 @@ function manualFixture(c, options = {}) {
   let parentSequenceRef;
   if (options.branchCountMismatch)
     parentSequenceRef = putLogical(c, store, "sequence-branch", {
-      schema: logical.OBJECT_SCHEMA,
+      schema: logical.SEQUENCE_SCHEMA,
       kind: "sequence-branch",
       capacity,
       count: 99,
@@ -319,7 +319,7 @@ function manualFixture(c, options = {}) {
     );
   else if (options.malformedSequence)
     parentSequenceRef = putLogical(c, store, "sequence-leaf", {
-      schema: logical.OBJECT_SCHEMA,
+      schema: logical.SEQUENCE_SCHEMA,
       kind: "sequence-leaf",
       capacity,
       count: 3,
@@ -327,7 +327,7 @@ function manualFixture(c, options = {}) {
     });
   else
     parentSequenceRef = putLogical(c, store, "sequence-branch", {
-      schema: logical.OBJECT_SCHEMA,
+      schema: logical.SEQUENCE_SCHEMA,
       kind: "sequence-branch",
       capacity,
       count: 4,

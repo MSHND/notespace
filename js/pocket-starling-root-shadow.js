@@ -294,7 +294,7 @@
         return fail("invalid-root-witness");
       if (
         !Number.isInteger(candidate.capacity) ||
-        candidate.capacity < 2 ||
+        candidate.capacity < 3 ||
         candidate.structural.capacity !== candidate.capacity ||
         candidate.root.capacity !== candidate.capacity
       )
