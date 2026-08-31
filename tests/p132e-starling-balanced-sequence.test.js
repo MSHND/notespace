@@ -49,6 +49,19 @@ function reorder(sequence, root, fromIndex, toIndex) {
   return { root: inserted.root, order: before };
 }
 
+function leaf(items, capacity = 3) {
+  return Object.freeze({ kind: "leaf", items: Object.freeze(items), count: items.length, capacity });
+}
+
+function branch(children, capacity = 3) {
+  return Object.freeze({ kind: "branch", children: Object.freeze(children), count: children.reduce((total, child) => total + child.count, 0), capacity });
+}
+
+function assertValid(sequence, root, expected) {
+  assert.equal(sequence.audit(root).ok, true);
+  assert.deepEqual(plain(sequence.materialise(root)), expected);
+}
+
 test("P132e rejects capacity two and builds only balanced C=3/C=4 roots", () => {
   const sequence = api();
   assert.deepEqual(plain(sequence.build(["a"], { capacity: 2 })), { ok: false, reason: "invalid-capacity" });
@@ -118,4 +131,59 @@ test("P132e full audit rejects repeated reachability and cycles", () => {
   const loop = { kind: "branch", capacity: 3, count: 1, children: [] };
   loop.children.push(loop, shared);
   assert.deepEqual(plain(sequence.audit(loop)), { ok: false, reason: "invalid-sequence" });
+});
+
+test("P132f names every deterministic capacity-three rebalance and height transition", () => {
+  const sequence = api();
+  let result;
+
+  result = sequence.insertAt(leaf(["a", "b", "c"]), 3, "d");
+  assert.equal(result.root.kind, "branch");
+  assert.deepEqual(plain(result.root.children.map((child) => child.items)), [["a", "b"], ["c", "d"]]);
+  assertValid(sequence, result.root, ["a", "b", "c", "d"]);
+
+  result = sequence.removeAt(branch([leaf(["a", "b", "c"]), leaf(["d", "e"])]), 3);
+  assert.deepEqual(plain(result.root.children.map((child) => child.items)), [["a", "b"], ["c", "e"]]);
+  assertValid(sequence, result.root, ["a", "b", "c", "e"]);
+
+  result = sequence.removeAt(branch([leaf(["a", "b"]), leaf(["c", "d", "e"])]), 0);
+  assert.deepEqual(plain(result.root.children.map((child) => child.items)), [["b", "c"], ["d", "e"]]);
+  assertValid(sequence, result.root, ["b", "c", "d", "e"]);
+
+  result = sequence.removeAt(branch([leaf(["a", "b"]), leaf(["c", "d"]), leaf(["e", "f"])]), 2);
+  assert.deepEqual(plain(result.root.children.map((child) => child.items)), [["a", "b", "d"], ["e", "f"]]);
+  assertValid(sequence, result.root, ["a", "b", "d", "e", "f"]);
+
+  result = sequence.removeAt(branch([leaf(["a", "b"]), leaf(["c", "d"]), leaf(["e", "f"])]), 0);
+  assert.deepEqual(plain(result.root.children.map((child) => child.items)), [["b", "c", "d"], ["e", "f"]]);
+  assertValid(sequence, result.root, ["b", "c", "d", "e", "f"]);
+
+  let root = sequence.build(Array.from({ length: 20 }, (_, index) => `n${index}`), { capacity: 3 }).root;
+  assert.equal(sequence.height(root), 2);
+  root = sequence.removeAt(root, 9).root;
+  root = sequence.removeAt(root, 11).root;
+  result = sequence.removeAt(root, 9); root = result.root;
+  assert.equal(root.kind, "branch");
+  assert.deepEqual(plain(root.children.map((child) => child.children.length)), [2, 2, 2]);
+  assertValid(sequence, root, Array.from({ length: 20 }, (_, index) => `n${index}`).filter((_, index) => ![9, 10, 12].includes(index)));
+
+  const heights = [sequence.height(root)];
+  while (root.count > 1) { root = sequence.removeAt(root, 0).root; heights.push(sequence.height(root)); assert.equal(sequence.audit(root).ok, true); }
+  assert.deepEqual([...new Set(heights)].sort((a, b) => b - a), [2, 1, 0]);
+});
+
+test("P132f sequence mutations retain distant persistent pages and never rebuild the sibling set", () => {
+  const sequence = api(), items = Array.from({ length: 120 }, (_, index) => `n${index}`), base = sequence.build(items, { capacity: 4 }).root;
+  const beforePages = new Set(sequence.pages(base)), beforeOrder = plain(sequence.materialise(base));
+  const inserted = sequence.insertAt(base, 1, "fresh");
+  assert.equal(inserted.ok, true);
+  assert.deepEqual(plain(sequence.materialise(base)), beforeOrder);
+  assert.strictEqual(base.children.at(-1), inserted.root.children.at(-1));
+  const sharedAfterInsert = sequence.pages(inserted.root).filter((page) => beforePages.has(page));
+  assert.ok(sharedAfterInsert.length > 0);
+  assert.ok(sharedAfterInsert.length < beforePages.size);
+  const removed = sequence.removeAt(inserted.root, 1);
+  assert.equal(removed.ok, true);
+  assert.deepEqual(plain(sequence.materialise(removed.root)), items);
+  assert.equal(sequence.audit(removed.root).ok, true);
 });

@@ -184,6 +184,32 @@ test("P130 insertion rewrites only the bounded changed frontier", async () => {
   for (const ref of candidate.newLogicalRefs) assert.equal(typeof candidate.resolveLogical(ref), "string");
 });
 
+test("P132f fresh logical Insert and Reorder retain v2 balance across reopened candidates", async () => {
+  const c = runtime(), state = stateFor(c, nodes(48, 8, 12)), stager = c.PocketStarlingObjectSealShadow.createStager();
+  let current = stage(c, stager, state), store = new Map(stager.store), expected = Array.from({ length: 48 }, (_, index) => `p${String(index).padStart(2, "0")}`);
+  confirm(c, stager, current);
+  for (let step = 0; step < 16; step += 1) {
+    const opened = await open(c, current, store), from = (step * 7 + 3) % expected.length, requested = (step * 11 + 1) % (expected.length + 1), adjusted = requested > from ? requested - 1 : requested;
+    const result = await c.PocketStarlingLogicalEditShadow.reorder(opened.base, expected[from], from, requested);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    if (!result.changed) { assert.equal(adjusted, from); continue; }
+    const candidate = result.candidate, reconstructed = materialise(c, store, candidate);
+    expected.splice(adjusted, 0, expected.splice(from, 1)[0]);
+    assert.deepEqual(plain(relation(c, reconstructed).children.parent), expected);
+    assert.ok(candidate.newLogicalRefs.length < 16 * ("parent".length + 8));
+    for (const ref of candidate.newLogicalRefs) store.set(ref, candidate.resolveLogical(ref));
+    current = { sealRef: candidate.sealRef };
+  }
+  const opened = await open(c, current, store), inserted = await c.PocketStarlingLogicalEditShadow.insert(opened.base, {
+    nodeId: "fresh-balanced", parentId: "parent", toIndex: 17, payload: { label: "Fresh balanced" },
+  });
+  assert.equal(inserted.ok, true, JSON.stringify(inserted));
+  const reconstructed = materialise(c, store, inserted.candidate);
+  expected.splice(17, 0, "fresh-balanced");
+  assert.deepEqual(plain(relation(c, reconstructed).children.parent), expected);
+  assert.ok(inserted.candidate.newLogicalRefs.length < 16 * ("parent".length + 8));
+});
+
 test("P130 rejects duplicate invalid and unknown-parent insertion without a candidate", async () => {
   const c = runtime(), state = stateFor(c, nodes(4, 2, 2)), stager = c.PocketStarlingObjectSealShadow.createStager(), base = stage(c, stager, state);
   confirm(c, stager, base);

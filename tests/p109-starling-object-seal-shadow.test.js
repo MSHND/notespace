@@ -229,6 +229,29 @@ function forgeSequence(api, entries, staged, mutate) {
   return forgeComponent(api, entries, staged, "childrenRef", childrenRef);
 }
 
+function forgeSequenceAt(api, entries, staged, path, mutate) {
+  const sequenceRef = trieValueRefAt(entries, staged.rootObject.childrenRef, "root"), pages = [], indexes = [];
+  let page = objectAt(entries, sequenceRef); pages.push(page);
+  for (const index of path) {
+    indexes.push(index); page = objectAt(entries, page.childRefs[index]); pages.push(page);
+  }
+  let replacementRef = rawPut(api, entries, pages.at(-1).kind, mutate(pages.at(-1)));
+  for (let depth = pages.length - 2; depth >= 0; depth -= 1) {
+    const parent = pages[depth], childRefs = parent.childRefs.slice();
+    childRefs[indexes[depth]] = replacementRef;
+    replacementRef = rawPut(api, entries, parent.kind, {
+      ...parent,
+      childRefs,
+      count: childRefs.reduce((total, ref) => total + objectAt(entries, ref).count, 0),
+    });
+  }
+  const childrenRef = rewriteTrieAt(
+    api, entries, staged.rootObject.childrenRef, "root",
+    (node) => ({ ...node, valueRef: replacementRef }),
+  );
+  return forgeComponent(api, entries, staged, "childrenRef", childrenRef);
+}
+
 function triePathVisitBound(root, key, includesValueRecord = true) {
   let node = root,
     visits = 1;
@@ -893,6 +916,50 @@ test("P109 rejects self-authenticating invalid ordered-sequence objects", () => 
       label,
     );
   }
+});
+
+test("P132f rejects every persisted v2 occupancy, capacity, and reachability violation", () => {
+  const c = context(), api = c.PocketStarlingObjectSealShadow,
+    state = stateFor(c, normalised(rootNodes(20))), stager = api.createStager(), staged = stage(api, stager, state);
+  const audit = (forged, entries, label, reason = "invalid-sequence-object") => {
+    assert.equal(api.openFromAcceptedSealRef(forged.sealRef, (ref) => entries.get(ref)).ok, true, label);
+    assert.equal(api.auditCandidateSeal(forged.sealRef, (ref) => entries.get(ref)).reason, reason, label);
+  };
+  for (const [label, path, mutate] of [
+    ["non-root-capacity-mismatch", [0], (page) => ({ ...page, capacity: page.capacity + 1 })],
+    ["non-root-capacity-two", [0], (page) => ({ ...page, capacity: 2 })],
+    ["underfull-non-root-branch", [0], (page) => ({ ...page, childRefs: [page.childRefs[0]], count: objectAt(stager.store, page.childRefs[0]).count })],
+    ["underfull-non-root-leaf", [0, 0], (page) => ({ ...page, items: page.items.slice(0, 1), count: 1 })],
+    ["empty-non-root-leaf", [0, 0], (page) => ({ ...page, items: [], count: 0 })],
+  ]) {
+    const entries = new Map(api.exportEntries(stager)), forged = forgeSequenceAt(api, entries, staged, path, mutate);
+    audit(forged, entries, label);
+  }
+  {
+    const entries = new Map(api.exportEntries(stager)), forged = forgeSequence(api, entries, staged, (page) => ({
+      ...page, childRefs: [page.childRefs[0]], count: objectAt(entries, page.childRefs[0]).count,
+    }));
+    audit(forged, entries, "illegal-root-branch-shape");
+  }
+  {
+    const entries = new Map(api.exportEntries(stager)), forged = forgeSequence(api, entries, staged, (page) => {
+      const childRef = page.childRefs[0], child = objectAt(entries, childRef);
+      return { ...page, childRefs: [childRef, childRef], count: child.count * 2 };
+    });
+    audit(forged, entries, "repeated-child-reachability");
+  }
+  {
+    const entries = new Map(api.exportEntries(stager)), forged = forgeRoot(api, entries, staged, { ...staged.rootObject, capacity: 2 });
+    assert.equal(api.openFromAcceptedSealRef(forged.sealRef, (ref) => entries.get(ref)).ok, false);
+    assert.equal(api.auditCandidateSeal(forged.sealRef, (ref) => entries.get(ref)).reason, "invalid-root-object");
+  }
+});
+
+test("P132f rejects capacity two at Bridge, Placement, Root, and persisted ObjectSeal seams", () => {
+  const c = context(), state = stateFor(c, normalised(rootNodes(8))), relation = c.PocketStarlingPlacementShadow.audit(state.structural).relation;
+  assert.deepEqual(plain(c.PocketStarlingBridgeShadow.encode(normalised(rootNodes(8)), { capacity: 2 })), { ok: false, reason: "invalid-capacity" });
+  assert.deepEqual(plain(c.PocketStarlingPlacementShadow.build(relation, { capacity: 2 })), { ok: false, reason: "invalid-capacity" });
+  assert.equal(c.PocketStarlingRootShadow.auditCandidate({ ...state, capacity: 2 }).reason, "invalid-root-config");
 });
 
 test("P109 required presence is relative to the supplied complete base", () => {
