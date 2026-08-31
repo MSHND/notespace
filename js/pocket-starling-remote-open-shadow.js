@@ -21,13 +21,15 @@
     const storage = global.PocketStarlingStorageShadow,
       crypto = global.PocketStarlingCryptoShadow,
       sync = global.PocketSyncCrypto,
-      head = global.PocketStarlingHeadShadow;
+      head = global.PocketStarlingHeadShadow,
+      semantic = global.PocketStarlingSemanticAuthorityShadow;
     if (!storage || !crypto || !sync || !head ||
       typeof storage.createResolver !== "function" ||
       typeof crypto.validateContext !== "function" ||
       typeof sync.validateNonExtractableAesKey !== "function" ||
+      (semantic && typeof semantic.authenticate !== "function") ||
       typeof head.validHead !== "function") throw fail("remote-open-input-invalid");
-    return { storage, crypto, sync, head };
+    return { storage, crypto, sync, head, semantic };
   }
 
   function claimFactory(factory) {
@@ -49,8 +51,11 @@
       typeof operationIdFactory !== "function") throw fail("remote-open-input-invalid");
 
     async function openRemote(input) {
-      if (!exact(input, ["masterKey", "context"])) throw fail("remote-open-input-invalid");
-      const { storage, crypto, sync, head } = dependencies();
+      const { storage, crypto, sync, head, semantic } = dependencies();
+      const inputFields = semantic ? ["masterKey", "context", "semanticAuthority"] : ["masterKey", "context"];
+      if (!input || typeof input !== "object" || Array.isArray(input) ||
+        Object.keys(input).length !== inputFields.length || inputFields.some((field) => !(field in input)))
+        throw fail("remote-open-input-invalid");
       let masterKey, context;
       try {
         masterKey = sync.validateNonExtractableAesKey(input.masterKey);
@@ -87,8 +92,33 @@
         },
       }), opened = await resolver.openAccepted();
       if (!opened || opened.ok !== true || !opened.handle) throw fail("remote-open-input-invalid");
+      let semanticBaseProof = null;
+      if (semantic) {
+        const semanticValidity = resolver.semanticValidity();
+        if (!semanticValidity) throw fail("semantic-validity-missing");
+        const binding = Object.freeze({
+          syncedPocketId: context.syncedPocketId,
+          logicalSealRef: resolver.acceptedSealRef,
+          logicalRootRef: opened.handle.seal.rootRef,
+          previousLogicalSealRef: opened.handle.seal.previousSealRef,
+          logicalSealSchema: "pocket.starling.candidate-seal.v1",
+          logicalRootSchema: "pocket.starling.logical-root.v1",
+          logicalObjectSchema: "pocket.starling.logical-object.v1",
+          sequenceSchema: "pocket.starling.sequence-page.v2",
+          placementGeneration: "pocket.starling.placement-relation.v1",
+        }), authenticated = await semantic.authenticate({
+          authority: input.semanticAuthority,
+          semanticValidity,
+          binding,
+        });
+        if (!authenticated || authenticated.ok !== true || !authenticated.semanticBaseProof)
+          throw fail(authenticated && authenticated.reason === "semantic-validity-invalid"
+            ? "semantic-validity-invalid" : "semantic-validity-missing");
+        semanticBaseProof = authenticated.semanticBaseProof;
+      }
       const session = Object.freeze({
         acceptedSealRef: resolver.acceptedSealRef,
+        ...(semantic ? { semanticBaseProof } : {}),
         resolveLogical: (ref) => resolver.resolveLogical(ref),
         createReuseProof: () => resolver.createReuseProof(),
         readContent: (nodeId) => resolver.readContent(opened.handle, nodeId),

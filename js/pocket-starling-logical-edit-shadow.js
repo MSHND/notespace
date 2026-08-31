@@ -3,18 +3,21 @@
 (function (global) {
   "use strict";
 
-  const baseStates = new WeakMap();
+  const baseStates = new WeakMap(),
+    semanticTransitions = new WeakMap();
 
   function fail(reason, extra = {}) {
     return { ok: false, reason, ...extra };
   }
 
   function dependencies() {
-    const logical = global.PocketStarlingObjectSealShadow;
+    const logical = global.PocketStarlingObjectSealShadow,
+      semantic = global.PocketStarlingSemanticAuthorityShadow;
     return logical &&
       typeof logical.canonical === "function" &&
-      typeof logical.refFor === "function"
-      ? { ok: true, logical }
+      typeof logical.refFor === "function" &&
+      (!semantic || typeof semantic.validSemanticBase === "function")
+      ? { ok: true, logical, semantic }
       : fail("logical-dependency-unavailable");
   }
 
@@ -168,7 +171,9 @@
       !input ||
       typeof input !== "object" ||
       typeof input.acceptedSealRef !== "string" ||
-      typeof input.resolveLogical !== "function"
+      typeof input.resolveLogical !== "function" ||
+      (dependency.semantic && (typeof input.syncedPocketId !== "string" || !input.syncedPocketId ||
+        !input.semanticAuthority || !input.semanticBaseProof))
     )
       return fail("invalid-logical-base");
     const state = {
@@ -186,8 +191,27 @@
     const root = await load(state, seal.object.rootRef, "pocket-root");
     if (!root.ok) return root;
     if (!validRoot(state.logical, root.object)) return fail("invalid-root");
+    const semanticBinding = Object.freeze({
+      syncedPocketId: input.syncedPocketId,
+      logicalSealRef: input.acceptedSealRef,
+      logicalRootRef: seal.object.rootRef,
+      previousLogicalSealRef: seal.object.previousSealRef,
+      logicalSealSchema: state.logical.SEAL_SCHEMA,
+      logicalRootSchema: state.logical.ROOT_SCHEMA,
+      logicalObjectSchema: state.logical.OBJECT_SCHEMA,
+      sequenceSchema: state.logical.SEQUENCE_SCHEMA,
+      placementGeneration: "pocket.starling.placement-relation.v1",
+    });
+    if (dependency.semantic && !dependency.semantic.validSemanticBase({
+      authority: input.semanticAuthority,
+      semanticBaseProof: input.semanticBaseProof,
+      binding: semanticBinding,
+    })) return fail("invalid-semantic-base");
     state.seal = seal.object;
     state.root = root.object;
+    state.semanticAuthority = dependency.semantic ? input.semanticAuthority : null;
+    state.semanticBaseProof = dependency.semantic ? input.semanticBaseProof : null;
+    state.semanticBinding = dependency.semantic ? semanticBinding : null;
     const base = Object.freeze({});
     baseStates.set(base, state);
     return Object.freeze({
@@ -210,6 +234,28 @@
       return fail("logical-ref-collision", { ref });
     if (existingNew === undefined) frontier.set(ref, encoded.bytes);
     return { ok: true, ref, bytes: encoded.bytes };
+  }
+
+  function registerSemanticTransition(state, candidate) {
+    if (!state.semanticBinding) return candidate;
+    const binding = Object.freeze({
+      syncedPocketId: state.semanticBinding.syncedPocketId,
+      logicalSealRef: candidate.sealRef,
+      logicalRootRef: candidate.rootRef,
+      previousLogicalSealRef: state.acceptedSealRef,
+      logicalSealSchema: state.logical.SEAL_SCHEMA,
+      logicalRootSchema: state.logical.ROOT_SCHEMA,
+      logicalObjectSchema: state.logical.OBJECT_SCHEMA,
+      sequenceSchema: state.logical.SEQUENCE_SCHEMA,
+      placementGeneration: "pocket.starling.placement-relation.v1",
+    });
+    semanticTransitions.set(candidate, Object.freeze({
+      authority: state.semanticAuthority,
+      semanticBaseProof: state.semanticBaseProof,
+      baseSealRef: state.acceptedSealRef,
+      binding,
+    }));
+    return candidate;
   }
 
   function copiedChildren(children, key = null, replacementRef = null) {
@@ -885,6 +931,7 @@
           newLogicalObjectCount: newLogicalRefs.length,
         }),
       });
+    registerSemanticTransition(state, candidate);
     return Object.freeze({ ok: true, candidate });
   }
 
@@ -1019,6 +1066,7 @@
           newLogicalObjectCount: newLogicalRefs.length,
         }),
       });
+    registerSemanticTransition(state, candidate);
     return Object.freeze({ ok: true, candidate });
   }
 
@@ -1112,6 +1160,7 @@
           newLogicalObjectCount: newLogicalRefs.length,
         }),
       });
+    registerSemanticTransition(state, candidate);
     return Object.freeze({ ok: true, changed: true, candidate });
   }
 
@@ -1147,14 +1196,7 @@
     const priorPayload = state.logical.canonical(record.object.payload);
     if (!priorPayload.ok) return fail("invalid-content-record");
     const placement = await readPlacement(state, nodeId, "unknown-node");
-    if (!placement.ok) {
-      if (
-        placement.reason === "missing-logical-object" &&
-        priorPayload.bytes === payload.bytes
-      )
-        return Object.freeze({ ok: true, changed: false, reason: "no-change" });
-      return placement;
-    }
+    if (!placement.ok) return placement;
     const sourceDomain = await currentNode(state, nodeId, placement.record);
     if (!sourceDomain.ok) return sourceDomain;
     if (priorPayload.bytes === payload.bytes)
@@ -1222,12 +1264,23 @@
           newLogicalObjectCount: newLogicalRefs.length,
         }),
       });
+    registerSemanticTransition(state, candidate);
     return Object.freeze({ ok: true, changed: true, candidate });
   }
 
   function diagnostics(base) {
     const state = baseStates.get(base);
     return state ? diagnosticsFor(state) : fail("invalid-base-token");
+  }
+
+  function semanticTransitionBinding(candidate, authority, semanticBaseProof) {
+    const transition = semanticTransitions.get(candidate);
+    return transition && transition.authority === authority &&
+      transition.semanticBaseProof === semanticBaseProof &&
+      candidate && candidate.sealRef === transition.binding.logicalSealRef &&
+      candidate.rootRef === transition.binding.logicalRootRef &&
+      transition.binding.previousLogicalSealRef === transition.baseSealRef
+      ? transition.binding : null;
   }
 
   global.PocketStarlingLogicalEditShadow = Object.freeze({
@@ -1237,5 +1290,6 @@
     move,
     reorder: reorderWithinParent,
     diagnostics,
+    semanticTransitionBinding,
   });
 })(typeof window !== "undefined" ? window : globalThis);

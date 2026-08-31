@@ -7,7 +7,9 @@
     SEAL_SCHEMA = "pocket.starling.candidate-seal.v1",
     OBJECT_SCHEMA = "pocket.starling.logical-object.v1",
     SEQUENCE_SCHEMA = "pocket.starling.sequence-page.v2";
-  const stageProofs = new WeakMap();
+  const stageProofs = new WeakMap(),
+    semanticAuditResults = new WeakMap(),
+    semanticAuditProofs = new WeakMap();
   const fail = (reason, extra = {}) => ({ ok: false, reason, ...extra });
   function plain(value, seen = new Set()) {
     if (
@@ -787,16 +789,35 @@
         root: witness.root,
       },
       audited = rootApi.auditCandidate(candidate);
-    return audited.ok
-      ? {
-          ok: true,
-          candidate,
-          diagnostics: {
-            fetches: handle.io.stats.fetches,
-            cacheHits: handle.io.stats.cacheHits,
-          },
-        }
-      : audited;
+    if (!audited.ok) return audited;
+    const result = Object.freeze({
+        ok: true,
+        candidate,
+        diagnostics: {
+          fetches: handle.io.stats.fetches,
+          cacheHits: handle.io.stats.cacheHits,
+        },
+      }), proof = Object.freeze({}), binding = Object.freeze({
+        syncedPocketId: null,
+        logicalSealRef: sealRef,
+        logicalRootRef: handle.seal.rootRef,
+        previousLogicalSealRef: handle.seal.previousSealRef,
+        logicalSealSchema: SEAL_SCHEMA,
+        logicalRootSchema: ROOT_SCHEMA,
+        logicalObjectSchema: OBJECT_SCHEMA,
+        sequenceSchema: SEQUENCE_SCHEMA,
+        placementGeneration: "pocket.starling.placement-relation.v1",
+      });
+    semanticAuditResults.set(result, proof);
+    semanticAuditProofs.set(proof, binding);
+    return result;
+  }
+  function semanticAuditProvenance(result) {
+    const proof = semanticAuditResults.get(result), binding = semanticAuditProofs.get(proof);
+    return proof && binding ? proof : null;
+  }
+  function semanticAuditBinding(proof) {
+    return semanticAuditProofs.get(proof) || null;
   }
   global.PocketStarlingObjectSealShadow = Object.freeze({
     ROOT_SCHEMA,
@@ -813,5 +834,7 @@
     readContent,
     readPlacement,
     auditCandidateSeal,
+    semanticAuditProvenance,
+    semanticAuditBinding,
   });
 })(typeof window !== "undefined" ? window : globalThis);

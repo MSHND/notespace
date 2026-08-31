@@ -181,6 +181,21 @@ operations without activating sync, storage, account, or transport behaviour.
     return key;
   }
 
+  function semanticOptions(value, syncedPocketId) {
+    if (value === undefined) return false;
+    if (!value || typeof value !== "object" || Array.isArray(value) ||
+        Object.keys(value).length !== 1 || value.semanticAuthority !== true)
+      throw cryptoError("semantic-authority-options-invalid");
+    return requireIdentifier(syncedPocketId, "semantic-authority-context-invalid") === syncedPocketId;
+  }
+
+  function semanticAuthority(rawMasterKey, syncedPocketId) {
+    const authority = global.PocketStarlingSemanticAuthorityShadow;
+    if (!authority || typeof authority.deriveAuthority !== "function")
+      throw cryptoError("semantic-authority-unavailable");
+    return authority.deriveAuthority(rawMasterKey, syncedPocketId);
+  }
+
   function validateContentContext(input) {
     const context = requireObject(input, CONTENT_CONTEXT_FIELDS, "content-context-invalid");
     if (context.contentType !== FORMAT.contentType) throw cryptoError("content-context-invalid");
@@ -555,8 +570,11 @@ operations without activating sync, storage, account, or transport behaviour.
     }
   }
 
-  async function createMasterKeyBundle(envelopePlans) {
+  async function createMasterKeyBundle(envelopePlans, options) {
     const plans = validatePlans(envelopePlans);
+    const semantic = semanticOptions(options, plans[0].context.syncedPocketId);
+    if (semantic && plans.some((plan) => plan.context.syncedPocketId !== plans[0].context.syncedPocketId))
+      throw cryptoError("semantic-authority-context-invalid");
     const rawMasterKey = randomBytes(FORMAT.keyBytes);
     try {
       const masterKey = await importMasterKey(rawMasterKey);
@@ -564,7 +582,9 @@ operations without activating sync, storage, account, or transport behaviour.
       for (const plan of plans) {
         envelopes.push(await wrapMasterBytes(rawMasterKey, plan));
       }
-      return Object.freeze({ masterKey, envelopes: Object.freeze(envelopes) });
+      if (!semantic) return Object.freeze({ masterKey, envelopes: Object.freeze(envelopes) });
+      return Object.freeze({ masterKey, envelopes: Object.freeze(envelopes),
+        semanticAuthority: await semanticAuthority(rawMasterKey, plans[0].context.syncedPocketId) });
     } finally {
       rawMasterKey.fill(0);
     }
@@ -608,13 +628,17 @@ operations without activating sync, storage, account, or transport behaviour.
     sourceEnvelope,
     sourceWrappingKey,
     sourceContext,
-    additionalEnvelopePlans = []
+    additionalEnvelopePlans = [],
+    options
   ) {
     const context = validateEnvelopeContext(sourceContext);
     const plans = validatePlans(additionalEnvelopePlans, {
       allowEmpty: true,
       reservedIds: [context.envelopeId],
     });
+    const semantic = semanticOptions(options, context.syncedPocketId);
+    if (semantic && plans.some((plan) => plan.context.syncedPocketId !== context.syncedPocketId))
+      throw cryptoError("semantic-authority-context-invalid");
     const rawMasterKey = await decryptMasterBytes(sourceEnvelope, sourceWrappingKey, context);
     try {
       const masterKey = await importMasterKey(rawMasterKey);
@@ -622,7 +646,9 @@ operations without activating sync, storage, account, or transport behaviour.
       for (const plan of plans) {
         envelopes.push(await wrapMasterBytes(rawMasterKey, plan));
       }
-      return Object.freeze({ masterKey, envelopes: Object.freeze(envelopes) });
+      if (!semantic) return Object.freeze({ masterKey, envelopes: Object.freeze(envelopes) });
+      return Object.freeze({ masterKey, envelopes: Object.freeze(envelopes),
+        semanticAuthority: await semanticAuthority(rawMasterKey, context.syncedPocketId) });
     } finally {
       rawMasterKey.fill(0);
     }
@@ -720,6 +746,7 @@ operations without activating sync, storage, account, or transport behaviour.
     DERIVATION_LABELS,
     ENVELOPE_KINDS,
     encodeBase64Url,
+    decodeBase64Url,
     validateContentRecord,
     validateMasterKeyEnvelope,
     validateContentContext,

@@ -691,12 +691,11 @@ test("P114 fails closed for invalid bases, touched objects and payloads", async 
     );
   assert.equal(api.diagnostics(opened.base).logicalFetches, beforeUnsupported);
 
-  const noChange = await api.editPayload(opened.base, "n1", { b: 2, a: 1 });
-  assert.equal(noChange.ok, true);
-  assert.equal(noChange.changed, false);
-  assert.equal(noChange.reason, "no-change");
-  assert.equal("candidate" in noChange, false);
-  assert.equal("newLogicalRefs" in noChange, false);
+  const missingPlacement = await api.editPayload(opened.base, "n1", { b: 2, a: 1 });
+  assert.equal(missingPlacement.ok, false);
+  assert.equal(missingPlacement.reason, "missing-logical-object");
+  assert.equal("candidate" in missingPlacement, false);
+  assert.equal("newLogicalRefs" in missingPlacement, false);
 });
 
 test("P114 remains a dormant logical-only proof", () => {

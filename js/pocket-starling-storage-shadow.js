@@ -4,12 +4,16 @@
   "use strict";
 
   const CAPSULE_SCHEMA = "pocket.starling.storage-capsule.v1",
+    ATTESTED_SEAL_CAPSULE_SCHEMA = "pocket.starling.storage-seal-capsule.v2",
     CAPSULE_FIELDS = Object.freeze([
       "schema",
       "logicalKind",
       "logicalRef",
       "logicalBytes",
       "links",
+    ]),
+    ATTESTED_SEAL_CAPSULE_FIELDS = Object.freeze([
+      "schema", "logicalKind", "logicalRef", "logicalBytes", "links", "semanticValidity",
     ]),
     LINK_FIELDS = Object.freeze(["logicalRef", "storageRef"]),
     stageProofs = new WeakMap(),
@@ -235,8 +239,8 @@
       throw storageError("capsule-invalid");
     }
     if (
-      !exact(capsule, CAPSULE_FIELDS) ||
-      capsule.schema !== CAPSULE_SCHEMA ||
+      !(exact(capsule, CAPSULE_FIELDS) || exact(capsule, ATTESTED_SEAL_CAPSULE_FIELDS)) ||
+      !(capsule.schema === CAPSULE_SCHEMA || capsule.schema === ATTESTED_SEAL_CAPSULE_SCHEMA) ||
       canonicalCapsule(capsule) !== bytes ||
       !Array.isArray(capsule.links)
     )
@@ -247,6 +251,12 @@
     );
     if (capsule.logicalRef !== described.logicalRef)
       throw storageError("capsule-logical-mismatch");
+    if (capsule.schema === ATTESTED_SEAL_CAPSULE_SCHEMA &&
+      (capsule.logicalKind !== "candidate-seal" || !capsule.semanticValidity ||
+        typeof capsule.semanticValidity !== "object" || Array.isArray(capsule.semanticValidity)))
+      throw storageError("capsule-semantic-validity-invalid");
+    if (capsule.schema === CAPSULE_SCHEMA && Object.prototype.hasOwnProperty.call(capsule, "semanticValidity"))
+      throw storageError("capsule-invalid");
     const links = [],
       seen = new Set();
     for (const link of capsule.links) {
@@ -274,23 +284,32 @@
     )
       throw storageError("capsule-links-invalid");
     return Object.freeze({
-      schema: CAPSULE_SCHEMA,
+      schema: capsule.schema,
       logicalKind: capsule.logicalKind,
       logicalRef: capsule.logicalRef,
       logicalBytes: capsule.logicalBytes,
       links: Object.freeze(links),
       directRefs: described.directRefs,
       object: described.object,
+      semanticValidity: capsule.schema === ATTESTED_SEAL_CAPSULE_SCHEMA
+        ? Object.freeze({ ...capsule.semanticValidity }) : null,
     });
   }
 
-  function capsuleBytes(logicalKind, logicalRefValue, logicalBytes, links) {
-    return canonicalCapsule({
+  function capsuleBytes(logicalKind, logicalRefValue, logicalBytes, links, semanticValidity = null) {
+    return canonicalCapsule(semanticValidity === null ? {
       schema: CAPSULE_SCHEMA,
       logicalKind,
       logicalRef: logicalRefValue,
       logicalBytes,
       links,
+    } : {
+      schema: ATTESTED_SEAL_CAPSULE_SCHEMA,
+      logicalKind,
+      logicalRef: logicalRefValue,
+      logicalBytes,
+      links,
+      semanticValidity,
     });
   }
 
@@ -314,6 +333,8 @@
   function publicationBinding(stage) {
     const proof = stageProofs.get(stage);
     if (!proof || proof.stage !== stage) throw storageError("publication-stage-invalid");
+    if (global.PocketStarlingSemanticAuthorityShadow && !proof.semanticValidity)
+      throw storageError("publication-semantic-validity-required");
     return Object.freeze({
       syncedPocketId: proof.syncedPocketId,
       expectedSealStorageRef: proof.base
@@ -327,7 +348,7 @@
   }
 
   async function stageCandidate(input) {
-    const { crypto, sync } = dependencies();
+    const { crypto, sync, logical } = dependencies(), semantic = global.PocketStarlingSemanticAuthorityShadow;
     if (
       !input ||
       typeof input !== "object" ||
@@ -376,6 +397,12 @@
         new Set(input.newLogicalRefs).size !== input.newLogicalRefs.length)
     )
       throw storageError("new-logical-frontier-invalid");
+    const semanticProofSupplied = input.semanticValidityProof !== undefined && input.semanticValidityProof !== null,
+      semanticAuthoritySupplied = input.semanticAuthority !== undefined && input.semanticAuthority !== null;
+    if (semanticProofSupplied !== semanticAuthoritySupplied)
+      throw storageError("semantic-validity-input-invalid");
+    if (semanticProofSupplied && (!semantic || typeof semantic.attestationForStage !== "function"))
+      throw storageError("semantic-validity-input-invalid");
     const newLogicalRefs = freshBase ? new Set(input.newLogicalRefs) : null;
     const entries = new Map(),
       visiting = new Set(),
@@ -446,7 +473,28 @@
           }),
         );
       }
-      const plaintext = capsuleBytes(kind, ref, bytes, links),
+      let semanticValidity = null;
+      if (kind === "candidate-seal" && semanticProofSupplied) {
+        const sealObject = described.object,
+          binding = Object.freeze({
+            syncedPocketId: context.syncedPocketId,
+            logicalSealRef: ref,
+            logicalRootRef: sealObject.rootRef,
+            previousLogicalSealRef: sealObject.previousSealRef,
+            logicalSealSchema: logical.SEAL_SCHEMA,
+            logicalRootSchema: logical.ROOT_SCHEMA,
+            logicalObjectSchema: logical.OBJECT_SCHEMA,
+            sequenceSchema: logical.SEQUENCE_SCHEMA,
+            placementGeneration: "pocket.starling.placement-relation.v1",
+          });
+        semanticValidity = semantic.attestationForStage({
+          authority: input.semanticAuthority,
+          proof: input.semanticValidityProof,
+          binding,
+        });
+        if (!semanticValidity) throw storageError("semantic-validity-input-invalid");
+      }
+      const plaintext = capsuleBytes(kind, ref, bytes, links, semanticValidity),
         sealed = await crypto.sealObject(plaintext, key, context),
         entry = Object.freeze({
           logicalRef: ref,
@@ -497,6 +545,22 @@
       sealLogicalRef: input.sealRef,
       masterKey: key,
       syncedPocketId: context.syncedPocketId,
+      semanticValidity: seal.logicalKind === "candidate-seal" && semanticProofSupplied
+        ? Object.freeze({ ...semantic.attestationForStage({
+          authority: input.semanticAuthority,
+          proof: input.semanticValidityProof,
+          binding: Object.freeze({
+            syncedPocketId: context.syncedPocketId,
+            logicalSealRef: input.sealRef,
+            logicalRootRef: JSON.parse(seal.logicalBytes).rootRef,
+            previousLogicalSealRef: JSON.parse(seal.logicalBytes).previousSealRef,
+            logicalSealSchema: logical.SEAL_SCHEMA,
+            logicalRootSchema: logical.ROOT_SCHEMA,
+            logicalObjectSchema: logical.OBJECT_SCHEMA,
+            sequenceSchema: logical.SEQUENCE_SCHEMA,
+            placementGeneration: "pocket.starling.placement-relation.v1",
+          }),
+        }) }) : null,
     });
     return stage;
   }
@@ -605,6 +669,7 @@
       resolveLogical,
       createReuseProof,
       openAccepted,
+      semanticValidity: () => accepted.semanticValidity,
       readContent: (handle, nodeId) =>
         settle(() => logical.readContent(handle, nodeId)),
       readPlacement: (handle, nodeId) =>
@@ -615,6 +680,7 @@
 
   global.PocketStarlingStorageShadow = Object.freeze({
     CAPSULE_SCHEMA,
+    ATTESTED_SEAL_CAPSULE_SCHEMA,
     describeLogical,
     canonicalCapsule,
     validateCapsuleBytes,
