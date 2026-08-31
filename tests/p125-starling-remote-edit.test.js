@@ -11,7 +11,7 @@ const test = require("node:test"), assert = require("node:assert/strict"),
     "js/pocket-import.js", "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js",
     "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js",
     "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js",
-    "js/pocket-sync-crypto.js", "js/pocket-starling-crypto-shadow.js",
+    "js/pocket-sync-crypto.js", "js/pocket-starling-semantic-authority-shadow.js", "js/pocket-starling-crypto-shadow.js",
     "js/pocket-starling-storage-shadow.js", "js/pocket-starling-head-shadow.js",
     "js/pocket-sync-remote-client.js", "js/pocket-starling-logical-edit-shadow.js",
     "js/pocket-starling-publication-shadow.js", "js/pocket-starling-remote-open-shadow.js",
@@ -35,7 +35,8 @@ function runtime() {
 const plain = (value) => JSON.parse(JSON.stringify(value)),
   context = (syncedPocketId = "p125") => ({ syncedPocketId }),
   genesis = () => ({ schema: HEAD_SCHEMA, revision: 0, sealRef: null }),
-  operationId = (kind, index) => `${kind}-${index}`;
+  operationId = (kind, index) => `${kind}-${index}`,
+  keyBundles = new WeakMap();
 
 function stateFor(c, count = 1000) {
   const encoded = c.PocketStarlingBridgeShadow.encode({ schema: "portal.mtt.web.v1", writtenAt: "2026-08-30T00:00:00.000Z",
@@ -46,9 +47,12 @@ function stateFor(c, count = 1000) {
 }
 
 async function keyFor(c, syncedPocketId = "p125", envelopeId = "device") {
-  const wrappingKey = await c.PocketSyncCrypto.generateDeviceWrappingKey(), bundle = await c.PocketSyncCrypto.createMasterKeyBundle([{
-    context: { syncedPocketId, envelopeId, envelopeKind: "device", envelopeVersion: 1 }, wrappingKey,
-  }]);
+  const wrappingKey = await c.PocketSyncCrypto.generateDeviceWrappingKey(), envelopeContext =
+    { syncedPocketId, envelopeId, envelopeKind: "device", envelopeVersion: 1 }, bundle = await c.PocketSyncCrypto.createMasterKeyBundle([{
+    context: envelopeContext, wrappingKey,
+  }], { semanticAuthority: true });
+  keyBundles.set(bundle.masterKey, { wrappingKey, envelopeContext, record: bundle.envelopes[0].record,
+    semanticAuthority: bundle.semanticAuthority });
   return bundle.masterKey;
 }
 
@@ -56,9 +60,14 @@ async function publishedFixture(count = 1000) {
   const writer = runtime(), state = stateFor(writer, count), stager = writer.PocketStarlingObjectSealShadow.createStager(),
     logicalResult = writer.PocketStarlingObjectSealShadow.stageCandidate(stager, state, { previousSealRef: null });
   assert.equal(logicalResult.ok, true);
-  const key = await keyFor(writer), physical = await writer.PocketStarlingStorageShadow.stageCandidate({
+  const key = await keyFor(writer), keyBundle = keyBundles.get(key), audit = writer.PocketStarlingObjectSealShadow.auditCandidateSeal(
+      logicalResult.stage.sealRef, (ref) => stager.store.get(ref)), auditProof = writer.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit),
+    issued = await writer.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority: keyBundle.semanticAuthority, auditProof }),
+    physical = await writer.PocketStarlingStorageShadow.stageCandidate({
     sealRef: logicalResult.stage.sealRef, resolveLogical: (ref) => stager.store.get(ref), masterKey: key, context: context(),
+    semanticAuthority: keyBundle.semanticAuthority, semanticValidityProof: issued.proof,
   }), confirmed = writer.PocketStarlingObjectSealShadow.verifyNewObjectPresence(logicalResult.stage, (ref) => stager.store.has(ref), {});
+  assert.equal(audit.ok, true); assert.equal(issued.ok, true);
   assert.equal(confirmed.ok, true);
   const remote = { objects: new Map(), head: genesis() }, publishCalls = [], publisher = writer.PocketStarlingPublicationShadow.createPublisher({
     objectHeadService: serviceFor(writer, remote, publishCalls), operationIdFactory: operationId,
@@ -94,8 +103,10 @@ const serviceFor = (c, remote, calls) => c.PocketSyncRemoteClient.createObjectHe
 async function openedFixture(count = 1000) {
   const fixture = await publishedFixture(count), reader = runtime(), calls = [], opener = reader.PocketStarlingRemoteOpenShadow.createRemoteOpener({
     objectHeadService: serviceFor(reader, fixture.remote, calls), operationIdFactory: operationId,
-  }), opened = await opener.openRemote({ masterKey: fixture.key, context: context() });
-  return { ...fixture, reader, calls, opened };
+  }), keyBundle = keyBundles.get(fixture.key), reopened = await reader.PocketSyncCrypto.openMasterKeyBundle(
+    keyBundle.record, keyBundle.wrappingKey, keyBundle.envelopeContext, [], { semanticAuthority: true }),
+    opened = await opener.openRemote({ masterKey: reopened.masterKey, context: context(), semanticAuthority: reopened.semanticAuthority });
+  return { ...fixture, reader, calls, opened, key: reopened.masterKey, authority: reopened.semanticAuthority };
 }
 
 function forbidden(routes) {
@@ -103,8 +114,8 @@ function forbidden(routes) {
 }
 
 test("P125 composes real P122 P124 P114 P112 P121 preparation without remote write", async () => {
-  const { reader, key, physical, remote, calls, opened } = await openedFixture(2000), afterOpen = calls.length,
-    editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context() }),
+  const { reader, key, authority, physical, remote, calls, opened } = await openedFixture(2000), afterOpen = calls.length,
+    editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context(), semanticAuthority: authority }),
     prepared = await editor.preparePayloadEdit({ nodeId: "n1337", payload: { label: "P125 changed", value: 125 } });
   assert.deepEqual(Object.keys(reader.PocketStarlingRemoteEditShadow), ["createEditor"]);
   assert.equal(Object.isFrozen(reader.PocketStarlingRemoteEditShadow), true);
@@ -136,8 +147,8 @@ test("P125 composes real P122 P124 P114 P112 P121 preparation without remote wri
 });
 
 test("P125 returns exact frozen unchanged without a stage or binding", async () => {
-  const { reader, key, calls, opened } = await openedFixture(), editor = await reader.PocketStarlingRemoteEditShadow.createEditor({
-    opened, masterKey: key, context: context(),
+  const { reader, key, authority, calls, opened } = await openedFixture(), editor = await reader.PocketStarlingRemoteEditShadow.createEditor({
+    opened, masterKey: key, context: context(), semanticAuthority: authority,
   }), before = calls.length, unchanged = await editor.preparePayloadEdit({ nodeId: "n20", payload: { label: "Node 20", value: 20 } });
   assert.deepEqual(plain(unchanged), { outcome: "unchanged" }); assert.equal(Object.isFrozen(unchanged), true);
   assert.equal(Object.hasOwn(unchanged, "stage"), false); assert.equal(Object.hasOwn(unchanged, "binding"), false);
@@ -145,22 +156,22 @@ test("P125 returns exact frozen unchanged without a stage or binding", async () 
 });
 
 test("P125 snapshots Head authority and rejects redirects before publication", async () => {
-  const { reader, key, remote, calls, opened } = await openedFixture(), originalSeal = opened.head.sealRef,
+  const { reader, key, authority, remote, calls, opened } = await openedFixture(), originalSeal = opened.head.sealRef,
     mutable = { outcome: "opened", head: { ...opened.head }, session: opened.session },
-    editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened: mutable, masterKey: key, context: context() });
+    editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened: mutable, masterKey: key, context: context(), semanticAuthority: authority });
   mutable.head.sealRef = "redirected";
   const prepared = await editor.preparePayloadEdit({ nodeId: "n20", payload: { label: "snapshotted", value: 125 } });
   assert.equal(prepared.expectedHead.sealRef, originalSeal); assert.equal(prepared.binding.expectedSealStorageRef, originalSeal);
   assert.equal(remote.head.sealRef, originalSeal); assert.equal(forbidden(calls.slice(3).map(([route]) => route)), false);
   const lookalike = { outcome: "opened", head: { ...opened.head, sealRef: "other-physical-seal" }, session: opened.session }, before = calls.length,
-    redirected = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened: lookalike, masterKey: key, context: context() });
+    redirected = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened: lookalike, masterKey: key, context: context(), semanticAuthority: authority });
   await assert.rejects(redirected.preparePayloadEdit({ nodeId: "n21", payload: { label: "rejected", value: -1 } }),
     (error) => error && error.code === "remote-edit-authority-mismatch");
   assert.equal(forbidden(calls.slice(before).map(([route]) => route)), false);
 });
 
 test("P125 rejects forged proof, key, context, and authority-looking inputs without callbacks", async () => {
-  const { reader, key, calls, opened } = await openedFixture();
+  const { reader, key, authority, calls, opened } = await openedFixture();
   let callbacks = 0;
   const watchedSession = { ...opened.session, createReuseProof() { callbacks += 1; return opened.session.createReuseProof(); } },
     watched = { outcome: "opened", head: { ...opened.head }, session: watchedSession };
@@ -172,22 +183,21 @@ test("P125 rejects forged proof, key, context, and authority-looking inputs with
     await assert.rejects(reader.PocketStarlingRemoteEditShadow.createEditor({ opened: watched, masterKey: key, context: context(), [field]: "redirect" }),
       (error) => error && error.code === "remote-edit-input-invalid", field);
   assert.equal(callbacks, 0);
-  const editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context() }), beforeExtra = calls.length;
+  const editor = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context(), semanticAuthority: authority }), beforeExtra = calls.length;
   for (const field of ["expectedHead", "sealRef", "revision", "baseStage", "freshBaseProof", "newLogicalRefs", "acceptedSealStorageRef", "candidateSealStorageRef"])
     await assert.rejects(editor.preparePayloadEdit({ nodeId: "n20", payload: {}, [field]: "redirect" }),
       (error) => error && error.code === "remote-edit-input-invalid", field);
   assert.equal(calls.length, beforeExtra);
   const forgedSession = { ...opened.session, createReuseProof: () => Object.freeze({}) }, forged = await reader.PocketStarlingRemoteEditShadow.createEditor({
-    opened: { outcome: "opened", head: { ...opened.head }, session: forgedSession }, masterKey: key, context: context(),
+    opened: { outcome: "opened", head: { ...opened.head }, session: forgedSession }, masterKey: key, context: context(), semanticAuthority: authority,
   });
   await assert.rejects(forged.preparePayloadEdit({ nodeId: "n20", payload: { label: "forged", value: 1 } }),
     (error) => error && error.code === "fresh-base-invalid");
-  const otherKey = await keyFor(reader), wrongKey = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: otherKey, context: context() });
+  const otherKey = await keyFor(reader), wrongKey = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: otherKey, context: context(), semanticAuthority: authority });
   await assert.rejects(wrongKey.preparePayloadEdit({ nodeId: "n20", payload: { label: "wrong key", value: 2 } }),
     (error) => error && error.code === "fresh-base-mismatch");
-  const wrongContext = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context("other-pocket") });
-  await assert.rejects(wrongContext.preparePayloadEdit({ nodeId: "n20", payload: { label: "wrong context", value: 3 } }),
-    (error) => error && error.code === "fresh-base-mismatch");
+  const wrongContext = await reader.PocketStarlingRemoteEditShadow.createEditor({ opened, masterKey: key, context: context("other-pocket"), semanticAuthority: authority });
+  assert.deepEqual(plain(wrongContext), { ok: false, reason: "invalid-semantic-base" });
 });
 
 test("P125 remains absent from production release and live owners", () => {

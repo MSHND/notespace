@@ -22,7 +22,7 @@
       logical = global.PocketStarlingLogicalEditShadow,
       storage = global.PocketStarlingStorageShadow,
       semantic = global.PocketStarlingSemanticAuthorityShadow;
-    if (!sync || !crypto || !head || !logical || !storage ||
+    if (!sync || !crypto || !head || !logical || !storage || !semantic ||
       typeof sync.validateNonExtractableAesKey !== "function" ||
       typeof crypto.validateContext !== "function" ||
       typeof head.validHead !== "function" ||
@@ -32,16 +32,14 @@
       typeof logical.reorder !== "function" ||
       typeof storage.stageCandidate !== "function" ||
       typeof storage.publicationBinding !== "function" ||
-      (semantic && typeof semantic.issueSuccessor !== "function")) throw fail("remote-edit-input-invalid");
+      typeof semantic.issueSuccessor !== "function") throw fail("remote-edit-input-invalid");
     return { sync, crypto, head, logical, storage, semantic };
   }
 
   function validSession(value) {
-    return exact(value, global.PocketStarlingSemanticAuthorityShadow
-      ? ["acceptedSealRef", "semanticBaseProof", "resolveLogical", "createReuseProof", "readContent", "readPlacement", "diagnostics"]
-      : ["acceptedSealRef", "resolveLogical", "createReuseProof", "readContent", "readPlacement", "diagnostics"]) &&
+    return exact(value, ["acceptedSealRef", "semanticBaseProof", "resolveLogical", "createReuseProof", "readContent", "readPlacement", "diagnostics"]) &&
       typeof value.acceptedSealRef === "string" && value.acceptedSealRef.length > 0 &&
-      (!global.PocketStarlingSemanticAuthorityShadow || !!value.semanticBaseProof) &&
+      !!value.semanticBaseProof &&
       typeof value.resolveLogical === "function" && typeof value.createReuseProof === "function" &&
       typeof value.readContent === "function" && typeof value.readPlacement === "function" &&
       typeof value.diagnostics === "function";
@@ -58,8 +56,7 @@
   }
 
   async function createEditor(input) {
-    if (!exact(input, global.PocketStarlingSemanticAuthorityShadow
-      ? ["opened", "masterKey", "context", "semanticAuthority"] : ["opened", "masterKey", "context"])) throw fail("remote-edit-input-invalid");
+    if (!exact(input, ["opened", "masterKey", "context", "semanticAuthority"])) throw fail("remote-edit-input-invalid");
     const { sync, crypto, head, logical, storage, semantic } = dependencies();
     let masterKey, context;
     try {
@@ -72,19 +69,20 @@
       baseResult = await logical.createBase({
         acceptedSealRef: opened.session.acceptedSealRef,
         resolveLogical: opened.session.resolveLogical,
-        ...(semantic ? { syncedPocketId: context.syncedPocketId,
-          semanticAuthority: input.semanticAuthority, semanticBaseProof: opened.session.semanticBaseProof } : {}),
+        syncedPocketId: context.syncedPocketId,
+        semanticAuthority: input.semanticAuthority,
+        semanticBaseProof: opened.session.semanticBaseProof,
       });
     if (!baseResult || baseResult.ok !== true || !baseResult.base) return baseResult;
     const base = baseResult.base, expectedHead = opened.expectedHead;
 
     async function prepareCandidate(candidate) {
-      const issued = semantic ? await semantic.issueSuccessor({
+      const issued = await semantic.issueSuccessor({
           authority: input.semanticAuthority,
           semanticBaseProof: opened.session.semanticBaseProof,
           candidate,
-        }) : null;
-      if (semantic && (!issued || issued.ok !== true || !issued.proof)) throw fail("remote-edit-authority-mismatch");
+        });
+      if (!issued || issued.ok !== true || !issued.proof) throw fail("remote-edit-authority-mismatch");
       const stage = await storage.stageCandidate({
           sealRef: candidate.sealRef,
           resolveLogical: candidate.resolveLogical,
@@ -92,7 +90,8 @@
           context,
           freshBaseProof,
           newLogicalRefs: candidate.newLogicalRefs,
-          ...(semantic ? { semanticAuthority: input.semanticAuthority, semanticValidityProof: issued.proof } : {}),
+          semanticAuthority: input.semanticAuthority,
+          semanticValidityProof: issued.proof,
         }),
         binding = storage.publicationBinding(stage);
       if (!binding || binding.syncedPocketId !== context.syncedPocketId ||

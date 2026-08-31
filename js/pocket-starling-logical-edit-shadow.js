@@ -15,8 +15,8 @@
       semantic = global.PocketStarlingSemanticAuthorityShadow;
     return logical &&
       typeof logical.canonical === "function" &&
-      typeof logical.refFor === "function" &&
-      (!semantic || typeof semantic.validSemanticBase === "function")
+      typeof logical.refFor === "function" && semantic &&
+      typeof semantic.validSemanticBase === "function"
       ? { ok: true, logical, semantic }
       : fail("logical-dependency-unavailable");
   }
@@ -172,8 +172,8 @@
       typeof input !== "object" ||
       typeof input.acceptedSealRef !== "string" ||
       typeof input.resolveLogical !== "function" ||
-      (dependency.semantic && (typeof input.syncedPocketId !== "string" || !input.syncedPocketId ||
-        !input.semanticAuthority || !input.semanticBaseProof))
+      typeof input.syncedPocketId !== "string" || !input.syncedPocketId ||
+      !input.semanticAuthority || !input.semanticBaseProof
     )
       return fail("invalid-logical-base");
     const state = {
@@ -202,16 +202,16 @@
       sequenceSchema: state.logical.SEQUENCE_SCHEMA,
       placementGeneration: "pocket.starling.placement-relation.v1",
     });
-    if (dependency.semantic && !dependency.semantic.validSemanticBase({
+    if (!dependency.semantic.validSemanticBase({
       authority: input.semanticAuthority,
       semanticBaseProof: input.semanticBaseProof,
       binding: semanticBinding,
     })) return fail("invalid-semantic-base");
     state.seal = seal.object;
     state.root = root.object;
-    state.semanticAuthority = dependency.semantic ? input.semanticAuthority : null;
-    state.semanticBaseProof = dependency.semantic ? input.semanticBaseProof : null;
-    state.semanticBinding = dependency.semantic ? semanticBinding : null;
+    state.semanticAuthority = input.semanticAuthority;
+    state.semanticBaseProof = input.semanticBaseProof;
+    state.semanticBinding = semanticBinding;
     const base = Object.freeze({});
     baseStates.set(base, state);
     return Object.freeze({
@@ -237,7 +237,6 @@
   }
 
   function registerSemanticTransition(state, candidate) {
-    if (!state.semanticBinding) return candidate;
     const binding = Object.freeze({
       syncedPocketId: state.semanticBinding.syncedPocketId,
       logicalSealRef: candidate.sealRef,

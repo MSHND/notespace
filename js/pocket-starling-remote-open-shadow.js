@@ -27,7 +27,7 @@
       typeof storage.createResolver !== "function" ||
       typeof crypto.validateContext !== "function" ||
       typeof sync.validateNonExtractableAesKey !== "function" ||
-      (semantic && typeof semantic.authenticate !== "function") ||
+      !semantic || typeof semantic.authenticate !== "function" ||
       typeof head.validHead !== "function") throw fail("remote-open-input-invalid");
     return { storage, crypto, sync, head, semantic };
   }
@@ -52,7 +52,7 @@
 
     async function openRemote(input) {
       const { storage, crypto, sync, head, semantic } = dependencies();
-      const inputFields = semantic ? ["masterKey", "context", "semanticAuthority"] : ["masterKey", "context"];
+      const inputFields = ["masterKey", "context", "semanticAuthority"];
       if (!input || typeof input !== "object" || Array.isArray(input) ||
         Object.keys(input).length !== inputFields.length || inputFields.some((field) => !(field in input)))
         throw fail("remote-open-input-invalid");
@@ -92,11 +92,9 @@
         },
       }), opened = await resolver.openAccepted();
       if (!opened || opened.ok !== true || !opened.handle) throw fail("remote-open-input-invalid");
-      let semanticBaseProof = null;
-      if (semantic) {
-        const semanticValidity = resolver.semanticValidity();
-        if (!semanticValidity) throw fail("semantic-validity-missing");
-        const binding = Object.freeze({
+      const semanticValidity = resolver.semanticValidity();
+      if (!semanticValidity) throw fail("semantic-validity-missing");
+      const binding = Object.freeze({
           syncedPocketId: context.syncedPocketId,
           logicalSealRef: resolver.acceptedSealRef,
           logicalRootRef: opened.handle.seal.rootRef,
@@ -111,14 +109,12 @@
           semanticValidity,
           binding,
         });
-        if (!authenticated || authenticated.ok !== true || !authenticated.semanticBaseProof)
-          throw fail(authenticated && authenticated.reason === "semantic-validity-invalid"
-            ? "semantic-validity-invalid" : "semantic-validity-missing");
-        semanticBaseProof = authenticated.semanticBaseProof;
-      }
+      if (!authenticated || authenticated.ok !== true || !authenticated.semanticBaseProof)
+        throw fail(authenticated && authenticated.reason === "semantic-validity-invalid"
+          ? "semantic-validity-invalid" : "semantic-validity-missing");
       const session = Object.freeze({
         acceptedSealRef: resolver.acceptedSealRef,
-        ...(semantic ? { semanticBaseProof } : {}),
+        semanticBaseProof: authenticated.semanticBaseProof,
         resolveLogical: (ref) => resolver.resolveLogical(ref),
         createReuseProof: () => resolver.createReuseProof(),
         readContent: (nodeId) => resolver.readContent(opened.handle, nodeId),

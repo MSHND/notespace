@@ -333,8 +333,7 @@
   function publicationBinding(stage) {
     const proof = stageProofs.get(stage);
     if (!proof || proof.stage !== stage) throw storageError("publication-stage-invalid");
-    if (global.PocketStarlingSemanticAuthorityShadow && !proof.semanticValidity)
-      throw storageError("publication-semantic-validity-required");
+    if (!proof.semanticValidity) throw storageError("publication-semantic-validity-required");
     return Object.freeze({
       syncedPocketId: proof.syncedPocketId,
       expectedSealStorageRef: proof.base

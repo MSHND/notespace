@@ -11,7 +11,7 @@ const test = require("node:test"), assert = require("node:assert/strict"),
     "js/pocket-import.js", "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js",
     "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js",
     "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js",
-    "js/pocket-sync-crypto.js", "js/pocket-starling-crypto-shadow.js",
+    "js/pocket-sync-crypto.js", "js/pocket-starling-semantic-authority-shadow.js", "js/pocket-starling-crypto-shadow.js",
     "js/pocket-starling-storage-shadow.js", "js/pocket-starling-head-shadow.js",
     "js/pocket-sync-remote-client.js", "js/pocket-starling-logical-edit-shadow.js",
     "js/pocket-starling-publication-shadow.js", "js/pocket-starling-remote-open-shadow.js",
@@ -34,7 +34,8 @@ function runtime() {
 const plain = (value) => JSON.parse(JSON.stringify(value)),
   context = () => ({ syncedPocketId: "p124" }),
   genesis = () => ({ schema: HEAD_SCHEMA, revision: 0, sealRef: null }),
-  operationId = (kind, index) => `${kind}-${index}`;
+  operationId = (kind, index) => `${kind}-${index}`,
+  keyBundles = new WeakMap(), sessionAuthorities = new WeakMap();
 
 function stateFor(c, count = 512) {
   const encoded = c.PocketStarlingBridgeShadow.encode({
@@ -58,16 +59,24 @@ function logicalConfirm(c, stager, stage) {
 }
 
 async function keyFor(c, envelopeId = "device") {
-  const wrappingKey = await c.PocketSyncCrypto.generateDeviceWrappingKey(),
+  const wrappingKey = await c.PocketSyncCrypto.generateDeviceWrappingKey(), envelopeContext =
+      { syncedPocketId: "p124", envelopeId, envelopeKind: "device", envelopeVersion: 1 },
     bundle = await c.PocketSyncCrypto.createMasterKeyBundle([{
-      context: { syncedPocketId: "p124", envelopeId, envelopeKind: "device", envelopeVersion: 1 }, wrappingKey,
-    }]);
+      context: envelopeContext, wrappingKey,
+    }], { semanticAuthority: true });
+  keyBundles.set(bundle.masterKey, { wrappingKey, envelopeContext, record: bundle.envelopes[0].record,
+    semanticAuthority: bundle.semanticAuthority });
   return bundle.masterKey;
 }
 
 async function physicalStage(c, stager, logical, key, baseStage = null) {
+  const keyBundle = keyBundles.get(key), audit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(
+      logical.sealRef, (ref) => stager.store.get(ref)), auditProof = c.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit),
+    issued = await c.PocketStarlingSemanticAuthorityShadow.issueInitial({ authority: keyBundle.semanticAuthority, auditProof });
+  assert.equal(audit.ok, true, JSON.stringify(audit)); assert.equal(issued.ok, true, JSON.stringify(issued));
   return c.PocketStarlingStorageShadow.stageCandidate({ sealRef: logical.sealRef,
     resolveLogical: (ref) => stager.store.get(ref), masterKey: key, context: context(),
+    semanticAuthority: keyBundle.semanticAuthority, semanticValidityProof: issued.proof,
     ...(baseStage ? { baseStage } : {}) });
 }
 
@@ -122,8 +131,14 @@ async function openRemote(c, stage, remote, calls, options = {}) {
   const opener = c.PocketStarlingRemoteOpenShadow.createRemoteOpener({
     objectHeadService: serviceFor(c, remote, calls, options.hooks),
     operationIdFactory: options.factory || operationId,
-  });
-  return opener.openRemote(options.input || { masterKey: stage.key, context: options.context || context() });
+  }), keyBundle = keyBundles.get(stage.key), reopened = await c.PocketSyncCrypto.openMasterKeyBundle(
+    keyBundle.record, keyBundle.wrappingKey, keyBundle.envelopeContext, [], { semanticAuthority: true });
+  const input = options.input || { masterKey: reopened.masterKey, context: options.context || context(),
+    semanticAuthority: reopened.semanticAuthority };
+  const result = await opener.openRemote(input);
+  if (result.outcome === "opened") sessionAuthorities.set(result.session,
+    { masterKey: reopened.masterKey, semanticAuthority: reopened.semanticAuthority });
+  return result;
 }
 
 async function sealAndRootRefs(c, stage) {
@@ -152,7 +167,7 @@ test("P124c real P122 publish opens through fresh P120 P124", async () => {
   assert.deepEqual(Object.keys(result), ["outcome", "head", "session"]);
   assert.equal(result.outcome, "opened"); assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.head), true); assert.equal(result.head.sealRef, publishedSeal);
-  assert.deepEqual(Object.keys(result.session), ["acceptedSealRef", "resolveLogical", "createReuseProof", "readContent", "readPlacement", "diagnostics"]);
+  assert.deepEqual(Object.keys(result.session), ["acceptedSealRef", "semanticBaseProof", "resolveLogical", "createReuseProof", "readContent", "readPlacement", "diagnostics"]);
   assert.equal(Object.isFrozen(result.session), true);
   const content = await result.session.readContent("n20"), placement = await result.session.readPlacement("n20");
   assert.deepEqual(plain(content.payload), { label: "Node 20", value: 20 }); assert.equal(placement.parentId, "root");
@@ -171,19 +186,27 @@ test("P124c open is lazy bounded and cached", async () => {
 test("P124c opened reuse proof stages genuine P114 P112 P121 successor", async () => {
   const { stage, remote } = await publishedFixture(1000), reader = runtime(), calls = [],
     result = await openRemote(reader, stage, remote, calls), session = result.session,
+    credential = sessionAuthorities.get(session),
     reuseProof = session.createReuseProof();
   assert.equal(Object.isFrozen(reuseProof), true); assert.deepEqual(Object.getOwnPropertyNames(reuseProof), []);
   const opened = await reader.PocketStarlingLogicalEditShadow.createBase({
       acceptedSealRef: session.acceptedSealRef, resolveLogical: session.resolveLogical,
+      syncedPocketId: context().syncedPocketId, semanticAuthority: credential.semanticAuthority,
+      semanticBaseProof: session.semanticBaseProof,
     }), edited = await reader.PocketStarlingLogicalEditShadow.editPayload(
       opened.base, "n777", { label: "P124d changed", value: 124 },
     );
   assert.equal(opened.ok, true); assert.equal(edited.ok, true); assert.equal(edited.changed, true);
   assert.ok(edited.candidate.newLogicalRefs.length > 0);
+  const issued = await reader.PocketStarlingSemanticAuthorityShadow.issueSuccessor({
+      authority: credential.semanticAuthority, semanticBaseProof: session.semanticBaseProof, candidate: edited.candidate,
+    });
+  assert.equal(issued.ok, true, JSON.stringify(issued));
   const before = calls.length, successorStage = await reader.PocketStarlingStorageShadow.stageCandidate({
       sealRef: edited.candidate.sealRef, resolveLogical: edited.candidate.resolveLogical,
-      masterKey: stage.key, context: context(), freshBaseProof: reuseProof,
-      newLogicalRefs: edited.candidate.newLogicalRefs,
+      masterKey: credential.masterKey, context: context(), freshBaseProof: reuseProof,
+      newLogicalRefs: edited.candidate.newLogicalRefs, semanticAuthority: credential.semanticAuthority,
+      semanticValidityProof: issued.proof,
     }), binding = reader.PocketStarlingStorageShadow.publicationBinding(successorStage);
   assert.equal(calls.length, before); assert.equal(binding.expectedSealStorageRef, remote.head.sealRef);
   assert.equal(binding.candidateSealStorageRef, successorStage.sealStorageRef);
@@ -261,7 +284,10 @@ test("P124c context and Head authority survive mutation", async () => {
       if (!factoryMutated) { factoryMutated = true; supplied.syncedPocketId = "factory-redirect"; }
       return operationId(kind, index);
     },
-  }), result = await opener.openRemote({ masterKey: stage.key, context: supplied });
+  }), keyBundle = keyBundles.get(stage.key), reopened = await reader.PocketSyncCrypto.openMasterKeyBundle(
+    keyBundle.record, keyBundle.wrappingKey, keyBundle.envelopeContext, [], { semanticAuthority: true }),
+    result = await opener.openRemote({ masterKey: reopened.masterKey, context: supplied,
+      semanticAuthority: reopened.semanticAuthority });
   assert.equal(factoryMutated, true); assert.equal(transportMutated, true);
   assert.equal(headMutatedAtGetBoundary, true); assert.equal(mutableHead.sealRef, "redirected");
   assert.equal(calls[1][0], "getOpaqueObject"); assert.equal(calls[1][1].storageRef, originalSeal);
