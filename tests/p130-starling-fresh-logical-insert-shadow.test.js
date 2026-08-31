@@ -111,6 +111,25 @@ function candidateObject(candidate, ref) {
   return JSON.parse(bytes);
 }
 
+function directRefs(object) {
+  if (object.kind === "candidate-seal") return [object.rootRef, object.previousSealRef].filter(Boolean);
+  if (object.kind === "pocket-root") return [object.contentRef, object.placementRef, object.childrenRef, object.preservationRef];
+  if (["content-trie", "placement-trie", "children-trie"].includes(object.kind)) return [...object.children.map((edge) => edge.ref), ...(object.hasValue ? [object.valueRef] : [])];
+  if (object.kind === "sequence-branch") return object.childRefs;
+  return [];
+}
+
+function reachableCandidateRefs(baseStore, candidate) {
+  const seen = new Set(), stack = [candidate.sealRef], owned = new Set(candidate.newLogicalRefs);
+  while (stack.length) {
+    const ref = stack.pop(); if (seen.has(ref)) continue; seen.add(ref);
+    const bytes = candidate.resolveLogical(ref) || baseStore.get(ref);
+    assert.equal(typeof bytes, "string", ref);
+    for (const next of directRefs(JSON.parse(bytes))) stack.push(next);
+  }
+  return new Set([...seen].filter((ref) => owned.has(ref)));
+}
+
 function relation(c, candidate) {
   const result = c.PocketStarlingPlacementShadow.materialise(candidate.structural);
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -197,6 +216,7 @@ test("P132f fresh logical Insert and Reorder retain v2 balance across reopened c
     expected.splice(adjusted, 0, expected.splice(from, 1)[0]);
     assert.deepEqual(plain(relation(c, reconstructed).children.parent), expected);
     assert.ok(candidate.newLogicalRefs.length < 16 * ("parent".length + 8));
+    assert.deepEqual([...reachableCandidateRefs(store, candidate)].sort(), [...candidate.newLogicalRefs].sort());
     for (const ref of candidate.newLogicalRefs) store.set(ref, candidate.resolveLogical(ref));
     current = { sealRef: candidate.sealRef };
   }

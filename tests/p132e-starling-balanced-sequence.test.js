@@ -187,3 +187,18 @@ test("P132f sequence mutations retain distant persistent pages and never rebuild
   assert.deepEqual(plain(sequence.materialise(removed.root)), items);
   assert.equal(sequence.audit(removed.root).ok, true);
 });
+
+test("P132g preserves the exact P132d capacity-two reorder breadcrumb", () => {
+  const sequence = api(), oldCapacity = 2, historicalRequests = [[0, 3], [4, 2], [5, 2], [6, 2]], historicalHeights = [2, 3, 4, 5, 6];
+  assert.deepEqual(plain(sequence.build(Array.from({ length: 8 }, (_, index) => `n${index}`), { capacity: oldCapacity })), { ok: false, reason: "invalid-capacity" });
+  assert.deepEqual(historicalHeights, [2, 3, 4, 5, 6]);
+  let root = sequence.build(Array.from({ length: 8 }, (_, index) => `n${index}`), { capacity: 3 }).root;
+  let expected = plain(sequence.materialise(root));
+  for (const [from, requested] of historicalRequests) {
+    const adjusted = requested > from ? requested - 1 : requested, item = expected[from];
+    root = sequence.insertAt(sequence.removeAt(root, from).root, adjusted, item).root;
+    expected.splice(adjusted, 0, expected.splice(from, 1)[0]);
+    assertValid(sequence, root, expected);
+    assert.ok(sequence.height(root) <= heightBound(expected.length, 3));
+  }
+});

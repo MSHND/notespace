@@ -962,6 +962,24 @@ test("P132f rejects capacity two at Bridge, Placement, Root, and persisted Objec
   assert.equal(c.PocketStarlingRootShadow.auditCandidate({ ...state, capacity: 2 }).reason, "invalid-root-config");
 });
 
+test("P132g rejects unequal persisted sequence leaf depths and authenticated cycle substitution", () => {
+  const c = context(), api = c.PocketStarlingObjectSealShadow, state = stateFor(c, normalised(rootNodes(20))), stager = api.createStager(), staged = stage(api, stager, state), entries = new Map(api.exportEntries(stager));
+  const sequenceRef = trieValueRefAt(entries, staged.rootObject.childrenRef, "root"), rootPage = objectAt(entries, sequenceRef), child = objectAt(entries, rootPage.childRefs[0]), leafPage = objectAt(entries, child.childRefs[0]);
+  assert.equal(leafPage.kind, "sequence-leaf");
+  const left = rawPut(api, entries, "sequence-leaf", { ...leafPage, items: leafPage.items.slice(0, 2), count: 2 }), right = rawPut(api, entries, "sequence-leaf", { ...leafPage, items: leafPage.items.slice(2), count: leafPage.items.length - 2 }), deeper = rawPut(api, entries, "sequence-branch", { schema: api.SEQUENCE_SCHEMA, kind: "sequence-branch", capacity: leafPage.capacity, count: leafPage.count, childRefs: [left, right] });
+  const childRefs = child.childRefs.slice(); childRefs[0] = deeper;
+  const replacementChild = rawPut(api, entries, "sequence-branch", { ...child, childRefs, count: childRefs.reduce((total, ref) => total + objectAt(entries, ref).count, 0) });
+  const rootRefs = rootPage.childRefs.slice(); rootRefs[0] = replacementChild;
+  const replacementRoot = rawPut(api, entries, "sequence-branch", { ...rootPage, childRefs: rootRefs, count: rootRefs.reduce((total, ref) => total + objectAt(entries, ref).count, 0) });
+  const childrenRef = rewriteTrieAt(api, entries, staged.rootObject.childrenRef, "root", (node) => ({ ...node, valueRef: replacementRoot })), forged = forgeComponent(api, entries, staged, "childrenRef", childrenRef);
+  assert.equal(api.openFromAcceptedSealRef(forged.sealRef, (ref) => entries.get(ref)).ok, true);
+  assert.equal(api.auditCandidateSeal(forged.sealRef, (ref) => entries.get(ref)).reason, "invalid-sequence-object");
+
+  // A persisted cycle would need a content-derived ref to authenticate bytes that name itself.
+  const substituted = api.canonical({ ...rootPage, childRefs: [sequenceRef, ...rootPage.childRefs.slice(1)] }).bytes;
+  assert.equal(api.auditCandidateSeal(staged.sealRef, (ref) => ref === sequenceRef ? substituted : stager.store.get(ref)).reason, "object-ref-mismatch");
+});
+
 test("P109 required presence is relative to the supplied complete base", () => {
   const c = context(),
     rootApi = c.PocketStarlingRootShadow,
