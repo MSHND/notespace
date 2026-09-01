@@ -31,6 +31,7 @@
       typeof logical.move !== "function" ||
       typeof logical.reorder !== "function" ||
       typeof logical.deleteBranch !== "function" ||
+      typeof logical.restoreBranch !== "function" ||
       typeof storage.stageCandidate !== "function" ||
       typeof storage.publicationBinding !== "function" ||
       typeof semantic.issueSuccessor !== "function") throw fail("remote-edit-input-invalid");
@@ -140,11 +141,26 @@
       return prepareCandidate(deleted.candidate);
     }
 
+    async function prepareRestore(restoreInput) {
+      if (!exact(restoreInput, ["nodeId", "fromIndex", "newParentId", "toIndex"])) throw fail("remote-edit-input-invalid");
+      const restored = await logical.restoreBranch(
+        base,
+        restoreInput.nodeId,
+        restoreInput.fromIndex,
+        restoreInput.newParentId,
+        restoreInput.toIndex,
+      );
+      if (!restored || restored.ok !== true) return restored;
+      if (!restored.candidate) throw fail("remote-edit-input-invalid");
+      return prepareCandidate(restored.candidate);
+    }
+
     return Object.freeze({
       preparePayloadEdit,
       prepareMove,
       prepareReorder,
       prepareDelete,
+      prepareRestore,
     });
   }
 
