@@ -33,6 +33,7 @@
       typeof logical.deleteBranch !== "function" ||
       typeof logical.restoreBranch !== "function" ||
       typeof logical.insert !== "function" ||
+      typeof logical.compose !== "function" ||
       typeof storage.stageCandidate !== "function" ||
       typeof storage.publicationBinding !== "function" ||
       typeof semantic.issueSuccessor !== "function") throw fail("remote-edit-input-invalid");
@@ -164,6 +165,16 @@
       return prepareCandidate(inserted.candidate);
     }
 
+    async function prepareWorkingSet(operations) {
+      const composed = await logical.compose(base, operations);
+      if (!composed || composed.ok !== true) return composed;
+      if (composed.changed === false && composed.reason === "no-change")
+        return Object.freeze({ outcome: "unchanged" });
+      if (composed.changed !== true || !composed.candidate)
+        throw fail("remote-edit-input-invalid");
+      return prepareCandidate(composed.candidate);
+    }
+
     return Object.freeze({
       preparePayloadEdit,
       prepareMove,
@@ -171,6 +182,7 @@
       prepareDelete,
       prepareRestore,
       prepareInsert,
+      prepareWorkingSet,
     });
   }
 

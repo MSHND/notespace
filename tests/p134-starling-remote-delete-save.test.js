@@ -101,7 +101,7 @@ function forbiddenDuringPrepare(calls) { return calls.some(([route]) => ["putOpa
 test("P134 prepares a genuine bounded Delete through semantic encrypted storage without publication", async () => {
   const f = await setup(), o = await open(f, "prepare"), editor = await o.c.PocketStarlingRemoteEditShadow.createEditor({ opened: o.opened, masterKey: o.reopened.masterKey, context: context(), semanticAuthority: o.reopened.semanticAuthority }), before = f.r.calls.length,
     prepared = await editor.prepareDelete({ nodeId: "branch", fromIndex: 1 }), calls = f.r.calls.slice(before);
-  assert.deepEqual(Object.keys(editor), ["preparePayloadEdit", "prepareMove", "prepareReorder", "prepareDelete", "prepareRestore", "prepareInsert"]); assert.equal(Object.isFrozen(editor), true);
+  assert.deepEqual(Object.keys(editor), ["preparePayloadEdit", "prepareMove", "prepareReorder", "prepareDelete", "prepareRestore", "prepareInsert", "prepareWorkingSet"]); assert.equal(Object.isFrozen(editor), true);
   assert.deepEqual(Object.keys(prepared), ["outcome", "expectedHead", "stage", "binding"]); assert.equal(Object.isFrozen(prepared), true); assert.equal(prepared.outcome, "prepared");
   assert.equal(forbiddenDuringPrepare(calls), false); assert.ok(calls.filter(([route]) => route === "getOpaqueObject").length < 80); assert.ok(prepared.stage.newRecords.length < 150);
   assert.equal(prepared.binding.expectedSealStorageRef, o.opened.head.sealRef); assert.equal(prepared.binding.candidateSealStorageRef, prepared.stage.sealStorageRef);
