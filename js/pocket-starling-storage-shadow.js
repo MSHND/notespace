@@ -205,8 +205,7 @@
         object.schema !== logical.OBJECT_SCHEMA ||
         typeof object.nodeId !== "string" ||
         object.nodeId.length === 0 ||
-        typeof object.parentId !== "string" ||
-        object.parentId.length === 0
+        typeof object.parentId !== "string"
       )
         throw storageError("logical-object-invalid");
     } else if (logicalKind === "preservation") {
