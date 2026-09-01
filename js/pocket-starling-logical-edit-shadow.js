@@ -1188,6 +1188,128 @@
     return Object.freeze({ ok: true, candidate });
   }
 
+  async function restoreBranch(base, nodeId, fromIndex, newParentId, toIndex) {
+    const state = baseStates.get(base);
+    if (!state) return fail("invalid-base-token");
+    if (
+      typeof nodeId !== "string" ||
+      nodeId.length === 0 ||
+      nodeId === "root"
+    )
+      return fail("invalid-node-id");
+    const restored = await readPlacement(state, nodeId, "unknown-node");
+    if (!restored.ok) return restored;
+    const domain = await placementDomain(state, nodeId, restored.record);
+    if (!domain.ok) return domain;
+    if (domain.terminal === "root") return fail("current-node-not-retained");
+    if (restored.record.parentId !== "") return fail("retained-node-not-root");
+    const destinationDomain = await currentParent(state, newParentId, nodeId);
+    if (!destinationDomain.ok) return destinationDomain;
+    const retainedLocated = await readChildrenRef(state, "");
+    if (!retainedLocated.ok) return retainedLocated;
+    if (!retainedLocated.found) return fail("placement-membership-mismatch");
+    const retained = await sequenceRoot(state, retainedLocated.valueRef);
+    if (!retained.ok) return retained;
+    const membership = await sequenceItemAt(state, retained.page, fromIndex);
+    if (!membership.ok) return membership;
+    if (membership.item !== nodeId)
+      return fail("placement-membership-mismatch");
+    const destinationLocated = await readChildrenRef(state, newParentId);
+    if (!destinationLocated.ok) return destinationLocated;
+    let destination;
+    if (destinationLocated.found) {
+      const loaded = await sequenceRoot(state, destinationLocated.valueRef);
+      if (!loaded.ok) return loaded;
+      destination = loaded.page;
+    } else destination = emptySequence(state);
+
+    const frontier = new Map(),
+      removed = await removeSequenceItem(
+        state,
+        frontier,
+        retained.page,
+        fromIndex,
+      );
+    if (!removed.ok) return removed;
+    const added = await addSequenceItem(
+      state,
+      frontier,
+      destination,
+      destinationIndex(toIndex, destination.count),
+      nodeId,
+    );
+    if (!added.ok) return added;
+    const placementRecord = materialise(state, frontier, "placement-record", {
+      schema: state.logical.OBJECT_SCHEMA,
+      kind: "placement-record",
+      nodeId,
+      parentId: newParentId,
+    });
+    if (!placementRecord.ok) return placementRecord;
+    const placement = await copyTrieValue(
+      state,
+      frontier,
+      state.root.placementRef,
+      "placement-trie",
+      nodeId,
+      placementRecord.ref,
+    );
+    if (!placement.ok) return placement;
+    const retainedChildren = await copyTrieValue(
+      state,
+      frontier,
+      state.root.childrenRef,
+      "children-trie",
+      "",
+      removed.page.ref,
+    );
+    if (!retainedChildren.ok) return retainedChildren;
+    const children = await copyTrieValue(
+      state,
+      frontier,
+      retainedChildren.ref,
+      "children-trie",
+      newParentId,
+      added.page.ref,
+    );
+    if (!children.ok) return children;
+    const root = materialise(state, frontier, "pocket-root", {
+      schema: state.logical.ROOT_SCHEMA,
+      kind: "pocket-root",
+      capacity: state.root.capacity,
+      contentRef: state.root.contentRef,
+      placementRef: placement.ref,
+      childrenRef: children.ref,
+      preservationRef: state.root.preservationRef,
+    });
+    if (!root.ok) return root;
+    const seal = materialise(state, frontier, "candidate-seal", {
+      schema: state.logical.SEAL_SCHEMA,
+      kind: "candidate-seal",
+      rootRef: root.ref,
+      previousSealRef: state.acceptedSealRef,
+    });
+    if (!seal.ok) return seal;
+    const published = reachableFrontier(frontier, seal.ref),
+      newLogicalRefs = Object.freeze(Array.from(published.keys())),
+      resolveLogical = (logicalRef) => published.get(logicalRef),
+      candidate = Object.freeze({
+        rootRef: root.ref,
+        sealRef: seal.ref,
+        newLogicalRefs,
+        resolveLogical,
+        diagnostics: Object.freeze({
+          logicalFetches: state.stats.logicalFetches,
+          logicalCacheHits: state.stats.logicalCacheHits,
+          destinationAncestryReads: destinationDomain.ancestryReads,
+          descendantReads: 0,
+          newLogicalObjectCount: newLogicalRefs.length,
+        }),
+      });
+    registerSemanticTransition(state, candidate);
+    return Object.freeze({ ok: true, candidate });
+  }
+
   async function reorderWithinParent(base, nodeId, fromIndex, toIndex) {
     const state = baseStates.get(base);
     if (!state) return fail("invalid-base-token");
@@ -1407,6 +1529,7 @@
     editPayload,
     move,
     deleteBranch,
+    restoreBranch,
     reorder: reorderWithinParent,
     diagnostics,
     semanticTransitionBinding,
