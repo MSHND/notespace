@@ -108,6 +108,36 @@
     );
   }
 
+  function plainObject(value) {
+    return (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.prototype.toString.call(value) === "[object Object]"
+    );
+  }
+
+  function validOwnerProjection(value) {
+    return (
+      exact(value, ["source", "tombstones", "rootExtras", "dataExtras"]) &&
+      exact(value.source, ["schema", "writtenAt"]) &&
+      typeof value.source.schema === "string" &&
+      typeof value.source.writtenAt === "string" &&
+      Array.isArray(value.tombstones) &&
+      plainObject(value.rootExtras) &&
+      plainObject(value.dataExtras)
+    );
+  }
+
+  function validPreservation(logical, value) {
+    return (
+      exact(value, ["schema", "kind", "value"]) &&
+      value.schema === logical.OBJECT_SCHEMA &&
+      value.kind === "preservation" &&
+      validOwnerProjection(value.value)
+    );
+  }
+
   function validTrie(logical, value, kind) {
     if (
       !exact(value, ["schema", "kind", "hasValue", "valueRef", "children"]) ||
@@ -1587,6 +1617,22 @@
     }
   }
 
+  function snapshotOwnerProjection(logical, preservationProjection) {
+    if (preservationProjection === undefined)
+      return { ok: true, supplied: false };
+    const captured = snapshotComposeValue(preservationProjection);
+    if (!captured.ok || !validOwnerProjection(captured.value))
+      return fail("invalid-owner-projection");
+    try {
+      const canonical = logical.canonical(captured.value);
+      return canonical.ok
+        ? { ok: true, supplied: true, value: captured.value }
+        : fail("invalid-owner-projection");
+    } catch (_error) {
+      return fail("invalid-owner-projection");
+    }
+  }
+
   function composeWorkingState(original, root, frontier, cache, stats) {
     return {
       logical: original.logical,
@@ -1629,12 +1675,77 @@
     }
   }
 
-  async function compose(base, operations) {
+  async function projectOwnerPreservation(state, frontier, projection) {
+    const current = await load(
+      state,
+      state.root.preservationRef,
+      "preservation",
+    );
+    if (!current.ok) return current;
+    if (!validPreservation(state.logical, current.object))
+      return fail("invalid-preservation");
+    const projectedValue = {
+      schema: state.logical.OBJECT_SCHEMA,
+      kind: "preservation",
+      value: projection,
+    };
+    let projected;
+    try { projected = state.logical.canonical(projectedValue); }
+    catch (_error) { return fail("invalid-owner-projection"); }
+    if (!projected.ok) return fail("invalid-owner-projection");
+    if (projected.bytes === current.bytes) return { ok: true, changed: false };
+    const preservation = materialise(
+      state,
+      frontier,
+      "preservation",
+      projectedValue,
+    );
+    if (!preservation.ok) return preservation;
+    const root = materialise(state, frontier, "pocket-root", {
+      schema: state.logical.ROOT_SCHEMA,
+      kind: "pocket-root",
+      capacity: state.root.capacity,
+      contentRef: state.root.contentRef,
+      placementRef: state.root.placementRef,
+      childrenRef: state.root.childrenRef,
+      preservationRef: preservation.ref,
+    });
+    if (!root.ok) return root;
+    const seal = materialise(state, frontier, "candidate-seal", {
+      schema: state.logical.SEAL_SCHEMA,
+      kind: "candidate-seal",
+      rootRef: root.ref,
+      previousSealRef: state.acceptedSealRef,
+    });
+    if (!seal.ok) return seal;
+    return {
+      ok: true,
+      changed: true,
+      candidate: Object.freeze({
+        rootRef: root.ref,
+        sealRef: seal.ref,
+        newLogicalRefs: Object.freeze(Array.from(frontier.keys())),
+        resolveLogical: (ref) => frontier.get(ref),
+        diagnostics: Object.freeze({
+          logicalFetches: state.stats.logicalFetches,
+          logicalCacheHits: state.stats.logicalCacheHits,
+          newLogicalObjectCount: frontier.size,
+        }),
+      }),
+    };
+  }
+
+  async function compose(base, operations, preservationProjection) {
     const original = baseStates.get(base);
     if (!original) return composeFailure("invalid-base-token");
     const captured = snapshotComposeOperations(operations);
     if (!captured.ok) return composeFailure("invalid-compose-input");
-    if (captured.operations.length === 0)
+    const projection = snapshotOwnerProjection(
+      original.logical,
+      preservationProjection,
+    );
+    if (!projection.ok) return composeFailure("invalid-owner-projection");
+    if (captured.operations.length === 0 && !projection.supplied)
       return Object.freeze({ ok: true, changed: false, reason: "no-change" });
 
     const frontier = new Map();
@@ -1697,6 +1808,21 @@
         cache,
         stats,
       );
+    }
+    if (projection.supplied) {
+      const projected = await projectOwnerPreservation(
+        workingState,
+        frontier,
+        projection.value,
+      );
+      if (!projected.ok) {
+        if (finalCandidate) semanticTransitions.delete(finalCandidate);
+        return composeFailure(projected.reason || "invalid-owner-projection");
+      }
+      if (projected.changed) {
+        if (finalCandidate) semanticTransitions.delete(finalCandidate);
+        finalCandidate = projected.candidate;
+      }
     }
     if (!finalCandidate)
       return Object.freeze({ ok: true, changed: false, reason: "no-change" });
