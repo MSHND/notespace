@@ -1523,6 +1523,197 @@
       ? transition.binding : null;
   }
 
+  function composeFailure(reason, operationIndex) {
+    return Number.isInteger(operationIndex)
+      ? Object.freeze({ ok: false, operationIndex, reason })
+      : Object.freeze({ ok: false, reason });
+  }
+
+  function snapshotComposeValue(value, ancestors = new Set()) {
+    if (value === null || typeof value !== "object")
+      return { ok: true, value };
+    if (
+      !value ||
+      ancestors.has(value) ||
+      (!Array.isArray(value) &&
+        Object.getPrototypeOf(value) !== Object.prototype &&
+        Object.getPrototypeOf(value) !== null)
+    )
+      return { ok: true, value };
+    ancestors.add(value);
+    const copy = Array.isArray(value) ? [] : {};
+    try {
+      for (const key of Object.keys(value)) {
+        const child = snapshotComposeValue(value[key], ancestors);
+        if (!child.ok) return child;
+        copy[key] = child.value;
+      }
+    } catch (_error) {
+      return fail("invalid-compose-input");
+    } finally {
+      ancestors.delete(value);
+    }
+    return { ok: true, value: Object.freeze(copy) };
+  }
+
+  function snapshotComposeOperations(operations) {
+    if (!Array.isArray(operations)) return fail("invalid-compose-input");
+    const fields = Object.freeze({
+      payload: Object.freeze(["nodeId", "payload"]),
+      move: Object.freeze(["nodeId", "fromIndex", "newParentId", "toIndex"]),
+      reorder: Object.freeze(["nodeId", "fromIndex", "toIndex"]),
+      delete: Object.freeze(["nodeId", "fromIndex"]),
+      restore: Object.freeze(["nodeId", "fromIndex", "newParentId", "toIndex"]),
+      insert: Object.freeze(["nodeId", "parentId", "toIndex", "payload"]),
+    });
+    try {
+      const captured = [];
+      for (const envelope of operations) {
+        if (!exact(envelope, ["type", "input"]) || typeof envelope.type !== "string")
+          return fail("invalid-compose-input");
+        const inputFields = fields[envelope.type];
+        if (!inputFields || !exact(envelope.input, inputFields))
+          return fail("invalid-compose-input");
+        const input = snapshotComposeValue(envelope.input);
+        if (!input.ok) return fail("invalid-compose-input");
+        captured.push(Object.freeze({ type: envelope.type, input: input.value }));
+      }
+      return { ok: true, operations: Object.freeze(captured) };
+    } catch (_error) {
+      return fail("invalid-compose-input");
+    }
+  }
+
+  function composeWorkingState(original, root, frontier, cache, stats) {
+    return {
+      logical: original.logical,
+      acceptedSealRef: original.acceptedSealRef,
+      resolveLogical: (ref) => frontier.has(ref)
+        ? frontier.get(ref)
+        : original.resolveLogical(ref),
+      cache,
+      stats,
+      seal: original.seal,
+      root,
+      semanticAuthority: original.semanticAuthority,
+      semanticBaseProof: original.semanticBaseProof,
+      semanticBinding: original.semanticBinding,
+    };
+  }
+
+  function captureCandidateFrontier(candidate, frontier, cache, logical) {
+    for (const ref of candidate.newLogicalRefs) {
+      const bytes = candidate.resolveLogical(ref);
+      const kind = kindFromRef(ref);
+      if (typeof bytes !== "string" || !kind) return fail("invalid-compose-input");
+      if (frontier.has(ref) && frontier.get(ref) !== bytes)
+        return fail("logical-ref-collision", { ref });
+      frontier.set(ref, bytes);
+      let object;
+      try { object = JSON.parse(bytes); }
+      catch (_error) { return fail("invalid-compose-input"); }
+      cache.set(ref, { expectedKind: kind, bytes, object });
+    }
+    const rootBytes = candidate.resolveLogical(candidate.rootRef);
+    if (typeof rootBytes !== "string") return fail("invalid-compose-input");
+    try {
+      const root = JSON.parse(rootBytes);
+      return validRoot(logical, root)
+        ? { ok: true, root }
+        : fail("invalid-compose-input");
+    } catch (_error) {
+      return fail("invalid-compose-input");
+    }
+  }
+
+  async function compose(base, operations) {
+    const original = baseStates.get(base);
+    if (!original) return composeFailure("invalid-base-token");
+    const captured = snapshotComposeOperations(operations);
+    if (!captured.ok) return composeFailure("invalid-compose-input");
+    if (captured.operations.length === 0)
+      return Object.freeze({ ok: true, changed: false, reason: "no-change" });
+
+    const frontier = new Map();
+    const cache = new Map(original.cache);
+    const stats = {
+      logicalFetches: original.stats.logicalFetches,
+      logicalCacheHits: original.stats.logicalCacheHits,
+    };
+    let workingState = composeWorkingState(
+      original,
+      original.root,
+      frontier,
+      cache,
+      stats,
+    );
+    let finalCandidate = null;
+    for (let operationIndex = 0; operationIndex < captured.operations.length; operationIndex += 1) {
+      const operation = captured.operations[operationIndex];
+      const workingBase = Object.freeze({});
+      baseStates.set(workingBase, workingState);
+      let result;
+      if (operation.type === "payload")
+        result = await editPayload(workingBase, operation.input.nodeId, operation.input.payload);
+      else if (operation.type === "move")
+        result = await move(workingBase, operation.input.nodeId, operation.input.fromIndex, operation.input.newParentId, operation.input.toIndex);
+      else if (operation.type === "reorder")
+        result = await reorderWithinParent(workingBase, operation.input.nodeId, operation.input.fromIndex, operation.input.toIndex);
+      else if (operation.type === "delete")
+        result = await deleteBranch(workingBase, operation.input.nodeId, operation.input.fromIndex);
+      else if (operation.type === "restore")
+        result = await restoreBranch(workingBase, operation.input.nodeId, operation.input.fromIndex, operation.input.newParentId, operation.input.toIndex);
+      else
+        result = await freshNode(workingBase, operation.input);
+      baseStates.delete(workingBase);
+      if (!result || result.ok !== true) {
+        if (finalCandidate) semanticTransitions.delete(finalCandidate);
+        return composeFailure(result && typeof result.reason === "string" ? result.reason : "invalid-compose-input", operationIndex);
+      }
+      if (result.changed === false) continue;
+      if (!result.candidate) {
+        if (finalCandidate) semanticTransitions.delete(finalCandidate);
+        return composeFailure("invalid-compose-input", operationIndex);
+      }
+      if (finalCandidate) semanticTransitions.delete(finalCandidate);
+      finalCandidate = result.candidate;
+      const capturedFrontier = captureCandidateFrontier(
+        finalCandidate,
+        frontier,
+        cache,
+        original.logical,
+      );
+      if (!capturedFrontier.ok) {
+        semanticTransitions.delete(finalCandidate);
+        return composeFailure(capturedFrontier.reason || "invalid-compose-input", operationIndex);
+      }
+      workingState = composeWorkingState(
+        original,
+        capturedFrontier.root,
+        frontier,
+        cache,
+        stats,
+      );
+    }
+    if (!finalCandidate)
+      return Object.freeze({ ok: true, changed: false, reason: "no-change" });
+    const published = reachableFrontier(frontier, finalCandidate.sealRef);
+    const newLogicalRefs = Object.freeze(Array.from(published.keys()));
+    const candidate = Object.freeze({
+      rootRef: finalCandidate.rootRef,
+      sealRef: finalCandidate.sealRef,
+      newLogicalRefs,
+      resolveLogical: (ref) => published.get(ref),
+      diagnostics: Object.freeze({
+        ...finalCandidate.diagnostics,
+        newLogicalObjectCount: newLogicalRefs.length,
+      }),
+    });
+    semanticTransitions.delete(finalCandidate);
+    registerSemanticTransition(workingState, candidate);
+    return Object.freeze({ ok: true, changed: true, candidate });
+  }
+
   global.PocketStarlingLogicalEditShadow = Object.freeze({
     createBase,
     insert: freshNode,
@@ -1531,6 +1722,7 @@
     deleteBranch,
     restoreBranch,
     reorder: reorderWithinParent,
+    compose,
     diagnostics,
     semanticTransitionBinding,
   });

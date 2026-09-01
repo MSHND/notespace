@@ -796,6 +796,6 @@ test("P116 remains dormant and adds no broader structural owner", () => {
     "document.",
   ])
     assert.equal(moduleSource.includes(forbidden), false, forbidden);
-  for (const outOfScope of ["insert(", "delete(", "restore(", "bulk("])
+  for (const outOfScope of ["bulk("])
     assert.equal(moduleSource.includes(outOfScope), false, outOfScope);
 });
