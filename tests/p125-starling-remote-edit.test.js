@@ -119,7 +119,7 @@ test("P125 composes real P122 P124 P114 P112 P121 preparation without remote wri
     prepared = await editor.preparePayloadEdit({ nodeId: "n1337", payload: { label: "P125 changed", value: 125 } });
   assert.deepEqual(Object.keys(reader.PocketStarlingRemoteEditShadow), ["createEditor"]);
   assert.equal(Object.isFrozen(reader.PocketStarlingRemoteEditShadow), true);
-  assert.deepEqual(Object.keys(editor), ["preparePayloadEdit", "prepareMove", "prepareReorder"]); assert.equal(Object.isFrozen(editor), true);
+  assert.deepEqual(Object.keys(editor), ["preparePayloadEdit", "prepareMove", "prepareReorder", "prepareDelete"]); assert.equal(Object.isFrozen(editor), true);
   assert.deepEqual(Object.keys(prepared), ["outcome", "expectedHead", "stage", "binding"]); assert.equal(Object.isFrozen(prepared), true);
   assert.equal(prepared.outcome, "prepared"); assert.equal(Object.isFrozen(prepared.expectedHead), true);
   assert.deepEqual(plain(prepared.expectedHead), plain(remote.head));

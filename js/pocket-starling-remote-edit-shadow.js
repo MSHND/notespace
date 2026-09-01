@@ -30,6 +30,7 @@
       typeof logical.editPayload !== "function" ||
       typeof logical.move !== "function" ||
       typeof logical.reorder !== "function" ||
+      typeof logical.deleteBranch !== "function" ||
       typeof storage.stageCandidate !== "function" ||
       typeof storage.publicationBinding !== "function" ||
       typeof semantic.issueSuccessor !== "function") throw fail("remote-edit-input-invalid");
@@ -127,7 +128,24 @@
       return prepareCandidate(reordered.candidate);
     }
 
-    return Object.freeze({ preparePayloadEdit, prepareMove, prepareReorder });
+    async function prepareDelete(deleteInput) {
+      if (!exact(deleteInput, ["nodeId", "fromIndex"])) throw fail("remote-edit-input-invalid");
+      const deleted = await logical.deleteBranch(
+        base,
+        deleteInput.nodeId,
+        deleteInput.fromIndex,
+      );
+      if (!deleted || deleted.ok !== true) return deleted;
+      if (!deleted.candidate) throw fail("remote-edit-input-invalid");
+      return prepareCandidate(deleted.candidate);
+    }
+
+    return Object.freeze({
+      preparePayloadEdit,
+      prepareMove,
+      prepareReorder,
+      prepareDelete,
+    });
   }
 
   global.PocketStarlingRemoteEditShadow = Object.freeze({ createEditor });
