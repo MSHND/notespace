@@ -263,9 +263,9 @@ test("P130 preserves accepted base authority across caller mutation and fresh re
 
 test("P130 keeps existing payload move and reorder behaviour unchanged", async () => {
   const c = runtime(), api = c.PocketStarlingLogicalEditShadow;
-  assert.deepEqual(Object.keys(api), ["createBase", "insert", "editPayload", "move", "reorder", "diagnostics", "semanticTransitionBinding"]);
+  assert.deepEqual(Object.keys(api), ["createBase", "insert", "editPayload", "move", "deleteBranch", "reorder", "diagnostics", "semanticTransitionBinding"]);
   assert.equal(Object.isFrozen(api), true);
-  for (const method of ["createBase", "editPayload", "move", "reorder", "diagnostics"]) assert.equal(typeof api[method], "function");
+  for (const method of ["createBase", "editPayload", "move", "deleteBranch", "reorder", "diagnostics"]) assert.equal(typeof api[method], "function");
 });
 
 test("P130 remains genuinely dormant in production", () => {
