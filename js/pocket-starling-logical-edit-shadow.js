@@ -1529,29 +1529,32 @@
       : Object.freeze({ ok: false, reason });
   }
 
-  function snapshotComposeValue(value, ancestors = new Set()) {
-    if (value === null || typeof value !== "object")
+  function unsupportedComposeValue() {
+    const sentinel = {};
+    sentinel.value = sentinel;
+    return Object.freeze(sentinel);
+  }
+
+  function snapshotComposeValue(value, copies = new Map()) {
+    if (value === null || (typeof value !== "object" && typeof value !== "function"))
       return { ok: true, value };
-    if (
-      !value ||
-      ancestors.has(value) ||
-      (!Array.isArray(value) &&
-        Object.getPrototypeOf(value) !== Object.prototype &&
-        Object.getPrototypeOf(value) !== null)
-    )
-      return { ok: true, value };
-    ancestors.add(value);
-    const copy = Array.isArray(value) ? [] : {};
+    if (typeof value === "function")
+      return { ok: true, value: unsupportedComposeValue() };
+    if (copies.has(value)) return { ok: true, value: copies.get(value) };
+    if (!Array.isArray(value) &&
+      Object.getPrototypeOf(value) !== Object.prototype &&
+      Object.getPrototypeOf(value) !== null)
+      return { ok: true, value: unsupportedComposeValue() };
+    const copy = Array.isArray(value) ? new Array(value.length) : {};
+    copies.set(value, copy);
     try {
       for (const key of Object.keys(value)) {
-        const child = snapshotComposeValue(value[key], ancestors);
+        const child = snapshotComposeValue(value[key], copies);
         if (!child.ok) return child;
         copy[key] = child.value;
       }
     } catch (_error) {
       return fail("invalid-compose-input");
-    } finally {
-      ancestors.delete(value);
     }
     return { ok: true, value: Object.freeze(copy) };
   }
