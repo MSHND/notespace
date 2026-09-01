@@ -30,13 +30,14 @@
     async function saveReorder(value) { return save(value, ["nodeId", "fromIndex", "toIndex"], "prepareReorder"); }
     async function saveDelete(value) { return save(value, ["nodeId", "fromIndex"], "prepareDelete"); }
     async function saveRestore(value) { return save(value, ["nodeId", "fromIndex", "newParentId", "toIndex"], "prepareRestore"); }
+    async function saveInsert(value) { return save(value, ["nodeId", "parentId", "toIndex", "payload"], "prepareInsert"); }
     async function reconcileAmbiguous() {
       if (state !== "ambiguous" || !pending) throw fail("remote-save-state-invalid");
       const result = await reconciler.reconcileAmbiguousPublication({ stage: pending.stage, expectedHead: pending.expectedHead, masterKey, context });
       if (result.outcome !== "unknown") { state = "terminal"; pending = null; }
       return result;
     }
-    return Object.freeze({ savePayload, saveMove, saveReorder, saveDelete, saveRestore, reconcileAmbiguous });
+    return Object.freeze({ savePayload, saveMove, saveReorder, saveDelete, saveRestore, saveInsert, reconcileAmbiguous });
   }
   global.PocketStarlingRemoteSaveShadow = Object.freeze({ createTransaction });
 })(typeof window !== "undefined" ? window : globalThis);

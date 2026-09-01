@@ -32,6 +32,7 @@
       typeof logical.reorder !== "function" ||
       typeof logical.deleteBranch !== "function" ||
       typeof logical.restoreBranch !== "function" ||
+      typeof logical.insert !== "function" ||
       typeof storage.stageCandidate !== "function" ||
       typeof storage.publicationBinding !== "function" ||
       typeof semantic.issueSuccessor !== "function") throw fail("remote-edit-input-invalid");
@@ -155,12 +156,21 @@
       return prepareCandidate(restored.candidate);
     }
 
+    async function prepareInsert(insertInput) {
+      if (!exact(insertInput, ["nodeId", "parentId", "toIndex", "payload"])) throw fail("remote-edit-input-invalid");
+      const inserted = await logical.insert(base, insertInput);
+      if (!inserted || inserted.ok !== true) return inserted;
+      if (!inserted.candidate) throw fail("remote-edit-input-invalid");
+      return prepareCandidate(inserted.candidate);
+    }
+
     return Object.freeze({
       preparePayloadEdit,
       prepareMove,
       prepareReorder,
       prepareDelete,
       prepareRestore,
+      prepareInsert,
     });
   }
 
