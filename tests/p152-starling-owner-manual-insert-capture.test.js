@@ -117,15 +117,15 @@ test("P152 keeps provisional cancellation, blank cleanup, slash import and exist
   assert.deepEqual(captured(context, rename.seq).map((entry) => entry.type), ["payload"]);
 });
 
-test("P152 leaves add undo semantically unclaimed and makes capture failure observational", () => {
+test("P152 preserves add undo bookkeeping while P153 cancels the uncovered Insert semantics", () => {
   const context = runtime([node("a")]);
   context.insertSiblingBelow("a");
   const committed = context.state.inlineEdit.id;
   assert.equal(context.commitInlineEdit(committed, "Committed").ok, true);
-  const add = operation(context, committed), beforeUndo = captured(context, add.seq);
+  const add = operation(context, committed);
   context.undoLastEditAction();
   const undo = context.state.ops.at(-1);
-  assert.equal(undo.type, "undo_add"); assert.deepEqual(captured(context, undo.seq), beforeUndo);
+  assert.equal(undo.type, "undo_add"); assert.deepEqual(captured(context, undo.seq), []);
   const failing = runtime([node("a")]), factory = failing.PocketStarlingOwnerWorkingSetShadow;
   failing.PocketStarlingOwnerWorkingSetShadow = undefined; assert.equal(failing.resetPocketStarlingOwnerWorkingSetJournal(), false);
   failing.insertSiblingBelow("a");

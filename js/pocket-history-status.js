@@ -116,6 +116,25 @@ function capturePocketStarlingNodeInsert(sequence, node, parentId, toIndex) {
   }]);
 }
 
+function bindP153InsertUndoWitness(snapshot, nodeId, operationSequence, forwardSemanticCaptured) {
+  const sequence = validPocketOperationSequence(operationSequence);
+  if (
+    !snapshot ||
+    snapshot.kind !== "add" ||
+    typeof nodeId !== "string" ||
+    !nodeId ||
+    nodeId.length > 80 ||
+    !sequence
+  ) return false;
+  Object.defineProperty(snapshot, "p153InsertUndoWitness", {
+    value: { nodeId, operationSequence: sequence, forwardSemanticCaptured: forwardSemanticCaptured === true },
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return true;
+}
+
 function discardPocketStarlingOwnerWorkingOperations(sequence) {
   const target = validPocketOperationSequence(sequence);
   const journal = pocketStarlingOwnerWorkingSetJournal;
@@ -410,6 +429,17 @@ function createTreeUndoSnapshot(kind = "") {
 function restoreTreeUndoSnapshot(snapshot) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   if (!snapshot || !Array.isArray(snapshot.nodes)) return false;
+  const insertUndoWitness = snapshot.kind === "add" ? snapshot.p153InsertUndoWitness : null;
+  const validInsertUndoWitness = insertUndoWitness
+    && typeof insertUndoWitness === "object"
+    && typeof insertUndoWitness.nodeId === "string"
+    && insertUndoWitness.nodeId
+    && insertUndoWitness.nodeId.length <= 80
+    && validPocketOperationSequence(insertUndoWitness.operationSequence) === insertUndoWitness.operationSequence
+    && insertUndoWitness.forwardSemanticCaptured === true;
+  const insertUndoEligible = validInsertUndoWitness
+    && validPocketOperationSequence(state.operationHighWater) === insertUndoWitness.operationSequence
+    && nodeMap().has(insertUndoWitness.nodeId);
   const moveUndoWitness = snapshot.p151MoveUndoWitness;
   const validMoveUndoWitness = moveUndoWitness
     && typeof moveUndoWitness === "object"
@@ -445,6 +475,9 @@ function restoreTreeUndoSnapshot(snapshot) {
   if (snapshot.kind === "rename") {
     const restoredNode = nodeMap().get(state.selectedId) || null;
     capturePocketStarlingNodePayload(undoOperation?.seq, restoredNode);
+  }
+  if (insertUndoEligible) {
+    discardPocketStarlingOwnerWorkingOperations(insertUndoWitness.operationSequence);
   }
   if (currentMovePlacement && moveUndoEligible && typeof sortNodesForParent === "function") {
     const restoredNode = nodeMap().get(moveUndoWitness.nodeId) || null;
@@ -989,7 +1022,9 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
     const finalIndex = typeof sortNodesForParent === "function"
       ? sortNodesForParent(parentId).findIndex((sibling) => sibling.id === node.id)
       : -1;
-    if (finalIndex >= 0) capturePocketStarlingNodeInsert(addOperation?.seq, node, parentId, finalIndex);
+    const forwardSemanticCaptured = finalIndex >= 0
+      && capturePocketStarlingNodeInsert(addOperation?.seq, node, parentId, finalIndex);
+    bindP153InsertUndoWitness(lastEditUndoSnapshot, node.id, addOperation?.seq, forwardSemanticCaptured);
     armCaptureRhythm(edit.parentId || node.parentId || "root", node.id);
     setStatus(`Caught.`, "ok", {
       action: { label: "Undo", onClick: () => undoLastEditAction() },
