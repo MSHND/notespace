@@ -165,8 +165,8 @@
       return prepareCandidate(inserted.candidate);
     }
 
-    async function prepareWorkingSet(operations) {
-      const composed = await logical.compose(base, operations);
+    async function prepareWorkingSet(operations, preservationProjection) {
+      const composed = await logical.compose(base, operations, preservationProjection);
       if (!composed || composed.ok !== true) return composed;
       if (composed.changed === false && composed.reason === "no-change")
         return Object.freeze({ outcome: "unchanged" });
