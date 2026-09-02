@@ -480,7 +480,19 @@ function ensurePathNodeUnder(rootParentId, labels) {
         updatedAt: nowIso(),
       };
       state.nodes.push(child);
-      recordOp({ type: "add_path", id, parentId, label: part });
+      const addPathOperation = recordOp({ type: "add_path", id, parentId, label: part });
+      let toIndex = -1;
+      try {
+        const siblings = typeof sortNodesForParent === "function"
+          ? sortNodesForParent(parentId)
+          : null;
+        if (Array.isArray(siblings)) toIndex = siblings.findIndex((entry) => entry?.id === child.id);
+      } catch {}
+      try {
+        if (Number.isSafeInteger(toIndex) && toIndex >= 0 && typeof capturePocketStarlingNodeInsert === "function") {
+          capturePocketStarlingNodeInsert(addPathOperation?.seq, child, parentId, toIndex);
+        }
+      } catch {}
     }
     current = child;
     parentId = child.id;
