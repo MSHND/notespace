@@ -8,23 +8,27 @@ function plain(value) { return value === undefined ? undefined : JSON.parse(JSON
 function node(id, parentId = "root", order = 1001, extra = {}) { return { id, parentId, order, label: id, updatedAt: "2026-09-02T00:00:00.000Z", ...extra }; }
 function runtime(nodes = [node("a")], managed = false) {
   class HTMLElement { focus() {} } class HTMLInputElement extends HTMLElement { constructor() { super(); this.value = ""; } }
-  let next = 0; const storage = new Map(), context = { Object, Array, String, Number, Boolean, Map, Set, Error, Function, Reflect, JSON, Date, Promise, structuredClone, HTMLElement, HTMLInputElement,
+  let next = 0; const storage = new Map(), statuses = [], context = { Object, Array, String, Number, Boolean, Map, Set, Error, Function, Reflect, JSON, Date, Promise, structuredClone, HTMLElement, HTMLInputElement,
     state: { nodes: plain(nodes), tombstones: [], rootExtras: {}, dataExtras: {}, collapsed: new Set(), selectedId: "", focusRootId: "", moveMode: false, inlineEdit: { id: "", isNew: false }, ops: [], operationHighWater: 0, operationDocumentAnchor: null, activeSaveOperationCeiling: 0, documentBaseline: null, source: { schema: "portal.export.v1", fileName: "p154.json", writtenAt: "" } }, lastMoveUndoSnapshot: null, lastEditUndoSnapshot: null, lastDeleteUndoSnapshot: null, lastTreeUndoKind: "", el: { search: new HTMLInputElement() },
     localStorage: { getItem(k) { return storage.get(String(k)) || null; }, setItem(k, v) { storage.set(String(k), String(v)); } }, DEVICE_CHANGE_SEQUENCE_KEY: "p154", nowIso() { return "2026-09-02T01:00:00.000Z"; }, cleanText(v, m = Number.MAX_SAFE_INTEGER) { return String(v || "").trim().slice(0, m); }, makeId() { next += 1; return `new-${next}`; }, compareSiblingOrder(a, b) { return (Number(a.order) || 0) - (Number(b.order) || 0) || String(a.label).localeCompare(String(b.label)); }, nodeMap() { return new Map(context.state.nodes.map((n) => [n.id, n])); }, childrenMap() { const result = new Map(); for (const n of context.state.nodes) { const p = n.parentId || "root"; if (!result.has(p)) result.set(p, []); result.get(p).push(n); } for (const values of result.values()) values.sort(context.compareSiblingOrder); return result; }, maxSiblingOrder(p) { return Math.max(1000, ...context.state.nodes.filter((n) => (n.parentId || "root") === p).map((n) => Number(n.order) || 0)); },
-    isManagedSystemBucketNode(n) { return managed && n.id === "bucket"; }, isCompletedSystemBucketNode() { return false; }, requirePocketFileForChanges() { return true; }, clearInlineEditState() { context.state.inlineEdit = { id: "", isNew: false }; }, expandPathToNode() {}, refreshSaveState() {}, refreshMeta() {}, renderTree() {}, persistPipSnapshot() {}, refocusTreeNavigation() {}, focusRowByNodeId() {}, softlyEnsureSelectionVisible() {}, requestAnimationFrame(f) { f?.(); }, flashTouchedRow() {}, setStatus() {}, saveLastSaveSnapshot() {}, saveLocalSafetySnapshot() { return true; }, parseCaptureSlashPathBatch() { return { matched: false, ok: true }; }, findChildByLabel() { return null; }, ensurePathNode() { return null; }, PocketDeviceChanges: { cloneJsonCompatible(v) { try { return { ok: true, value: plain(v) }; } catch { return { ok: false }; } }, coerceDocument(v) { return { ok: true, document: plain({ nodes: v.nodes || [], tombstones: v.tombstones || [], rootExtras: v.rootExtras || {}, dataExtras: v.dataExtras || {} }) }; }, describeDocumentTransition() { return { ok: true, records: [] }; } } };
-  context.window = context; context.globalThis = context; vm.createContext(context); for (const file of [SHADOW, HISTORY, ACTIONS]) vm.runInContext(source(file), context, { filename: file }); context.refreshSaveState = context.refreshMeta = context.renderTree = context.persistPipSnapshot = context.refocusTreeNavigation = context.focusRowByNodeId = context.softlyEnsureSelectionVisible = context.setStatus = () => {}; return context;
+    isManagedSystemBucketNode(n) { return managed && n.id === "bucket"; }, isCompletedSystemBucketNode() { return false; }, requirePocketFileForChanges() { return true; }, clearInlineEditState() { context.state.inlineEdit = { id: "", isNew: false }; }, expandPathToNode() {}, refreshSaveState() {}, refreshMeta() {}, renderTree() {}, persistPipSnapshot() {}, refocusTreeNavigation() {}, focusRowByNodeId() {}, softlyEnsureSelectionVisible() {}, requestAnimationFrame(f) { f?.(); }, flashTouchedRow() {}, setStatus(...args) { statuses.push(plain(args)); }, saveLastSaveSnapshot() {}, saveLocalSafetySnapshot() { return true; }, parseCaptureSlashPathBatch() { return { matched: false, ok: true }; }, findChildByLabel() { return null; }, ensurePathNode() { return null; }, PocketDeviceChanges: { cloneJsonCompatible(v) { try { return { ok: true, value: plain(v) }; } catch { return { ok: false }; } }, coerceDocument(v) { return { ok: true, document: plain({ nodes: v.nodes || [], tombstones: v.tombstones || [], rootExtras: v.rootExtras || {}, dataExtras: v.dataExtras || {} }) }; }, describeDocumentTransition() { return { ok: true, records: [] }; } } };
+  context.window = context; context.globalThis = context; vm.createContext(context); for (const file of [SHADOW, HISTORY, ACTIONS]) vm.runInContext(source(file), context, { filename: file }); context.refreshSaveState = context.refreshMeta = context.renderTree = context.persistPipSnapshot = context.refocusTreeNavigation = context.focusRowByNodeId = context.softlyEnsureSelectionVisible = () => {}; context.setStatus = (...args) => { statuses.push(plain(args)); }; context.__statuses = () => plain(statuses); return context;
 }
 function captured(c, seq) { const f = c.freezePocketStarlingOwnerWorkingSetThrough(seq); return f ? plain(f.operations) : null; }
 function add(c) { c.insertSiblingBelow("a"); const id = c.state.inlineEdit.id; assert.equal(c.commitInlineEdit(id, "New").ok, true); return { id, op: c.state.ops.at(-1) }; }
 
-test("P154 captures actual existing leaf and branch-root Delete operations at their pre-delete local index", () => {
+test("P154 captures valid existing leaf and branch-root Delete operations, while Delete undo remains unclaimed", () => {
   const leaf = runtime([node("a", "root", 30), node("target", "root", 70), node("later", "root", 90)]);
   assert.equal(leaf.deleteNodeById("target", { confirm: false }), true); const deleted = leaf.state.ops.at(-1), leafOps = captured(leaf, deleted.seq);
   assert.deepEqual(leafOps, [{ type: "delete", input: { nodeId: "target", fromIndex: 1 } }]); assert.notEqual(leafOps[0].input.fromIndex, 70); assert.equal(leaf.nodeMap().has("target"), false); assert.equal(leaf.state.tombstones.some((entry) => entry.id === "target"), true);
-  const branch = runtime([node("root", "root", 40), node("child", "root", 50), node("grandchild", "child", 1)]);
-  assert.equal(branch.deleteNodeById("root", { confirm: false }), true); const branchOps = captured(branch, branch.state.ops.at(-1).seq);
-  assert.deepEqual(branchOps, [{ type: "delete", input: { nodeId: "root", fromIndex: 0 } }]); assert.equal(branch.nodeMap().has("child"), false); assert.equal(branch.state.tombstones.length, 3);
-  branch.undoLastDeleteAction(); assert.equal(branch.state.ops.at(-1).type, "undo_delete"); assert.deepEqual(captured(branch, branch.state.ops.at(-1).seq), branchOps);
+  const original = [node("before", "root", 10), node("branch", "root", 20), node("child", "branch", 700), node("grandchild", "child", 3), node("after", "root", 90)], branch = runtime(original);
+  assert.equal(branch.deleteNodeById("branch", { confirm: false }), true); const forward = branch.state.ops.at(-1), branchOps = captured(branch, forward.seq);
+  assert.deepEqual(branchOps, [{ type: "delete", input: { nodeId: "branch", fromIndex: 1 } }]); assert.notEqual(branchOps[0].input.fromIndex, 20);
+  assert.deepEqual(branch.state.nodes.map((entry) => entry.id), ["before", "after"]); assert.deepEqual(branch.state.tombstones.map((entry) => entry.id), ["branch", "child", "grandchild"]);
+  assert.equal(branchOps.some((entry) => entry.input.nodeId === "child" || entry.input.nodeId === "grandchild"), false);
+  branch.undoLastDeleteAction(); const undo = branch.state.ops.at(-1), afterUndo = captured(branch, undo.seq);
+  assert.equal(undo.type, "undo_delete"); assert.equal(undo.seq, forward.seq + 1); assert.equal(branch.state.operationHighWater, undo.seq); assert.deepEqual(plain(branch.state.nodes), original); assert.deepEqual(branch.state.tombstones, []);
+  assert.deepEqual(afterUndo, branchOps); assert.equal(afterUndo.some((entry) => entry.type === "restore" || entry.type === "insert"), false);
 });
 
 test("P154 cancels only an exact immediate uncovered manual Insert and fails closed for covered or newer creations", () => {
@@ -34,11 +38,29 @@ test("P154 cancels only an exact immediate uncovered manual Insert and fails clo
   const newer = runtime(), stale = add(newer); const later = newer.recordOp({ type: "later" }); newer.deleteNodeById(stale.id, { confirm: false }); assert.deepEqual(captured(newer, newer.state.ops.at(-1).seq).map((entry) => entry.type), ["insert"]); assert.equal(later.seq > stale.op.seq, true);
 });
 
-test("P154 treats settled creation as ordinary delete and excludes provisional, path and managed targets", () => {
+test("P154 treats settled creation as ordinary delete and leaves Cancel and blank provisional cleanup semantically absent", () => {
   const settled = runtime(), created = add(settled); settled.retainPocketOperationsAfterSequence(created.op.seq); settled.deleteNodeById(created.id, { confirm: false }); assert.deepEqual(captured(settled, settled.state.ops.at(-1).seq), [{ type: "delete", input: { nodeId: created.id, fromIndex: 1 } }]);
   const provisional = runtime(); provisional.insertSiblingBelow("a"); provisional.cancelInlineEdit(provisional.state.inlineEdit.id); assert.deepEqual(captured(provisional, 99), []);
+  const blank = runtime(); blank.insertSiblingBelow("a"); const blankId = blank.state.inlineEdit.id;
+  assert.deepEqual(plain(blank.commitInlineEdit(blankId, "")), { ok: false, reason: "blank-title" }); assert.equal(blank.nodeMap().has(blankId), false); assert.equal(blank.state.ops.at(-1).type, "delete"); assert.deepEqual(blank.state.tombstones.map((entry) => entry.id), [blankId]); assert.deepEqual(captured(blank, blank.state.operationHighWater), []);
+  assert.equal(JSON.stringify({ nodes: blank.state.nodes, ops: blank.state.ops, tombstones: blank.state.tombstones }).includes("provisionalCleanup"), false);
   const path = runtime([node("path")]); path.recordOp({ type: "add_path", id: "path" }); path.deleteNodeById("path", { confirm: false }); assert.deepEqual(captured(path, path.state.ops.at(-1).seq), []);
   const bucket = runtime([node("bucket")], true); bucket.deleteNodeById("bucket", { confirm: false }); assert.deepEqual(captured(bucket, bucket.state.ops.at(-1).seq), []);
+});
+
+test("P154 leaves current deletion authoritative when the P148 sidecar capture is unavailable", () => {
+  const unavailable = runtime([node("before", "root", 10), node("target", "root", 20), node("after", "root", 30)]);
+  unavailable.PocketStarlingOwnerWorkingSetShadow = undefined;
+  assert.equal(unavailable.resetPocketStarlingOwnerWorkingSetJournal(), false);
+  for (const name of ["PocketOwnerSaveBoundary", "PocketStarlingLogicalEditShadow", "PocketStarlingRemoteEditShadow", "PocketStarlingRemoteSaveShadow", "fetch"]) {
+    Object.defineProperty(unavailable, name, { configurable: true, get() { throw new Error(`unexpected ${name} access`); } });
+  }
+  assert.equal(unavailable.deleteNodeById("target", { confirm: false }), true);
+  const current = unavailable.state.ops.at(-1);
+  assert.deepEqual(unavailable.state.nodes.map((entry) => entry.id), ["before", "after"]); assert.deepEqual(unavailable.state.tombstones.map((entry) => entry.id), ["target"]);
+  assert.deepEqual({ type: current.type, id: current.id, subtreeCount: current.subtreeCount, seq: current.seq, highWater: unavailable.state.operationHighWater }, { type: "delete", id: "target", subtreeCount: 1, seq: 1, highWater: 1 });
+  assert.equal(unavailable.freezePocketStarlingOwnerWorkingSetThrough(current.seq), null);
+  assert.deepEqual(unavailable.__statuses().at(-1).slice(0, 2), ["Deleted 1 item. Ctrl+Z to undo.", "ok"]);
 });
 
 async function composeDelete(nodes, operations) {
@@ -47,8 +69,9 @@ async function composeDelete(nodes, operations) {
 }
 
 test("P154 composes the actual branch-root Delete through genuine P139 retained ancestry", async () => {
-  const before = [node("branch", "root", 1), node("child", "branch", 1), node("grandchild", "child", 1)], context = runtime(before); context.deleteNodeById("branch", { confirm: false }); const relation = await composeDelete(before, captured(context, context.state.ops.at(-1).seq));
-  assert.equal(relation.parents.branch, ""); assert.equal(relation.parents.child, "branch"); assert.equal(relation.parents.grandchild, "child"); assert.deepEqual(relation.children.root, []);
+  const before = [node("before", "root", 10), node("branch", "root", 20), node("child", "branch", 700), node("grandchild", "child", 3), node("after", "root", 90)], context = runtime(before);
+  assert.equal(context.deleteNodeById("branch", { confirm: false }), true); const relation = await composeDelete(before, captured(context, context.state.ops.at(-1).seq));
+  assert.equal(relation.parents.branch, ""); assert.equal(relation.parents.child, "branch"); assert.equal(relation.parents.grandchild, "child"); assert.deepEqual(relation.children.root, ["before", "after"]);
 });
 
 test("P154 stays restricted to the canonical single-root delete seam", () => {
