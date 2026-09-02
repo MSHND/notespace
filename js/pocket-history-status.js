@@ -18,6 +18,49 @@ function validPocketOperationSequence(value) {
   return Number.isSafeInteger(sequence) && sequence > 0 ? sequence : 0;
 }
 
+let pocketStarlingOwnerWorkingSetJournal = null;
+
+function capturePocketStarlingOwnerWorkingOperations(sequence, operations) {
+  const journal = pocketStarlingOwnerWorkingSetJournal;
+  if (!journal || typeof journal.capture !== "function") return false;
+  try {
+    journal.capture(sequence, operations);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function freezePocketStarlingOwnerWorkingSetThrough(sequence) {
+  const journal = pocketStarlingOwnerWorkingSetJournal;
+  if (!journal || typeof journal.freezeThrough !== "function") return null;
+  try {
+    return journal.freezeThrough(sequence);
+  } catch {
+    return null;
+  }
+}
+
+function resetPocketStarlingOwnerWorkingSetJournal() {
+  const previous = pocketStarlingOwnerWorkingSetJournal;
+  pocketStarlingOwnerWorkingSetJournal = null;
+  try {
+    if (previous && typeof previous.invalidate === "function") previous.invalidate();
+  } catch {}
+  try {
+    const factory = window.PocketStarlingOwnerWorkingSetShadow?.createJournal;
+    if (typeof factory !== "function") return false;
+    const fresh = factory();
+    if (!fresh || typeof fresh.capture !== "function" || typeof fresh.freezeThrough !== "function"
+        || typeof fresh.retainAfter !== "function" || typeof fresh.discardUncovered !== "function"
+        || typeof fresh.invalidate !== "function") return false;
+    pocketStarlingOwnerWorkingSetJournal = fresh;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function persistedPocketOperationHighWater() {
   try {
     return validPocketOperationSequence(localStorage.getItem(DEVICE_CHANGE_SEQUENCE_KEY));
@@ -121,6 +164,7 @@ function adoptPocketOperations(rawOperations, storedHighWater = 0, options = {})
   const prepared = normalisePocketOperations(rawOperations, storedHighWater);
   state.ops = prepared.operations;
   if (options.resetAnchor !== false) resetPocketOperationAnchor(options.anchor || null);
+  resetPocketStarlingOwnerWorkingSetJournal();
   return prepared;
 }
 
@@ -145,6 +189,13 @@ function retainPocketOperationsAfterSequence(sequence) {
     return validPocketOperationSequence(operation.seq) > boundary;
   });
   resetPocketOperationAnchor();
+  if (boundary > 0) {
+    try {
+      if (pocketStarlingOwnerWorkingSetJournal && typeof pocketStarlingOwnerWorkingSetJournal.retainAfter === "function") {
+        pocketStarlingOwnerWorkingSetJournal.retainAfter(boundary);
+      }
+    } catch {}
+  }
   return state.ops.length;
 }
 
@@ -157,8 +208,18 @@ function discardPocketOperationSequence(sequence) {
   });
   if (state.ops.length === before) return false;
   resetPocketOperationAnchor();
+  try {
+    if (pocketStarlingOwnerWorkingSetJournal && typeof pocketStarlingOwnerWorkingSetJournal.discardUncovered === "function") {
+      pocketStarlingOwnerWorkingSetJournal.discardUncovered(
+        target,
+        validPocketOperationSequence(state.activeSaveOperationCeiling)
+      );
+    }
+  } catch {}
   return true;
 }
+
+resetPocketStarlingOwnerWorkingSetJournal();
 
 function capturePocketDeviceChangeSet(
   capturedAt = nowIso(),

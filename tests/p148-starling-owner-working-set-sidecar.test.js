@@ -133,7 +133,7 @@ test("P148 rejects invalid inputs atomically while preserving arbitrary JSON-com
   assert.deepEqual(plain(journal.freezeThrough(20)), before);
 });
 
-test("P148 remains memory-only, dormant, and proportional to pending records", () => {
+test("P148 remains memory-only, reviewed, and proportional to pending records", () => {
   const context = runtime(), journal = context.PocketStarlingOwnerWorkingSetShadow.createJournal();
   for (let index = 1; index <= 4000; index += 1) journal.capture(index * 3, [{ marker: index, nested: { stable: true } }]);
   const frozen = journal.freezeThrough(12000);
@@ -141,8 +141,13 @@ test("P148 remains memory-only, dormant, and proportional to pending records", (
   assert.equal(journal.retainAfter(6000), 2000);
   assert.equal(journal.freezeThrough(12000).operations.length, 2000);
   const source = fs.readFileSync(path.join(ROOT, MODULE), "utf8"), manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" });
-  assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes(MODULE), false);
-  assert.equal(manifest.some((entry) => entry.path === `/${MODULE}`), false);
-  for (const entry of manifest.filter((value) => value.path.endsWith(".js"))) assert.equal(fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingOwnerWorkingSetShadow"), false, entry.path);
+  const index = fs.readFileSync(path.join(ROOT, "index.html"), "utf8"), scripts = [...index.matchAll(/<script src="([^"]+)"><\/script>/g)].map((match) => match[1]);
+  assert.equal(scripts.filter((script) => script === MODULE).length, 1);
+  assert.ok(scripts.indexOf(MODULE) < scripts.indexOf("js/pocket-history-status.js"));
+  assert.equal(manifest.some((entry) => entry.path === `/${MODULE}`), true);
+  for (const entry of manifest.filter((value) => value.path.endsWith(".js") && value.path !== `/${MODULE}`)) {
+    const usesJournal = fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingOwnerWorkingSetShadow");
+    assert.equal(usesJournal, entry.path === "/js/pocket-history-status.js", entry.path);
+  }
   for (const forbidden of ["state", "localStorage", "indexedDB", "PictureInPicture", "Vault", "Recovery", "RemoteSave", "fetch(", "XMLHttpRequest", "WebSocket"]) assert.equal(source.includes(forbidden), false, forbidden);
 });
