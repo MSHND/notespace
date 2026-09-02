@@ -91,6 +91,31 @@ function capturePocketStarlingNodePayloadAndStructure(sequence, node, structural
   return capturePocketStarlingOwnerWorkingOperations(target, [payloadOperation, structuralOperation]);
 }
 
+function capturePocketStarlingNodeInsert(sequence, node, parentId, toIndex) {
+  const target = currentPocketStarlingOperationSequence(sequence);
+  const payloadOperation = buildPocketStarlingNodePayloadOperation(node);
+  const actualParentId = node?.parentId || "root";
+  if (
+    !target ||
+    !payloadOperation ||
+    typeof parentId !== "string" ||
+    !parentId ||
+    parentId.length > 80 ||
+    parentId !== actualParentId ||
+    !Number.isSafeInteger(toIndex) ||
+    toIndex < 0
+  ) return false;
+  return capturePocketStarlingOwnerWorkingOperations(target, [{
+    type: "insert",
+    input: {
+      nodeId: payloadOperation.input.nodeId,
+      parentId,
+      toIndex,
+      payload: payloadOperation.input.payload,
+    },
+  }]);
+}
+
 function discardPocketStarlingOwnerWorkingOperations(sequence) {
   const target = validPocketOperationSequence(sequence);
   const journal = pocketStarlingOwnerWorkingSetJournal;
@@ -959,7 +984,12 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   node.label = next;
   node.updatedAt = nowIso();
   if (edit.isNew) {
-    recordOp({ type: "add_below", id: node.id, afterId: edit.afterId, parentId: edit.parentId, label: next });
+    const addOperation = recordOp({ type: "add_below", id: node.id, afterId: edit.afterId, parentId: edit.parentId, label: next });
+    const parentId = node.parentId || "root";
+    const finalIndex = typeof sortNodesForParent === "function"
+      ? sortNodesForParent(parentId).findIndex((sibling) => sibling.id === node.id)
+      : -1;
+    if (finalIndex >= 0) capturePocketStarlingNodeInsert(addOperation?.seq, node, parentId, finalIndex);
     armCaptureRhythm(edit.parentId || node.parentId || "root", node.id);
     setStatus(`Caught.`, "ok", {
       action: { label: "Undo", onClick: () => undoLastEditAction() },
