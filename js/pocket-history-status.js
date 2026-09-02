@@ -31,6 +31,35 @@ function capturePocketStarlingOwnerWorkingOperations(sequence, operations) {
   }
 }
 
+function capturePocketStarlingNodePayload(sequence, node) {
+  if (!validPocketOperationSequence(sequence) || !node || typeof node !== "object" || Array.isArray(node)) return false;
+  const nodeId = typeof node.id === "string" && node.id.length <= 80 ? node.id : "";
+  if (!nodeId) return false;
+  const payload = {};
+  for (const key of Object.keys(node)) {
+    if (key === "id" || key === "parentId" || key === "order") continue;
+    payload[key] = node[key];
+  }
+  return capturePocketStarlingOwnerWorkingOperations(sequence, [{
+    type: "payload",
+    input: { nodeId, payload },
+  }]);
+}
+
+function discardPocketStarlingOwnerWorkingOperations(sequence) {
+  const target = validPocketOperationSequence(sequence);
+  const journal = pocketStarlingOwnerWorkingSetJournal;
+  if (!target || !journal || typeof journal.discardUncovered !== "function") return false;
+  try {
+    return journal.discardUncovered(
+      target,
+      validPocketOperationSequence(state.activeSaveOperationCeiling)
+    ) === true;
+  } catch {
+    return false;
+  }
+}
+
 function freezePocketStarlingOwnerWorkingSetThrough(sequence) {
   const journal = pocketStarlingOwnerWorkingSetJournal;
   if (!journal || typeof journal.freezeThrough !== "function") return null;
@@ -208,14 +237,7 @@ function discardPocketOperationSequence(sequence) {
   });
   if (state.ops.length === before) return false;
   resetPocketOperationAnchor();
-  try {
-    if (pocketStarlingOwnerWorkingSetJournal && typeof pocketStarlingOwnerWorkingSetJournal.discardUncovered === "function") {
-      pocketStarlingOwnerWorkingSetJournal.discardUncovered(
-        target,
-        validPocketOperationSequence(state.activeSaveOperationCeiling)
-      );
-    }
-  } catch {}
+  discardPocketStarlingOwnerWorkingOperations(target);
   return true;
 }
 
@@ -325,7 +347,11 @@ function restoreTreeUndoSnapshot(snapshot) {
   state.collapsed = new Set(Array.isArray(snapshot.collapsed) ? snapshot.collapsed : []);
   clearInlineEditState();
   state.moveMode = false;
-  recordOp({ type: `undo_${cleanText(snapshot.kind, 40) || "tree_change"}` });
+  const undoOperation = recordOp({ type: `undo_${cleanText(snapshot.kind, 40) || "tree_change"}` });
+  if (snapshot.kind === "rename") {
+    const restoredNode = nodeMap().get(state.selectedId) || null;
+    capturePocketStarlingNodePayload(undoOperation?.seq, restoredNode);
+  }
   refreshMeta();
   renderTree();
   persistPipSnapshot();
@@ -851,7 +877,8 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
       durationMs: 7600,
     });
   } else if (next !== prev) {
-    recordOp({ type: "rename", id: node.id, from: prev, to: next });
+    const renameOperation = recordOp({ type: "rename", id: node.id, from: prev, to: next });
+    capturePocketStarlingNodePayload(renameOperation?.seq, node);
     setStatus(`Renamed.`, "ok", {
       action: { label: "Undo", onClick: () => undoLastEditAction() },
       durationMs: 7600,

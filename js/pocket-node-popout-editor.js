@@ -296,7 +296,12 @@
     if (prepared.notesChanged) changedSections.push("notes");
     if (prepared.editorChanged) changedSections.push("outline");
     const changedSection = changedSections.join("-and-");
-    if (typeof recordOp === "function") recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: changedSection });
+    const operation = typeof recordOp === "function"
+      ? recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: changedSection })
+      : null;
+    if (typeof global.capturePocketStarlingNodePayload === "function") {
+      global.capturePocketStarlingNodePayload(operation?.seq, node);
+    }
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();
     if (typeof focusRowByNodeId === "function") focusRowByNodeId(id, { instant: true });
@@ -347,8 +352,14 @@
         && await global.saveLocalSafetySnapshotDurably("large-outline-before-truth-save") === true;
       if (!safetyStored) {
         restoreNodeFromRollback(popoutTarget().getById(applied.id), applied.rollback);
+        const rolledBackSequences = (Array.isArray(state.ops) ? state.ops : [])
+          .slice(opsBeforeApply)
+          .map((operation) => Number(operation?.seq) || 0);
         state.ops = Array.isArray(state.ops) ? state.ops.slice(0, opsBeforeApply) : [];
         if (typeof global.resetPocketOperationAnchor === "function") global.resetPocketOperationAnchor();
+        if (typeof global.discardPocketStarlingOwnerWorkingOperations === "function") {
+          for (const sequence of rolledBackSequences) global.discardPocketStarlingOwnerWorkingOperations(sequence);
+        }
         return rejection(
           "large-outline-safety-copy-failed",
           "Pocket could not retain a complete current safety copy for this large Outline. Nothing was changed.",

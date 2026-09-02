@@ -285,21 +285,20 @@ function restoreDetailsDraftOriginal() {
       && draftSequence > 0
       && draftSequence <= (Number(state.activeSaveOperationCeiling) || 0)
     );
-  let revertRecorded = false;
+  let revertOperation = null;
   if (draftWasCoveredBySave) {
-    recordOp({
+    revertOperation = recordOp({
       type: "details_draft_reverted",
       id: node.id,
       path: getPath(node.id),
       changed: "details",
     });
-    revertRecorded = true;
   }
   const discarded = typeof discardPocketOperationSequence === "function"
     ? discardPocketOperationSequence(draftSequence)
     : false;
-  if (!discarded && !revertRecorded) {
-    recordOp({
+  if (!discarded && !revertOperation) {
+    revertOperation = recordOp({
       type: "details_draft_reverted",
       id: node.id,
       path: getPath(node.id),
@@ -309,6 +308,9 @@ function restoreDetailsDraftOriginal() {
     saveLocalSafetySnapshot("details-draft-reverted");
   } else {
     clearLocalSafetySnapshot();
+  }
+  if (revertOperation && typeof capturePocketStarlingNodePayload === "function") {
+    capturePocketStarlingNodePayload(revertOperation.seq, node);
   }
   refreshMeta();
   renderTree();
@@ -372,6 +374,9 @@ function stageDetailsEditorDraft() {
   } else {
     if (typeof resetPocketOperationAnchor === "function") resetPocketOperationAnchor();
     saveLocalSafetySnapshot("details-draft");
+  }
+  if (typeof capturePocketStarlingNodePayload === "function") {
+    capturePocketStarlingNodePayload(state.detailsEdit.draftOperationSequence, node);
   }
   refreshMeta();
   renderTree();
@@ -552,12 +557,15 @@ function saveDetailsEditor() {
   if (urgentChanged) changedParts.push("urgent");
   if (copyContextChanged) changedParts.push("copy context");
   if (completionResult.moved) changedParts.push("completed");
-  recordOp({
+  const detailsOperation = recordOp({
     type: "details_edit",
     id: node.id,
     path: getPath(node.id),
     changed: changedParts.join("+"),
   });
+  if (typeof capturePocketStarlingNodePayload === "function") {
+    capturePocketStarlingNodePayload(detailsOperation?.seq, node);
+  }
 
   refreshMeta();
   renderTree();

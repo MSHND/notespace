@@ -66,6 +66,9 @@
       global.state.detailsEdit.draftOpRecorded = true;
       global.state.detailsEdit.draftOperationSequence = Number(operation?.seq) || 0;
     }
+    if (typeof global.capturePocketStarlingNodePayload === "function") {
+      global.capturePocketStarlingNodePayload(global.state?.detailsEdit?.draftOperationSequence, node);
+    }
     if (typeof refreshMeta === "function") refreshMeta();
     if (typeof renderTree === "function") renderTree();
     if (typeof persistPipSnapshot === "function") persistPipSnapshot();
