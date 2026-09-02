@@ -116,6 +116,30 @@ function capturePocketStarlingNodeInsert(sequence, node, parentId, toIndex) {
   }]);
 }
 
+function capturePocketStarlingNodeDelete(sequence, nodeId, fromIndex) {
+  const target = currentPocketStarlingOperationSequence(sequence);
+  if (
+    !target ||
+    typeof nodeId !== "string" ||
+    !nodeId ||
+    nodeId.length > 80 ||
+    !Number.isSafeInteger(fromIndex) ||
+    fromIndex < 0
+  ) return false;
+  return capturePocketStarlingOwnerWorkingOperations(target, [{
+    type: "delete",
+    input: { nodeId, fromIndex },
+  }]);
+}
+
+function currentPocketDirectCreationOperation(nodeId) {
+  if (typeof nodeId !== "string" || !nodeId || !Array.isArray(state.ops)) return null;
+  return state.ops.find((operation) => (
+    operation?.id === nodeId
+    && (operation.type === "add_below" || operation.type === "add_path")
+  )) || null;
+}
+
 function bindP153InsertUndoWitness(snapshot, nodeId, operationSequence, forwardSemanticCaptured) {
   const sequence = validPocketOperationSequence(operationSequence);
   if (
@@ -866,7 +890,7 @@ function cancelInlineEdit(nodeId) {
   clearInlineEditState();
   if (edit.isNew) {
     clearCaptureRhythm();
-    deleteNodeById(nodeId, { confirm: false });
+    deleteNodeById(nodeId, { confirm: false, provisionalCleanup: true });
     setStatus("New item cancelled.", "warn");
     refocusTreeNavigation();
     return;
@@ -997,7 +1021,7 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   const next = cleanText(rawValue, 220);
   if (!next) {
     if (edit.isNew) {
-      deleteNodeById(nodeId, { confirm: false });
+      deleteNodeById(nodeId, { confirm: false, provisionalCleanup: true });
       setStatus("Blank item removed.", "warn");
       refocusTreeNavigation();
       return { ok: false, reason: "blank-title" };

@@ -166,6 +166,21 @@ function deleteNodeById(nodeId, options = {}) {
   const parentId = node.parentId || "root";
   const siblings = sortNodesForParent(parentId);
   const siblingIndex = siblings.findIndex((s) => s.id === node.id);
+  const creationOperation = typeof currentPocketDirectCreationOperation === "function"
+    ? currentPocketDirectCreationOperation(node.id)
+    : null;
+  const insertUndoWitness = lastEditUndoSnapshot?.p153InsertUndoWitness;
+  const cancelUncoveredInsert = opts.provisionalCleanup !== true
+    && creationOperation?.type === "add_below"
+    && insertUndoWitness
+    && insertUndoWitness.nodeId === node.id
+    && insertUndoWitness.forwardSemanticCaptured === true
+    && insertUndoWitness.operationSequence === creationOperation.seq
+    && state.operationHighWater === creationOperation.seq;
+  const captureExistingDelete = opts.provisionalCleanup !== true
+    && siblingIndex >= 0
+    && !(typeof isManagedSystemBucketNode === "function" && isManagedSystemBucketNode(node) === true)
+    && !creationOperation;
   const nextSiblingId = siblingIndex >= 0 && siblingIndex + 1 < siblings.length
     ? siblings[siblingIndex + 1].id
     : "";
@@ -174,7 +189,12 @@ function deleteNodeById(nodeId, options = {}) {
   const fallbackSelection = nextSiblingId || prevSiblingId || parentSelection;
   state.nodes = state.nodes.filter((n) => !drop.has(n.id));
   state.tombstones.push(...ids.map((id) => ({ id, deletedAt: nowIso() })));
-  recordOp({ type: "delete", id: node.id, subtreeCount: ids.length });
+  const deleteOperation = recordOp({ type: "delete", id: node.id, subtreeCount: ids.length });
+  if (cancelUncoveredInsert && typeof discardPocketStarlingOwnerWorkingOperations === "function") {
+    discardPocketStarlingOwnerWorkingOperations(creationOperation.seq);
+  } else if (captureExistingDelete && typeof capturePocketStarlingNodeDelete === "function") {
+    capturePocketStarlingNodeDelete(deleteOperation?.seq, node.id, siblingIndex);
+  }
   if (state.focusRootId && drop.has(state.focusRootId)) state.focusRootId = "";
   if (state.inlineEdit.id && drop.has(state.inlineEdit.id)) clearInlineEditState();
   state.selectedId = fallbackSelection;

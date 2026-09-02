@@ -127,6 +127,6 @@ test("P153 production remains an add-only sidecar cancellation boundary", () => 
   assert.match(history, /function bindP153InsertUndoWitness\(snapshot, nodeId, operationSequence, forwardSemanticCaptured\)/);
   assert.match(history, /snapshot\.kind === "add" \? snapshot\.p153InsertUndoWitness : null/);
   assert.match(history, /discardPocketStarlingOwnerWorkingOperations\(insertUndoWitness\.operationSequence\)/);
-  assert.doesNotMatch(source(ACTIONS), /p153InsertUndoWitness|discardPocketStarlingOwnerWorkingOperations/);
+  assert.match(source(ACTIONS), /const insertUndoWitness = lastEditUndoSnapshot\?\.p153InsertUndoWitness;/);
   assert.doesNotMatch(history, /p153InsertUndoWitness[\s\S]*?(?:LogicalEdit|RemoteEdit|RemoteSave|compareAndSetShadowHead)/);
 });
