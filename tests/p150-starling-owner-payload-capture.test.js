@@ -76,15 +76,32 @@ function openDetails(context, values = {}) {
   context.el.detailEditorCopyContext.checked = values.copyContext ?? !!node.copyContext;
 }
 
-test("P150 extracts exact detached payload envelopes and fails observationally for uncapturable node fields", () => {
+test("P150a captures only genuine current sequences, preserves exact own payload keys, and fails observationally for uncapturable material", () => {
   const node = { id: "p150", parentId: "parent", order: 2, label: "Label", details: "Details", urgent: true, copyContext: true, editor: { schema: "current" }, updatedAt: "2026-09-02T01:00:00.000Z", future: { nested: [1, 2] } };
+  Object.defineProperty(node, "__proto__", { value: { retained: "as-data" }, enumerable: true, configurable: true, writable: true });
   const context = runtime({ node }), operation = context.recordOp({ type: "legacy" }), before = plain(node);
   assert.equal(context.capturePocketStarlingNodePayload(operation.seq, node), true);
-  assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(operation.seq).operations), [{ type: "payload", input: { nodeId: "p150", payload: { label: "Label", details: "Details", urgent: true, copyContext: true, editor: { schema: "current" }, updatedAt: "2026-09-02T01:00:00.000Z", future: { nested: [1, 2] } } } }]);
+  const captured = context.freezePocketStarlingOwnerWorkingSetThrough(operation.seq).operations[0];
+  assert.deepEqual(Object.keys(captured), ["type", "input"]);
+  assert.deepEqual(Object.keys(captured.input), ["nodeId", "payload"]);
+  assert.equal(captured.input.nodeId, "p150");
+  assert.deepEqual(Object.keys(captured.input.payload), ["label", "details", "urgent", "copyContext", "editor", "updatedAt", "future", "__proto__"]);
+  assert.deepEqual(plain({ label: captured.input.payload.label, details: captured.input.payload.details, urgent: captured.input.payload.urgent, copyContext: captured.input.payload.copyContext, editor: captured.input.payload.editor, updatedAt: captured.input.payload.updatedAt, future: captured.input.payload.future }), { label: "Label", details: "Details", urgent: true, copyContext: true, editor: { schema: "current" }, updatedAt: "2026-09-02T01:00:00.000Z", future: { nested: [1, 2] } });
+  assert.equal(Object.prototype.hasOwnProperty.call(captured.input.payload, "__proto__"), true);
+  assert.deepEqual(plain(captured.input.payload.__proto__), { retained: "as-data" });
+  assert.notEqual(Object.getPrototypeOf(captured.input.payload), captured.input.payload.__proto__);
   assert.deepEqual(plain(node), before);
-  node.future = { unsafe() {} };
+  const rejectedState = plain(context.state.ops), rejectedHighWater = context.state.operationHighWater, rejectedAnchor = plain(context.state.operationDocumentAnchor);
   assert.equal(context.capturePocketStarlingNodePayload(operation.seq + 1, node), false);
+  assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(operation.seq + 1).operations), [plain(captured)]);
+  assert.deepEqual(plain(context.state.ops), rejectedState);
+  assert.equal(context.state.operationHighWater, rejectedHighWater);
+  assert.deepEqual(plain(context.state.operationDocumentAnchor), rejectedAnchor);
+  node.future = { unsafe() {} };
+  const uncapturable = context.recordOp({ type: "uncapturable" });
+  assert.equal(context.capturePocketStarlingNodePayload(uncapturable.seq, node), false);
   assert.equal(JSON.stringify(context.state.ops).includes("unsafe"), false);
+  assert.equal(JSON.stringify([...context.__storage.values()]).includes("unsafe"), false);
 });
 
 test("P150 captures existing rename and rename undo only, leaving add undo without semantic Restore", () => {

@@ -32,15 +32,24 @@ function capturePocketStarlingOwnerWorkingOperations(sequence, operations) {
 }
 
 function capturePocketStarlingNodePayload(sequence, node) {
-  if (!validPocketOperationSequence(sequence) || !node || typeof node !== "object" || Array.isArray(node)) return false;
+  const target = validPocketOperationSequence(sequence);
+  if (!target || !Array.isArray(state.ops) || !state.ops.some((operation) => {
+    return validPocketOperationSequence(operation?.seq) === target;
+  })) return false;
+  if (!node || typeof node !== "object" || Array.isArray(node)) return false;
   const nodeId = typeof node.id === "string" && node.id.length <= 80 ? node.id : "";
   if (!nodeId) return false;
   const payload = {};
   for (const key of Object.keys(node)) {
     if (key === "id" || key === "parentId" || key === "order") continue;
-    payload[key] = node[key];
+    Object.defineProperty(payload, key, {
+      value: node[key],
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
-  return capturePocketStarlingOwnerWorkingOperations(sequence, [{
+  return capturePocketStarlingOwnerWorkingOperations(target, [{
     type: "payload",
     input: { nodeId, payload },
   }]);
