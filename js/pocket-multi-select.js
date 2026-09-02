@@ -285,6 +285,53 @@
     });
   }
 
+  function planPocketStarlingMultiDeletes(rootIds) {
+    if (
+      !Array.isArray(rootIds) ||
+      rootIds.length === 0 ||
+      typeof sortNodesForParent !== "function" ||
+      typeof currentPocketDirectCreationOperation !== "function" ||
+      typeof isManagedSystemBucketNode !== "function"
+    ) return null;
+    try {
+      const map = getMap();
+      const rootIdsSeen = new Set();
+      const siblingsByParent = new Map();
+      const deletes = [];
+      for (const rootId of rootIds) {
+        if (
+          typeof rootId !== "string" ||
+          !rootId ||
+          rootId === "root" ||
+          rootId.length > 80 ||
+          rootIdsSeen.has(rootId)
+        ) return null;
+        const node = map.get(rootId);
+        if (!node || node.id !== rootId || currentPocketDirectCreationOperation(rootId) || isManagedSystemBucketNode(node)) return null;
+        const parentId = typeof node.parentId === "string" && node.parentId ? node.parentId : "root";
+        let siblings = siblingsByParent.get(parentId);
+        if (!siblings) {
+          const ordered = sortNodesForParent(parentId);
+          if (!Array.isArray(ordered)) return null;
+          siblings = ordered.map((sibling) => sibling?.id);
+          if (
+            siblings.some((siblingId) => typeof siblingId !== "string" || !siblingId || siblingId.length > 80)
+            || new Set(siblings).size !== siblings.length
+          ) return null;
+          siblingsByParent.set(parentId, siblings);
+        }
+        const fromIndex = siblings.indexOf(rootId);
+        if (!Number.isSafeInteger(fromIndex) || fromIndex < 0) return null;
+        siblings.splice(fromIndex, 1);
+        rootIdsSeen.add(rootId);
+        deletes.push({ nodeId: rootId, fromIndex });
+      }
+      return deletes;
+    } catch {
+      return null;
+    }
+  }
+
   function deleteMultiSelectionIfActive() {
     if (!hasActiveMultiSelection()) return false;
     if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return true;
@@ -301,6 +348,7 @@
       return true;
     }
 
+    const completePlan = planPocketStarlingMultiDeletes(rootIds);
     const ids = collectSubtreeIds(rootIds);
     const drop = new Set(ids);
     const nextSelectedId = fallbackSelection(ids, rootIds);
@@ -316,9 +364,14 @@
     }
     state.nodes = state.nodes.filter((node) => !drop.has(node.id));
     state.tombstones.push(...ids.map((id) => ({ id, deletedAt: typeof nowIso === "function" ? nowIso() : new Date().toISOString() })));
-    if (typeof recordOp === "function") {
-      recordOp({ type: "delete_many", ids: rootIds, rootCount: rootIds.length, subtreeCount: ids.length });
-    }
+    const deleteManyOperation = typeof recordOp === "function"
+      ? recordOp({ type: "delete_many", ids: rootIds, rootCount: rootIds.length, subtreeCount: ids.length })
+      : null;
+    try {
+      if (completePlan && typeof capturePocketStarlingNodeDeletes === "function") {
+        capturePocketStarlingNodeDeletes(deleteManyOperation?.seq, completePlan);
+      }
+    } catch {}
     if (state.focusRootId && drop.has(state.focusRootId)) state.focusRootId = "";
     if (state.inlineEdit && state.inlineEdit.id && drop.has(state.inlineEdit.id) && typeof clearInlineEditState === "function") {
       clearInlineEditState();

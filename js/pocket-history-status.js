@@ -132,6 +132,35 @@ function capturePocketStarlingNodeDelete(sequence, nodeId, fromIndex) {
   }]);
 }
 
+function capturePocketStarlingNodeDeletes(sequence, deletes) {
+  try {
+    const target = currentPocketStarlingOperationSequence(sequence);
+    if (!target || !Array.isArray(deletes) || deletes.length === 0) return false;
+    const nodeIds = new Set();
+    const operations = [];
+    for (const entry of deletes) {
+      const nodeId = entry?.nodeId;
+      const fromIndex = entry?.fromIndex;
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        Array.isArray(entry) ||
+        typeof nodeId !== "string" ||
+        !nodeId ||
+        nodeId.length > 80 ||
+        nodeIds.has(nodeId) ||
+        !Number.isSafeInteger(fromIndex) ||
+        fromIndex < 0
+      ) return false;
+      nodeIds.add(nodeId);
+      operations.push({ type: "delete", input: { nodeId, fromIndex } });
+    }
+    return capturePocketStarlingOwnerWorkingOperations(target, operations);
+  } catch {
+    return false;
+  }
+}
+
 function currentPocketDirectCreationOperation(nodeId) {
   if (typeof nodeId !== "string" || !nodeId || !Array.isArray(state.ops)) return null;
   return state.ops.find((operation) => (
