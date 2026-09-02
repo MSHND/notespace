@@ -1,7 +1,8 @@
 "use strict";
 
-const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"), { webcrypto } = require("node:crypto"), { semanticBase } = require("./helpers/starling-semantic-test.js");
 const ROOT = path.resolve(__dirname, ".."), SHADOW = "js/pocket-starling-owner-working-set-shadow.js", HISTORY = "js/pocket-history-status.js", ACTIONS = "js/pocket-tree-actions.js";
+const LOGICAL_SCRIPTS = ["js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", "js/pocket-import.js", "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js", "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js", "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js", "js/pocket-sync-crypto.js", "js/pocket-starling-logical-edit-shadow.js", "js/pocket-starling-semantic-authority-shadow.js"];
 
 function source(file) { return fs.readFileSync(path.join(ROOT, file), "utf8"); }
 function plain(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
@@ -47,20 +48,59 @@ function assertPayloadThenStructure(operations, expected) {
   assert.deepEqual(operations[1], expected.structural);
 }
 
+function logicalRuntime() {
+  const context = { crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array, ArrayBuffer, URL, Date, Math, JSON, Map, Set, WeakMap, WeakSet, Object, Array, String, Number, Boolean, Promise, Error, btoa(value) { return Buffer.from(value, "binary").toString("base64"); }, atob(value) { return Buffer.from(value, "base64").toString("binary"); }, console: { log() {}, info() {}, warn() {}, error() {} }, localStorage: { getItem() {}, setItem() {}, removeItem() {} }, document: { body: { classList: { add() {}, remove() {}, toggle() {} } }, getElementById() {}, addEventListener() {} }, navigator: { clipboard: {} }, location: { href: "https://example.test" }, indexedDB: null, open() {}, close() {}, setTimeout() { return 1; }, clearTimeout() {}, requestAnimationFrame() { return 1; }, cancelAnimationFrame() {} };
+  context.window = context; context.globalThis = context; vm.createContext(context);
+  for (const file of LOGICAL_SCRIPTS) vm.runInContext(source(file), context, { filename: file });
+  return context;
+}
+
+function semanticInput(nodes) {
+  const copy = plain(nodes), byId = new Map(copy.map((entry) => [entry.id, entry])), children = {};
+  for (const entry of copy) { children[entry.id] = []; }
+  for (const entry of copy) { const parentId = entry.parentId || "root"; if (!children[parentId]) children[parentId] = []; children[parentId].push(entry.id); }
+  for (const [parentId, ids] of Object.entries(children)) ids.sort((left, right) => (Number(byId.get(left)?.order) || 0) - (Number(byId.get(right)?.order) || 0));
+  return { nodes: copy, relation: { nodeIds: copy.map((entry) => entry.id), parents: Object.fromEntries(copy.map((entry) => [entry.id, entry.parentId || "root"])), children } };
+}
+
+function stageSemanticBase(context, nodes) {
+  const input = semanticInput(nodes), encoded = context.PocketStarlingBridgeShadow.encode({ schema: "portal.mtt.web.v1", writtenAt: "2026-09-02T00:00:00.000Z", nodes: input.nodes, tombstones: [], rootExtras: {}, dataExtras: {} }, { capacity: 4 }), root = context.PocketStarlingRootShadow.build(encoded.bridge), structural = context.PocketStarlingPlacementShadow.build(input.relation, { capacity: 4 });
+  assert.equal(encoded.ok, true, JSON.stringify(encoded)); assert.equal(root.ok, true, JSON.stringify(root)); assert.equal(structural.ok, true, JSON.stringify(structural));
+  const witness = context.PocketStarlingRootShadow.diagnosticRootFor({ capacity: root.state.capacity, content: root.state.content, placements: structural.model.placements, children: structural.model.children, preservation: root.state.preservation });
+  assert.equal(witness.ok, true, JSON.stringify(witness));
+  const stager = context.PocketStarlingObjectSealShadow.createStager(), staged = context.PocketStarlingObjectSealShadow.stageCandidate(stager, { schema: context.PocketStarlingRootShadow.SCHEMA, capacity: root.state.capacity, content: root.state.content, structural: structural.model, preservation: root.state.preservation, root: witness.root }, { previousSealRef: null });
+  assert.equal(staged.ok, true, JSON.stringify(staged));
+  return { stager, stage: staged.stage };
+}
+
+async function composeCapturedThroughP139(nodes, operations) {
+  const context = logicalRuntime(), staged = stageSemanticBase(context, nodes), resolveLogical = (ref) => staged.stager.store.get(ref), semantic = await semanticBase(context, { acceptedSealRef: staged.stage.sealRef, resolveLogical, syncedPocketId: "p151a" }), opened = await context.PocketStarlingLogicalEditShadow.createBase({ acceptedSealRef: staged.stage.sealRef, resolveLogical, ...semantic });
+  assert.equal(opened.ok, true, JSON.stringify(opened));
+  const composed = await context.PocketStarlingLogicalEditShadow.compose(opened.base, operations);
+  assert.equal(composed.ok, true, JSON.stringify(composed));
+  const resolve = (ref) => composed.candidate.resolveLogical(ref) || resolveLogical(ref), audited = context.PocketStarlingObjectSealShadow.auditCandidateSeal(composed.candidate.sealRef, resolve);
+  assert.equal(audited.ok, true, JSON.stringify(audited));
+  const relation = context.PocketStarlingPlacementShadow.materialise(audited.candidate.structural);
+  assert.equal(relation.ok, true, JSON.stringify(relation));
+  return { context, candidate: audited.candidate, relation: plain(relation.relation) };
+}
+
 test("P151 captures actual same-parent reorder and its witnessed inverse undo under real operation sequences", () => {
   const context = runtime([node("a", "root", 1001), node("b", "root", 1002), node("c", "root", 1003)]);
   context.moveNodeWithinSiblings("b", -1);
   const forward = movement(context);
   assert.equal(forward.type, "move_up");
   assert.equal(Object.keys(context.lastMoveUndoSnapshot).includes("p151MoveUndoWitness"), false);
-  assert.deepEqual(plain(context.lastMoveUndoSnapshot.p151MoveUndoWitness), { nodeId: "b", parentId: "root", index: 1 });
+  assert.deepEqual(plain(context.lastMoveUndoSnapshot.p151MoveUndoWitness), { nodeId: "b", parentId: "root", index: 1, operationSequence: forward.seq, forwardSemanticCaptured: true });
+  assert.equal(JSON.stringify(context.lastMoveUndoSnapshot).includes("forwardSemanticCaptured"), false);
+  assert.equal(JSON.stringify(context.state.ops).includes("forwardSemanticCaptured"), false);
   assert.deepEqual(siblingIds(context), ["b", "a", "c"]);
   assertPayloadThenStructure(capturedForSequence(context, forward.seq), { nodeId: "b", structural: { type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 0 } } });
   assert.equal(context.undoLastMoveAction(), undefined);
   const undo = movement(context);
   assert.equal(undo.type, "undo_move_up");
   assert.deepEqual(siblingIds(context), ["a", "b", "c"]);
-  assertPayloadThenStructure(capturedForSequence(context, undo.seq), { nodeId: "b", updatedAt: "2026-09-02T00:00:00.000Z", structural: { type: "reorder", input: { nodeId: "b", fromIndex: 0, toIndex: 1 } } });
+  assertPayloadThenStructure(capturedForSequence(context, undo.seq), { nodeId: "b", updatedAt: "2026-09-02T00:00:00.000Z", structural: { type: "reorder", input: { nodeId: "b", fromIndex: 0, toIndex: 2 } } });
 });
 
 test("P151 captures actual indent and outdent from local sibling positions without descendant operations", () => {
@@ -129,6 +169,69 @@ test("P151 preserves P150a extraction and leaves current movement authoritative 
   assert.equal(unavailable.state.ops.length, 1);
   assert.equal(unavailable.freezePocketStarlingOwnerWorkingSetThrough(1), null);
   assert.equal(JSON.stringify(unavailable.state.ops).includes('"type":"reorder"'), false);
+});
+
+test("P151a retains exact inverse capture after lifecycle settlement when high-water still proves the movement frontier", () => {
+  const context = runtime([node("a", "root", 1001), node("b", "root", 1002)]);
+  context.moveNodeWithinSiblings("b", -1);
+  const movementOperation = movement(context);
+  assert.equal(context.retainPocketOperationsAfterSequence(movementOperation.seq), 0);
+  assert.equal(context.state.operationHighWater, movementOperation.seq);
+  assert.equal(context.state.ops.length, 0);
+  assert.equal(context.undoLastMoveAction(), undefined);
+  const undo = movement(context);
+  assert.equal(undo.type, "undo_move_up");
+  assertPayloadThenStructure(captured(context, undo.seq), { nodeId: "b", updatedAt: "2026-09-02T00:00:00.000Z", structural: { type: "reorder", input: { nodeId: "b", fromIndex: 0, toIndex: 2 } } });
+});
+
+test("P151a suppresses inverse capture after a newer unrelated operation while preserving current broad undo", () => {
+  const context = runtime([node("a", "root", 1001), node("b", "root", 1002), node("unrelated", "root", 1003, { details: "before" })]);
+  context.moveNodeWithinSiblings("b", -1);
+  const movementOperation = movement(context), unrelated = context.state.nodes.find((entry) => entry.id === "unrelated");
+  unrelated.details = "later";
+  const newer = context.recordOp({ type: "unrelated", id: unrelated.id });
+  assert.equal(context.capturePocketStarlingNodePayload(newer.seq, unrelated), true);
+  const beforeUndoCapture = captured(context, newer.seq);
+  assert.ok(context.state.operationHighWater > movementOperation.seq);
+  assert.equal(context.undoLastMoveAction(), undefined);
+  const undo = movement(context);
+  assert.equal(undo.type, "undo_move_up");
+  assert.deepEqual(siblingIds(context), ["a", "b", "unrelated"]);
+  assert.equal(context.state.nodes.find((entry) => entry.id === "unrelated").details, "before");
+  assert.deepEqual(captured(context, undo.seq), beforeUndoCapture);
+});
+
+test("P151a never permits a lone inverse after forward shadow capture failure", () => {
+  const context = runtime([node("a", "root", 1001), node("b", "root", 1002)]), factory = context.PocketStarlingOwnerWorkingSetShadow;
+  context.PocketStarlingOwnerWorkingSetShadow = undefined;
+  assert.equal(context.resetPocketStarlingOwnerWorkingSetJournal(), false);
+  context.moveNodeWithinSiblings("b", -1);
+  const movementOperation = movement(context);
+  assert.deepEqual(plain(context.lastMoveUndoSnapshot.p151MoveUndoWitness), { nodeId: "b", parentId: "root", index: 1, operationSequence: movementOperation.seq, forwardSemanticCaptured: false });
+  context.PocketStarlingOwnerWorkingSetShadow = factory;
+  assert.equal(context.resetPocketStarlingOwnerWorkingSetJournal(), true);
+  assert.equal(context.undoLastMoveAction(), undefined);
+  const undo = movement(context);
+  assert.equal(undo.type, "undo_move_up");
+  assert.deepEqual(captured(context, undo.seq), []);
+});
+
+test("P151a composes real captured immediate reorder and move inverses through genuine P139", async () => {
+  const reorderNodes = [node("a", "root", 1001, { details: "A" }), node("b", "root", 1002, { details: "B" }), node("c", "root", 1003, { details: "C" })], reorder = runtime(reorderNodes);
+  reorder.moveNodeWithinSiblings("b", -1);
+  reorder.undoLastMoveAction();
+  const reorderComposed = await composeCapturedThroughP139(reorderNodes, captured(reorder, movement(reorder).seq));
+  assert.deepEqual(reorderComposed.relation.children.root, ["a", "b", "c"]);
+  assert.equal(reorderComposed.relation.parents.b, "root");
+  assert.deepEqual(plain(reorderComposed.context.PocketStarlingRootShadow.getContent(reorderComposed.candidate, "b")), { nodeId: "b", payload: { label: "b", updatedAt: "2026-09-02T00:00:00.000Z", details: "B" } });
+
+  const moveNodes = [node("parent", "root", 1001), node("branch", "root", 1002, { details: "Branch" }), node("child", "branch", 1001)], move = runtime(moveNodes);
+  assert.equal(move.moveTreeBranchByDrop("branch", "parent", "inside"), true);
+  move.undoLastMoveAction();
+  const moveComposed = await composeCapturedThroughP139(moveNodes, captured(move, movement(move).seq));
+  assert.deepEqual(moveComposed.relation.children.root, ["parent", "branch"]);
+  assert.equal(moveComposed.relation.parents.branch, "root");
+  assert.deepEqual(plain(moveComposed.context.PocketStarlingRootShadow.getContent(moveComposed.candidate, "branch")), { nodeId: "branch", payload: { label: "branch", updatedAt: "2026-09-02T00:00:00.000Z", details: "Branch" } });
 });
 
 test("P151 sources remain limited to Move/Reorder capture without completion or owner authority expansion", () => {

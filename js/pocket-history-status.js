@@ -395,9 +395,13 @@ function restoreTreeUndoSnapshot(snapshot) {
     && moveUndoWitness.parentId
     && moveUndoWitness.parentId.length <= 80
     && Number.isSafeInteger(moveUndoWitness.index)
-    && moveUndoWitness.index >= 0;
+    && moveUndoWitness.index >= 0
+    && validPocketOperationSequence(moveUndoWitness.operationSequence) === moveUndoWitness.operationSequence
+    && moveUndoWitness.forwardSemanticCaptured === true;
   let currentMovePlacement = null;
-  if (validMoveUndoWitness && typeof sortNodesForParent === "function") {
+  const moveUndoEligible = validMoveUndoWitness
+    && validPocketOperationSequence(state.operationHighWater) === moveUndoWitness.operationSequence;
+  if (moveUndoEligible && typeof sortNodesForParent === "function") {
     const currentNode = nodeMap().get(moveUndoWitness.nodeId) || null;
     const currentParentId = currentNode?.parentId || "root";
     const currentIndex = currentNode
@@ -417,7 +421,7 @@ function restoreTreeUndoSnapshot(snapshot) {
     const restoredNode = nodeMap().get(state.selectedId) || null;
     capturePocketStarlingNodePayload(undoOperation?.seq, restoredNode);
   }
-  if (currentMovePlacement && validMoveUndoWitness && typeof sortNodesForParent === "function") {
+  if (currentMovePlacement && moveUndoEligible && typeof sortNodesForParent === "function") {
     const restoredNode = nodeMap().get(moveUndoWitness.nodeId) || null;
     const restoredParentId = restoredNode?.parentId || "root";
     const restoredIndex = restoredNode
@@ -425,7 +429,14 @@ function restoreTreeUndoSnapshot(snapshot) {
       : -1;
     if (restoredNode && restoredParentId === moveUndoWitness.parentId && restoredIndex === moveUndoWitness.index) {
       const structuralOperation = currentMovePlacement.parentId === moveUndoWitness.parentId
-        ? { type: "reorder", input: { nodeId: restoredNode.id, fromIndex: currentMovePlacement.index, toIndex: moveUndoWitness.index } }
+        ? {
+          type: "reorder",
+          input: {
+            nodeId: restoredNode.id,
+            fromIndex: currentMovePlacement.index,
+            toIndex: moveUndoWitness.index + (currentMovePlacement.index < moveUndoWitness.index ? 1 : 0),
+          },
+        }
         : { type: "move", input: { nodeId: restoredNode.id, fromIndex: currentMovePlacement.index, newParentId: moveUndoWitness.parentId, toIndex: moveUndoWitness.index } };
       capturePocketStarlingNodePayloadAndStructure(undoOperation?.seq, restoredNode, structuralOperation);
     }
