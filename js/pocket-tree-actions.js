@@ -14,6 +14,17 @@ function renumberChildren(parentId) {
   });
 }
 
+function attachP151MoveUndoWitness(snapshot, nodeId, parentId, index) {
+  if (!snapshot || typeof nodeId !== "string" || !nodeId || typeof parentId !== "string" || !parentId || !Number.isSafeInteger(index) || index < 0) return snapshot;
+  Object.defineProperty(snapshot, "p151MoveUndoWitness", {
+    value: { nodeId, parentId, index },
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return snapshot;
+}
+
 function insertSiblingBelow(nodeId) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return;
   const map = nodeMap();
@@ -188,7 +199,7 @@ function indentNodeById(nodeId) {
     return;
   }
   const previousSibling = siblings[index - 1];
-  lastMoveUndoSnapshot = createTreeUndoSnapshot("indent");
+  lastMoveUndoSnapshot = attachP151MoveUndoWitness(createTreeUndoSnapshot("indent"), node.id, parentId, index);
   lastTreeUndoKind = "move";
   node.parentId = previousSibling.id;
   node.order = maxSiblingOrder(previousSibling.id) + 1;
@@ -197,7 +208,14 @@ function indentNodeById(nodeId) {
   renumberChildren(previousSibling.id);
   state.selectedId = node.id;
   expandPathToNode(node.id);
-  recordOp({ type: "indent", id: node.id, newParentId: previousSibling.id });
+  const indentOperation = recordOp({ type: "indent", id: node.id, newParentId: previousSibling.id });
+  const toIndex = sortNodesForParent(previousSibling.id).findIndex((sibling) => sibling.id === node.id);
+  if (toIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
+    capturePocketStarlingNodePayloadAndStructure(indentOperation?.seq, node, {
+      type: "move",
+      input: { nodeId: node.id, fromIndex: index, newParentId: previousSibling.id, toIndex },
+    });
+  }
   if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();
@@ -226,7 +244,8 @@ function outdentNodeById(nodeId) {
     return;
   }
   const grandParentId = parent.parentId || "root";
-  lastMoveUndoSnapshot = createTreeUndoSnapshot("outdent");
+  const sourceIndex = sortNodesForParent(parentId).findIndex((sibling) => sibling.id === node.id);
+  lastMoveUndoSnapshot = attachP151MoveUndoWitness(createTreeUndoSnapshot("outdent"), node.id, parentId, sourceIndex);
   lastTreeUndoKind = "move";
   node.parentId = grandParentId;
   node.order = Number.isFinite(parent.order) ? parent.order + 0.5 : maxSiblingOrder(grandParentId) + 1;
@@ -235,7 +254,14 @@ function outdentNodeById(nodeId) {
   renumberChildren(grandParentId);
   state.selectedId = node.id;
   expandPathToNode(node.id);
-  recordOp({ type: "outdent", id: node.id, newParentId: grandParentId, afterId: parent.id });
+  const outdentOperation = recordOp({ type: "outdent", id: node.id, newParentId: grandParentId, afterId: parent.id });
+  const toIndex = sortNodesForParent(grandParentId).findIndex((sibling) => sibling.id === node.id);
+  if (sourceIndex >= 0 && toIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
+    capturePocketStarlingNodePayloadAndStructure(outdentOperation?.seq, node, {
+      type: "move",
+      input: { nodeId: node.id, fromIndex: sourceIndex, newParentId: grandParentId, toIndex },
+    });
+  }
   if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();
@@ -266,7 +292,7 @@ function moveNodeWithinSiblings(nodeId, direction) {
     return;
   }
   const moving = siblings[index];
-  lastMoveUndoSnapshot = createTreeUndoSnapshot(direction < 0 ? "move_up" : "move_down");
+  lastMoveUndoSnapshot = attachP151MoveUndoWitness(createTreeUndoSnapshot(direction < 0 ? "move_up" : "move_down"), node.id, parentId, index);
   lastTreeUndoKind = "move";
   siblings.splice(index, 1);
   siblings.splice(targetIndex, 0, moving);
@@ -275,7 +301,14 @@ function moveNodeWithinSiblings(nodeId, direction) {
   });
   node.updatedAt = nowIso();
   state.selectedId = node.id;
-  recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
+  const reorderOperation = recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
+  const finalIndex = sortNodesForParent(parentId).findIndex((sibling) => sibling.id === node.id);
+  if (finalIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
+    capturePocketStarlingNodePayloadAndStructure(reorderOperation?.seq, node, {
+      type: "reorder",
+      input: { nodeId: node.id, fromIndex: index, toIndex: finalIndex },
+    });
+  }
   if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();
@@ -318,7 +351,8 @@ function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
   if ((nextParent && isCompletedSystemBucketNode(nextParent)) || branchIds.has(nextParentId)) return false;
 
   const previousParentId = node.parentId || "root";
-  lastMoveUndoSnapshot = createTreeUndoSnapshot("drag_branch");
+  const sourceIndex = sortNodesForParent(previousParentId).findIndex((sibling) => sibling.id === node.id);
+  lastMoveUndoSnapshot = attachP151MoveUndoWitness(createTreeUndoSnapshot("drag_branch"), node.id, previousParentId, sourceIndex);
   lastTreeUndoKind = "move";
   node.parentId = nextParentId;
   if (position === "inside") {
@@ -333,7 +367,15 @@ function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
   if (nextParentId !== previousParentId) renumberChildren(nextParentId);
   state.selectedId = node.id;
   expandPathToNode(node.id);
-  recordOp({ type: "drag_branch", id: node.id, targetId: target.id, position, newParentId: nextParentId });
+  const dragOperation = recordOp({ type: "drag_branch", id: node.id, targetId: target.id, position, newParentId: nextParentId });
+  const finalParentId = node.parentId || "root";
+  const finalIndex = sortNodesForParent(finalParentId).findIndex((sibling) => sibling.id === node.id);
+  if (sourceIndex >= 0 && finalIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
+    const structuralOperation = finalParentId === previousParentId
+      ? { type: "reorder", input: { nodeId: node.id, fromIndex: sourceIndex, toIndex: finalIndex } }
+      : { type: "move", input: { nodeId: node.id, fromIndex: sourceIndex, newParentId: finalParentId, toIndex: finalIndex } };
+    capturePocketStarlingNodePayloadAndStructure(dragOperation?.seq, node, structuralOperation);
+  }
   if (typeof refreshSaveState === "function") refreshSaveState();
   renderTree();
   persistPipSnapshot();

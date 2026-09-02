@@ -31,11 +31,15 @@ function capturePocketStarlingOwnerWorkingOperations(sequence, operations) {
   }
 }
 
-function capturePocketStarlingNodePayload(sequence, node) {
+function currentPocketStarlingOperationSequence(sequence) {
   const target = validPocketOperationSequence(sequence);
   if (!target || !Array.isArray(state.ops) || !state.ops.some((operation) => {
     return validPocketOperationSequence(operation?.seq) === target;
-  })) return false;
+  })) return 0;
+  return target;
+}
+
+function buildPocketStarlingNodePayloadOperation(node) {
   if (!node || typeof node !== "object" || Array.isArray(node)) return false;
   const nodeId = typeof node.id === "string" && node.id.length <= 80 ? node.id : "";
   if (!nodeId) return false;
@@ -49,10 +53,42 @@ function capturePocketStarlingNodePayload(sequence, node) {
       writable: true,
     });
   }
-  return capturePocketStarlingOwnerWorkingOperations(target, [{
+  return {
     type: "payload",
     input: { nodeId, payload },
-  }]);
+  };
+}
+
+function validPocketStarlingStructuralOperation(operation) {
+  if (!operation || typeof operation !== "object" || Array.isArray(operation)) return false;
+  const operationKeys = Object.keys(operation);
+  if (operationKeys.length !== 2 || !operationKeys.includes("type") || !operationKeys.includes("input")) return false;
+  const type = operation.type;
+  const input = operation.input;
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  const required = type === "move"
+    ? ["nodeId", "fromIndex", "newParentId", "toIndex"]
+    : (type === "reorder" ? ["nodeId", "fromIndex", "toIndex"] : null);
+  if (!required) return false;
+  const inputKeys = Object.keys(input);
+  if (inputKeys.length !== required.length || !required.every((key) => inputKeys.includes(key))) return false;
+  if (typeof input.nodeId !== "string" || !input.nodeId || input.nodeId.length > 80) return false;
+  if (!Number.isSafeInteger(input.fromIndex) || input.fromIndex < 0 || !Number.isSafeInteger(input.toIndex) || input.toIndex < 0) return false;
+  return type !== "move" || (typeof input.newParentId === "string" && !!input.newParentId && input.newParentId.length <= 80);
+}
+
+function capturePocketStarlingNodePayload(sequence, node) {
+  const target = currentPocketStarlingOperationSequence(sequence);
+  const payloadOperation = buildPocketStarlingNodePayloadOperation(node);
+  if (!target || !payloadOperation) return false;
+  return capturePocketStarlingOwnerWorkingOperations(target, [payloadOperation]);
+}
+
+function capturePocketStarlingNodePayloadAndStructure(sequence, node, structuralOperation) {
+  const target = currentPocketStarlingOperationSequence(sequence);
+  const payloadOperation = buildPocketStarlingNodePayloadOperation(node);
+  if (!target || !payloadOperation || !validPocketStarlingStructuralOperation(structuralOperation)) return false;
+  return capturePocketStarlingOwnerWorkingOperations(target, [payloadOperation, structuralOperation]);
 }
 
 function discardPocketStarlingOwnerWorkingOperations(sequence) {
@@ -349,6 +385,26 @@ function createTreeUndoSnapshot(kind = "") {
 function restoreTreeUndoSnapshot(snapshot) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   if (!snapshot || !Array.isArray(snapshot.nodes)) return false;
+  const moveUndoWitness = snapshot.p151MoveUndoWitness;
+  const validMoveUndoWitness = moveUndoWitness
+    && typeof moveUndoWitness === "object"
+    && typeof moveUndoWitness.nodeId === "string"
+    && moveUndoWitness.nodeId
+    && moveUndoWitness.nodeId.length <= 80
+    && typeof moveUndoWitness.parentId === "string"
+    && moveUndoWitness.parentId
+    && moveUndoWitness.parentId.length <= 80
+    && Number.isSafeInteger(moveUndoWitness.index)
+    && moveUndoWitness.index >= 0;
+  let currentMovePlacement = null;
+  if (validMoveUndoWitness && typeof sortNodesForParent === "function") {
+    const currentNode = nodeMap().get(moveUndoWitness.nodeId) || null;
+    const currentParentId = currentNode?.parentId || "root";
+    const currentIndex = currentNode
+      ? sortNodesForParent(currentParentId).findIndex((node) => node.id === currentNode.id)
+      : -1;
+    if (currentIndex >= 0) currentMovePlacement = { nodeId: currentNode.id, parentId: currentParentId, index: currentIndex };
+  }
   state.nodes = cloneForUndo(snapshot.nodes);
   state.tombstones = Array.isArray(snapshot.tombstones) ? cloneForUndo(snapshot.tombstones) : [];
   state.selectedId = cleanText(snapshot.selectedId, 80);
@@ -360,6 +416,19 @@ function restoreTreeUndoSnapshot(snapshot) {
   if (snapshot.kind === "rename") {
     const restoredNode = nodeMap().get(state.selectedId) || null;
     capturePocketStarlingNodePayload(undoOperation?.seq, restoredNode);
+  }
+  if (currentMovePlacement && validMoveUndoWitness && typeof sortNodesForParent === "function") {
+    const restoredNode = nodeMap().get(moveUndoWitness.nodeId) || null;
+    const restoredParentId = restoredNode?.parentId || "root";
+    const restoredIndex = restoredNode
+      ? sortNodesForParent(restoredParentId).findIndex((node) => node.id === restoredNode.id)
+      : -1;
+    if (restoredNode && restoredParentId === moveUndoWitness.parentId && restoredIndex === moveUndoWitness.index) {
+      const structuralOperation = currentMovePlacement.parentId === moveUndoWitness.parentId
+        ? { type: "reorder", input: { nodeId: restoredNode.id, fromIndex: currentMovePlacement.index, toIndex: moveUndoWitness.index } }
+        : { type: "move", input: { nodeId: restoredNode.id, fromIndex: currentMovePlacement.index, newParentId: moveUndoWitness.parentId, toIndex: moveUndoWitness.index } };
+      capturePocketStarlingNodePayloadAndStructure(undoOperation?.seq, restoredNode, structuralOperation);
+    }
   }
   refreshMeta();
   renderTree();
