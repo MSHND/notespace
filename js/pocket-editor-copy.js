@@ -563,7 +563,14 @@ function saveDetailsEditor() {
     path: getPath(node.id),
     changed: changedParts.join("+"),
   });
-  if (typeof capturePocketStarlingNodePayload === "function") {
+  if (completionResult.moved) {
+    const bucket = nodeMap().get(completionResult.bucketId) || null;
+    try {
+      if (typeof capturePocketStarlingCompletedMove === "function") {
+        capturePocketStarlingCompletedMove(detailsOperation?.seq, node, bucket, completionResult);
+      }
+    } catch {}
+  } else if (typeof capturePocketStarlingNodePayload === "function") {
     capturePocketStarlingNodePayload(detailsOperation?.seq, node);
   }
 

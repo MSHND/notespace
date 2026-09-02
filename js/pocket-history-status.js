@@ -91,6 +91,63 @@ function capturePocketStarlingNodePayloadAndStructure(sequence, node, structural
   return capturePocketStarlingOwnerWorkingOperations(target, [payloadOperation, structuralOperation]);
 }
 
+function capturePocketStarlingCompletedMove(sequence, node, bucket, completion) {
+  try {
+    const target = currentPocketStarlingOperationSequence(sequence);
+    const nodePayload = buildPocketStarlingNodePayloadOperation(node);
+    const bucketPayload = buildPocketStarlingNodePayloadOperation(bucket);
+    if (
+      !target ||
+      !nodePayload ||
+      !bucketPayload ||
+      nodePayload.input.nodeId === bucketPayload.input.nodeId ||
+      !completion ||
+      typeof completion !== "object" ||
+      Array.isArray(completion) ||
+      completion.moved !== true ||
+      typeof completion.fromParentId !== "string" ||
+      !completion.fromParentId ||
+      completion.fromParentId.length > 80 ||
+      completion.bucketId !== bucketPayload.input.nodeId ||
+      bucket?.parentId !== completion.fromParentId ||
+      node?.parentId !== bucketPayload.input.nodeId ||
+      !Number.isSafeInteger(completion.fromIndex) ||
+      completion.fromIndex < 0 ||
+      !Number.isSafeInteger(completion.toIndex) ||
+      completion.toIndex < 0 ||
+      typeof completion.bucketCreated !== "boolean"
+    ) return false;
+    const move = {
+      type: "move",
+      input: {
+        nodeId: nodePayload.input.nodeId,
+        fromIndex: completion.fromIndex,
+        newParentId: bucketPayload.input.nodeId,
+        toIndex: completion.toIndex,
+      },
+    };
+    if (!completion.bucketCreated) {
+      return capturePocketStarlingOwnerWorkingOperations(target, [bucketPayload, nodePayload, move]);
+    }
+    if (
+      !Number.isSafeInteger(completion.bucketParentIndex) ||
+      completion.bucketParentIndex < 0 ||
+      completion.bucketParentIndex <= completion.fromIndex
+    ) return false;
+    return capturePocketStarlingOwnerWorkingOperations(target, [{
+      type: "insert",
+      input: {
+        nodeId: bucketPayload.input.nodeId,
+        parentId: completion.fromParentId,
+        toIndex: completion.bucketParentIndex,
+        payload: bucketPayload.input.payload,
+      },
+    }, nodePayload, move]);
+  } catch {
+    return false;
+  }
+}
+
 function capturePocketStarlingNodeInsert(sequence, node, parentId, toIndex) {
   const target = currentPocketStarlingOperationSequence(sequence);
   const payloadOperation = buildPocketStarlingNodePayloadOperation(node);

@@ -305,10 +305,24 @@ function moveNodeIntoCompletedSystemBucket(nodeId) {
   }
   if (parentId !== "root" && !parentNode) return { moved: false, reason: "missing_parent" };
 
+  const siblingIndex = (parent, id) => {
+    try {
+      if (typeof sortNodesForParent !== "function") return -1;
+      const siblings = sortNodesForParent(parent);
+      if (!Array.isArray(siblings)) return -1;
+      const index = siblings.findIndex((sibling) => sibling?.id === id);
+      return Number.isSafeInteger(index) && index >= 0 ? index : -1;
+    } catch {
+      return -1;
+    }
+  };
+  const fromIndex = siblingIndex(parentId, node.id);
+
   const ensured = ensureCompletedSystemBucketChildNode(parentId);
   const bucket = ensured.bucket;
   if (!bucket) return { moved: false, reason: "missing_bucket" };
   if (cleanText(bucket.id, 80) === id) return { moved: false, reason: "bucket_node" };
+  const bucketParentIndex = siblingIndex(parentId, bucket.id);
 
   node.parentId = bucket.id;
   node.order = maxSiblingOrder(bucket.id) + 1;
@@ -320,7 +334,15 @@ function moveNodeIntoCompletedSystemBucket(nodeId) {
   };
   node.updatedAt = nowIso();
   pinCompletedBucketToParentTail(parentId, bucket.id);
-  return { moved: true, bucketId: bucket.id, bucketCreated: !!ensured.created };
+  return {
+    moved: true,
+    bucketId: bucket.id,
+    bucketCreated: !!ensured.created,
+    fromParentId: parentId,
+    fromIndex,
+    bucketParentIndex,
+    toIndex: siblingIndex(bucket.id, node.id),
+  };
 }
 
 const RESERVED_NODE_KEYS = new Set([
