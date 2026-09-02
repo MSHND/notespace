@@ -159,6 +159,25 @@ function bindP153InsertUndoWitness(snapshot, nodeId, operationSequence, forwardS
   return true;
 }
 
+function bindP155DeleteUndoWitness(snapshot, nodeId, operationSequence, forwardSemanticCaptured) {
+  const sequence = validPocketOperationSequence(operationSequence);
+  if (
+    !snapshot ||
+    snapshot.kind !== "delete" ||
+    typeof nodeId !== "string" ||
+    !nodeId ||
+    nodeId.length > 80 ||
+    !sequence
+  ) return false;
+  Object.defineProperty(snapshot, "p155DeleteUndoWitness", {
+    value: { nodeId, operationSequence: sequence, forwardSemanticCaptured: forwardSemanticCaptured === true },
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  return true;
+}
+
 function discardPocketStarlingOwnerWorkingOperations(sequence) {
   const target = validPocketOperationSequence(sequence);
   const journal = pocketStarlingOwnerWorkingSetJournal;
@@ -464,6 +483,17 @@ function restoreTreeUndoSnapshot(snapshot) {
   const insertUndoEligible = validInsertUndoWitness
     && validPocketOperationSequence(state.operationHighWater) === insertUndoWitness.operationSequence
     && nodeMap().has(insertUndoWitness.nodeId);
+  const deleteUndoWitness = snapshot.kind === "delete" ? snapshot.p155DeleteUndoWitness : null;
+  const validDeleteUndoWitness = deleteUndoWitness
+    && typeof deleteUndoWitness === "object"
+    && typeof deleteUndoWitness.nodeId === "string"
+    && deleteUndoWitness.nodeId
+    && deleteUndoWitness.nodeId.length <= 80
+    && validPocketOperationSequence(deleteUndoWitness.operationSequence) === deleteUndoWitness.operationSequence
+    && deleteUndoWitness.forwardSemanticCaptured === true;
+  const deleteUndoEligible = validDeleteUndoWitness
+    && validPocketOperationSequence(state.operationHighWater) === deleteUndoWitness.operationSequence
+    && !nodeMap().has(deleteUndoWitness.nodeId);
   const moveUndoWitness = snapshot.p151MoveUndoWitness;
   const validMoveUndoWitness = moveUndoWitness
     && typeof moveUndoWitness === "object"
@@ -502,6 +532,9 @@ function restoreTreeUndoSnapshot(snapshot) {
   }
   if (insertUndoEligible) {
     discardPocketStarlingOwnerWorkingOperations(insertUndoWitness.operationSequence);
+  }
+  if (deleteUndoEligible) {
+    discardPocketStarlingOwnerWorkingOperations(deleteUndoWitness.operationSequence);
   }
   if (currentMovePlacement && moveUndoEligible && typeof sortNodesForParent === "function") {
     const restoredNode = nodeMap().get(moveUndoWitness.nodeId) || null;

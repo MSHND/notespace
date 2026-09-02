@@ -17,7 +17,7 @@ function runtime(nodes = [node("a")], managed = false) {
 function captured(c, seq) { const f = c.freezePocketStarlingOwnerWorkingSetThrough(seq); return f ? plain(f.operations) : null; }
 function add(c) { c.insertSiblingBelow("a"); const id = c.state.inlineEdit.id; assert.equal(c.commitInlineEdit(id, "New").ok, true); return { id, op: c.state.ops.at(-1) }; }
 
-test("P154 captures valid existing leaf and branch-root Delete operations, while Delete undo remains unclaimed", () => {
+test("P154 captures valid existing leaf and branch-root Delete operations before later undo handling", () => {
   const leaf = runtime([node("a", "root", 30), node("target", "root", 70), node("later", "root", 90)]);
   assert.equal(leaf.deleteNodeById("target", { confirm: false }), true); const deleted = leaf.state.ops.at(-1), leafOps = captured(leaf, deleted.seq);
   assert.deepEqual(leafOps, [{ type: "delete", input: { nodeId: "target", fromIndex: 1 } }]); assert.notEqual(leafOps[0].input.fromIndex, 70); assert.equal(leaf.nodeMap().has("target"), false); assert.equal(leaf.state.tombstones.some((entry) => entry.id === "target"), true);
@@ -28,7 +28,7 @@ test("P154 captures valid existing leaf and branch-root Delete operations, while
   assert.equal(branchOps.some((entry) => entry.input.nodeId === "child" || entry.input.nodeId === "grandchild"), false);
   branch.undoLastDeleteAction(); const undo = branch.state.ops.at(-1), afterUndo = captured(branch, undo.seq);
   assert.equal(undo.type, "undo_delete"); assert.equal(undo.seq, forward.seq + 1); assert.equal(branch.state.operationHighWater, undo.seq); assert.deepEqual(plain(branch.state.nodes), original); assert.deepEqual(branch.state.tombstones, []);
-  assert.deepEqual(afterUndo, branchOps); assert.equal(afterUndo.some((entry) => entry.type === "restore" || entry.type === "insert"), false);
+  assert.deepEqual(afterUndo, []); assert.equal(afterUndo.some((entry) => entry.type === "restore" || entry.type === "insert"), false);
 });
 
 test("P154 cancels only an exact immediate uncovered manual Insert and fails closed for covered or newer creations", () => {

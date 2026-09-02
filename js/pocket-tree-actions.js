@@ -192,8 +192,12 @@ function deleteNodeById(nodeId, options = {}) {
   const deleteOperation = recordOp({ type: "delete", id: node.id, subtreeCount: ids.length });
   if (cancelUncoveredInsert && typeof discardPocketStarlingOwnerWorkingOperations === "function") {
     discardPocketStarlingOwnerWorkingOperations(creationOperation.seq);
-  } else if (captureExistingDelete && typeof capturePocketStarlingNodeDelete === "function") {
-    capturePocketStarlingNodeDelete(deleteOperation?.seq, node.id, siblingIndex);
+  } else if (captureExistingDelete) {
+    const forwardSemanticCaptured = typeof capturePocketStarlingNodeDelete === "function"
+      && capturePocketStarlingNodeDelete(deleteOperation?.seq, node.id, siblingIndex) === true;
+    if (typeof bindP155DeleteUndoWitness === "function") {
+      bindP155DeleteUndoWitness(lastDeleteUndoSnapshot, node.id, deleteOperation?.seq, forwardSemanticCaptured);
+    }
   }
   if (state.focusRootId && drop.has(state.focusRootId)) state.focusRootId = "";
   if (state.inlineEdit.id && drop.has(state.inlineEdit.id)) clearInlineEditState();
