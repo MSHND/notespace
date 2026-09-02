@@ -122,7 +122,12 @@ test("P160 freezes one payload and P148 working set before a delayed owner obser
   appendCoveredCapture(context);
   appendSecondCoveredCapture(context);
   let builds = 0;
-  context.buildPocketPayload = () => { builds += 1; return p160Payload(context); };
+  let builtPayload = null;
+  context.buildPocketPayload = () => {
+    builds += 1;
+    builtPayload = p160Payload(context);
+    return builtPayload;
+  };
   let ownerPayload = null;
   context.PocketOwnerSaveBoundary.save = async ({ freezePayload }) => {
     const state = vm.runInContext("state", context);
@@ -132,7 +137,12 @@ test("P160 freezes one payload and P148 working set before a delayed owner obser
     assert.equal(context.capturePocketStarlingOwnerWorkingOperations(3, [
       { type: "payload", input: { nodeId: "one", payload: { label: "After" } } },
     ]), true);
+    state.tombstones[0].retained.stable = false;
+    state.tombstones.push({ id: "later-gone", retained: { stable: "later" } });
+    state.rootExtras.rootFuture.value = "later-root";
+    state.dataExtras.dataFuture.value = "later-data";
     ownerPayload = freezePayload();
+    assert.strictEqual(ownerPayload, builtPayload);
     return { ok: true, target: "synced" };
   };
 
@@ -157,9 +167,20 @@ test("P160 freezes one payload and P148 working set before a delayed owner obser
     rootExtras: norm.rootExtras,
     dataExtras: norm.dataExtras,
   }));
+  assert.deepEqual(plain(preparation.preservationProjection.tombstones), [
+    { id: "gone", retained: { stable: true } },
+  ]);
+  assert.equal(preparation.preservationProjection.rootExtras.rootFuture.value, "root");
+  assert.equal(preparation.preservationProjection.dataExtras.dataFuture.value, "data");
   assert.equal(Object.hasOwn(preparation.preservationProjection, "nodes"), false);
   const state = vm.runInContext("state", context);
   assert.equal(state.nodes[0].label, "After");
+  assert.deepEqual(plain(state.tombstones), [
+    { id: "gone", retained: { stable: false } },
+    { id: "later-gone", retained: { stable: "later" } },
+  ]);
+  assert.equal(state.rootExtras.rootFuture.value, "later-root");
+  assert.equal(state.dataExtras.dataFuture.value, "later-data");
   assert.deepEqual(plain(state.ops.map((operation) => operation.seq)), [3]);
   assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(3).operations), [
     { type: "payload", input: { nodeId: "one", payload: { label: "After" } } },
@@ -171,6 +192,38 @@ test("P160 freezes one payload and P148 working set before a delayed owner obser
   assert.equal(context.currentPocketStarlingOwnerSavePreparation(ownerPayload).operations[0].input.payload.label, "Before");
   assert.equal(context.currentPocketStarlingOwnerSavePreparation(ownerPayload).preservationProjection.rootExtras.rootFuture.value, "root");
   assert.equal(JSON.stringify(ownerPayload).includes("preservationProjection"), false);
+});
+
+test("P160 prepares an empty but valid P148 working set at a positive Save ceiling", async () => {
+  const context = runtime();
+  let builds = 0;
+  let ownerPayload = null;
+  context.buildPocketPayload = () => { builds += 1; return p160Payload(context); };
+  context.PocketOwnerSaveBoundary.save = async ({ freezePayload }) => {
+    ownerPayload = freezePayload();
+    return { ok: true, target: "synced" };
+  };
+
+  const result = await context.exportTree({ returnDetails: true });
+  assert.equal(result.ok, true);
+  assert.equal(builds, 1);
+  const preparation = context.currentPocketStarlingOwnerSavePreparation(ownerPayload);
+  assert.ok(preparation);
+  assert.equal(preparation.ceiling, 1);
+  assert.deepEqual(plain(preparation.operations), []);
+  const norm = context.normaliseInput(ownerPayload);
+  assert.deepEqual(plain(preparation.preservationProjection), plain({
+    source: { schema: norm.schema, writtenAt: norm.writtenAt },
+    tombstones: norm.tombstones,
+    rootExtras: norm.rootExtras,
+    dataExtras: norm.dataExtras,
+  }));
+  assert.equal(context.currentPocketStarlingOwnerSavePreparation(plain(ownerPayload)), null);
+  assert.deepEqual(plain(vm.runInContext("state.ops", context)), []);
+  assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(1)), {
+    ceiling: 1,
+    operations: [],
+  });
 });
 
 test("P160 leaves the authoritative Save and pending operations intact when preparation is unavailable or persistence fails", async () => {
