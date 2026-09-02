@@ -1522,6 +1522,87 @@ function exportTreeResult(options, ok, reason, extra = {}, legacyOk = ok) {
   return options.returnDetails === true ? result : !!legacyOk;
 }
 
+const pocketStarlingOwnerSavePreparationByPayload = new WeakMap();
+
+function clonePocketStarlingOwnerSavePreparation(value) {
+  try {
+    const encoded = JSON.stringify(value);
+    return typeof encoded === "string" ? JSON.parse(encoded) : null;
+  } catch {
+    return null;
+  }
+}
+
+function validPocketStarlingOwnerPreservationProjection(value) {
+  return !!value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === 4
+    && Object.hasOwn(value, "source")
+    && Object.hasOwn(value, "tombstones")
+    && Object.hasOwn(value, "rootExtras")
+    && Object.hasOwn(value, "dataExtras")
+    && !!value.source
+    && typeof value.source === "object"
+    && !Array.isArray(value.source)
+    && Object.keys(value.source).length === 2
+    && Object.hasOwn(value.source, "schema")
+    && Object.hasOwn(value.source, "writtenAt")
+    && typeof value.source.schema === "string"
+    && typeof value.source.writtenAt === "string"
+    && Array.isArray(value.tombstones)
+    && !!value.rootExtras
+    && typeof value.rootExtras === "object"
+    && !Array.isArray(value.rootExtras)
+    && !!value.dataExtras
+    && typeof value.dataExtras === "object"
+    && !Array.isArray(value.dataExtras);
+}
+
+function preparePocketStarlingOwnerSave(payload, ceiling) {
+  try {
+    if (!payload || typeof payload !== "object" || !Number.isSafeInteger(ceiling) || ceiling <= 0) {
+      return false;
+    }
+    const workingSet = typeof freezePocketStarlingOwnerWorkingSetThrough === "function"
+      ? freezePocketStarlingOwnerWorkingSetThrough(ceiling)
+      : null;
+    if (!workingSet || workingSet.ceiling !== ceiling || !Array.isArray(workingSet.operations)) {
+      return false;
+    }
+    const norm = typeof normaliseInput === "function" ? normaliseInput(payload) : null;
+    const preservationProjection = norm && {
+      source: { schema: norm.schema, writtenAt: norm.writtenAt },
+      tombstones: norm.tombstones,
+      rootExtras: norm.rootExtras,
+      dataExtras: norm.dataExtras,
+    };
+    if (!validPocketStarlingOwnerPreservationProjection(preservationProjection)) return false;
+    const preparation = clonePocketStarlingOwnerSavePreparation({
+      ceiling,
+      operations: workingSet.operations,
+      preservationProjection,
+    });
+    if (!preparation || !validPocketStarlingOwnerPreservationProjection(preparation.preservationProjection)) {
+      return false;
+    }
+    pocketStarlingOwnerSavePreparationByPayload.set(payload, preparation);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function currentPocketStarlingOwnerSavePreparation(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const preparation = pocketStarlingOwnerSavePreparationByPayload.get(payload);
+  if (!preparation) return null;
+  const copy = clonePocketStarlingOwnerSavePreparation(preparation);
+  return copy && validPocketStarlingOwnerPreservationProjection(copy.preservationProjection)
+    ? copy
+    : null;
+}
+
 async function exportTree(options = {}) {
   const saveSession = capturePocketFileSaveSession();
   return enqueueTreeSave(async () => {
@@ -1571,18 +1652,26 @@ async function exportTree(options = {}) {
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, "no-changes");
     }
-    // The boundary invokes this once. Synced Save passes it straight to P042.
+    // The boundary receives this exact memoised payload. P160 freezes it before owner awaits.
     let payload = null;
+    let payloadFreezeError = null;
     const freezePayload = () => {
-      if (payload === null) {
-        payload = buildPocketPayload(nowIso());
-        if (!["vault", "synced"].includes(saveSession.ownerKind)) saveLastSaveSnapshot(payload);
+      if (payload === null && payloadFreezeError === null) {
+        try {
+          payload = buildPocketPayload(nowIso());
+          if (!["vault", "synced"].includes(saveSession.ownerKind)) saveLastSaveSnapshot(payload);
+          preparePocketStarlingOwnerSave(payload, saveStartHighestSequence);
+        } catch (error) {
+          payloadFreezeError = error;
+        }
       }
+      if (payloadFreezeError !== null) throw payloadFreezeError;
       return payload;
     };
     state.activeSaveOperationCeiling = saveStartHighestSequence;
     let writeResult;
     try {
+      try { freezePayload(); } catch {}
       const boundary = window.PocketOwnerSaveBoundary;
       writeResult = boundary && typeof boundary.save === "function"
         ? await boundary.save({
