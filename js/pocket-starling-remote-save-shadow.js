@@ -33,9 +33,9 @@
     async function saveDelete(value) { return save(value, ["nodeId", "fromIndex"], "prepareDelete"); }
     async function saveRestore(value) { return save(value, ["nodeId", "fromIndex", "newParentId", "toIndex"], "prepareRestore"); }
     async function saveInsert(value) { return save(value, ["nodeId", "parentId", "toIndex", "payload"], "prepareInsert"); }
-    async function saveWorkingSet(operations) {
+    async function saveWorkingSet(operations, preservationProjection) {
       if (state !== "ready") throw fail("remote-save-state-invalid");
-      return publishPrepared(await editor.prepareWorkingSet(operations));
+      return publishPrepared(await editor.prepareWorkingSet(operations, preservationProjection));
     }
     async function reconcileAmbiguous() {
       if (state !== "ambiguous" || !pending) throw fail("remote-save-state-invalid");
