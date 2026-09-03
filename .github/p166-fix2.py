@@ -187,4 +187,53 @@ s = once(s,
   const generic = Object.freeze({ transact });''', "p119 lock")
 write(p, s)
 
+p = "tests/p166-persistence-authority-fence.test.js"
+s = read(p)
+s = once(s,
+'''function controlledFirstLock(baseStore) {
+  let firstEnteredResolve;
+  let releaseFirstResolve;
+  const firstEntered = new Promise((resolve) => { firstEnteredResolve = resolve; });
+  const releaseFirst = new Promise((resolve) => { releaseFirstResolve = resolve; });
+  let calls = 0;
+  return {
+    store: Object.freeze({ transact: baseStore.transact,
+      withPocketAuthorityLock(pocket, callback) {
+        calls += 1;
+        const ordinal = calls;
+        return baseStore.withPocketAuthorityLock(pocket, async () => {
+          if (ordinal === 1) { firstEnteredResolve(); await releaseFirst; }
+          return callback();
+        });
+      } }),
+    firstEntered,
+    release: () => releaseFirstResolve(),
+  };
+}''',
+'''function controlledFirstLock(baseStore) {
+  let firstEnteredResolve;
+  let releaseFirstResolve;
+  const firstEntered = new Promise((resolve) => { firstEnteredResolve = resolve; });
+  const releaseFirst = new Promise((resolve) => { releaseFirstResolve = resolve; });
+  let calls = 0;
+  const transact = async (...args) => baseStore.transact(...args);
+  Object.defineProperty(transact, "withPocketAuthorityLock", { value(pocket, callback) {
+    calls += 1;
+    const ordinal = calls;
+    return baseStore.transact.withPocketAuthorityLock(pocket, async () => {
+      if (ordinal === 1) { firstEnteredResolve(); await releaseFirst; }
+      return callback();
+    });
+  } });
+  return {
+    store: Object.freeze({ transact }),
+    firstEntered,
+    release: () => releaseFirstResolve(),
+  };
+}''', "p166 controlled private lock")
+s = once(s,
+'''  const result = await store.withPocketAuthorityLock("pocket", async () => { events.push(["callback"]); return 17; });''',
+'''  const result = await store.transact.withPocketAuthorityLock("pocket", async () => { events.push(["callback"]); return 17; });''', "p166 postgres private lock")
+write(p, s)
+
 print("P166 compatibility fixes applied")
