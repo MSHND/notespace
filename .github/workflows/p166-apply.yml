@@ -8,6 +8,7 @@ on:
       - .github/p166-apply.py
       - .github/p166-fix.py
       - .github/p166-fix2.py
+      - .github/p166-fix3.py
       - .github/workflows/p166-apply.yml
 
 permissions:
@@ -23,13 +24,14 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - run: npm ci
       - name: Apply P166 candidate implementation
         run: |
           python3 .github/p166-apply.py
           python3 .github/p166-fix.py
           python3 .github/p166-fix2.py
+          python3 .github/p166-fix3.py
       - name: Check patch hygiene
         run: git diff --check
       - name: Focused P166 proof
@@ -56,7 +58,7 @@ jobs:
         run: |
           git config user.name "MSHND"
           git config user.email "193864085+MSHND@users.noreply.github.com"
-          git rm .github/p166-apply.py .github/p166-fix.py .github/p166-fix2.py .github/workflows/p166-apply.yml
+          git rm .github/p166-apply.py .github/p166-fix.py .github/p166-fix2.py .github/p166-fix3.py .github/workflows/p166-apply.yml
           git add -A
           git commit -m "P166 shared persistence authority fence"
           git push origin HEAD:candidate/p166
