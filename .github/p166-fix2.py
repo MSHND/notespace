@@ -121,10 +121,10 @@ s = once(s,
           const rowKey = key(values[0], values[1]);''', "p049 advisory SQL")
 s = once(s,
 '''    assert.equal(calls[2], source("sync-service/migrations/002-pocket-sync-object-head-store.sql"));
-    assert.equal(calls[3], "verify");''',
+    assert.equal(ended, 1);''',
 '''    assert.equal(calls[2], source("sync-service/migrations/002-pocket-sync-object-head-store.sql"));
     assert.equal(calls[3], source("sync-service/migrations/003-pocket-sync-persistence-authority.sql"));
-    assert.equal(calls[4], "verify");''', "p049 migrations")
+    assert.equal(ended, 1);''', "p049 migrations")
 write(p, s)
 
 p = "tests/p118-object-head-schema-adoption.test.js"
