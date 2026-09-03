@@ -17,16 +17,22 @@ jobs:
         run: |
           python3 .github/p168-server4.py
           python3 .github/p168-owner.py
+          python3 .github/p168-reentry.py
       - name: Diff hygiene
         run: git diff --check
-      - name: Core and same-owner affected tests
+      - name: Focused and affected tests
         run: |
-          timeout 300s node --test --test-concurrency=1 \
+          timeout 360s node --test --test-concurrency=1 \
             tests/p032-sync-remote-client.test.js \
             tests/p034-sync-service-core.test.js \
+            tests/p041-emergency-recovery.test.js \
             tests/p042-synced-owner-controller.test.js \
+            tests/p045-browser-sync-runtime.test.js \
             tests/p047-sync-postgres-store.test.js \
             tests/p049-sync-postgres-runtime.test.js \
+            tests/p051-local-sync-integration.test.js \
+            tests/p051a-local-sync-acceptance.test.js \
+            tests/p052-additional-device.test.js \
             tests/p117-starling-object-head-postgres-store.test.js \
             tests/p119-starling-object-head-service.test.js \
             tests/p160-owner-save-preparation.test.js \
