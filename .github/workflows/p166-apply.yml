@@ -32,13 +32,18 @@ jobs:
       - name: Directly affected server and client suites
         run: >-
           node --test --test-concurrency=1
+          tests/p032-sync-remote-client.test.js
           tests/p034-sync-service-core.test.js
+          tests/p042-synced-owner-controller.test.js
           tests/p046-sync-http-adapter.test.js
           tests/p047-postgres-store.test.js
           tests/p049-sync-server-runtime.test.js
           tests/p052-additional-device.test.js
-          tests/p119-starling-object-head-service.test.js
-          tests/p120-starling-object-head-postgres-store.test.js
+          tests/p074-production-composition.test.js
+          tests/p076-production-browser-boundary.test.js
+          tests/p117-sync-object-head-postgres-store.test.js
+          tests/p118-object-head-schema-adoption.test.js
+          tests/p119-object-head-server-transport.test.js
           tests/p164-starling-successor-mirror.test.js
       - name: Repository check
         run: npm run check
