@@ -9,6 +9,12 @@ def once(text, old, new, label):
     if count != 1: raise SystemExit(f"{label}: expected 1, found {count}")
     return text.replace(old, new, 1)
 
+# This temporary helper was superseded by p166-fix2.py after its historic
+# memory-store assumption proved stale. Keep it in the ordered construction
+# sequence without partially mutating the tree before the corrected helper runs.
+print("P166 legacy compatibility helper superseded by p166-fix2")
+raise SystemExit(0)
+
 # Keep the historic exact store surface {transact}; expose the new fence only as
 # private capability on that existing function.
 for p in ["sync-service/pocket-sync-postgres-store.js", "tests/helpers/p034-memory-service-store.js"]:
