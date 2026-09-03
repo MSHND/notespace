@@ -1074,21 +1074,32 @@ function validateStoredRecord(collection, input, key) {
     }
     case COLLECTIONS.persistenceAuthorities: {
       if (input.kind !== "pocket.sync.persistence-authority"
-          || input.syncedPocketId !== key || input.currentMode !== "whole-record"
-          || input.rollbackRevision !== null || input.adoptionHead !== null) {
+          || input.syncedPocketId !== key
+          || !["whole-record", "starling"].includes(input.currentMode)) {
         throw serviceError("service-state-invalid", 500);
       }
       identifier(input.accountId, "service-state-invalid");
       identifier(input.syncedPocketId, "service-state-invalid");
       positiveInteger(input.authorityRevision, "service-state-invalid");
-      if (input.transition !== null) {
-        if (!sameKeys(input.transition, ["transitionId", "expectedAuthorityRevision"])) {
+      if (input.currentMode === "whole-record") {
+        if (input.rollbackRevision !== null || input.adoptionHead !== null) {
           throw serviceError("service-state-invalid", 500);
         }
-        identifier(input.transition.transitionId, "service-state-invalid");
-        positiveInteger(input.transition.expectedAuthorityRevision, "service-state-invalid");
-        if (input.transition.expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER
-            || input.transition.expectedAuthorityRevision + 1 !== input.authorityRevision) {
+        if (input.transition !== null) {
+          if (!sameKeys(input.transition, ["transitionId", "expectedAuthorityRevision"])) {
+            throw serviceError("service-state-invalid", 500);
+          }
+          identifier(input.transition.transitionId, "service-state-invalid");
+          positiveInteger(input.transition.expectedAuthorityRevision, "service-state-invalid");
+          if (input.transition.expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER
+              || input.transition.expectedAuthorityRevision + 1 !== input.authorityRevision) {
+            throw serviceError("service-state-invalid", 500);
+          }
+        }
+      } else {
+        if (input.transition !== null
+            || !Number.isSafeInteger(input.rollbackRevision) || input.rollbackRevision < 1
+            || !validateStarlingHead(input.adoptionHead, "service-state-invalid")) {
           throw serviceError("service-state-invalid", 500);
         }
       }
@@ -1502,6 +1513,44 @@ function validateAuthorityFenceRequest(input) {
     transitionId: identifier(value.transitionId) });
 }
 
+function validateStarlingHead(input, code = "service-request-invalid") {
+  const status = code === "service-state-invalid" ? 500 : 400;
+  if (!isObject(input) || !sameKeys(input, ["schema", "revision", "sealRef"])
+      || input.schema !== "pocket.starling.head.v1"
+      || !Number.isSafeInteger(input.revision) || input.revision < 1
+      || typeof input.sealRef !== "string" || input.sealRef.length < 1
+      || input.sealRef.length > POLICY.maximumIdentifierLength
+      || input.sealRef !== input.sealRef.trim()) {
+    throw serviceError(code, status);
+  }
+  return frozen({ schema: input.schema, revision: input.revision, sealRef: input.sealRef });
+}
+
+function sameStarlingHead(left, right) {
+  return !!left && !!right && left.schema === right.schema
+    && left.revision === right.revision && left.sealRef === right.sealRef;
+}
+
+function validateAuthorityAdoptionRequest(input) {
+  const fields = ["apiVersion", "operationId", "syncedPocketId", "expectedAuthorityRevision",
+    "transitionId", "rollbackRevision", "adoptionHead"];
+  const value = exactObject(input, fields, fields);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  const expectedAuthorityRevision = positiveInteger(value.expectedAuthorityRevision);
+  if (expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER) {
+    throw serviceError("service-request-invalid");
+  }
+  return frozen({
+    apiVersion: 1,
+    operationId: identifier(value.operationId),
+    syncedPocketId: identifier(value.syncedPocketId),
+    expectedAuthorityRevision,
+    transitionId: identifier(value.transitionId),
+    rollbackRevision: positiveInteger(value.rollbackRevision),
+    adoptionHead: validateStarlingHead(value.adoptionHead),
+  });
+}
+
 function validateObjectHeadRequest(input, fields) {
   const value = exactObject(input, fields, fields);
   if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
@@ -1771,6 +1820,12 @@ function createServiceCore(input) {
 
   function persistenceAuthorityIsSteady(authority) {
     return authority.currentMode === "whole-record" && authority.transition === null;
+  }
+
+  function persistenceAuthorityIsStarlingSteady(authority) {
+    return authority.currentMode === "starling" && authority.transition === null
+      && Number.isSafeInteger(authority.rollbackRevision) && authority.rollbackRevision >= 1
+      && !!authority.adoptionHead;
   }
 
   async function readRecord(transaction, collection, key) {
@@ -2131,9 +2186,17 @@ function createServiceCore(input) {
   async function initialiseShadowHead(value) {
     const { context, body } = invocation(value);
     const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId"]);
-    await authoriseObjectHead(context, request.syncedPocketId);
-    const head = await objectHeadCall("initialiseHead", [request.syncedPocketId]);
-    return frozen({ status: 200, body: { apiVersion: 1, ok: true, operationId: request.operationId, syncedPocketId: request.syncedPocketId, head }, session: null });
+    const account = await authoriseObjectHead(context, request.syncedPocketId);
+    return withPocketAuthorityLock(request.syncedPocketId, async () => {
+      const authority = await transact("readonly", (transaction) =>
+        readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId));
+      if (!persistenceAuthorityIsSteady(authority)) {
+        throw serviceError("service-persistence-authority-transition-active", 409);
+      }
+      const head = await objectHeadCall("initialiseHead", [request.syncedPocketId]);
+      return frozen({ status: 200, body: { apiVersion: 1, ok: true,
+        operationId: request.operationId, syncedPocketId: request.syncedPocketId, head }, session: null });
+    });
   }
 
   async function readShadowHead(value) {
@@ -2146,19 +2209,35 @@ function createServiceCore(input) {
 
   async function compareAndSetShadowHead(value) {
     const { context, body } = invocation(value);
-    const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId", "expectedHead", "candidateSealStorageRef"]);
+    const legacyFields = ["apiVersion", "operationId", "syncedPocketId", "expectedHead", "candidateSealStorageRef"];
+    const authoritativeFields = [...legacyFields, "expectedAuthorityRevision"];
+    const authoritative = isObject(body) && Object.prototype.hasOwnProperty.call(body, "expectedAuthorityRevision");
+    const request = validateObjectHeadRequest(body, authoritative ? authoritativeFields : legacyFields);
+    if (authoritative) positiveInteger(request.expectedAuthorityRevision);
     const account = await authoriseObjectHead(context, request.syncedPocketId);
     return withPocketAuthorityLock(request.syncedPocketId, async () => {
       const authority = await transact("readonly", (transaction) =>
         readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId));
-      if (!persistenceAuthorityIsSteady(authority)) {
-        throw serviceError("service-persistence-authority-transition-active", 409);
+      if (authority.currentMode === "whole-record") {
+        if (!persistenceAuthorityIsSteady(authority)) {
+          throw serviceError("service-persistence-authority-transition-active", 409);
+        }
+        if (authoritative) return authorityConflictWrapper(request, authority);
+      } else if (persistenceAuthorityIsStarlingSteady(authority)) {
+        if (!authoritative || request.expectedAuthorityRevision !== authority.authorityRevision) {
+          return authorityConflictWrapper(request, authority);
+        }
+      } else {
+        return authorityConflictWrapper(request, authority);
       }
-    const result = await objectHeadCall("compareAndSetHead", [request.syncedPocketId, request.expectedHead, request.candidateSealStorageRef]);
-    return frozen({ status: result.ok ? 200 : 409, body: { apiVersion: 1, ok: result.ok === true,
-      operationId: request.operationId, syncedPocketId: request.syncedPocketId, ...result }, session: null });
+      const result = await objectHeadCall("compareAndSetHead", [request.syncedPocketId,
+        request.expectedHead, request.candidateSealStorageRef]);
+      return frozen({ status: result.ok ? 200 : 409, body: { apiVersion: 1,
+        ok: result.ok === true, operationId: request.operationId,
+        syncedPocketId: request.syncedPocketId, ...result }, session: null });
     });
   }
+
   async function completedReplay(transaction, ceremony, digest, atMilliseconds) {
     if (ceremony.finishDigest !== digest) {
       throw serviceError("service-operation-reuse", 409);
@@ -3177,14 +3256,14 @@ function createServiceCore(input) {
     const { context, body } = invocation(value);
     const request = validateReadPersistenceAuthorityRequest(body);
     const at = clockMilliseconds();
-    return transact("readonly", async (transaction) => {
+    return withPocketAuthorityLock(request.syncedPocketId, () => transact("readonly", async (transaction) => {
       const { account } = await authoriseSession(transaction, context.sessionId, at);
       await requireOwnedPocket(transaction, account, request.syncedPocketId);
       const authority = await readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId);
       return frozen({ status: 200, body: { apiVersion: 1, ok: true,
         operationId: request.operationId, syncedPocketId: request.syncedPocketId,
         authority: persistenceAuthoritySnapshot(authority) }, session: null });
-    });
+    }));
   }
 
   function authorityConflictWrapper(request, authority) {
@@ -3224,6 +3303,51 @@ function createServiceCore(input) {
         operationId: request.operationId, syncedPocketId: request.syncedPocketId,
         status: "fenced", replayed: false, authority: persistenceAuthoritySnapshot(next) },
         session: null });
+    });
+  }
+
+  async function commitStarlingAuthorityAdoption(value) {
+    const { context, body } = invocation(value);
+    const request = validateAuthorityAdoptionRequest(body);
+    const at = clockMilliseconds();
+    return transactAuthorityMutation(request.syncedPocketId, async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const authority = await readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId);
+      if (authority.authorityRevision !== request.expectedAuthorityRevision
+          || authority.currentMode !== "whole-record"
+          || authority.transition === null
+          || authority.transition.transitionId !== request.transitionId
+          || authority.transition.expectedAuthorityRevision + 1 !== authority.authorityRevision
+          || authority.rollbackRevision !== null || authority.adoptionHead !== null) {
+        return authorityConflictWrapper(request, authority);
+      }
+      const pocket = await readRecord(transaction, COLLECTIONS.pockets, request.syncedPocketId);
+      if (!pocket || pocket.accountId !== account.accountId
+          || pocket.revision !== request.rollbackRevision) {
+        return authorityConflictWrapper(request, authority);
+      }
+      const actualHead = await objectHeadCall("readHead", [request.syncedPocketId]);
+      if (!sameStarlingHead(actualHead, request.adoptionHead)) {
+        return authorityConflictWrapper(request, authority);
+      }
+      if (authority.authorityRevision >= Number.MAX_SAFE_INTEGER) {
+        return authorityConflictWrapper(request, authority);
+      }
+      const next = frozen({
+        ...authority,
+        storeVersion: authority.storeVersion + 1,
+        authorityRevision: authority.authorityRevision + 1,
+        currentMode: "starling",
+        transition: null,
+        rollbackRevision: request.rollbackRevision,
+        adoptionHead: request.adoptionHead,
+      });
+      await replaceRecord(transaction, COLLECTIONS.persistenceAuthorities,
+        request.syncedPocketId, authority, next);
+      return frozen({ status: 200, body: { apiVersion: 1, ok: true,
+        operationId: request.operationId, syncedPocketId: request.syncedPocketId,
+        status: "adopted", authority: persistenceAuthoritySnapshot(next) }, session: null });
     });
   }
 
@@ -3781,6 +3905,7 @@ function createServiceCore(input) {
     conditionalUpload,
     readPersistenceAuthority,
     acquirePersistenceAuthorityFence,
+    commitStarlingAuthorityAdoption,
     releasePersistenceAuthorityFence,
     listEnvelopes,
     downloadEnvelope,

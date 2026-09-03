@@ -36,6 +36,7 @@ persisting session state, retrying work, or changing a Pocket owner.
     conditionalUpload: "/pockets/content/conditional-upload",
     readPersistenceAuthority: "/pockets/authority/read",
     acquirePersistenceAuthorityFence: "/pockets/authority/fence/acquire",
+    commitStarlingAuthorityAdoption: "/pockets/authority/starling/adopt",
     releasePersistenceAuthorityFence: "/pockets/authority/fence/release",
     listEnvelopes: "/pockets/envelopes/list",
     downloadEnvelope: "/pockets/envelopes/download",
@@ -147,6 +148,7 @@ persisting session state, retrying work, or changing a Pocket owner.
       statuses: [
         "conditionalUpload",
         "acquirePersistenceAuthorityFence",
+        "commitStarlingAuthorityAdoption",
         "releasePersistenceAuthorityFence",
         "addEnvelope",
         "revokeEnvelope",
@@ -1366,25 +1368,52 @@ persisting session state, retrying work, or changing a Pocket owner.
     return value;
   }
 
+  function validatePersistenceAuthorityHead(input) {
+    const value = exactObject(input, ["schema", "revision", "sealRef"],
+      ["schema", "revision", "sealRef"]);
+    if (value.schema !== "pocket.starling.head.v1"
+        || !Number.isSafeInteger(value.revision) || value.revision < 1
+        || typeof value.sealRef !== "string" || value.sealRef.length < 1
+        || value.sealRef.length > IDENTIFIER_LIMIT || value.sealRef !== value.sealRef.trim()) {
+      throw remoteError("remote-response-invalid");
+    }
+    return frozen(value);
+  }
+
   function validatePersistenceAuthorityState(input) {
     const value = exactObject(input, ["schema", "authorityRevision", "currentMode",
       "transition", "rollbackRevision", "adoptionHead"],
     ["schema", "authorityRevision", "currentMode", "transition", "rollbackRevision", "adoptionHead"]);
     if (value.schema !== "pocket.sync.persistence-authority.v1"
-        || value.currentMode !== "whole-record" || value.rollbackRevision !== null
-        || value.adoptionHead !== null) throw remoteError("remote-response-invalid");
+        || !["whole-record", "starling"].includes(value.currentMode)) {
+      throw remoteError("remote-response-invalid");
+    }
     const authorityRevision = revision(value.authorityRevision, 1, "remote-response-invalid");
     let transition = null;
-    if (value.transition !== null) {
-      const current = exactObject(value.transition, ["transitionId", "expectedAuthorityRevision"],
-        ["transitionId", "expectedAuthorityRevision"]);
-      transition = frozen({ transitionId: identifier(current.transitionId, "remote-response-invalid"),
-        expectedAuthorityRevision: revision(current.expectedAuthorityRevision, 1, "remote-response-invalid") });
-      if (transition.expectedAuthorityRevision + 1 !== authorityRevision) {
+    let rollbackRevision = null;
+    let adoptionHead = null;
+    if (value.currentMode === "whole-record") {
+      if (value.rollbackRevision !== null || value.adoptionHead !== null) {
         throw remoteError("remote-response-invalid");
       }
+      if (value.transition !== null) {
+        const current = exactObject(value.transition, ["transitionId", "expectedAuthorityRevision"],
+          ["transitionId", "expectedAuthorityRevision"]);
+        const expectedAuthorityRevision = revision(current.expectedAuthorityRevision, 1, "remote-response-invalid");
+        if (expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER
+            || expectedAuthorityRevision + 1 !== authorityRevision) {
+          throw remoteError("remote-response-invalid");
+        }
+        transition = frozen({ transitionId: identifier(current.transitionId, "remote-response-invalid"),
+          expectedAuthorityRevision });
+      }
+    } else {
+      if (value.transition !== null) throw remoteError("remote-response-invalid");
+      rollbackRevision = revision(value.rollbackRevision, 1, "remote-response-invalid");
+      adoptionHead = validatePersistenceAuthorityHead(value.adoptionHead);
     }
-    return frozen({ ...value, authorityRevision, transition });
+    return frozen({ schema: value.schema, authorityRevision, currentMode: value.currentMode,
+      transition, rollbackRevision, adoptionHead });
   }
 
   function validatePersistenceAuthorityReadRequest(input) {
@@ -1406,6 +1435,20 @@ persisting session state, retrying work, or changing a Pocket owner.
     return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
       syncedPocketId: identifier(value.syncedPocketId), expectedAuthorityRevision,
       transitionId: identifier(value.transitionId) });
+  }
+
+  function validatePersistenceAuthorityAdoptionRequest(input) {
+    const fields = ["apiVersion", "operationId", "syncedPocketId", "expectedAuthorityRevision",
+      "transitionId", "rollbackRevision", "adoptionHead"];
+    const value = exactObject(input, fields, fields, "remote-request-invalid");
+    if (value.apiVersion !== 1) throw remoteError("remote-request-invalid");
+    const expectedAuthorityRevision = revision(value.expectedAuthorityRevision, 1);
+    if (expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER) throw remoteError("remote-request-invalid");
+    const head = validatePersistenceAuthorityHead(value.adoptionHead);
+    return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+      syncedPocketId: identifier(value.syncedPocketId), expectedAuthorityRevision,
+      transitionId: identifier(value.transitionId), rollbackRevision: revision(value.rollbackRevision, 1),
+      adoptionHead: head });
   }
 
   function validatePersistenceAuthorityBase(input, request) {
@@ -1430,27 +1473,28 @@ persisting session state, retrying work, or changing a Pocket owner.
         const value = exactObject(result.body, ["apiVersion", "ok", "operationId", "syncedPocketId",
           "status", "replayed", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId",
           "status", "replayed", "authority"]);
-        if (value.apiVersion !== 1 || value.ok !== true || value.status !== "fenced"
-            || value.operationId !== request.operationId || value.syncedPocketId !== request.syncedPocketId
+        if (value.apiVersion !== 1 || value.ok !== true || value.operationId !== request.operationId
+            || value.syncedPocketId !== request.syncedPocketId || value.status !== "fenced"
             || typeof value.replayed !== "boolean") throw remoteError("remote-response-invalid");
         return frozen({ ...value, authority: validatePersistenceAuthorityState(value.authority) });
       }
       const value = exactObject(result.body, ["apiVersion", "ok", "operationId", "syncedPocketId",
         "status", "reason", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId",
         "status", "reason", "authority"]);
-      if (value.apiVersion !== 1 || value.ok !== false || value.status !== "conflict"
-          || value.reason !== "authority-conflict" || value.operationId !== request.operationId
-          || value.syncedPocketId !== request.syncedPocketId) throw remoteError("remote-response-invalid");
+      if (value.apiVersion !== 1 || value.ok !== false || value.operationId !== request.operationId
+          || value.syncedPocketId !== request.syncedPocketId || value.status !== "conflict"
+          || value.reason !== "authority-conflict") throw remoteError("remote-response-invalid");
       return frozen({ ...value, authority: validatePersistenceAuthorityState(value.authority) });
     }
-    async function releaseFence(input) {
-      const request = validatePersistenceAuthorityFenceRequest(input);
-      const result = validateTransportResult(await callTransport(remote, "releasePersistenceAuthorityFence", request), [200, 409]);
+    async function commitStarlingAdoption(input) {
+      const request = validatePersistenceAuthorityAdoptionRequest(input);
+      const result = validateTransportResult(await callTransport(remote, "commitStarlingAuthorityAdoption", request), [200, 409]);
       if (result.status === 200) {
         const value = exactObject(result.body, ["apiVersion", "ok", "operationId", "syncedPocketId",
-          "status", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId", "status", "authority"]);
-        if (value.apiVersion !== 1 || value.ok !== true || value.status !== "released"
-            || value.operationId !== request.operationId || value.syncedPocketId !== request.syncedPocketId) {
+          "status", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId",
+          "status", "authority"]);
+        if (value.apiVersion !== 1 || value.ok !== true || value.operationId !== request.operationId
+            || value.syncedPocketId !== request.syncedPocketId || value.status !== "adopted") {
           throw remoteError("remote-response-invalid");
         }
         return frozen({ ...value, authority: validatePersistenceAuthorityState(value.authority) });
@@ -1458,12 +1502,33 @@ persisting session state, retrying work, or changing a Pocket owner.
       const value = exactObject(result.body, ["apiVersion", "ok", "operationId", "syncedPocketId",
         "status", "reason", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId",
         "status", "reason", "authority"]);
-      if (value.apiVersion !== 1 || value.ok !== false || value.status !== "conflict"
-          || value.reason !== "authority-conflict" || value.operationId !== request.operationId
-          || value.syncedPocketId !== request.syncedPocketId) throw remoteError("remote-response-invalid");
+      if (value.apiVersion !== 1 || value.ok !== false || value.operationId !== request.operationId
+          || value.syncedPocketId !== request.syncedPocketId || value.status !== "conflict"
+          || value.reason !== "authority-conflict") throw remoteError("remote-response-invalid");
       return frozen({ ...value, authority: validatePersistenceAuthorityState(value.authority) });
     }
-    return Object.freeze({ read, acquireFence, releaseFence });
+    async function releaseFence(input) {
+      const request = validatePersistenceAuthorityFenceRequest(input);
+      const result = validateTransportResult(await callTransport(remote, "releasePersistenceAuthorityFence", request), [200, 409]);
+      if (result.status === 200) {
+        const value = exactObject(result.body, ["apiVersion", "ok", "operationId", "syncedPocketId",
+          "status", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId",
+          "status", "authority"]);
+        if (value.apiVersion !== 1 || value.ok !== true || value.operationId !== request.operationId
+            || value.syncedPocketId !== request.syncedPocketId || value.status !== "released") {
+          throw remoteError("remote-response-invalid");
+        }
+        return frozen({ ...value, authority: validatePersistenceAuthorityState(value.authority) });
+      }
+      const value = exactObject(result.body, ["apiVersion", "ok", "operationId", "syncedPocketId",
+        "status", "reason", "authority"], ["apiVersion", "ok", "operationId", "syncedPocketId",
+        "status", "reason", "authority"]);
+      if (value.apiVersion !== 1 || value.ok !== false || value.operationId !== request.operationId
+          || value.syncedPocketId !== request.syncedPocketId || value.status !== "conflict"
+          || value.reason !== "authority-conflict") throw remoteError("remote-response-invalid");
+      return frozen({ ...value, authority: validatePersistenceAuthorityState(value.authority) });
+    }
+    return Object.freeze({ read, acquireFence, commitStarlingAdoption, releaseFence });
   }
 
   function createObjectHeadService({ transport } = {}) {
@@ -1485,8 +1550,11 @@ persisting session state, retrying work, or changing a Pocket owner.
       if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || (!allowNull && body.head===null)) throw remoteError("remote-response-invalid"); return frozen({...body,head:body.head===null?null:validateShadowHead(body.head,"remote-response-invalid")});
     }
     async function compareAndSetShadowHead(input) {
-      const value=validateObjectHeadRequest(input,["apiVersion","operationId","syncedPocketId","expectedHead","candidateSealStorageRef"]), request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId),expectedHead:validateShadowHead(value.expectedHead),candidateSealStorageRef:validateObjectRef(value.candidateSealStorageRef)}), result=validateTransportResult(await callTransport(remote,"compareAndSetShadowHead",request),[200,409]);
-      if (result.status===409 && result.body?.reason==="service-persistence-authority-transition-active") { const body=exactObject(result.body,["apiVersion","ok","reason"],["apiVersion","ok","reason"]); if (body.apiVersion!==1 || body.ok!==false || body.reason!=="service-persistence-authority-transition-active") throw remoteError("remote-response-invalid"); return frozen({apiVersion:1,ok:false,operationId:request.operationId,syncedPocketId:request.syncedPocketId,reason:"authority-transition-active"}); } if (result.status===409) { const body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","reason"],["apiVersion","ok","operationId","syncedPocketId","reason"]); if (body.apiVersion!==1 || body.ok!==false || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || !["head-conflict","candidate-object-missing","head-revision-exhausted"].includes(body.reason)) throw remoteError("remote-response-invalid"); return frozen(body); }
+      const legacyFields=["apiVersion","operationId","syncedPocketId","expectedHead","candidateSealStorageRef"], authoritative=!!input && typeof input==="object" && Object.prototype.hasOwnProperty.call(input,"expectedAuthorityRevision"), fields=authoritative?[...legacyFields,"expectedAuthorityRevision"]:legacyFields;
+      const value=validateObjectHeadRequest(input,fields), request=frozen({apiVersion:1,operationId:identifier(value.operationId),syncedPocketId:identifier(value.syncedPocketId),expectedHead:validateShadowHead(value.expectedHead),candidateSealStorageRef:validateObjectRef(value.candidateSealStorageRef),...(authoritative?{expectedAuthorityRevision:revision(value.expectedAuthorityRevision,1)}:{})}), result=validateTransportResult(await callTransport(remote,"compareAndSetShadowHead",request),[200,409]);
+      if (result.status===409 && result.body?.reason==="service-persistence-authority-transition-active") { const body=exactObject(result.body,["apiVersion","ok","reason"],["apiVersion","ok","reason"]); if (body.apiVersion!==1 || body.ok!==false || body.reason!=="service-persistence-authority-transition-active") throw remoteError("remote-response-invalid"); return frozen({apiVersion:1,ok:false,operationId:request.operationId,syncedPocketId:request.syncedPocketId,reason:"authority-transition-active"}); }
+      if (result.status===409 && result.body?.reason==="authority-conflict") { const body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","status","reason","authority"],["apiVersion","ok","operationId","syncedPocketId","status","reason","authority"]); if (body.apiVersion!==1 || body.ok!==false || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || body.status!=="conflict" || body.reason!=="authority-conflict") throw remoteError("remote-response-invalid"); return frozen({...body,authority:validatePersistenceAuthorityState(body.authority)}); }
+      if (result.status===409) { const body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","reason","head"],["apiVersion","ok","operationId","syncedPocketId","reason"]); if (body.apiVersion!==1 || body.ok!==false || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || !["head-conflict","candidate-object-missing","head-revision-exhausted"].includes(body.reason)) throw remoteError("remote-response-invalid"); return frozen(body); }
       const body=exactObject(result.body,["apiVersion","ok","operationId","syncedPocketId","head"],["apiVersion","ok","operationId","syncedPocketId","head"]), head=validateShadowHead(body.head,"remote-response-invalid"); if (body.apiVersion!==1 || body.ok!==true || body.operationId!==request.operationId || body.syncedPocketId!==request.syncedPocketId || head.revision!==request.expectedHead.revision+1 || head.sealRef!==request.candidateSealStorageRef) throw remoteError("remote-response-invalid"); return frozen({...body,head});
     }
     return Object.freeze({putOpaqueObject,getOpaqueObject,objectPresence,initialiseShadowHead:(input)=>headCall("initialiseShadowHead",input),readShadowHead:(input)=>headCall("readShadowHead",input,true),compareAndSetShadowHead});

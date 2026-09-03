@@ -194,8 +194,12 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
       return Object.freeze({ outcome: "objects-present" });
     }
 
-    async function attemptHead(descriptorInput) {
+    async function attemptHead(descriptorInput, expectedAuthorityRevision = null) {
       const descriptor = await provePresence(descriptorInput, "pre-cas");
+      if (expectedAuthorityRevision !== null
+          && (!Number.isSafeInteger(expectedAuthorityRevision) || expectedAuthorityRevision < 1)) {
+        throw fail("authority-revision-invalid");
+      }
       let response;
       try {
         response = await service.compareAndSetShadowHead({
@@ -204,6 +208,7 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
           syncedPocketId: descriptor.syncedPocketId,
           expectedHead: descriptor.expectedHead,
           candidateSealStorageRef: descriptor.candidateSealStorageRef,
+          ...(expectedAuthorityRevision === null ? {} : { expectedAuthorityRevision }),
         });
       } catch (_error) {
         throw fail("head-outcome-unknown");
@@ -217,8 +222,8 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
         }
         return Object.freeze({ outcome: "committed", head: accepted });
       }
-      if (response?.ok === false && response.reason === "head-conflict") {
-        return Object.freeze({ outcome: "conflict" });
+      if (response?.ok === false && ["head-conflict", "authority-conflict"].includes(response.reason)) {
+        return Object.freeze({ outcome: "conflict", reason: response.reason });
       }
       if (response?.ok === false && ["candidate-object-missing", "head-revision-exhausted"].includes(response.reason)) {
         return Object.freeze({ outcome: "not-committed", reason: response.reason });

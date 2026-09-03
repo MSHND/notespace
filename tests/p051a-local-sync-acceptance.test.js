@@ -13,6 +13,25 @@ const { createMemoryServiceStore } = require("./helpers/p034-memory-service-stor
 const { createSharedDeviceStoreState, createMemoryDeviceStoreDriver } = require("./helpers/p030-memory-device-store-driver.js");
 
 const ROOT = path.resolve(__dirname, "..");
+
+function p168ObjectHeadStore() {
+  let head = { schema: "pocket.starling.head.v1", revision: 0, sealRef: null };
+  return Object.freeze({
+    async putObject() { return { ok: true, created: true }; },
+    async getObject() { return null; },
+    async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+    async initialiseHead() { return head; },
+    async readHead() { return head; },
+    async compareAndSetHead(_pocket, expected, candidate) {
+      if (head.revision !== expected.revision || head.sealRef !== expected.sealRef) {
+        return { ok: false, reason: "head-conflict", head };
+      }
+      head = { schema: head.schema, revision: head.revision + 1, sealRef: candidate };
+      return { ok: true, head };
+    },
+  });
+}
+
 const ORIGIN = "https://sync.pocket.example";
 const SERVICE_ROOT = "/pocket-sync/v1";
 const NOW = Date.parse("2042-01-01T00:00:00.000Z");
@@ -48,6 +67,7 @@ function createAdapterHarness() {
   let randomCall = 0;
   const core = createServiceCore({
     store: driver.store,
+    objectHeadStore: p168ObjectHeadStore(),
     webAuthnVerifier: Object.freeze({
       async verifyRegistration(input) {
         return { credentialId: input.credential.id, publicKey: b64(bytes(64, 81)),

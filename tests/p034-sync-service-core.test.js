@@ -348,6 +348,7 @@ test("factory configuration, store boundary, origin and lifetimes are exact", ()
     "conditionalUpload",
     "readPersistenceAuthority",
     "acquirePersistenceAuthorityFence",
+    "commitStarlingAuthorityAdoption",
     "releasePersistenceAuthorityFence",
     "listEnvelopes",
     "downloadEnvelope",

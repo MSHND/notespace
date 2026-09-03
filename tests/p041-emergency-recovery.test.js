@@ -17,6 +17,25 @@ const {
 const fixtures = require("./helpers/p032-remote-fixtures.js");
 
 const ROOT = path.resolve(__dirname, "..");
+
+function p168ObjectHeadStore() {
+  let head = { schema: "pocket.starling.head.v1", revision: 0, sealRef: null };
+  return Object.freeze({
+    async putObject() { return { ok: true, created: true }; },
+    async getObject() { return null; },
+    async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+    async initialiseHead() { return head; },
+    async readHead() { return head; },
+    async compareAndSetHead(_pocket, expected, candidate) {
+      if (head.revision !== expected.revision || head.sealRef !== expected.sealRef) {
+        return { ok: false, reason: "head-conflict", head };
+      }
+      head = { schema: head.schema, revision: head.revision + 1, sealRef: candidate };
+      return { ok: true, head };
+    },
+  });
+}
+
 const MODULE = "js/pocket-sync-emergency-recovery.js";
 const ORIGIN = "https://sync.pocket.example";
 const NOW = Date.parse("2041-01-01T00:00:00.000Z");
@@ -108,6 +127,7 @@ async function createActivatedHarness(options = {}) {
   const verifierCalls = { registration: 0, recovery: 0 };
   const core = createServiceCore({
     store: serviceDriver.store,
+    objectHeadStore: p168ObjectHeadStore(),
     webAuthnVerifier: Object.freeze({
       async verifyRegistration(input) {
         verifierCalls.registration += 1;

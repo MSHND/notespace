@@ -129,6 +129,7 @@ test("policy and route map are exact and deeply frozen", () => {
     conditionalUpload: "/pockets/content/conditional-upload",
     readPersistenceAuthority: "/pockets/authority/read",
     acquirePersistenceAuthorityFence: "/pockets/authority/fence/acquire",
+    commitStarlingAuthorityAdoption: "/pockets/authority/starling/adopt",
     releasePersistenceAuthorityFence: "/pockets/authority/fence/release",
     listEnvelopes: "/pockets/envelopes/list",
     downloadEnvelope: "/pockets/envelopes/download",
@@ -192,7 +193,7 @@ test("browser transport and injected services enforce exact method surfaces", ()
   );
   assert.deepEqual(
     Object.keys(api.createPersistenceAuthorityService({ transport })),
-    ["read", "acquireFence", "releaseFence"]
+    ["read", "acquireFence", "commitStarlingAdoption", "releaseFence"]
   );
   assert.throws(() => api.createContentService({ transport: {} }), remoteErrorCode("remote-transport-invalid"));
   assert.throws(() => api.createContentService({

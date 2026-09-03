@@ -13,6 +13,7 @@ const CLIENT_ROUTES = Object.freeze({
   conditionalUpload: "/pockets/content/conditional-upload",
   readPersistenceAuthority: "/pockets/authority/read",
   acquirePersistenceAuthorityFence: "/pockets/authority/fence/acquire",
+  commitStarlingAuthorityAdoption: "/pockets/authority/starling/adopt",
   releasePersistenceAuthorityFence: "/pockets/authority/fence/release",
   listEnvelopes: "/pockets/envelopes/list",
   downloadEnvelope: "/pockets/envelopes/download",
@@ -123,7 +124,7 @@ function limitsFor(routeName) {
     response: ["downloadEncryptedRecord", "getOpaqueObject"].includes(routeName)
       ? POLICY.contentJsonLimitBytes : POLICY.smallJsonLimitBytes,
     statuses: ["conditionalUpload", "acquirePersistenceAuthorityFence",
-      "releasePersistenceAuthorityFence", "addEnvelope", "revokeEnvelope",
+      "commitStarlingAuthorityAdoption", "releasePersistenceAuthorityFence", "addEnvelope", "revokeEnvelope",
       "initialiseRecovery", "rotateRecovery", "compareAndSetShadowHead"].includes(routeName)
       ? Object.freeze([200, 409]) : Object.freeze([200]),
   });

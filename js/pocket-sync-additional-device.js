@@ -4,6 +4,7 @@
 
   const LIMIT = 2 ** 20;
   const FACTORY = ["crypto", "deviceStore", "accountClient", "discoveryService", "contentService", "envelopeService", "randomBytes", "now"];
+  const AUTHORITY_FACTORY = ["persistenceAuthorityService", "objectHeadService"];
   const DEPENDENCIES = ["captureTarget", "isTargetCurrent", "validatePayload", "adoptOpenedPocket"];
   const ACTIVATION_DRAFT_FIELDS = Object.freeze([
     "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
@@ -20,8 +21,10 @@
   const freeze = (value) => Object.freeze(value);
 
   function validFactory(value) {
-    if (!object(value) || Object.keys(value).some((key) => ![...FACTORY, "strandedActivationClassifier"].includes(key))
+    if (!object(value) || Object.keys(value).some((key) => ![...FACTORY, ...AUTHORITY_FACTORY, "strandedActivationClassifier"].includes(key))
         || FACTORY.some((key) => !Object.prototype.hasOwnProperty.call(value, key))) return null;
+    const authorityCount = AUTHORITY_FACTORY.filter((key) => Object.prototype.hasOwnProperty.call(value, key)).length;
+    if (![0, AUTHORITY_FACTORY.length].includes(authorityCount)) return null;
     const required = {
       crypto: ["generateDeviceWrappingKey", "deriveWrappingKey", "openMasterKeyBundle", "openContent", "sealContent", "encodeBase64Url", "validateNonExtractableAesKey"],
       deviceStore: ["open", "readPocket", "createPocket", "replacePocket", "reservePocketEncryptionUsage"],
@@ -33,6 +36,12 @@
     if (Object.keys(required).some((name) => !object(value[name]) || required[name].some((method) => typeof value[name][method] !== "function"))
         || !object(value.crypto.FORMAT) || typeof value.crypto.FORMAT.contentType !== "string"
         || typeof value.randomBytes !== "function" || typeof value.now !== "function"
+        || (authorityCount === AUTHORITY_FACTORY.length
+          && (!object(value.persistenceAuthorityService)
+            || typeof value.persistenceAuthorityService.read !== "function"
+            || !object(value.objectHeadService)
+            || typeof value.objectHeadService.readShadowHead !== "function"
+            || typeof value.objectHeadService.getOpaqueObject !== "function"))
         || (value.strandedActivationClassifier !== undefined
           && (!object(value.strandedActivationClassifier)
             || typeof value.strandedActivationClassifier.classify !== "function"))) return null;
@@ -88,6 +97,124 @@
     const payload = await config.crypto.openContent(content.record, masterKey, content.context);
     if (dependencies.validatePayload(payload) !== true) return null;
     return { content, revision: revision.revision, payload };
+  }
+
+  function authorityMode(value) {
+    const authority = value?.authority;
+    if (!object(authority) || authority.schema !== "pocket.sync.persistence-authority.v1"
+        || !Number.isSafeInteger(authority.authorityRevision) || authority.authorityRevision < 1) return null;
+    if (authority.currentMode === "whole-record") {
+      if (authority.transition !== null || authority.rollbackRevision !== null || authority.adoptionHead !== null) return null;
+      return freeze({ mode: "whole-record", authorityRevision: authority.authorityRevision });
+    }
+    const head = authority.adoptionHead;
+    if (authority.currentMode !== "starling" || authority.transition !== null
+        || !Number.isSafeInteger(authority.rollbackRevision) || authority.rollbackRevision < 1
+        || !object(head) || head.schema !== "pocket.starling.head.v1"
+        || !Number.isSafeInteger(head.revision) || head.revision < 1
+        || typeof head.sealRef !== "string" || !head.sealRef) return null;
+    return freeze({ mode: "starling", authorityRevision: authority.authorityRevision,
+      rollbackRevision: authority.rollbackRevision,
+      adoptionHead: freeze({ schema: head.schema, revision: head.revision, sealRef: head.sealRef }) });
+  }
+
+  async function readAuthority(config, syncedPocketId) {
+    if (!config.persistenceAuthorityService) return freeze({ mode: "legacy" });
+    const operationId = randomId(config);
+    if (!operationId) return null;
+    try {
+      return authorityMode(await config.persistenceAuthorityService.read({
+        apiVersion: 1, operationId, syncedPocketId,
+      }));
+    } catch (_error) { return null; }
+  }
+
+  async function readRollbackContent(config, syncedPocketId, revision) {
+    const operationId = randomId(config);
+    if (!operationId) return null;
+    try {
+      const current = await config.contentService.readRevision({ apiVersion: 1, operationId, syncedPocketId });
+      if (!current || current.recordPresent !== true || current.revision !== revision) return null;
+      const downloadId = randomId(config);
+      if (!downloadId) return null;
+      const downloaded = await config.contentService.downloadEncryptedRecord({
+        apiVersion: 1, operationId: downloadId, syncedPocketId, revision,
+      });
+      if (!downloaded || downloaded.syncedPocketId !== syncedPocketId || downloaded.revision !== revision) return null;
+      return freeze({ content: remoteContent(config, syncedPocketId, revision, downloaded.encryptedRecord), revision });
+    } catch (_error) { return null; }
+  }
+
+  function starlingPayload(document) {
+    if (!object(document) || typeof document.schema !== "string" || !document.schema
+        || typeof document.writtenAt !== "string" || !document.writtenAt
+        || !Array.isArray(document.nodes) || !Array.isArray(document.tombstones)
+        || !object(document.rootExtras) || !object(document.dataExtras)) return null;
+    let nodes; let tombstones; let rootExtras; let dataExtras;
+    try {
+      nodes = JSON.parse(JSON.stringify(document.nodes));
+      tombstones = JSON.parse(JSON.stringify(document.tombstones));
+      rootExtras = JSON.parse(JSON.stringify(document.rootExtras));
+      dataExtras = JSON.parse(JSON.stringify(document.dataExtras));
+    } catch (_error) { return null; }
+    return {
+      ...rootExtras,
+      schema: "portal.export.v1",
+      exportedAt: document.writtenAt,
+      writtenAt: document.writtenAt,
+      mainThoughtTree: nodes,
+      mainThoughtTreeTombstones: tombstones,
+      data: { ...dataExtras, mainThoughtTree: nodes, mainThoughtTreeTombstones: tombstones },
+    };
+  }
+
+  async function readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority,
+    dependencies, authority) {
+    const remoteOpen = global.PocketStarlingRemoteOpenShadow;
+    const materialize = global.PocketStarlingMaterializeShadow;
+    if (!semanticAuthority || !remoteOpen || typeof remoteOpen.createRemoteOpener !== "function"
+        || !materialize || typeof materialize.materializeAccepted !== "function") return null;
+    let opened;
+    try {
+      opened = await remoteOpen.createRemoteOpener({
+        objectHeadService: config.objectHeadService,
+        operationIdFactory: () => randomId(config),
+      }).openRemote({ masterKey, context: { syncedPocketId }, semanticAuthority });
+    } catch (_error) { return null; }
+    if (!opened || opened.outcome !== "opened" || !opened.session
+        || !object(opened.head) || opened.head.schema !== "pocket.starling.head.v1"
+        || !Number.isSafeInteger(opened.head.revision) || opened.head.revision < 1) return null;
+    let materialized;
+    try { materialized = await materialize.materializeAccepted(opened.session); }
+    catch (_error) { return null; }
+    const payload = materialized?.ok === true ? starlingPayload(materialized.document) : null;
+    if (!payload || dependencies.validatePayload(payload) !== true) return null;
+    const rollback = await readRollbackContent(config, syncedPocketId, authority.rollbackRevision);
+    if (!rollback) return null;
+    return freeze({ kind: "starling", payload, content: rollback.content,
+      revision: rollback.revision, head: opened.head, authorityRevision: authority.authorityRevision });
+  }
+
+  async function selectCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies) {
+    const authority = await readAuthority(config, syncedPocketId);
+    if (!authority) return null;
+    if (authority.mode === "legacy") {
+      const current = await readCurrent(config, syncedPocketId, randomId(config), masterKey, dependencies);
+      return current ? freeze({ kind: "whole-record", ...current }) : null;
+    }
+    if (authority.mode === "starling") {
+      return readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, authority);
+    }
+    if (authority.mode !== "whole-record") return null;
+    const current = await readCurrent(config, syncedPocketId, randomId(config), masterKey, dependencies);
+    if (!current) return null;
+    const after = await readAuthority(config, syncedPocketId);
+    if (!after) return null;
+    if (after.mode === "starling") {
+      return readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, after);
+    }
+    if (after.mode !== "whole-record" || after.authorityRevision !== authority.authorityRevision) return null;
+    return freeze({ kind: "whole-record", ...current });
   }
 
   async function completedActivationDraft(config, record) {
@@ -193,10 +320,13 @@
       && matches[0].derivationVersion === null;
   }
 
-  async function adoptOpened(config, dependencies, captured, syncedPocketId, record, masterKey) {
-    const latest = await readCurrent(config, syncedPocketId, randomId(config), masterKey, dependencies);
+  async function adoptOpened(config, dependencies, captured, syncedPocketId, record, masterKey, semanticAuthority = null) {
+    const latest = await selectCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies);
     if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
-    if (latest.revision !== record.remote.confirmedRevision) {
+    if (latest.kind === "starling" && latest.revision !== record.remote.confirmedRevision) {
+      return fail("additional-device-state-invalid");
+    }
+    if (latest.kind === "whole-record" && latest.revision !== record.remote.confirmedRevision) {
       const stored = await config.deviceStore.readPocket(syncedPocketId);
       if (!(await completedDeviceRecord(config, stored, syncedPocketId))) return fail("additional-device-state-invalid");
       const current = stored.activationDraft === null ? stored : await config.deviceStore.reservePocketEncryptionUsage(
@@ -232,11 +362,15 @@
         || !listedDeviceEnvelope(record, listed)) return fail("remote-device-state-invalid");
     let bundle;
     try {
-      bundle = await config.crypto.openMasterKeyBundle(record.deviceEnvelope.record,
-        record.deviceWrappingKey, record.deviceEnvelope.context, []);
+      bundle = config.persistenceAuthorityService
+        ? await config.crypto.openMasterKeyBundle(record.deviceEnvelope.record,
+          record.deviceWrappingKey, record.deviceEnvelope.context, [], { semanticAuthority: true })
+        : await config.crypto.openMasterKeyBundle(record.deviceEnvelope.record,
+          record.deviceWrappingKey, record.deviceEnvelope.context, []);
       config.crypto.validateNonExtractableAesKey(bundle?.masterKey);
     } catch (_error) { return fail("additional-device-open-failed"); }
-    return adoptOpened(config, dependencies, captured, syncedPocketId, record, bundle.masterKey);
+    return adoptOpened(config, dependencies, captured, syncedPocketId, record,
+      bundle.masterKey, bundle.semanticAuthority || null);
   }
 
   async function openExisting(dependenciesInput) {
@@ -298,15 +432,19 @@
       } catch (_error) { return fail("additional-device-open-failed"); }
       prf.fill(0); prf = null;
       try {
-        opened = await config.crypto.openMasterKeyBundle(downloaded.envelope.encryptedEnvelope,
-          wrappingKey, context, []);
+        opened = config.persistenceAuthorityService
+          ? await config.crypto.openMasterKeyBundle(downloaded.envelope.encryptedEnvelope,
+            wrappingKey, context, [], { semanticAuthority: true })
+          : await config.crypto.openMasterKeyBundle(downloaded.envelope.encryptedEnvelope,
+            wrappingKey, context, []);
       } catch (error) {
         return error?.code === "master-key-envelope-authentication-failed"
           ? fail("recovery-required") : fail("additional-device-open-failed");
       }
       try { config.crypto.validateNonExtractableAesKey(opened?.masterKey); }
       catch (_error) { return fail("additional-device-open-failed"); }
-      const current = await readCurrent(config, discovery.syncedPocketId, randomId(config), opened.masterKey, dependencies);
+      const current = await selectCurrent(config, discovery.syncedPocketId, opened.masterKey,
+        opened.semanticAuthority || null, dependencies);
       if (!current) return fail("remote-content-invalid");
       let draft;
       let envelope;
@@ -367,17 +505,28 @@
         usage: Object.assign({}, record.usage, { masterKeyContentEncryptionLimit: LIMIT }),
         additionalDeviceDraft: null });
       await config.deviceStore.replacePocket(discovery.syncedPocketId, record.storeRevision, finalRecord);
-      const durableBundle = await config.crypto.openMasterKeyBundle(
-        finalRecord.deviceEnvelope.record,
-        finalRecord.deviceWrappingKey,
-        finalRecord.deviceEnvelope.context,
-        []
-      );
+      const durableBundle = config.persistenceAuthorityService
+        ? await config.crypto.openMasterKeyBundle(
+          finalRecord.deviceEnvelope.record,
+          finalRecord.deviceWrappingKey,
+          finalRecord.deviceEnvelope.context,
+          [],
+          { semanticAuthority: true }
+        )
+        : await config.crypto.openMasterKeyBundle(
+          finalRecord.deviceEnvelope.record,
+          finalRecord.deviceWrappingKey,
+          finalRecord.deviceEnvelope.context,
+          []
+        );
       config.crypto.validateNonExtractableAesKey(durableBundle?.masterKey);
-      const latest = await readCurrent(config, discovery.syncedPocketId, randomId(config),
-        durableBundle.masterKey, dependencies);
+      const latest = await selectCurrent(config, discovery.syncedPocketId, durableBundle.masterKey,
+        durableBundle.semanticAuthority || null, dependencies);
       if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
-      if (latest.revision !== current.revision) {
+      if (latest.kind === "starling" && latest.revision !== current.revision) {
+        return fail("additional-device-state-invalid");
+      }
+      if (latest.kind === "whole-record" && latest.revision !== current.revision) {
         const stored = await config.deviceStore.readPocket(discovery.syncedPocketId);
         const refreshed = Object.assign({}, stored, { storeRevision: stored.storeRevision + 1, content: latest.content, remote: { confirmedRevision: latest.revision, pending: null, conflict: null } });
         await config.deviceStore.replacePocket(discovery.syncedPocketId, stored.storeRevision, refreshed);

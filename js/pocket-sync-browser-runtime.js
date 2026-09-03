@@ -344,7 +344,8 @@
 
   function createRuntime(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)
-        || Object.keys(input).some((field) => ![...SERVICE_FIELDS, "discoveryService", "environment"].includes(field))
+        || Object.keys(input).some((field) => ![...SERVICE_FIELDS, "discoveryService",
+          "persistenceAuthorityService", "objectHeadService", "environment"].includes(field))
         || SERVICE_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(input, field))) {
       throw new Error("Pocket Sync browser runtime configuration-invalid.");
     }
@@ -354,6 +355,13 @@
     requireMethods(config.contentService, ["conditionalUpload"], "content-service-invalid");
     requireMethods(config.envelopeService, ["addEnvelope"], "envelope-service-invalid");
     requireMethods(config.recoveryService, ["initialiseRecovery"], "recovery-service-invalid");
+    const authorityPair = Number(Object.prototype.hasOwnProperty.call(config, "persistenceAuthorityService"))
+      + Number(Object.prototype.hasOwnProperty.call(config, "objectHeadService"));
+    if (![0, 2].includes(authorityPair)) throw new Error("Pocket Sync browser runtime configuration-invalid.");
+    if (authorityPair === 2) {
+      requireMethods(config.persistenceAuthorityService, ["read"], "persistence-authority-service-invalid");
+      requireMethods(config.objectHeadService, ["readShadowHead", "getOpaqueObject"], "object-head-service-invalid");
+    }
     const security = global.PocketSyncSecurityContract;
     const crypto = global.PocketSyncCrypto;
     const storeApi = global.PocketSyncDeviceStore;
@@ -486,6 +494,18 @@
         found.record.deviceEnvelope.context,
         []
       );
+      if (authorityPair === 2) {
+        let authority = null;
+        try {
+          const operationId = crypto.encodeBase64Url(browserRandom(environment)(32));
+          authority = (await config.persistenceAuthorityService.read({ apiVersion: 1,
+            operationId, syncedPocketId: found.record.syncedPocketId }))?.authority || null;
+        } catch (_error) { return safeFailure("recovery-authority-attention"); }
+        if (!authority || authority.currentMode !== "whole-record" || authority.transition !== null
+            || authority.rollbackRevision !== null || authority.adoptionHead !== null) {
+          return safeFailure("recovery-starling-authority-attention");
+        }
+      }
       const payload = await crypto.openContent(
         found.record.content.record,
         bundle.masterKey,
@@ -683,6 +703,10 @@
         discoveryService: config.discoveryService,
         contentService: config.contentService,
         envelopeService: config.envelopeService,
+        ...(authorityPair === 2 ? {
+          persistenceAuthorityService: config.persistenceAuthorityService,
+          objectHeadService: config.objectHeadService,
+        } : {}),
         randomBytes: browserRandom(environment), now,
       });
       const jsonSafetyToken = discardTarget?.ownerKind === "json"

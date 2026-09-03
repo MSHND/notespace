@@ -57,11 +57,17 @@
     }
     const transport = remote.createBrowserJsonTransport({ serviceRoot });
     const contentService = remote.createContentService({ transport });
+    const authorityServices = typeof remote.createPersistenceAuthorityService === "function"
+      && typeof remote.createObjectHeadService === "function"
+      ? { persistenceAuthorityService: remote.createPersistenceAuthorityService({ transport }),
+        objectHeadService: remote.createObjectHeadService({ transport }) }
+      : {};
     const runtime = browser.createRuntime({
       accountService: remote.createAccountService({ transport }),
       ...(typeof remote.createPocketDiscoveryService === "function"
         ? { discoveryService: remote.createPocketDiscoveryService({ transport }) } : {}),
       contentService,
+      ...authorityServices,
       envelopeService: remote.createEnvelopeService({ transport }),
       recoveryService: remote.createRecoveryService({ transport }),
     });
@@ -129,6 +135,18 @@
         if (!store || !crypto || typeof store.open !== "function" || typeof store.readStoredRecord !== "function"
             || typeof crypto.openMasterKeyBundle !== "function" || typeof crypto.openContent !== "function") {
           return safeFailure("round-trip-unavailable");
+        }
+        if (authorityServices.persistenceAuthorityService) {
+          const authorityOperation = operationId();
+          if (!authorityOperation) return safeFailure("round-trip-unavailable");
+          const authority = await authorityServices.persistenceAuthorityService.read({
+            apiVersion: 1, operationId: authorityOperation, syncedPocketId,
+          });
+          if (authority?.authority?.currentMode === "starling") {
+            return safeFailure("round-trip-starling-authority");
+          }
+          if (authority?.authority?.currentMode !== "whole-record"
+              || authority.authority.transition !== null) return safeFailure("round-trip-not-ready");
         }
         const savedPayload = currentPayload();
         const savedFingerprint = recordFingerprint(savedPayload);
