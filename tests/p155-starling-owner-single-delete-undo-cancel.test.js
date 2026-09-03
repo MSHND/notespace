@@ -22,6 +22,10 @@ function operationTypes(context) { return plain(context.state.ops).map((operatio
 function add(context) { context.insertSiblingBelow("a"); const id = context.state.inlineEdit.id; assert.equal(context.commitInlineEdit(id, "New").ok, true); return { id, operation: plain(context.state.ops.at(-1)) }; }
 function witness(context) { return context.lastDeleteUndoSnapshot?.p155DeleteUndoWitness; }
 function hasWitness(context) { return Object.hasOwn(context.lastDeleteUndoSnapshot || {}, "p155DeleteUndoWitness"); }
+function deleteContinuity(context, sequence) {
+  const preparation = context.freezePocketStarlingOwnerWorkingSetThrough(sequence);
+  return plain(context.currentPocketStarlingAcceptedDeleteContinuity(preparation));
+}
 
 test("P155 cancels only the captured uncovered leaf Delete after real immediate undo", () => {
   const original = [node("before", "root", 10), node("target", "root", 20), node("after", "root", 90)], context = runtime(original);
@@ -31,8 +35,28 @@ test("P155 cancels only the captured uncovered leaf Delete after real immediate 
   assert.equal(Object.getOwnPropertyDescriptor(snapshot, "p155DeleteUndoWitness").enumerable, false);
   assert.deepEqual(plain(witness(context)), { nodeId: "target", operationSequence: forward.seq, forwardSemanticCaptured: true });
   assert.equal(JSON.stringify({ snapshot, nodes: context.state.nodes, tombstones: context.state.tombstones, ops: context.state.ops }).includes("p155DeleteUndoWitness"), false);
+  assert.deepEqual(deleteContinuity(context, forward.seq), { nodeId: "target", operationSequence: forward.seq });
   context.undoLastDeleteAction(); const undo = plain(context.state.ops.at(-1));
-  assert.deepEqual(plain(context.state.nodes), original); assert.deepEqual(context.state.tombstones, []); assert.deepEqual(operationTypes(context), ["delete", "undo_delete"]); assert.equal(context.state.operationHighWater, undo.seq); assert.deepEqual(captured(context, undo.seq), []);
+  assert.deepEqual(plain(context.state.nodes), original); assert.deepEqual(context.state.tombstones, []); assert.deepEqual(operationTypes(context), ["delete", "undo_delete"]); assert.equal(context.state.operationHighWater, undo.seq); assert.deepEqual(captured(context, undo.seq), []); assert.equal(deleteContinuity(context, undo.seq), null);
+  context.deleteNodeById("target", { confirm: false }); const repeated = plain(context.state.ops.at(-1));
+  assert.deepEqual(deleteContinuity(context, repeated.seq), { nodeId: "target", operationSequence: repeated.seq });
+});
+
+test("P170 retires Delete continuity with its working set and never carries it across reset or adoption", () => {
+  const original = [node("before", "root", 10), node("target", "root", 20), node("after", "root", 30)], context = runtime(original);
+  context.deleteNodeById("target", { confirm: false });
+  const first = plain(context.state.ops.at(-1));
+  assert.deepEqual(deleteContinuity(context, first.seq), { nodeId: "target", operationSequence: first.seq });
+  assert.equal(context.retainPocketOperationsAfterSequence(first.seq), 0);
+  assert.equal(deleteContinuity(context, first.seq), null);
+  context.state.nodes = plain(original); context.state.tombstones = [];
+  context.deleteNodeById("target", { confirm: false });
+  const second = plain(context.state.ops.at(-1));
+  assert.deepEqual(deleteContinuity(context, second.seq), { nodeId: "target", operationSequence: second.seq });
+  assert.equal(context.resetPocketStarlingOwnerWorkingSetJournal(), true);
+  assert.equal(deleteContinuity(context, second.seq), null);
+  context.adoptPocketOperations([{ type: "adopted", seq: second.seq + 1, at: "2026-09-03T00:00:00.000Z" }], second.seq + 1);
+  assert.equal(deleteContinuity(context, second.seq + 1), null);
 });
 
 test("P155 cancels exactly one valid branch-root Delete without descendant semantics", () => {

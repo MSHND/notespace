@@ -21,6 +21,16 @@ function validPocketOperationSequence(value) {
 let pocketStarlingOwnerWorkingSetJournal = null;
 const pocketStarlingAcceptedDeleteContinuities = new Map();
 
+function retirePocketStarlingAcceptedDeleteContinuitiesThrough(sequence) {
+  const boundary = validPocketOperationSequence(sequence);
+  if (!boundary) return;
+  for (const continuity of pocketStarlingAcceptedDeleteContinuities.values()) {
+    if (continuity.operationSequence <= boundary) {
+      pocketStarlingAcceptedDeleteContinuities.delete(continuity.operationSequence);
+    }
+  }
+}
+
 function capturePocketStarlingOwnerWorkingOperations(sequence, operations) {
   const journal = pocketStarlingOwnerWorkingSetJournal;
   if (!journal || typeof journal.capture !== "function") return false;
@@ -288,10 +298,12 @@ function discardPocketStarlingOwnerWorkingOperations(sequence) {
   const journal = pocketStarlingOwnerWorkingSetJournal;
   if (!target || !journal || typeof journal.discardUncovered !== "function") return false;
   try {
-    return journal.discardUncovered(
+    const discarded = journal.discardUncovered(
       target,
       validPocketOperationSequence(state.activeSaveOperationCeiling)
     ) === true;
+    if (discarded) pocketStarlingAcceptedDeleteContinuities.delete(target);
+    return discarded;
   } catch {
     return false;
   }
@@ -310,6 +322,7 @@ function freezePocketStarlingOwnerWorkingSetThrough(sequence) {
 function resetPocketStarlingOwnerWorkingSetJournal() {
   const previous = pocketStarlingOwnerWorkingSetJournal;
   pocketStarlingOwnerWorkingSetJournal = null;
+  pocketStarlingAcceptedDeleteContinuities.clear();
   try {
     if (previous && typeof previous.invalidate === "function") previous.invalidate();
   } catch {}
@@ -461,6 +474,7 @@ function retainPocketOperationsAfterSequence(sequence) {
         pocketStarlingOwnerWorkingSetJournal.retainAfter(boundary);
       }
     } catch {}
+    retirePocketStarlingAcceptedDeleteContinuitiesThrough(boundary);
   }
   return state.ops.length;
 }

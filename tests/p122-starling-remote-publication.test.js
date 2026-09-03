@@ -616,7 +616,7 @@ test("P122 composes with the real P120 object Head service over its transport co
   assert.equal(calls.length, 0);
 });
 
-test("P122 remains absent from live assets and owner, Save, Sync, and open paths", () => {
+test("P122 remains absent from direct live assets but is served only through the installed Starling save path", () => {
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8"),
     assets = [...html.matchAll(/<script src="([^"]+)"><\/script>/g)].map(
       (match) => match[1],
@@ -642,7 +642,7 @@ test("P122 remains absent from live assets and owner, Save, Sync, and open paths
     }),
     servedPaths = manifest.map((entry) => entry.path),
     servedJavaScript = manifest.filter((entry) => entry.path.endsWith(".js"));
-  assert.equal(servedPaths.includes("/js/pocket-starling-publication-shadow.js"), false);
+  assert.equal(servedPaths.includes("/js/pocket-starling-publication-shadow.js"), true);
   for (const expected of [
     "/js/pocket-sync-local-integration.js",
     "/js/pocket-sync-additional-device.js",
@@ -650,8 +650,11 @@ test("P122 remains absent from live assets and owner, Save, Sync, and open paths
     "/js/pocket-sync-production-bootstrap.js",
   ])
     assert.equal(servedPaths.includes(expected), true, expected);
-  for (const entry of servedJavaScript) {
-    const source = fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8");
-    assert.equal(source.includes("PocketStarlingPublicationShadow"), false, entry.path);
-  }
+  const consumers = servedJavaScript.filter((entry) => {
+    return fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingPublicationShadow");
+  }).map((entry) => entry.path).sort();
+  assert.deepEqual(consumers, [
+    "/js/pocket-starling-owner-bootstrap.js",
+    "/js/pocket-starling-publication-shadow.js",
+  ]);
 });
