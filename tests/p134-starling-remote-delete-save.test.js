@@ -148,8 +148,8 @@ test("P134 keeps remote Delete bounded for a two-thousand-descendant branch", as
   const fresh = await open(f, "large-fresh"); assert.equal((await fresh.opened.session.readPlacement("branch")).parentId, ""); assert.equal((await fresh.opened.session.readPlacement("desc-1999")).parentId, "desc-1998");
 });
 
-test("P134 remains dormant in production", () => {
+test("P170 makes only the P134 Delete preparation seam live", () => {
   const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" });
-  for (const file of ["js/pocket-starling-remote-edit-shadow.js", "js/pocket-starling-remote-save-shadow.js"])
-    assert.equal(manifest.some((entry) => entry.path === `/${file}`), false);
+  assert.equal(manifest.some((entry) => entry.path === "/js/pocket-starling-remote-edit-shadow.js"), true);
+  assert.equal(manifest.some((entry) => entry.path === "/js/pocket-starling-remote-save-shadow.js"), false);
 });

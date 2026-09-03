@@ -4,7 +4,8 @@
   "use strict";
 
   const baseStates = new WeakMap(),
-    semanticTransitions = new WeakMap();
+    semanticTransitions = new WeakMap(),
+    deleteRetentionWitnesses = new WeakMap();
 
   function fail(reason, extra = {}) {
     return { ok: false, reason, ...extra };
@@ -1215,7 +1216,9 @@
         }),
       });
     registerSemanticTransition(state, candidate);
-    return Object.freeze({ ok: true, candidate });
+    const retainedIndex = retained.count;
+    deleteRetentionWitnesses.set(candidate, Object.freeze([{ nodeId, retainedIndex }]));
+    return Object.freeze({ ok: true, candidate, retainedIndex });
   }
 
   async function restoreBranch(base, nodeId, fromIndex, newParentId, toIndex) {
@@ -1762,6 +1765,7 @@
       stats,
     );
     let finalCandidate = null;
+    const deleteRetentions = [];
     for (let operationIndex = 0; operationIndex < captured.operations.length; operationIndex += 1) {
       const operation = captured.operations[operationIndex];
       const workingBase = Object.freeze({});
@@ -1788,6 +1792,13 @@
       if (!result.candidate) {
         if (finalCandidate) semanticTransitions.delete(finalCandidate);
         return composeFailure("invalid-compose-input", operationIndex);
+      }
+      if (operation.type === "delete") {
+        if (!Number.isSafeInteger(result.retainedIndex) || result.retainedIndex < 0) {
+          if (finalCandidate) semanticTransitions.delete(finalCandidate);
+          return composeFailure("invalid-compose-input", operationIndex);
+        }
+        deleteRetentions.push(Object.freeze({ nodeId: operation.input.nodeId, retainedIndex: result.retainedIndex }));
       }
       if (finalCandidate) semanticTransitions.delete(finalCandidate);
       finalCandidate = result.candidate;
@@ -1840,7 +1851,13 @@
     });
     semanticTransitions.delete(finalCandidate);
     registerSemanticTransition(workingState, candidate);
+    if (deleteRetentions.length > 0) deleteRetentionWitnesses.set(candidate, Object.freeze(deleteRetentions));
     return Object.freeze({ ok: true, changed: true, candidate });
+  }
+
+  function deleteRetentionWitness(candidate) {
+    const witness = deleteRetentionWitnesses.get(candidate);
+    return witness || Object.freeze([]);
   }
 
   global.PocketStarlingLogicalEditShadow = Object.freeze({
@@ -1852,6 +1869,7 @@
     restoreBranch,
     reorder: reorderWithinParent,
     compose,
+    deleteRetentionWitness,
     diagnostics,
     semanticTransitionBinding,
   });

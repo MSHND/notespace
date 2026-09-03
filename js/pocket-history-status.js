@@ -19,6 +19,7 @@ function validPocketOperationSequence(value) {
 }
 
 let pocketStarlingOwnerWorkingSetJournal = null;
+const pocketStarlingAcceptedDeleteContinuities = new Map();
 
 function capturePocketStarlingOwnerWorkingOperations(sequence, operations) {
   const journal = pocketStarlingOwnerWorkingSetJournal;
@@ -183,10 +184,28 @@ function capturePocketStarlingNodeDelete(sequence, nodeId, fromIndex) {
     !Number.isSafeInteger(fromIndex) ||
     fromIndex < 0
   ) return false;
-  return capturePocketStarlingOwnerWorkingOperations(target, [{
+  const captured = capturePocketStarlingOwnerWorkingOperations(target, [{
     type: "delete",
     input: { nodeId, fromIndex },
   }]);
+  if (captured) pocketStarlingAcceptedDeleteContinuities.set(target, Object.freeze({
+    nodeId, fromIndex, operationSequence: target,
+  }));
+  return captured;
+}
+
+function currentPocketStarlingAcceptedDeleteContinuity(preparation) {
+  if (!preparation || !Number.isSafeInteger(preparation.ceiling) || preparation.ceiling < 1
+      || !Array.isArray(preparation.operations)) return null;
+  const matches = [];
+  for (const continuity of pocketStarlingAcceptedDeleteContinuities.values()) {
+    if (continuity.operationSequence > preparation.ceiling) continue;
+    if (preparation.operations.some((operation) => operation?.type === "delete"
+        && operation.input?.nodeId === continuity.nodeId
+        && operation.input?.fromIndex === continuity.fromIndex)) matches.push(continuity);
+  }
+  return matches.length === 1 ? { nodeId: matches[0].nodeId,
+    operationSequence: matches[0].operationSequence } : null;
 }
 
 function capturePocketStarlingNodeDeletes(sequence, deletes) {
@@ -555,7 +574,7 @@ function createTreeUndoSnapshot(kind = "") {
   };
 }
 
-function restoreTreeUndoSnapshot(snapshot) {
+function restoreTreeUndoSnapshot(snapshot, acceptedRestoreOperation = null) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   if (!snapshot || !Array.isArray(snapshot.nodes)) return false;
   const insertUndoWitness = snapshot.kind === "add" ? snapshot.p153InsertUndoWitness : null;
@@ -577,7 +596,7 @@ function restoreTreeUndoSnapshot(snapshot) {
     && deleteUndoWitness.nodeId.length <= 80
     && validPocketOperationSequence(deleteUndoWitness.operationSequence) === deleteUndoWitness.operationSequence
     && deleteUndoWitness.forwardSemanticCaptured === true;
-  const deleteUndoEligible = validDeleteUndoWitness
+  const deleteUndoEligible = acceptedRestoreOperation === null && validDeleteUndoWitness
     && validPocketOperationSequence(state.operationHighWater) === deleteUndoWitness.operationSequence
     && !nodeMap().has(deleteUndoWitness.nodeId);
   const moveUndoWitness = snapshot.p151MoveUndoWitness;
@@ -622,6 +641,9 @@ function restoreTreeUndoSnapshot(snapshot) {
   if (deleteUndoEligible) {
     discardPocketStarlingOwnerWorkingOperations(deleteUndoWitness.operationSequence);
   }
+  if (acceptedRestoreOperation !== null) {
+    capturePocketStarlingOwnerWorkingOperations(undoOperation?.seq, [acceptedRestoreOperation]);
+  }
   if (currentMovePlacement && moveUndoEligible && typeof sortNodesForParent === "function") {
     const restoredNode = nodeMap().get(moveUndoWitness.nodeId) || null;
     const restoredParentId = restoredNode?.parentId || "root";
@@ -654,7 +676,39 @@ function undoLastDeleteAction() {
     setStatus("Nothing to undo.", "warn");
     return;
   }
-  const restored = restoreTreeUndoSnapshot(lastDeleteUndoSnapshot);
+  const snapshot = lastDeleteUndoSnapshot;
+  const witness = snapshot.p155DeleteUndoWitness;
+  const settled = witness && validPocketOperationSequence(witness.operationSequence)
+    && !state.ops.some((operation) => validPocketOperationSequence(operation?.seq) === witness.operationSequence);
+  if (settled) {
+    const original = Array.isArray(snapshot.nodes) ? snapshot.nodes.find((node) => node?.id === witness.nodeId) : null;
+    const parentId = original?.parentId || "root";
+    const oldSiblings = Array.isArray(snapshot.nodes) ? snapshot.nodes.filter((node) => (node?.parentId || "root") === parentId) : [];
+    const toIndex = oldSiblings.findIndex((node) => node?.id === witness.nodeId);
+    const currentSiblings = typeof sortNodesForParent === "function" ? sortNodesForParent(parentId) : [];
+    const request = window.PocketSyncActiveIntegration?.admitAcceptedDeleteRestore;
+    if (!original || toIndex < 0 || !Array.isArray(currentSiblings) || toIndex > currentSiblings.length
+        || typeof request !== "function") {
+      setStatus("Saved Delete undo needs current Starling proof.", "warn");
+      return Promise.resolve(false);
+    }
+    setStatus("Checking saved Delete against current Starling Head…", "warn");
+    return Promise.resolve(request({ nodeId: witness.nodeId, operationSequence: witness.operationSequence,
+      newParentId: parentId, toIndex })).then((admitted) => {
+      if (!admitted?.ok || lastDeleteUndoSnapshot !== snapshot
+          || validPocketOperationSequence(state.operationHighWater) !== witness.operationSequence) {
+        setStatus("Saved Delete undo needs attention.", "warn");
+        return false;
+      }
+      const restored = restoreTreeUndoSnapshot(snapshot, admitted.operation);
+      if (!restored) { setStatus("Undo unavailable.", "warn"); return false; }
+      lastDeleteUndoSnapshot = null;
+      lastTreeUndoKind = lastMoveUndoSnapshot ? "move" : "";
+      setStatus("Restored locally. Save to settle it.", "ok");
+      return true;
+    }).catch(() => { setStatus("Saved Delete undo needs attention.", "warn"); return false; });
+  }
+  const restored = restoreTreeUndoSnapshot(snapshot);
   if (!restored) {
     setStatus("Undo unavailable.", "warn");
     return;

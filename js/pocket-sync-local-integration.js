@@ -126,6 +126,14 @@
       catch (_error) { return safeFailure("recovery-discovery-needs-attention"); }
     }
 
+    async function admitAcceptedDeleteRestore(input) {
+      try {
+        return typeof runtime.admitAcceptedDeleteRestore === "function"
+          ? await runtime.admitAcceptedDeleteRestore(input)
+          : safeFailure("restore-owner-unavailable");
+      } catch (_error) { return safeFailure("restore-owner-unavailable"); }
+    }
+
     async function verifyRoundTrip() {
       if (!syncedPocketId) return safeFailure("sync-not-activated");
       try {
@@ -192,8 +200,9 @@
 
     const integration = frozen({
       activate, resume, openExisting, captureSwitchTarget, saveSwitchTarget, discardSwitchTarget,
-      recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip,
+      recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip, admitAcceptedDeleteRestore,
     });
+    global.PocketSyncActiveIntegration = integration;
     try { global.PocketSyncUi?.install?.(integration); } catch (_error) {}
     return integration;
   }

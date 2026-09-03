@@ -790,8 +790,18 @@
       return safeFailure("recovery-discovery-needs-attention");
     }
 
+    async function admitAcceptedDeleteRestore(input) {
+      const session = global.capturePocketFileSaveSession?.();
+      if (!session || session.ownerKind !== "synced"
+          || typeof syncedOwnerController.admitAcceptedDeleteRestore !== "function") {
+        return frozen({ ok: false, reason: "restore-owner-unavailable" });
+      }
+      try { return await syncedOwnerController.admitAcceptedDeleteRestore(input); }
+      catch (_error) { return frozen({ ok: false, reason: "restore-owner-unavailable" }); }
+    }
+
     return frozen({ activate, resume, openExisting, recoverExisting, resumeRecovery,
-      restartLegacyRecovery, findRecoveryAttempt });
+      restartLegacyRecovery, findRecoveryAttempt, admitAcceptedDeleteRestore });
   }
 
   global.PocketSyncBrowserRuntime = frozen({ createRuntime });

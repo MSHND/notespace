@@ -200,6 +200,7 @@ test("P133 deletes exactly one current branch into retained roots with semantic 
     baseBranchChildrenRef = trieValue((ref) => staged.stager.store.get(ref), baseRoot.childrenRef, "branch"),
     deleted = await api.deleteBranch(opened.base, "branch", 1);
   assert.equal(deleted.ok, true, JSON.stringify(deleted));
+  assert.equal(deleted.retainedIndex, 1, "the retained append slot is not the source fromIndex");
   assert.equal(Object.isFrozen(deleted.candidate), true);
   assert.equal(objectAt(deleted.candidate.resolveLogical, deleted.candidate.sealRef).previousSealRef, staged.stage.sealRef);
   assert.deepEqual([...reachableOwned(staged, deleted.candidate)].sort(), [...deleted.candidate.newLogicalRefs].sort());
@@ -291,8 +292,8 @@ function apiDiagnostics(c, base) {
   return result;
 }
 
-test("P133 remains dormant in production", () => {
+test("P170 makes the P133 Delete primitive available to the live Starling owner", () => {
   const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" });
   assert.equal(source("index.html").includes(MODULE), false);
-  assert.equal(manifest.some((entry) => entry.path === "/js/pocket-starling-logical-edit-shadow.js"), false);
+  assert.equal(manifest.some((entry) => entry.path === "/js/pocket-starling-logical-edit-shadow.js"), true);
 });

@@ -107,6 +107,6 @@ test("P135 Restore work remains bounded for a two-thousand-descendant retained b
   const candidate = audit(c, staged, restored.candidate), relation = c.PocketStarlingPlacementShadow.materialise(candidate.structural); assert.equal(relation.ok, true, JSON.stringify(relation)); assert.equal(relation.relation.parents["desc-1999"], "desc-1998"); assert.deepEqual(plain(relation.relation.children.branch), ["desc-0000"]);
 });
 
-test("P135 remains dormant in production", () => {
-  const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }); assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes(MODULE), false); assert.equal(manifest.some((entry) => entry.path === `/${MODULE}`), false);
+test("P170 makes P135 Restore proof available to the live Starling owner", () => {
+  const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }); assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes(MODULE), false); assert.equal(manifest.some((entry) => entry.path === `/${MODULE}`), true);
 });

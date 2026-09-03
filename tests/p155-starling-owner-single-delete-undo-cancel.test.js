@@ -44,14 +44,36 @@ test("P155 cancels exactly one valid branch-root Delete without descendant seman
   assert.deepEqual(plain(context.state.nodes), original); assert.deepEqual(context.state.tombstones, []); assert.deepEqual(operationTypes(context), ["delete", "undo_delete"]); assert.deepEqual(captured(context, undo.seq), []);
 });
 
-test("P155 leaves Save-covered and settled Delete material semantically untouched", () => {
+test("P155 leaves Save-covered material untouched and P170 refuses a settled Delete without an accepted receipt", async () => {
   const covered = runtime([node("a", "root", 10), node("target", "root", 20)]); covered.deleteNodeById("target", { confirm: false }); const coveredDelete = plain(covered.state.ops.at(-1));
   covered.state.activeSaveOperationCeiling = coveredDelete.seq; covered.undoLastDeleteAction(); const coveredUndo = plain(covered.state.ops.at(-1));
   assert.deepEqual(operationTypes(covered), ["delete", "undo_delete"]); assert.deepEqual(captured(covered, coveredUndo.seq), [{ type: "delete", input: { nodeId: "target", fromIndex: 1 } }]); assert.equal(captured(covered, coveredUndo.seq).some((operation) => operation.type === "restore"), false);
   const settled = runtime([node("a", "root", 10), node("target", "root", 20)]); settled.deleteNodeById("target", { confirm: false }); const settledDelete = plain(settled.state.ops.at(-1));
   assert.equal(settled.retainPocketOperationsAfterSequence(settledDelete.seq), 0); assert.equal(settled.state.operationHighWater, settledDelete.seq); assert.deepEqual(captured(settled, settledDelete.seq), []);
-  settled.undoLastDeleteAction(); const settledUndo = plain(settled.state.ops.at(-1));
-  assert.equal(settledUndo.type, "undo_delete"); assert.equal(settled.nodeMap().has("target"), true); assert.deepEqual(captured(settled, settledUndo.seq), []);
+  await settled.undoLastDeleteAction();
+  assert.equal(settled.state.ops.length, 0); assert.equal(settled.nodeMap().has("target"), false);
+});
+
+test("P170 restores a settled Delete only after guarded admission supplies the retained append slot", async () => {
+  const context = runtime([node("before", "root", 10), node("target", "root", 20), node("after", "root", 30)]);
+  context.deleteNodeById("target", { confirm: false });
+  const deleted = plain(context.state.ops.at(-1));
+  assert.equal(context.retainPocketOperationsAfterSequence(deleted.seq), 0);
+  let request = null;
+  context.PocketSyncActiveIntegration = { async admitAcceptedDeleteRestore(value) {
+    request = plain(value);
+    return { ok: true, operation: { type: "restore", input: {
+      nodeId: "target", fromIndex: 7, newParentId: "root", toIndex: 1,
+    } } };
+  } };
+  assert.equal(await context.undoLastDeleteAction(), true);
+  assert.deepEqual(request, { nodeId: "target", operationSequence: deleted.seq, newParentId: "root", toIndex: 1 });
+  assert.deepEqual(context.state.nodes.map((entry) => entry.id), ["before", "target", "after"]);
+  const undo = plain(context.state.ops.at(-1));
+  assert.equal(undo.type, "undo_delete");
+  assert.deepEqual(captured(context, undo.seq), [{ type: "restore", input: {
+    nodeId: "target", fromIndex: 7, newParentId: "root", toIndex: 1,
+  } }]);
 });
 
 test("P155 does not cancel after a newer operation or an unavailable forward capture", () => {

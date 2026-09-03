@@ -14,11 +14,13 @@ into a user-facing failure.
   if (!baseOwnerApi || typeof baseOwnerApi.createSyncedOwnerController !== "function") return;
 
   const STATE_SCHEMA = "pocket.starling.owner-mirror-state.v1";
-  const AUTHORITY_STATE_SCHEMA = "pocket.starling.owner-authority-state.v2";
+  const AUTHORITY_STATE_SCHEMA = "pocket.starling.owner-authority-state.v3";
+  const LEGACY_AUTHORITY_STATE_SCHEMA = "pocket.starling.owner-authority-state.v2";
   const SWITCH_SCHEMA = "pocket.starling.authority-switch.v1";
   const SAVE_SCHEMA = "pocket.starling.authoritative-save.v1";
   const MIGRATION_SCHEMA = "pocket.starling.owner-migration.v1";
   const HEAD_SCHEMA = "pocket.starling.head.v1";
+  const DELETE_RECEIPT_SCHEMA = "pocket.starling.accepted-delete-receipt.v1";
   const SWITCH_PHASES = Object.freeze(["prepared", "fenced", "commit-ambiguous"]);
   const SAVE_PHASES = Object.freeze(["captured", "prepared", "objects-present", "cas-ambiguous", "conflict"]);
   const PHASES = Object.freeze([
@@ -169,6 +171,13 @@ into a user-facing failure.
     catch (_error) { return null; }
   }
 
+  function resolveDeleteContinuity(preparation) {
+    const resolver = global.currentPocketStarlingAcceptedDeleteContinuity;
+    if (typeof resolver !== "function") return null;
+    try { return validateDeleteContinuity(resolver(preparation)); }
+    catch (_error) { return null; }
+  }
+
   function validateAccepted(value) {
     if (!exact(value, ["sourceRevision", "head"])
         || !Number.isSafeInteger(value.sourceRevision) || value.sourceRevision < 1) return null;
@@ -293,7 +302,8 @@ into a user-facing failure.
   function validateSaveWitness(value) {
     if (value === null) return null;
     if (!exact(value, ["schema", "authorityRevision", "expectedHead", "ceiling", "operations",
-      "preservationProjection", "targetFingerprint", "descriptor", "phase", "casMayHaveRun"])
+      "preservationProjection", "targetFingerprint", "descriptor", "phase", "casMayHaveRun",
+      "deleteContinuity", "deleteRetention"])
         || value.schema !== SAVE_SCHEMA
         || !Number.isSafeInteger(value.authorityRevision) || value.authorityRevision < 1
         || !Number.isSafeInteger(value.ceiling) || value.ceiling < 1
@@ -311,16 +321,52 @@ into a user-facing failure.
     }
     if (value.phase !== "captured" && !descriptor) return null;
     if (value.phase === "cas-ambiguous" && !value.casMayHaveRun) return null;
+    const deleteContinuity = value.deleteContinuity === null ? null : validateDeleteContinuity(value.deleteContinuity);
+    const deleteRetention = value.deleteRetention === null ? null : validateDeleteRetention(value.deleteRetention);
+    if ((deleteRetention && !deleteContinuity)
+        || (deleteContinuity && deleteRetention && deleteContinuity.nodeId !== deleteRetention.nodeId)) return null;
     return freeze({ schema: SAVE_SCHEMA, authorityRevision: value.authorityRevision, expectedHead,
       ceiling: value.ceiling, operations: clone(value.operations),
       preservationProjection: clone(value.preservationProjection), targetFingerprint: value.targetFingerprint,
-      descriptor, phase: value.phase, casMayHaveRun: value.casMayHaveRun });
+      descriptor, phase: value.phase, casMayHaveRun: value.casMayHaveRun,
+      deleteContinuity, deleteRetention });
+  }
+
+  function validateDeleteContinuity(value) {
+    if (!exact(value, ["nodeId", "operationSequence"])
+        || typeof value.nodeId !== "string" || !value.nodeId || value.nodeId.length > 80
+        || !Number.isSafeInteger(value.operationSequence) || value.operationSequence < 1) return null;
+    return freeze({ nodeId: value.nodeId, operationSequence: value.operationSequence });
+  }
+
+  function validateDeleteRetention(value) {
+    if (!exact(value, ["nodeId", "retainedIndex"])
+        || typeof value.nodeId !== "string" || !value.nodeId || value.nodeId.length > 80
+        || !Number.isSafeInteger(value.retainedIndex) || value.retainedIndex < 0) return null;
+    return freeze({ nodeId: value.nodeId, retainedIndex: value.retainedIndex });
+  }
+
+  function validateAcceptedDeleteReceipt(value, ownerRecord) {
+    if (value === null) return null;
+    if (!exact(value, ["schema", "syncedPocketId", "nodeId", "retainedIndex", "acceptedHead", "operationSequence"])
+        || value.schema !== DELETE_RECEIPT_SCHEMA
+        || value.syncedPocketId !== ownerRecord.syncedPocketId) return null;
+    const retention = validateDeleteRetention({ nodeId: value.nodeId, retainedIndex: value.retainedIndex });
+    const continuity = validateDeleteContinuity({ nodeId: value.nodeId, operationSequence: value.operationSequence });
+    const acceptedHead = safeHead(value.acceptedHead);
+    if (!retention || !continuity || retention.nodeId !== continuity.nodeId || !acceptedHead) return null;
+    return freeze({ schema: DELETE_RECEIPT_SCHEMA, syncedPocketId: value.syncedPocketId,
+      nodeId: retention.nodeId, retainedIndex: retention.retainedIndex, acceptedHead,
+      operationSequence: continuity.operationSequence });
   }
 
   function validateAuthorityPlainState(value, ownerRecord) {
-    if (!exact(value, ["schema", "owner", "authority", "legacyMirror", "acceptedHead",
-      "switchWitness", "saveWitness"])
-        || value.schema !== AUTHORITY_STATE_SCHEMA || !exact(value.owner, [
+    const currentSchema = value?.schema;
+    const fields = currentSchema === LEGACY_AUTHORITY_STATE_SCHEMA
+      ? ["schema", "owner", "authority", "legacyMirror", "acceptedHead", "switchWitness", "saveWitness"]
+      : ["schema", "owner", "authority", "legacyMirror", "acceptedHead", "switchWitness", "saveWitness", "acceptedDeleteReceipt"];
+    if (!exact(value, fields)
+        || ![AUTHORITY_STATE_SCHEMA, LEGACY_AUTHORITY_STATE_SCHEMA].includes(currentSchema) || !exact(value.owner, [
           "syncedPocketId", "deviceId", "masterKeyGeneration",
         ]) || value.owner.syncedPocketId !== ownerRecord.syncedPocketId
         || value.owner.deviceId !== ownerRecord.deviceId
@@ -329,9 +375,12 @@ into a user-facing failure.
     const acceptedHead = safeHead(value.acceptedHead);
     const switchWitness = validateSwitchWitness(value.switchWitness);
     const saveWitness = validateSaveWitness(value.saveWitness);
+    const acceptedDeleteReceipt = currentSchema === LEGACY_AUTHORITY_STATE_SCHEMA
+      ? null : validateAcceptedDeleteReceipt(value.acceptedDeleteReceipt, ownerRecord);
     if (!authority || !acceptedHead || acceptedHead.revision < 1
         || (value.switchWitness !== null && !switchWitness)
-        || (value.saveWitness !== null && !saveWitness)) return null;
+        || (value.saveWitness !== null && !saveWitness)
+        || (currentSchema !== LEGACY_AUTHORITY_STATE_SCHEMA && value.acceptedDeleteReceipt !== null && !acceptedDeleteReceipt)) return null;
     let legacyMirror = null;
     if (value.legacyMirror !== null) {
       legacyMirror = validateAccepted(value.legacyMirror);
@@ -359,7 +408,7 @@ into a user-facing failure.
     return freeze({ schema: AUTHORITY_STATE_SCHEMA,
       owner: { syncedPocketId: ownerRecord.syncedPocketId, deviceId: ownerRecord.deviceId,
         masterKeyGeneration: ownerRecord.usage.masterKeyGeneration },
-      authority, legacyMirror, acceptedHead, switchWitness, saveWitness });
+      authority, legacyMirror, acceptedHead, switchWitness, saveWitness, acceptedDeleteReceipt });
   }
 
   function validatePlainState(value, ownerRecord) {
@@ -553,7 +602,7 @@ into a user-facing failure.
     }
 
     function authorityPlainState(authorityInput, legacyMirrorInput, acceptedHeadInput,
-      switchWitnessInput = null, saveWitnessInput = null) {
+      switchWitnessInput = null, saveWitnessInput = null, acceptedDeleteReceiptInput = null) {
       const current = currentPrivate();
       const authority = validateAuthoritySnapshot(authorityInput);
       const acceptedHead = safeHead(acceptedHeadInput);
@@ -566,6 +615,7 @@ into a user-facing failure.
         acceptedHead,
         switchWitness: switchWitnessInput,
         saveWitness: saveWitnessInput,
+        acceptedDeleteReceipt: acceptedDeleteReceiptInput,
       };
       return validateAuthorityPlainState(candidate, current.owner.record);
     }
@@ -1173,13 +1223,20 @@ into a user-facing failure.
           clone(witness.preservationProjection));
         if (!prepared || prepared.outcome !== "prepared") return null;
         const descriptor = publication.descriptorFromPrepared(prepared);
-        return descriptor && sameHead(descriptor.expectedHead, witness.expectedHead) ? descriptor : null;
+        const deleteRetentions = Array.isArray(prepared.p170DeleteRetentions)
+          ? prepared.p170DeleteRetentions.map(validateDeleteRetention).filter(Boolean) : [];
+        const deleteRetention = witness.deleteContinuity && deleteRetentions.length === 1
+          && deleteRetentions[0].nodeId === witness.deleteContinuity.nodeId
+          ? deleteRetentions[0] : null;
+        if (witness.deleteContinuity && !deleteRetention) return null;
+        return descriptor && sameHead(descriptor.expectedHead, witness.expectedHead)
+          ? Object.freeze({ descriptor, deleteRetention }) : null;
       } catch (_error) { return null; }
     }
 
     async function persistAuthoritativeWitness(durable, witness) {
       const next = authorityPlainState(durable.authority, null, durable.acceptedHead,
-        null, witness);
+        null, witness, durable.acceptedDeleteReceipt);
       return next && await persistDurableState(next) ? next : null;
     }
 
@@ -1191,7 +1248,12 @@ into a user-facing failure.
       if (!candidateHead) return false;
       const opened = await freshOpen();
       if (!await proveOpened(opened, candidateHead, witness.targetFingerprint, expectedBytes)) return false;
-      const next = authorityPlainState(durable.authority, null, candidateHead, null, null);
+      const receipt = witness.deleteContinuity && witness.deleteRetention
+        ? freeze({ schema: DELETE_RECEIPT_SCHEMA, syncedPocketId: currentPrivate()?.owner.syncedPocketId,
+          nodeId: witness.deleteContinuity.nodeId, retainedIndex: witness.deleteRetention.retainedIndex,
+          acceptedHead: candidateHead, operationSequence: witness.deleteContinuity.operationSequence })
+        : null;
+      const next = authorityPlainState(durable.authority, null, candidateHead, null, null, receipt);
       if (!next || !await persistDurableState(next)) return false;
       const current = currentPrivate();
       if (current) accepted = { token: current.session.token, generation: current.session.generation,
@@ -1206,9 +1268,10 @@ into a user-facing failure.
       const current = currentPrivate();
       if (!current || !witness || !starlingSteady(durable.authority)) return false;
       if (!witness.descriptor) {
-        const descriptor = await prepareAuthoritativeDescriptor(witness, durable, durable.authority);
-        if (!descriptor) return false;
-        witness = freeze({ ...witness, descriptor, phase: "prepared", casMayHaveRun: false });
+        const prepared = await prepareAuthoritativeDescriptor(witness, durable, durable.authority);
+        if (!prepared) return false;
+        witness = freeze({ ...witness, descriptor: prepared.descriptor,
+          deleteRetention: prepared.deleteRetention, phase: "prepared", casMayHaveRun: false });
         durable = await persistAuthoritativeWitness(durable, witness);
         if (!durable) return false;
       }
@@ -1288,17 +1351,20 @@ into a user-facing failure.
       const canonical = canonicalDocument(payload);
       const targetFingerprint = canonical && await fingerprint(canonical.bytes);
       if (!canonical || !targetFingerprint) return failure("starling-save-preparation-invalid");
+      const continuity = resolveDeleteContinuity(preparation);
       let witness = freeze({ schema: SAVE_SCHEMA, authorityRevision: authority.authorityRevision,
         expectedHead: source.head, ceiling: preparation.ceiling, operations: preparation.operations,
         preservationProjection: preparation.preservationProjection, targetFingerprint,
-        descriptor: null, phase: "captured", casMayHaveRun: false });
+        descriptor: null, phase: "captured", casMayHaveRun: false,
+        deleteContinuity: continuity, deleteRetention: null });
       let local = authorityPlainState(authority, null, source.head, null, witness);
       if (!local || !await persistDurableState(local)) {
         return failure("starling-save-local-confirmation-unsettled");
       }
-      const descriptor = await prepareAuthoritativeDescriptor(witness, local, authority);
-      if (!descriptor) return failure("starling-save-unsettled");
-      witness = freeze({ ...witness, descriptor, phase: "prepared" });
+      const prepared = await prepareAuthoritativeDescriptor(witness, local, authority);
+      if (!prepared) return failure("starling-save-unsettled");
+      witness = freeze({ ...witness, descriptor: prepared.descriptor,
+        deleteRetention: prepared.deleteRetention, phase: "prepared" });
       local = await persistAuthoritativeWitness(local, witness);
       if (!local) return failure("starling-save-local-confirmation-unsettled");
       const committed = await completeAuthoritativeSave(local, canonical.bytes, { casAttempted: false });
@@ -1578,6 +1644,71 @@ into a user-facing failure.
       return serialiseOwnerOperation(() => dispatchAuthoritySave(input));
     }
 
+    function validRestoreAdmissionInput(value) {
+      if (!exact(value, ["nodeId", "operationSequence", "newParentId", "toIndex"])
+          || typeof value.nodeId !== "string" || !value.nodeId || value.nodeId.length > 80
+          || !Number.isSafeInteger(value.operationSequence) || value.operationSequence < 1
+          || typeof value.newParentId !== "string" || !value.newParentId || value.newParentId.length > 80
+          || !Number.isSafeInteger(value.toIndex) || value.toIndex < 0) return null;
+      return freeze(value);
+    }
+
+    async function readActualHead() {
+      const current = currentPrivate();
+      const operationId = nextOperationId("restore-head-read");
+      if (!current || !operationId) return null;
+      try {
+        const result = await options.objectHeadService.readShadowHead({ apiVersion: 1, operationId,
+          syncedPocketId: current.owner.syncedPocketId });
+        return safeHead(result?.head);
+      } catch (_error) { return null; }
+    }
+
+    async function admitAcceptedDeleteRestore(input) {
+      const requested = validRestoreAdmissionInput(input);
+      if (!requested || !await refreshPrivateOwner()) return failure("restore-input-invalid");
+      const current = currentPrivate();
+      const durable = await loadDurableState();
+      const receipt = durable?.acceptedDeleteReceipt;
+      if (!current || !durable || durable.schema !== AUTHORITY_STATE_SCHEMA || !receipt
+          || receipt.syncedPocketId !== current.owner.syncedPocketId
+          || receipt.nodeId !== requested.nodeId
+          || receipt.operationSequence !== requested.operationSequence) {
+        return failure("restore-receipt-unavailable");
+      }
+      const authority = await readSharedAuthority();
+      if (!authority || !starlingSteady(authority)
+          || authority.authorityRevision !== durable.authority.authorityRevision
+          || authority.rollbackRevision !== durable.authority.rollbackRevision
+          || !sameHead(authority.adoptionHead, durable.authority.adoptionHead)) {
+        return failure("restore-authority-conflict");
+      }
+      const actualHead = await readActualHead();
+      if (!actualHead || !sameHead(actualHead, receipt.acceptedHead)) return failure("restore-head-conflict");
+      const opened = await freshOpen();
+      if (!opened || opened.outcome !== "opened" || !opened.session || !sameHead(opened.head, receipt.acceptedHead)) {
+        return failure("restore-open-failed");
+      }
+      const logical = global.PocketStarlingLogicalEditShadow;
+      if (!logical || typeof logical.createBase !== "function" || typeof logical.restoreBranch !== "function") {
+        return failure("restore-logical-unavailable");
+      }
+      try {
+        const baseResult = await logical.createBase({ acceptedSealRef: opened.session.acceptedSealRef,
+          resolveLogical: opened.session.resolveLogical, syncedPocketId: current.owner.syncedPocketId,
+          semanticAuthority: current.owner.semanticAuthority,
+          semanticBaseProof: opened.session.semanticBaseProof });
+        if (!baseResult?.ok || !baseResult.base) return failure("restore-open-failed");
+        const proved = await logical.restoreBranch(baseResult.base, receipt.nodeId, receipt.retainedIndex,
+          requested.newParentId, requested.toIndex);
+        if (!proved?.ok || !proved.candidate) return failure(`restore-${proved?.reason || "admission-failed"}`);
+      } catch (_error) { return failure("restore-admission-failed"); }
+      return freeze({ ok: true, operation: { type: "restore", input: {
+        nodeId: receipt.nodeId, fromIndex: receipt.retainedIndex,
+        newParentId: requested.newParentId, toIndex: requested.toIndex,
+      } } });
+    }
+
     return Object.freeze({
       canAdoptSyncedOwner: base.canAdoptSyncedOwner,
       adoptSyncedOwner,
@@ -1588,6 +1719,7 @@ into a user-facing failure.
       isSyncedOwnerSaveSessionCurrent: base.isSyncedOwnerSaveSessionCurrent,
       getSyncedOwnerState: base.getSyncedOwnerState,
       saveSyncedOwner,
+      admitAcceptedDeleteRestore,
       bootstrapInitialStarlingBase,
       getStarlingBootstrapState,
     });

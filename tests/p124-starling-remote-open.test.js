@@ -409,6 +409,7 @@ test("P124 is production-bounded to P164 successor reentry", () => {
     "/js/pocket-starling-owner-bootstrap.js",
     "/js/pocket-starling-owner-successor.js",
     "/js/pocket-starling-remote-open-shadow.js",
+    "/js/pocket-sync-additional-device.js",
   ]);
   assert.equal(paths.includes("/js/pocket-starling-remote-save-shadow.js"), false);
 });

@@ -102,7 +102,18 @@
         binding.expectedSealStorageRef !== expectedHead.sealRef ||
         binding.candidateSealStorageRef !== stage.sealStorageRef)
         throw fail("remote-edit-authority-mismatch");
-      return Object.freeze({ outcome: "prepared", expectedHead, stage, binding });
+      const prepared = { outcome: "prepared", expectedHead, stage, binding };
+      const retentions = typeof logical.deleteRetentionWitness === "function"
+        ? logical.deleteRetentionWitness(candidate) : null;
+      if (Array.isArray(retentions) && retentions.length > 0) {
+        Object.defineProperty(prepared, "p170DeleteRetentions", {
+          value: retentions,
+          enumerable: false,
+          configurable: false,
+          writable: false,
+        });
+      }
+      return Object.freeze(prepared);
     }
 
     async function preparePayloadEdit(editInput) {
