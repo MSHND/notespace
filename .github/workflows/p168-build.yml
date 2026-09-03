@@ -20,6 +20,7 @@ jobs:
           python3 .github/p168-reentry.py
           python3 .github/p168-reentry2.py
           python3 .github/p168-tests.py
+          python3 .github/p168-tests2.py
       - name: Diff hygiene
         run: git diff --check
       - name: Focused P168 proofs
