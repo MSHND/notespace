@@ -13,19 +13,23 @@ jobs:
         with:
           node-version: '24'
       - run: npm ci
-      - name: Apply P168 server contract
-        run: python3 .github/p168-server4.py
+      - name: Apply P168 implementation
+        run: |
+          python3 .github/p168-server4.py
+          python3 .github/p168-owner.py
       - name: Diff hygiene
         run: git diff --check
-      - name: Server and transport affected tests
+      - name: Core and same-owner affected tests
         run: |
           node --test \
             tests/p032-sync-remote-client.test.js \
             tests/p034-sync-service-core.test.js \
+            tests/p042-synced-owner-controller.test.js \
             tests/p047-sync-postgres-store.test.js \
             tests/p049-sync-postgres-runtime.test.js \
             tests/p117-starling-object-head-postgres-store.test.js \
             tests/p119-starling-object-head-service.test.js \
+            tests/p160-owner-save-preparation.test.js \
             tests/p164-starling-successor-mirror.test.js \
             tests/p166-persistence-authority-fence.test.js
       - name: Full check
