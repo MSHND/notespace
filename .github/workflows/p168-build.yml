@@ -18,6 +18,7 @@ jobs:
           python3 .github/p168-server4.py
           python3 .github/p168-owner.py
           python3 .github/p168-reentry.py
+          python3 .github/p168-reentry2.py
       - name: Diff hygiene
         run: git diff --check
       - name: Focused and affected tests
