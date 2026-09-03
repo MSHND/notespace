@@ -1,0 +1,55 @@
+name: P166 exact candidate proof
+
+on:
+  push:
+    branches:
+      - candidate/p166-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify exact candidate ancestry and proof-only diff
+        run: |
+          CANDIDATE=3a0a56ffa36be28086371b71542c860cd1d5f8fd
+          test "$(git merge-base "$CANDIDATE" HEAD)" = "$CANDIDATE"
+          test "$(git rev-list --count "$CANDIDATE"..HEAD)" = "1"
+          test "$(git rev-list --count HEAD.."$CANDIDATE")" = "0"
+          test "$(git diff --name-only "$CANDIDATE"..HEAD)" = ".github/workflows/p166-proof.yml"
+      - name: Focused P166 proof
+        run: node --test tests/p166-persistence-authority-fence.test.js
+      - name: Directly affected P032 P119 P164 suites
+        run: >-
+          node --test --test-concurrency=1
+          tests/p032-sync-remote-client.test.js
+          tests/p119-object-head-server-transport.test.js
+          tests/p164-starling-successor-mirror.test.js
+      - name: P166 required affected suites
+        run: >-
+          node --test --test-concurrency=1
+          tests/p034-sync-service-core.test.js
+          tests/p042-synced-owner-controller.test.js
+          tests/p046-sync-http-adapter.test.js
+          tests/p047-postgres-store.test.js
+          tests/p049-sync-server-runtime.test.js
+          tests/p052-additional-device.test.js
+          tests/p074-production-composition.test.js
+          tests/p076-production-browser-boundary.test.js
+          tests/p117-sync-object-head-postgres-store.test.js
+          tests/p118-object-head-schema-adoption.test.js
+          tests/p119-object-head-server-transport.test.js
+          tests/p164-starling-successor-mirror.test.js
+      - name: Repository check
+        run: npm run check
