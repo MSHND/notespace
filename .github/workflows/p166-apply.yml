@@ -1,0 +1,52 @@
+name: P166 implementation harness
+
+on:
+  push:
+    branches:
+      - candidate/p166
+    paths:
+      - .github/p166-apply.py
+      - .github/workflows/p166-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p166
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Apply P166 candidate implementation
+        run: python3 .github/p166-apply.py
+      - name: Check patch hygiene
+        run: git diff --check
+      - name: Focused P166 proof
+        run: node --test tests/p166-persistence-authority-fence.test.js
+      - name: Directly affected server and client suites
+        run: >-
+          node --test --test-concurrency=1
+          tests/p034-sync-service-core.test.js
+          tests/p046-sync-http-adapter.test.js
+          tests/p047-postgres-store.test.js
+          tests/p049-sync-server-runtime.test.js
+          tests/p052-additional-device.test.js
+          tests/p119-starling-object-head-service.test.js
+          tests/p120-starling-object-head-postgres-store.test.js
+          tests/p164-starling-successor-mirror.test.js
+      - name: Repository check
+        run: npm run check
+      - name: Commit exact candidate tree
+        run: |
+          git config user.name "MSHND"
+          git config user.email "193864085+MSHND@users.noreply.github.com"
+          git rm .github/p166-apply.py .github/workflows/p166-apply.yml
+          git add -A
+          git commit -m "P166 shared persistence authority fence"
+          git push origin HEAD:candidate/p166
