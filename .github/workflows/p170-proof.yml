@@ -1,0 +1,32 @@
+name: P170 exact-candidate proof
+
+on:
+  push:
+    branches: [candidate/p170-proof]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  p170-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify exact candidate parent and unchanged production tree
+        env:
+          EXPECTED_CANDIDATE: 0c5dbe6291e735047d75591d9455f996be054d0b
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_CANDIDATE"
+          git diff --quiet "$EXPECTED_CANDIDATE" -- js tests
+      - name: Run bounded P170 proof matrix
+        run: sh tools/prove-p170.sh
