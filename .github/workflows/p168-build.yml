@@ -14,7 +14,7 @@ jobs:
           node-version: '24'
       - run: npm ci
       - name: Apply P168 server contract
-        run: python3 .github/p168-server.py
+        run: python3 .github/p168-server2.py
       - name: Diff hygiene
         run: git diff --check
       - name: Server and transport affected tests
