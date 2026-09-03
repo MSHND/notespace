@@ -30,10 +30,15 @@ const STARLING_BOOTSTRAP_PATHS = Object.freeze([
   "/js/pocket-starling-publication-shadow.js",
   "/js/pocket-starling-remote-open-shadow.js",
   "/js/pocket-starling-materialize-shadow.js",
+  "/js/pocket-starling-logical-edit-shadow.js",
+  "/js/pocket-starling-remote-edit-shadow.js",
+  "/js/pocket-starling-durable-publication.js",
+  "/js/pocket-starling-owner-state.js",
   "/js/pocket-starling-owner-bootstrap.js",
+  "/js/pocket-starling-owner-successor.js",
 ]);
 const STARLING_BOOTSTRAP_TAG = STARLING_BOOTSTRAP_PATHS.map((modulePath) => (
-  modulePath === "/js/pocket-starling-owner-bootstrap.js"
+  ["/js/pocket-starling-owner-bootstrap.js", "/js/pocket-starling-owner-successor.js"].includes(modulePath)
     ? `<script src="${modulePath}" data-service-root="%SERVICE_ROOT%"></script>`
     : `<script src="${modulePath}"></script>`
 )).join("\n  ");
