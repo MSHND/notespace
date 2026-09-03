@@ -1,0 +1,50 @@
+name: P164 exact candidate proof
+
+on:
+  push:
+    branches:
+      - candidate/p164-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  p164-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify proof branch differs only by disposable proof machinery
+        run: |
+          git fetch origin candidate/p164
+          test "$(git merge-base HEAD origin/candidate/p164)" = "$(git rev-parse origin/candidate/p164)"
+          test "$(git rev-list --count origin/candidate/p164..HEAD)" = "1"
+          test "$(git diff --name-only origin/candidate/p164..HEAD)" = ".github/workflows/p164-proof.yml"
+      - name: P042 regression
+        run: node --test tests/p042-synced-owner-controller.test.js
+      - name: P164 focused proof
+        run: node --test tests/p164-starling-successor-mirror.test.js
+      - name: P164 affected suites
+        run: >-
+          node --test
+          tests/p030-sync-device-store.test.js
+          tests/p043-owner-aware-save-boundary.test.js
+          tests/p074-production-composition.test.js
+          tests/p076-production-browser-boundary.test.js
+          tests/p124-starling-remote-open.test.js
+          tests/p125-starling-remote-edit.test.js
+          tests/p139-starling-logical-working-set-compose.test.js
+          tests/p140-starling-remote-working-set-prepare.test.js
+          tests/p141-starling-remote-working-set-save.test.js
+          tests/p146-starling-accepted-document-materialize.test.js
+          tests/p160-starling-owner-save-preparation.test.js
+          tests/p162-starling-owner-bootstrap.test.js
+      - name: Repository check
+        run: npm run check
