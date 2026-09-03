@@ -11,5 +11,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
+      - run: npm ci
+      - run: node tests/p162-starling-owner-bootstrap.test.js
+      - run: node tests/p042-synced-owner-controller.test.js
+      - run: node tests/p119-object-head-server-transport.test.js
+      - run: node tests/p141-starling-remote-working-set-save.test.js
+      - run: node tests/p146-starling-accepted-document-materialize.test.js
+      - run: node tests/p160-starling-owner-save-preparation.test.js
       - run: npm run check
