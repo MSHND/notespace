@@ -3,12 +3,16 @@ on:
   push:
     branches: [candidate/p168]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -48,3 +52,13 @@ jobs:
             tests/p168-starling-reentry.test.js
       - name: Full check
         run: timeout 600s npm run check
+      - name: Materialize exact candidate tree
+        run: |
+          rm -f .github/p168-*.py .github/workflows/p168-build.yml
+          test -z "$(find .github -maxdepth 1 -type f -name 'p168-*' -print -quit)"
+          git add -A
+          git diff --cached --check
+          git config user.name "Pocket P168 construction"
+          git config user.email "193864085+MSHND@users.noreply.github.com"
+          git commit -m "P168 same-owner Starling authority adoption"
+          git push origin HEAD:candidate/p168
