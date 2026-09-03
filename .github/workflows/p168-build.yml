@@ -19,16 +19,20 @@ jobs:
           python3 .github/p168-owner.py
           python3 .github/p168-reentry.py
           python3 .github/p168-reentry2.py
+          python3 .github/p168-tests.py
       - name: Diff hygiene
         run: git diff --check
+      - name: Focused P168 proofs
+        run: timeout 180s node --test --test-concurrency=1 tests/p168-authority-adoption.test.js tests/p168-starling-reentry.test.js
       - name: Focused and affected tests
         run: |
-          timeout 360s node --test --test-concurrency=1 \
+          timeout 420s node --test --test-concurrency=1 \
             tests/p032-sync-remote-client.test.js \
             tests/p034-sync-service-core.test.js \
             tests/p041-emergency-recovery.test.js \
             tests/p042-synced-owner-controller.test.js \
             tests/p045-browser-sync-runtime.test.js \
+            tests/p046-sync-http-adapter.test.js \
             tests/p047-sync-postgres-store.test.js \
             tests/p049-sync-postgres-runtime.test.js \
             tests/p051-local-sync-integration.test.js \
@@ -38,6 +42,8 @@ jobs:
             tests/p119-starling-object-head-service.test.js \
             tests/p160-owner-save-preparation.test.js \
             tests/p164-starling-successor-mirror.test.js \
-            tests/p166-persistence-authority-fence.test.js
+            tests/p166-persistence-authority-fence.test.js \
+            tests/p168-authority-adoption.test.js \
+            tests/p168-starling-reentry.test.js
       - name: Full check
         run: timeout 600s npm run check
