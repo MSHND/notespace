@@ -199,6 +199,53 @@ test("P166 in-flight whole-record mutation and fence acquisition serialize in bo
   }
 });
 
+test("P166 in-flight Head CAS and fence acquisition serialize in both directions", async () => {
+  {
+    const base = createMemoryServiceStore({ seed: seed() });
+    const controlled = controlledFirstLock(base.store);
+    const objectHeadStore = headStore();
+    const core = coreWithStore(controlled.store, objectHeadStore);
+    const casPromise = core.compareAndSetShadowHead(call(cas("racing-cas-first")));
+    await controlled.firstEntered;
+    let fenceSettled = false;
+    const fencePromise = core.acquirePersistenceAuthorityFence(call(fence("racing-fence-after-cas", 1)))
+      .then((value) => { fenceSettled = true; return value; });
+    await Promise.resolve();
+    assert.equal(fenceSettled, false);
+    controlled.release();
+    const [casResult, fenceResult] = await Promise.all([casPromise, fencePromise]);
+    assert.equal(casResult.status, 200);
+    assert.deepEqual(plain(casResult.body.head), {
+      schema: "pocket.starling.head.v1", revision: 2, sealRef: "seal-two",
+    });
+    assert.equal(fenceResult.status, 200);
+    assert.notEqual(base.snapshot().persistenceAuthorities.pocket.transition, null);
+  }
+  {
+    const base = createMemoryServiceStore({ seed: seed() });
+    const controlled = controlledFirstLock(base.store);
+    const objectHeadStore = headStore();
+    const core = coreWithStore(controlled.store, objectHeadStore);
+    const fencePromise = core.acquirePersistenceAuthorityFence(call(fence("racing-fence-first-head", 1)));
+    await controlled.firstEntered;
+    let casSettled = false;
+    const casPromise = core.compareAndSetShadowHead(call(cas("racing-cas-after-fence"))).then(
+      (value) => { casSettled = true; return value; },
+      (error) => { casSettled = true; throw error; }
+    );
+    await Promise.resolve();
+    assert.equal(casSettled, false);
+    controlled.release();
+    const fenced = await fencePromise;
+    assert.equal(fenced.status, 200);
+    await assert.rejects(casPromise,
+      (error) => error?.code === "service-persistence-authority-transition-active" && error.status === 409);
+    assert.deepEqual(plain(await objectHeadStore.readHead("pocket")), {
+      schema: "pocket.starling.head.v1", revision: 1, sealRef: "seal-one",
+    });
+  }
+});
+
 test("P166 PostgreSQL store takes and releases the shared advisory lock around the whole callback", async () => {
   const events = [];
   const client = { async query(sql, values) {

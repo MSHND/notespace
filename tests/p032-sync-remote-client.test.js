@@ -221,6 +221,34 @@ test("P120a fails closed for malformed object Head service boundaries", async ()
   await assert.rejects(service.putOpaqueObject({...base,storageRef:"bad",record:{}}),remoteErrorCode("remote-request-invalid")); await assert.rejects(service.initialiseShadowHead({...base,extra:true}),remoteErrorCode("remote-request-invalid")); await assert.rejects(service.objectPresence({...base,storageRefs:Array(513).fill(ref)}),remoteErrorCode("remote-request-invalid")); await assert.rejects(service.objectPresence({...base,storageRefs:[ref,ref]}),remoteErrorCode("remote-request-invalid")); await assert.rejects(service.objectPresence({...base,storageRefs:[ref]}),remoteErrorCode("remote-response-invalid")); await assert.rejects(service.getOpaqueObject({...base,storageRef:ref}),remoteErrorCode("remote-response-invalid")); await assert.rejects(service.compareAndSetShadowHead({...base,expectedHead:genesis,candidateSealStorageRef:ref}),remoteErrorCode("remote-response-invalid")); await assert.rejects(service.compareAndSetShadowHead({...base,expectedHead:{schema:"pocket.starling.head.v1",revision:0,sealRef:ref},candidateSealStorageRef:ref}),remoteErrorCode("remote-request-invalid"));
 });
 
+test("P166 Head authority-transition rejection exact-validates the bounded HTTP envelope", async () => {
+  const { api } = loadProduction();
+  const ref = `pocket.sync.starling-object.reference.v1:sha256:${Buffer.alloc(32, 29).toString("base64url")}`;
+  const request = { apiVersion: 1, operationId: "transition-cas", syncedPocketId: "pocket",
+    expectedHead: { schema: "pocket.starling.head.v1", revision: 0, sealRef: null },
+    candidateSealStorageRef: ref };
+  const serviceFor = (body) => api.createObjectHeadService({ transport: validTransport(async (route) => {
+    assert.equal(route, "compareAndSetShadowHead");
+    return { status: 409, body };
+  }) });
+  const valid = await serviceFor({ apiVersion: 1, ok: false,
+    reason: "service-persistence-authority-transition-active" }).compareAndSetShadowHead(request);
+  assert.deepEqual(plain(valid), { apiVersion: 1, ok: false, operationId: "transition-cas",
+    syncedPocketId: "pocket", reason: "authority-transition-active" });
+  for (const body of [
+    null,
+    [],
+    { apiVersion: 2, ok: false, reason: "service-persistence-authority-transition-active" },
+    { apiVersion: 1, ok: true, reason: "service-persistence-authority-transition-active" },
+    { apiVersion: 1, reason: "service-persistence-authority-transition-active" },
+    { apiVersion: 1, ok: false, reason: "service-persistence-authority-transition-active", extra: true },
+    { apiVersion: 1, ok: false, reason: "wrong-reason" },
+  ]) {
+    await assert.rejects(serviceFor(body).compareAndSetShadowHead(request),
+      remoteErrorCode("remote-response-invalid"));
+  }
+});
+
 test("P120b proves real transport statuses, exact calls, frozen values, and remaining rejection matrix", async () => {
   const { api }=loadProduction(), digest=Buffer.alloc(32,31).toString("base64url"), ref=`pocket.sync.starling-object.reference.v1:sha256:${digest}`, nonce=Buffer.alloc(12,32).toString("base64url"), ciphertext=Buffer.alloc(16,33).toString("base64url"), record={format:"pocket.sync.starling-object.opaque",version:1,algorithm:"AES-GCM-256",nonce,ciphertext}, genesis={schema:"pocket.starling.head.v1",revision:0,sealRef:null}, successor={schema:"pocket.starling.head.v1",revision:1,sealRef:ref}, base={apiVersion:1,operationId:"op",syncedPocketId:"pocket"};
   for(const route of ["putOpaqueObject","getOpaqueObject","objectPresence","initialiseShadowHead","readShadowHead"]) { const transport=api.createBrowserJsonTransport({serviceRoot:"/sync",async fetch(){return fixtures.textResponse({apiVersion:1,ok:false},{status:500});}}); await assert.rejects(transport.request(route,{}),remoteErrorCode("remote-request-rejected")); }
