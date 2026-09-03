@@ -43,6 +43,7 @@ const COLLECTIONS = Object.freeze({
   recoveryLocators: "recoveryLocators",
   recoveryCeremonies: "recoveryCeremonies",
   keyOperations: "keyOperations",
+  persistenceAuthorities: "persistenceAuthorities",
 });
 
 const COLLECTION_NAMES = Object.freeze(Object.values(COLLECTIONS));
@@ -189,6 +190,10 @@ const RECORD_FIELDS = Object.freeze({
     "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
     "operationId", "logicalChangeId", "operationKind", "expectedKeySetVersion",
     "requestDigest", "result",
+  ]),
+  persistenceAuthorities: Object.freeze([
+    "kind", "schemaVersion", "storeVersion", "accountId", "syncedPocketId",
+    "authorityRevision", "currentMode", "transition", "rollbackRevision", "adoptionHead",
   ]),
 });
 
@@ -1067,6 +1072,28 @@ function validateStoredRecord(collection, input, key) {
       }
       break;
     }
+    case COLLECTIONS.persistenceAuthorities: {
+      if (input.kind !== "pocket.sync.persistence-authority"
+          || input.syncedPocketId !== key || input.currentMode !== "whole-record"
+          || input.rollbackRevision !== null || input.adoptionHead !== null) {
+        throw serviceError("service-state-invalid", 500);
+      }
+      identifier(input.accountId, "service-state-invalid");
+      identifier(input.syncedPocketId, "service-state-invalid");
+      positiveInteger(input.authorityRevision, "service-state-invalid");
+      if (input.transition !== null) {
+        if (!sameKeys(input.transition, ["transitionId", "expectedAuthorityRevision"])) {
+          throw serviceError("service-state-invalid", 500);
+        }
+        identifier(input.transition.transitionId, "service-state-invalid");
+        positiveInteger(input.transition.expectedAuthorityRevision, "service-state-invalid");
+        if (input.transition.expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER
+            || input.transition.expectedAuthorityRevision + 1 !== input.authorityRevision) {
+          throw serviceError("service-state-invalid", 500);
+        }
+      }
+      break;
+    }
     case COLLECTIONS.keyOperations: {
       if (input.kind !== "pocket.sync.service-key-operation"
           || input.storeVersion !== 1 || !DIGEST_PATTERN.test(input.requestDigest)
@@ -1453,6 +1480,28 @@ function validateConditionalRequest(input) {
   });
 }
 
+function validateReadPersistenceAuthorityRequest(input) {
+  const value = exactObject(input, ["apiVersion", "operationId", "syncedPocketId"],
+    ["apiVersion", "operationId", "syncedPocketId"]);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+    syncedPocketId: identifier(value.syncedPocketId) });
+}
+
+function validateAuthorityFenceRequest(input) {
+  const fields = ["apiVersion", "operationId", "syncedPocketId",
+    "expectedAuthorityRevision", "transitionId"];
+  const value = exactObject(input, fields, fields);
+  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
+  const expectedAuthorityRevision = positiveInteger(value.expectedAuthorityRevision);
+  if (expectedAuthorityRevision >= Number.MAX_SAFE_INTEGER) {
+    throw serviceError("service-request-invalid");
+  }
+  return frozen({ apiVersion: 1, operationId: identifier(value.operationId),
+    syncedPocketId: identifier(value.syncedPocketId), expectedAuthorityRevision,
+    transitionId: identifier(value.transitionId) });
+}
+
 function validateObjectHeadRequest(input, fields) {
   const value = exactObject(input, fields, fields);
   if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
@@ -1683,6 +1732,47 @@ function createServiceCore(input) {
     }
   }
 
+  async function withPocketAuthorityLock(syncedPocketId, callback) {
+    let pending;
+    try {
+      const lock = store.transact.withPocketAuthorityLock;
+      if (typeof lock !== "function") throw serviceError("service-core-invalid", 500);
+      pending = lock(syncedPocketId, callback);
+      if (!thenable(pending)) throw serviceError("service-core-invalid", 500);
+      return await pending;
+    } catch (error) {
+      if (error && typeof error.code === "string" && error.code.startsWith("service-")) throw error;
+      throw mapTransactionError(error);
+    }
+  }
+
+  function transactAuthorityMutation(syncedPocketId, callback) {
+    return withPocketAuthorityLock(syncedPocketId, () => transact("readwrite", callback));
+  }
+
+  function initialPersistenceAuthority(account, syncedPocketId) {
+    return frozen({
+      kind: "pocket.sync.persistence-authority", schemaVersion: 1, storeVersion: 1,
+      accountId: account.accountId, syncedPocketId, authorityRevision: 1,
+      currentMode: "whole-record", transition: null, rollbackRevision: null, adoptionHead: null,
+    });
+  }
+
+  function persistenceAuthoritySnapshot(authority) {
+    return frozen({
+      schema: "pocket.sync.persistence-authority.v1",
+      authorityRevision: authority.authorityRevision,
+      currentMode: authority.currentMode,
+      transition: authority.transition,
+      rollbackRevision: authority.rollbackRevision,
+      adoptionHead: authority.adoptionHead,
+    });
+  }
+
+  function persistenceAuthorityIsSteady(authority) {
+    return authority.currentMode === "whole-record" && authority.transition === null;
+  }
+
   async function readRecord(transaction, collection, key) {
     let raw;
     try {
@@ -1697,6 +1787,18 @@ function createServiceCore(input) {
     } catch (_error) {
       throw serviceError("service-state-invalid", 500);
     }
+  }
+
+  async function readPersistenceAuthorityRecord(transaction, account, syncedPocketId, options = {}) {
+    const authority = await readRecord(transaction, COLLECTIONS.persistenceAuthorities, syncedPocketId);
+    if (authority === null) {
+      if (options.allowMissing === true) return null;
+      throw serviceError("service-state-invalid", 500);
+    }
+    if (authority.accountId !== account.accountId || authority.syncedPocketId !== syncedPocketId) {
+      throw serviceError("service-state-invalid", 500);
+    }
+    return authority;
   }
 
   async function insertRecord(transaction, collection, key, record) {
@@ -2045,12 +2147,18 @@ function createServiceCore(input) {
   async function compareAndSetShadowHead(value) {
     const { context, body } = invocation(value);
     const request = validateObjectHeadRequest(body, ["apiVersion", "operationId", "syncedPocketId", "expectedHead", "candidateSealStorageRef"]);
-    await authoriseObjectHead(context, request.syncedPocketId);
+    const account = await authoriseObjectHead(context, request.syncedPocketId);
+    return withPocketAuthorityLock(request.syncedPocketId, async () => {
+      const authority = await transact("readonly", (transaction) =>
+        readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId));
+      if (!persistenceAuthorityIsSteady(authority)) {
+        throw serviceError("service-persistence-authority-transition-active", 409);
+      }
     const result = await objectHeadCall("compareAndSetHead", [request.syncedPocketId, request.expectedHead, request.candidateSealStorageRef]);
     return frozen({ status: result.ok ? 200 : 409, body: { apiVersion: 1, ok: result.ok === true,
       operationId: request.operationId, syncedPocketId: request.syncedPocketId, ...result }, session: null });
+    });
   }
-
   async function completedReplay(transaction, ceremony, digest, atMilliseconds) {
     if (ceremony.finishDigest !== digest) {
       throw serviceError("service-operation-reuse", 409);
@@ -2911,7 +3019,7 @@ function createServiceCore(input) {
     const { context, body } = invocation(value);
     const request = validateConditionalRequest(body);
     const at = clockMilliseconds();
-    return transact("readwrite", async (transaction) => {
+    return transactAuthorityMutation(request.syncedPocketId, async (transaction) => {
       const { account } = await authoriseSession(transaction, context.sessionId, at);
       if (account.syncedPocketId !== null
           && account.syncedPocketId !== request.syncedPocketId) {
@@ -2928,6 +3036,9 @@ function createServiceCore(input) {
           throw serviceError("service-state-invalid", 500);
         }
       }
+      const authority = account.syncedPocketId === null
+        ? null
+        : await readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId);
       const digest = uploadDigest(account.accountId, request);
       const key = operationKey(account.accountId, request.syncedPocketId, request.operationId);
       const existingOperation = await readRecord(transaction, COLLECTIONS.operations, key);
@@ -2944,6 +3055,11 @@ function createServiceCore(input) {
           throw serviceError("service-state-invalid", 500);
         }
         return storedOperationResult(existingOperation, request.attemptKind);
+      }
+      if (pocket !== null) {
+        if (!persistenceAuthorityIsSteady(authority)) {
+          throw serviceError("service-persistence-authority-transition-active", 409);
+        }
       }
       const actualRevision = pocket ? pocket.revision : 0;
       if (actualRevision < request.expectedRevision) {
@@ -3006,6 +3122,8 @@ function createServiceCore(input) {
             account,
             boundAccount
           );
+          await insertRecord(transaction, COLLECTIONS.persistenceAuthorities,
+            request.syncedPocketId, initialPersistenceAuthority(account, request.syncedPocketId));
         }
         operationResult = frozen({ status: "committed", revision: nextRevision });
         wrapper = frozen({
@@ -3052,6 +3170,83 @@ function createServiceCore(input) {
       });
       await insertRecord(transaction, COLLECTIONS.operations, key, operation);
       return wrapper;
+    });
+  }
+
+  async function readPersistenceAuthority(value) {
+    const { context, body } = invocation(value);
+    const request = validateReadPersistenceAuthorityRequest(body);
+    const at = clockMilliseconds();
+    return transact("readonly", async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const authority = await readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId);
+      return frozen({ status: 200, body: { apiVersion: 1, ok: true,
+        operationId: request.operationId, syncedPocketId: request.syncedPocketId,
+        authority: persistenceAuthoritySnapshot(authority) }, session: null });
+    });
+  }
+
+  function authorityConflictWrapper(request, authority) {
+    return frozen({ status: 409, body: { apiVersion: 1, ok: false,
+      operationId: request.operationId, syncedPocketId: request.syncedPocketId,
+      status: "conflict", reason: "authority-conflict",
+      authority: persistenceAuthoritySnapshot(authority) }, session: null });
+  }
+
+  async function acquirePersistenceAuthorityFence(value) {
+    const { context, body } = invocation(value);
+    const request = validateAuthorityFenceRequest(body);
+    const at = clockMilliseconds();
+    return transactAuthorityMutation(request.syncedPocketId, async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const authority = await readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId);
+      if (authority.transition !== null
+          && authority.transition.transitionId === request.transitionId
+          && authority.transition.expectedAuthorityRevision === request.expectedAuthorityRevision) {
+        return frozen({ status: 200, body: { apiVersion: 1, ok: true,
+          operationId: request.operationId, syncedPocketId: request.syncedPocketId,
+          status: "fenced", replayed: true, authority: persistenceAuthoritySnapshot(authority) },
+          session: null });
+      }
+      if (!persistenceAuthorityIsSteady(authority)
+          || authority.authorityRevision !== request.expectedAuthorityRevision) {
+        return authorityConflictWrapper(request, authority);
+      }
+      const next = frozen({ ...authority, storeVersion: authority.storeVersion + 1,
+        authorityRevision: authority.authorityRevision + 1,
+        transition: { transitionId: request.transitionId,
+          expectedAuthorityRevision: request.expectedAuthorityRevision } });
+      await replaceRecord(transaction, COLLECTIONS.persistenceAuthorities,
+        request.syncedPocketId, authority, next);
+      return frozen({ status: 200, body: { apiVersion: 1, ok: true,
+        operationId: request.operationId, syncedPocketId: request.syncedPocketId,
+        status: "fenced", replayed: false, authority: persistenceAuthoritySnapshot(next) },
+        session: null });
+    });
+  }
+
+  async function releasePersistenceAuthorityFence(value) {
+    const { context, body } = invocation(value);
+    const request = validateAuthorityFenceRequest(body);
+    const at = clockMilliseconds();
+    return transactAuthorityMutation(request.syncedPocketId, async (transaction) => {
+      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      await requireOwnedPocket(transaction, account, request.syncedPocketId);
+      const authority = await readPersistenceAuthorityRecord(transaction, account, request.syncedPocketId);
+      if (authority.authorityRevision !== request.expectedAuthorityRevision
+          || authority.transition === null
+          || authority.transition.transitionId !== request.transitionId) {
+        return authorityConflictWrapper(request, authority);
+      }
+      const next = frozen({ ...authority, storeVersion: authority.storeVersion + 1,
+        authorityRevision: authority.authorityRevision + 1, transition: null });
+      await replaceRecord(transaction, COLLECTIONS.persistenceAuthorities,
+        request.syncedPocketId, authority, next);
+      return frozen({ status: 200, body: { apiVersion: 1, ok: true,
+        operationId: request.operationId, syncedPocketId: request.syncedPocketId,
+        status: "released", authority: persistenceAuthoritySnapshot(next) }, session: null });
     });
   }
 
@@ -3584,6 +3779,9 @@ function createServiceCore(input) {
     readRevision,
     downloadEncryptedRecord,
     conditionalUpload,
+    readPersistenceAuthority,
+    acquirePersistenceAuthorityFence,
+    releasePersistenceAuthorityFence,
     listEnvelopes,
     downloadEnvelope,
     addEnvelope,

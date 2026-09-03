@@ -13,6 +13,7 @@ const HEAD_COLUMNS = Object.freeze([
 const COLLECTIONS = Object.freeze([
   "accounts", "credentials", "sessions", "ceremonies", "pockets", "operations",
   "keySets", "envelopes", "recoveryLocators", "recoveryCeremonies", "keyOperations",
+  "persistenceAuthorities",
 ]);
 const SCHEMA_COMPONENTS = Object.freeze([
   "columns-catalog", "columns-contract", "constraints-catalog", "records-primary-key",
@@ -173,15 +174,19 @@ async function verifyPocketSyncSchema(pool) {
   }
 
   const version = await query(pool,
-    "SELECT schema_name,schema_version FROM public.pocket_sync_schema WHERE schema_name IN ($1,$2)",
-    ["pocket-sync-store", "pocket-sync-object-head-store"], "schema-version-query");
+    "SELECT schema_name,schema_version FROM public.pocket_sync_schema WHERE schema_name IN ($1,$2,$3)",
+    ["pocket-sync-store", "pocket-sync-object-head-store", "pocket-sync-persistence-authority"], "schema-version-query");
   const legacyVersions = version.rows.filter((row) => row?.schema_name === "pocket-sync-store");
   const objectHeadVersions = version.rows.filter((row) => row?.schema_name === "pocket-sync-object-head-store");
+  const authorityVersions = version.rows.filter((row) => row?.schema_name === "pocket-sync-persistence-authority");
   if (legacyVersions.length !== 1 || legacyVersions[0]?.schema_version !== 1) {
     throw schemaError("schema-version-value");
   }
   if (objectHeadVersions.length !== 1 || objectHeadVersions[0]?.schema_version !== 1) {
     throw schemaError("object-head-schema-version-value");
+  }
+  if (authorityVersions.length !== 1 || authorityVersions[0]?.schema_version !== 1) {
+    throw schemaError("schema-version-value");
   }
   return true;
 }

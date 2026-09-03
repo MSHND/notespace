@@ -11,6 +11,7 @@ const ROOT = path.resolve(__dirname, "..");
 const MIGRATION_MODULE = require.resolve("../sync-service/pocket-sync-db-migrate.js");
 const FIRST_MIGRATION = path.join(ROOT, "sync-service/migrations/001-pocket-sync-store.sql");
 const SECOND_MIGRATION = path.join(ROOT, "sync-service/migrations/002-pocket-sync-object-head-store.sql");
+const THIRD_MIGRATION = path.join(ROOT, "sync-service/migrations/003-pocket-sync-persistence-authority.sql");
 
 function copy(value) {
   return structuredClone(value);
@@ -38,7 +39,7 @@ function validFixture() {
       ["pocket_sync_records", "p", "PRIMARY KEY (collection, record_key)"],
       ["pocket_sync_records", "c", "CHECK (length(record_key)>0)"],
       ["pocket_sync_records", "c", "CHECK (store_version>0 AND store_version<=9007199254740991)"],
-      ["pocket_sync_records", "c", "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations'))"],
+      ["pocket_sync_records", "c", "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations','persistenceAuthorities'))"],
       ["pocket_sync_records", "c", "CHECK (jsonb_typeof(record)='object')"],
       ["pocket_sync_records", "c", "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)"],
       ["pocket_sync_schema", "p", "PRIMARY KEY (schema_name)"],
@@ -54,6 +55,7 @@ function validFixture() {
     versions: [
       { schema_name: "pocket-sync-store", schema_version: 1 },
       { schema_name: "pocket-sync-object-head-store", schema_version: 1 },
+      { schema_name: "pocket-sync-persistence-authority", schema_version: 1 },
     ],
   };
 }
@@ -114,13 +116,14 @@ function migrationDependencies({ failAt = null } = {}) {
   };
 }
 
-test("P118 runs the two fixed additive migrations in order before verification", async () => {
+test("P118 runs the three fixed additive migrations in order before verification", async () => {
   const dependencies = migrationDependencies();
   const { applyLocalMigration } = loadMigration(dependencies);
   await assert.doesNotReject(applyLocalMigration("postgres://test-only"));
   assert.deepEqual(dependencies.calls, [
     fs.readFileSync(FIRST_MIGRATION, "utf8"),
     fs.readFileSync(SECOND_MIGRATION, "utf8"),
+    fs.readFileSync(THIRD_MIGRATION, "utf8"),
     "verify",
   ]);
   assert.equal(dependencies.ended(), 1);
@@ -140,25 +143,28 @@ test("P118 keeps migration read and apply failures safe and closes pools", async
     } finally { fs.readFileSync = originalRead; }
     assert.equal(dependencies.ended(), 0);
   });
-  for (const failAt of [1, 2]) await t.test(`apply ${failAt}`, async () => {
+  for (const failAt of [1, 2, 3]) await t.test(`apply ${failAt}`, async () => {
     const dependencies = migrationDependencies({ failAt });
     const { applyLocalMigration } = loadMigration(dependencies);
     await assert.rejects(applyLocalMigration("postgres://test-only"), (error) => error.stage === "migration-apply");
     assert.equal(dependencies.ended(), 1);
-    assert.deepEqual(dependencies.calls, failAt === 1
-      ? [fs.readFileSync(FIRST_MIGRATION, "utf8")]
-      : [fs.readFileSync(FIRST_MIGRATION, "utf8"), fs.readFileSync(SECOND_MIGRATION, "utf8")]);
+    const expected = [fs.readFileSync(FIRST_MIGRATION, "utf8"), fs.readFileSync(SECOND_MIGRATION, "utf8"), fs.readFileSync(THIRD_MIGRATION, "utf8")];
+    assert.deepEqual(dependencies.calls, expected.slice(0, failAt));
   });
 });
 
 test("P118 migration files are additive and create neither object nor Head rows", () => {
   const first = fs.readFileSync(FIRST_MIGRATION, "utf8");
   const second = fs.readFileSync(SECOND_MIGRATION, "utf8");
+  const third = fs.readFileSync(THIRD_MIGRATION, "utf8");
   assert.match(first, /CREATE TABLE IF NOT EXISTS/);
   assert.match(second, /CREATE TABLE IF NOT EXISTS public\.pocket_sync_objects/);
   assert.match(second, /CREATE TABLE IF NOT EXISTS public\.pocket_sync_heads/);
   assert.match(second, /ON CONFLICT \(schema_name\) DO NOTHING/);
   assert.doesNotMatch(second, /INSERT INTO public\.pocket_sync_(objects|heads)|UPDATE public\.pocket_sync_|DELETE FROM public\.pocket_sync_/i);
+  assert.match(third, /INSERT INTO public\.pocket_sync_records/);
+  assert.match(third, /WHERE collection = 'pockets'/);
+  assert.doesNotMatch(third, /UPDATE\s+public\.pocket_sync_records[\s\S]*encryptedRecord/i);
 });
 
 test("P118 accepts a complete combined legacy, object and Head catalogue", async () => {
@@ -205,9 +211,11 @@ test("P118 requires the object and Head table contracts", async (t) => {
 
 test("P118 requires both version-one metadata rows and preserves bigint normalisation", async (t) => {
   for (const [name, component, mutate] of [
-    ["missing object Head row", "object-head-schema-version-value", (fixture) => { fixture.versions.pop(); }],
+    ["missing object Head row", "object-head-schema-version-value", (fixture) => { fixture.versions.splice(1, 1); }],
     ["duplicate object Head row", "object-head-schema-version-value", (fixture) => { fixture.versions.push(copy(fixture.versions[1])); }],
     ["wrong object Head version", "object-head-schema-version-value", (fixture) => { fixture.versions[1].schema_version = 2; }],
+    ["missing persistence authority row", "schema-version-value", (fixture) => { fixture.versions.pop(); }],
+    ["wrong persistence authority version", "schema-version-value", (fixture) => { fixture.versions[2].schema_version = 2; }],
     ["missing legacy row", "schema-version-value", (fixture) => { fixture.versions.shift(); }],
     ["legacy primary key", "records-primary-key", (fixture) => {
       fixture.constraints.find((row) => row.relation.endsWith("records") && row.contype === "p").definition = "PRIMARY KEY (record_key, collection)";

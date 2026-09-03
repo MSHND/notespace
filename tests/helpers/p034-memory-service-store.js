@@ -12,6 +12,7 @@ const COLLECTIONS = Object.freeze([
   "recoveryLocators",
   "recoveryCeremonies",
   "keyOperations",
+  "persistenceAuthorities",
 ]);
 const FAILURE_POINTS = Object.freeze([
   "before-first-read",
@@ -101,6 +102,7 @@ function createMemoryServiceStore(options = {}) {
   const backing = {
     collections: seedCollections(options.seed),
     queue: Promise.resolve(),
+    authorityLocks: new Map(),
   };
   let failurePoint = null;
   const counters = {
@@ -206,6 +208,27 @@ function createMemoryServiceStore(options = {}) {
     return current;
   }
 
+  async function withPocketAuthorityLock(syncedPocketId, callback) {
+    const pocket = validateKey(syncedPocketId);
+    if (pocket.length > 160 || pocket !== pocket.trim() || typeof callback !== "function") {
+      throw storeError("store-key-invalid");
+    }
+    const prior = backing.authorityLocks.get(pocket) || Promise.resolve();
+    let releaseTurn;
+    const turn = new Promise((resolve) => { releaseTurn = resolve; });
+    const tail = prior.then(() => turn, () => turn);
+    backing.authorityLocks.set(pocket, tail);
+    await prior.catch(() => {});
+    try { return await callback(); }
+    finally {
+      releaseTurn();
+      tail.finally(() => {
+        if (backing.authorityLocks.get(pocket) === tail) backing.authorityLocks.delete(pocket);
+      }).catch(() => {});
+    }
+  }
+
+  Object.defineProperty(transact, "withPocketAuthorityLock", { value: withPocketAuthorityLock });
   const store = Object.freeze({ transact });
 
   return Object.freeze({

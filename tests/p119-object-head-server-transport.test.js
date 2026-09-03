@@ -51,7 +51,10 @@ function authenticatedCore(options = {}) {
   const rows = new Map([[`sessions\0${sessionId}`, { kind:"pocket.sync.service-session",schemaVersion:1,storeVersion:1,sessionId,accountId:id,credentialId,status:"active",createdAt:"2032-01-01T00:00:00.000Z",expiresAt:"2033-01-01T00:00:00.000Z",replacedBy:null }], [`accounts\0${id}`, { kind:"pocket.sync.service-account",schemaVersion:1,storeVersion:1,accountId:id,accountPolicyVersion:1,prfEvaluationInput:"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",credentialIds:[credentialId],syncedPocketId:pocket,createdAt:"2032-01-01T00:00:00.000Z" }], [`credentials\0${credentialId}`, { kind:"pocket.sync.service-credential",schemaVersion:1,storeVersion:1,credentialId,accountId:id,credentialVersion:1,status:"active",publicKey:"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",publicKeyAlgorithm:-7,signCount:0,transports:["internal"],backupEligible:true,backedUp:false,createdAt:"2032-01-01T00:00:00.000Z" }]]);
   if (options.unconfigured) rows.get(`accounts\0${id}`).syncedPocketId = null;
   if (options.boundPocket) rows.get(`accounts\0${id}`).syncedPocketId = options.boundPocket;
-  const generic = Object.freeze({ async transact(_mode, fn) { return fn(Object.freeze({ async get(collection,key) { reads.push([collection,key]); return rows.get(`${collection}\0${key}`) || null; }, async insert(){},async replace(){},async remove(){} })); } });
+  const transact = async function transact(_mode, fn) { return fn(Object.freeze({ async get(collection,key) { reads.push([collection,key]); return rows.get(`${collection}\0${key}`) || null; }, async insert(){},async replace(){},async remove(){} })); };
+  Object.defineProperty(transact, "withPocketAuthorityLock", { value: async (_pocket, callback) => callback() });
+  rows.set(`persistenceAuthorities\0${pocket}`, { kind:"pocket.sync.persistence-authority",schemaVersion:1,storeVersion:1,accountId:id,syncedPocketId:pocket,authorityRevision:1,currentMode:"whole-record",transition:null,rollbackRevision:null,adoptionHead:null });
+  const generic = Object.freeze({ transact });
   return { core:createServiceCore(coreConfig({ store:generic, objectHeadStore })), sessionId, pocket, ref, record, calls:()=>calls, argumentsSeen, reads, head:(syncedPocketId)=>heads.get(syncedPocketId) || null };
 }
 

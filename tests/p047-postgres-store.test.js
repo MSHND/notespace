@@ -137,6 +137,7 @@ test("P047 exports a frozen narrow provider-neutral production surface", () => {
   assert.deepEqual(COLLECTIONS, [
     "accounts", "credentials", "sessions", "ceremonies", "pockets", "operations",
     "keySets", "envelopes", "recoveryLocators", "recoveryCeremonies", "keyOperations",
+    "persistenceAuthorities",
   ]);
   const production = source("sync-service/pocket-sync-postgres-store.js");
   const migration = source("sync-service/migrations/001-pocket-sync-store.sql");
@@ -384,6 +385,14 @@ test("P047 real store façade is compatible with the unchanged service core", as
   const controlled = createControlledPool();
   const core = createServiceCore({
     store: createPostgresStore({ pool: controlled.pool }),
+    objectHeadStore: Object.freeze({
+      async putObject() { return { ok: true, created: true }; },
+      async getObject() { return null; },
+      async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+      async initialiseHead() { return Object.freeze({ schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); },
+      async readHead() { return null; },
+      async compareAndSetHead() { return { ok: false, reason: "head-conflict" }; },
+    }),
     webAuthnVerifier: Object.freeze({ async verifyRegistration() { return {}; }, async verifyAuthentication() { return {}; } }),
     recoveryProofVerifier: Object.freeze({ async verifyRecoveryProof() { return { verified: true }; } }),
     randomBytes(length) { return Uint8Array.from({ length }, (_value, index) => index + 1); },

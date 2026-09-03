@@ -9,6 +9,7 @@ const { verifyPocketSyncSchema, safeSchemaComponent } = require("./pocket-sync-p
 const MIGRATION_PATHS = Object.freeze([
   path.join(__dirname, "migrations", "001-pocket-sync-store.sql"),
   path.join(__dirname, "migrations", ["002", "pocket", "sync", "object", "head", "store.sql"].join("-")),
+  path.join(__dirname, "migrations", ["003", "pocket", "sync", "persistence", "authority.sql"].join("-")),
 ]);
 const MIGRATION_STAGES = Object.freeze([
   "configuration", "migration-file", "migration-apply", "schema-verify", "unknown",

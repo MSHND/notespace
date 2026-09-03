@@ -12,6 +12,7 @@ const COLLECTIONS = Object.freeze([
   "recoveryLocators",
   "recoveryCeremonies",
   "keyOperations",
+  "persistenceAuthorities",
 ]);
 
 const TABLE = "public.pocket_sync_records";
@@ -24,6 +25,8 @@ const SQL = Object.freeze({
   insert: `INSERT INTO ${TABLE} (collection, record_key, store_version, record) VALUES ($1, $2, $3, $4::jsonb)`,
   replace: `UPDATE ${TABLE} SET store_version = $4, record = $5::jsonb WHERE collection = $1 AND record_key = $2 AND store_version = $3`,
   remove: `DELETE FROM ${TABLE} WHERE collection = $1 AND record_key = $2 AND store_version = $3`,
+  authorityLock: "SELECT pg_advisory_lock(hashtextextended($1::text, 166)) AS locked",
+  authorityUnlock: "SELECT pg_advisory_unlock(hashtextextended($1::text, 166)) AS unlocked",
 });
 
 function isObject(value) {
@@ -295,6 +298,50 @@ function createPostgresStore(options) {
     }
   }
 
+  async function withPocketAuthorityLock(syncedPocketId, callback) {
+    const pocket = validateKey(syncedPocketId);
+    if (pocket.length > 160 || pocket !== pocket.trim() || typeof callback !== "function") {
+      throw storeError("store-key-invalid");
+    }
+    let client = null;
+    let locked = false;
+    let primaryError = null;
+    try {
+      try { client = await pool.connect(); }
+      catch (_error) { throw storeError("store-storage-failed"); }
+      if (!isReference(client) || typeof client.query !== "function"
+          || typeof client.release !== "function") throw storeError("store-storage-failed");
+      let acquired;
+      try { acquired = await client.query(SQL.authorityLock, [pocket]); }
+      catch (_error) { throw storeError("store-storage-failed"); }
+      if (!isReference(acquired) || !Array.isArray(acquired.rows) || acquired.rows.length !== 1) {
+        throw storeError("store-storage-failed");
+      }
+      locked = true;
+      return await callback();
+    } catch (error) {
+      primaryError = error;
+      throw error;
+    } finally {
+      if (client) {
+        let unlockError = null;
+        if (locked) {
+          try {
+            const released = await client.query(SQL.authorityUnlock, [pocket]);
+            if (!isReference(released) || !Array.isArray(released.rows)
+                || released.rows.length !== 1 || released.rows[0]?.unlocked !== true) {
+              unlockError = storeError("store-storage-failed");
+            }
+          } catch (_error) { unlockError = storeError("store-storage-failed"); }
+        }
+        try { client.release(); }
+        catch (_error) { if (!unlockError) unlockError = storeError("store-storage-failed"); }
+        if (unlockError && !primaryError) throw unlockError;
+      }
+    }
+  }
+
+  Object.defineProperty(transact, "withPocketAuthorityLock", { value: withPocketAuthorityLock });
   return Object.freeze({ transact });
 }
 

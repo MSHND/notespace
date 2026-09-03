@@ -244,6 +244,14 @@ async function createBrowserJourney(options = {}) {
   let serviceRandom = 0;
   const core = createServiceCore({
     store: serviceDriver.store,
+    objectHeadStore: Object.freeze({
+      async putObject() { return { ok: true, created: true }; },
+      async getObject() { return null; },
+      async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+      async initialiseHead() { return Object.freeze({ schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); },
+      async readHead() { return null; },
+      async compareAndSetHead() { return { ok: false, reason: "head-conflict" }; },
+    }),
     webAuthnVerifier: {
       async verifyRegistration(input) { return { credentialId: input.credential.id,
         publicKey: Buffer.from(bytes(64, 101)).toString("base64url"), publicKeyAlgorithm: -7,
@@ -808,6 +816,14 @@ test("P052b accepts a production Device A activation, Device B adoption and ordi
   let random = 0;
   const core = createServiceCore({
     store: serviceDriver.store,
+    objectHeadStore: Object.freeze({
+      async putObject() { return { ok: true, created: true }; },
+      async getObject() { return null; },
+      async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },
+      async initialiseHead() { return Object.freeze({ schema: "pocket.starling.head.v1", revision: 0, sealRef: null }); },
+      async readHead() { return null; },
+      async compareAndSetHead() { return { ok: false, reason: "head-conflict" }; },
+    }),
     webAuthnVerifier: {
       async verifyRegistration(input) { return { credentialId: input.credential.id,
         publicKey: Buffer.from(bytes(64, 91)).toString("base64url"), publicKeyAlgorithm: -7,

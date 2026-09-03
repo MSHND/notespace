@@ -75,14 +75,14 @@ function validSchemaFixture() {
       { relation: "public.pocket_sync_records", contype: "p", definition: "PRIMARY KEY (collection, record_key)" },
       { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (length(record_key)>0)" },
       { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (store_version>0 AND store_version<=9007199254740991)" },
-      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations'))" },
+      { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (collection IN ('accounts','credentials','sessions','ceremonies','pockets','operations','keySets','envelopes','recoveryLocators','recoveryCeremonies','keyOperations','persistenceAuthorities'))" },
       { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" },
       { relation: "public.pocket_sync_records", contype: "c", definition: "CHECK (jsonb_typeof(record->'storeVersion')='number' AND record->>'storeVersion' ~ '^[1-9][0-9]*$' AND (record->>'storeVersion')::NUMERIC=store_version)" },
       { relation: "public.pocket_sync_schema", contype: "p", definition: "PRIMARY KEY (schema_name)" },
       { relation: "public.pocket_sync_objects", contype: "p", definition: "PRIMARY KEY (synced_pocket_id, storage_ref)" }, { relation: "public.pocket_sync_objects", contype: "c", definition: "CHECK (length(synced_pocket_id)>0)" }, { relation: "public.pocket_sync_objects", contype: "c", definition: "CHECK (length(storage_ref)>0)" }, { relation: "public.pocket_sync_objects", contype: "c", definition: "CHECK (jsonb_typeof(record)='object')" },
       { relation: "public.pocket_sync_heads", contype: "p", definition: "PRIMARY KEY (synced_pocket_id)" }, { relation: "public.pocket_sync_heads", contype: "c", definition: "CHECK (length(synced_pocket_id)>0)" }, { relation: "public.pocket_sync_heads", contype: "c", definition: "CHECK (revision>=0 AND revision<=9007199254740991)" }, { relation: "public.pocket_sync_heads", contype: "c", definition: "CHECK ((revision=0 AND seal_storage_ref IS NULL) OR (revision>0 AND seal_storage_ref IS NOT NULL AND length(seal_storage_ref)>0))" },
     ],
-    versions: [{ schema_name: "pocket-sync-store", schema_version: 1 }, { schema_name: "pocket-sync-object-head-store", schema_version: 1 }],
+    versions: [{ schema_name: "pocket-sync-store", schema_version: 1 }, { schema_name: "pocket-sync-object-head-store", schema_version: 1 }, { schema_name: "pocket-sync-persistence-authority", schema_version: 1 }],
   };
 }
 
@@ -142,6 +142,8 @@ function createPoolClass(state) {
             began = false;
             return { rows: [], rowCount: null };
           }
+          if (sql.includes("pg_advisory_lock")) return { rows: [{ locked: null }], rowCount: 1 };
+          if (sql.includes("pg_advisory_unlock")) return { rows: [{ unlocked: true }], rowCount: 1 };
           if (!began) throw new Error("query outside transaction");
           const rowKey = key(values[0], values[1]);
           if (sql.startsWith("SELECT store_version, record")) {
@@ -522,6 +524,7 @@ test("P049 keeps the migration explicit, fixed-path and safely closed", async ()
     assert.deepEqual(calls[0], { connectionString: "postgres://operator:secret@127.0.0.1/pocket" });
     assert.equal(calls[1], source("sync-service/migrations/001-pocket-sync-store.sql"));
     assert.equal(calls[2], source("sync-service/migrations/002-pocket-sync-object-head-store.sql"));
+    assert.equal(calls[3], source("sync-service/migrations/003-pocket-sync-persistence-authority.sql"));
     assert.equal(ended, 1);
     Pool.prototype.query = async () => { throw new Error("native connection detail"); };
     await assert.rejects(applyLocalMigration("postgres://operator:secret@127.0.0.1/pocket"),

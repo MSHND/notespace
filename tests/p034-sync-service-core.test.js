@@ -296,6 +296,7 @@ test("P034 service module is dormant, server-side only, and exports one frozen s
     "recoveryLocators",
     "recoveryCeremonies",
     "keyOperations",
+    "persistenceAuthorities",
   ]);
   assert.doesNotMatch(source("index.html"), /pocket-sync-service-core/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-service-core/);
@@ -345,6 +346,9 @@ test("factory configuration, store boundary, origin and lifetimes are exact", ()
     "readRevision",
     "downloadEncryptedRecord",
     "conditionalUpload",
+    "readPersistenceAuthority",
+    "acquirePersistenceAuthorityFence",
+    "releasePersistenceAuthorityFence",
     "listEnvelopes",
     "downloadEnvelope",
     "addEnvelope",
