@@ -138,6 +138,6 @@ test("P139 rejects invalid compose grammar and stops on the exact lower-layer fa
   expectFailure(failed, "retained-node-not-current", 1); assert.equal((await api.editPayload(opened.base, "later", { label: "not present" })).reason, "unknown-node"); assert.deepEqual(plain(await api.compose(opened.base, [{ type: "payload", input: { nodeId: "first", payload: { label: "First" } } }])), { ok: true, changed: false, reason: "no-change" }); assert.equal((await api.compose(opened.base, [{ type: "payload", input: { nodeId: "first", payload: { label: "reusable" } } }])).ok, true);
 });
 
-test("P139 remains dormant in production", () => {
-  const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }); assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes(MODULE), false); assert.equal(manifest.some((entry) => entry.path === `/${MODULE}`), false);
+test("P139 is production-bounded beneath the P164 successor composer", () => {
+  const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }), paths = manifest.map((entry) => entry.path); assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes(MODULE), false); assert.equal(paths.includes(`/${MODULE}`), true); assert.equal(paths.includes("/js/pocket-starling-remote-save-shadow.js"), false);
 });

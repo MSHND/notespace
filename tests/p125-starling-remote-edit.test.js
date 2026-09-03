@@ -200,12 +200,18 @@ test("P125 rejects forged proof, key, context, and authority-looking inputs with
   assert.deepEqual(plain(wrongContext), { ok: false, reason: "invalid-semantic-base" });
 });
 
-test("P125 remains absent from production release and live owners", () => {
+test("P125 is production-bounded to P164 successor preparation", () => {
   const source = fs.readFileSync(path.join(ROOT, "js/pocket-starling-remote-edit-shadow.js"), "utf8"),
     manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }), paths = manifest.map((entry) => entry.path);
   assert.equal(source.includes("verifyNewRecordPresence"), false);
-  assert.equal(paths.includes("/js/pocket-starling-remote-edit-shadow.js"), false);
+  assert.equal(paths.includes("/js/pocket-starling-remote-edit-shadow.js"), true);
   assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes("pocket-starling-remote-edit-shadow.js"), false);
-  for (const entry of manifest.filter((item) => item.path.endsWith(".js")))
-    assert.equal(fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingRemoteEditShadow"), false, entry.path);
+  const consumers = manifest.filter((entry) => entry.path.endsWith(".js")
+    && fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingRemoteEditShadow"))
+    .map((entry) => entry.path).sort();
+  assert.deepEqual(consumers, [
+    "/js/pocket-starling-owner-successor.js",
+    "/js/pocket-starling-remote-edit-shadow.js",
+  ]);
+  assert.equal(paths.includes("/js/pocket-starling-remote-save-shadow.js"), false);
 });

@@ -395,13 +395,20 @@ test("P124 retains missing Seal Head transport and no-secret boundaries", async 
     assert.equal(Object.hasOwn(result.session, field), false);
 });
 
-test("P124 stays absent from the real production release manifest", () => {
+test("P124 is production-bounded to P164 successor reentry", () => {
   const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }), paths = manifest.map((e) => e.path);
-  assert.equal(paths.includes("/js/pocket-starling-remote-open-shadow.js"), false);
+  assert.equal(paths.includes("/js/pocket-starling-remote-open-shadow.js"), true);
   for (const expected of ["/js/pocket-sync-local-integration.js", "/js/pocket-sync-additional-device.js",
     "/js/pocket-sync-emergency-recovery.js", "/js/pocket-sync-production-bootstrap.js"])
     assert.equal(paths.includes(expected), true, expected);
   assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes("pocket-starling-remote-open-shadow.js"), false);
-  for (const entry of manifest.filter((e) => e.path.endsWith(".js")))
-    assert.equal(fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingRemoteOpenShadow"), false, entry.path);
+  const consumers = manifest.filter((entry) => entry.path.endsWith(".js")
+    && fs.readFileSync(path.join(ROOT, `.${entry.path}`), "utf8").includes("PocketStarlingRemoteOpenShadow"))
+    .map((entry) => entry.path).sort();
+  assert.deepEqual(consumers, [
+    "/js/pocket-starling-owner-bootstrap.js",
+    "/js/pocket-starling-owner-successor.js",
+    "/js/pocket-starling-remote-open-shadow.js",
+  ]);
+  assert.equal(paths.includes("/js/pocket-starling-remote-save-shadow.js"), false);
 });

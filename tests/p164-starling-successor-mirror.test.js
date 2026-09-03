@@ -149,6 +149,41 @@ function normalisedDocument(context, label, writtenAt, extra = {}) {
   };
 }
 
+function canonicalStarlingDocument(context, document) {
+  const encoded = context.PocketStarlingBridgeShadow.encode(document, { capacity: 4 });
+  assert.equal(encoded.ok, true, JSON.stringify(encoded));
+  const audited = context.PocketStarlingPlacementShadow.audit(encoded.bridge.structural);
+  assert.equal(audited.ok, true, JSON.stringify(audited));
+  const byId = new Map(document.nodes.map((node) => [node.id, node]));
+  const nodes = [];
+  const seen = new Set();
+  const visit = (parentId) => {
+    const children = audited.relation.children[parentId] || [];
+    for (let index = 0; index < children.length; index += 1) {
+      const nodeId = children[index];
+      const node = byId.get(nodeId);
+      assert.ok(node && !seen.has(nodeId), nodeId);
+      seen.add(nodeId);
+      const payload = {};
+      for (const key of Object.keys(node)) {
+        if (!["id", "parentId", "order"].includes(key)) payload[key] = plain(node[key]);
+      }
+      nodes.push({ id: nodeId, parentId, order: index, ...payload });
+      visit(nodeId);
+    }
+  };
+  visit("root");
+  assert.equal(seen.size, document.nodes.length);
+  return {
+    schema: document.schema,
+    writtenAt: document.writtenAt,
+    nodes,
+    tombstones: plain(document.tombstones),
+    rootExtras: plain(document.rootExtras),
+    dataExtras: plain(document.dataExtras),
+  };
+}
+
 function payloadOnly(node) {
   const payload = {};
   for (const key of Object.keys(node)) {
@@ -509,7 +544,7 @@ test("P164 mirrors one exact P160 explicit Save only after durable witness and w
   assert.equal(h.remote.count.cas, 2, "one genesis CAS + one successor CAS");
   assert.equal(h.audit.indexOf("state:write-done") < h.audit.indexOf("whole:remote"), true, h.audit.join(" | "));
   assert.equal(h.audit.indexOf("whole:remote") < h.audit.indexOf("starling:cas"), true, h.audit.join(" | "));
-  assert.deepEqual(plain(await materialise(h.context, h)), plain(h.targetDocument.norm));
+  assert.deepEqual(plain(await materialise(h.context, h)), plain(canonicalStarlingDocument(h.context, h.targetDocument.norm)));
   const accepted = h.controller.getStarlingBootstrapState();
   assert.equal(accepted.sourceRevision, 4);
   assert.deepEqual(plain(accepted.head), plain(h.remote.head));
@@ -571,7 +606,7 @@ test("P164 leaves Head unchanged when whole-record Save is not confirmed and pen
   assert.equal(retried.reason, "pending-reconciled");
   assert.equal(freezeCalled, 0);
   assert.equal(h.remote.count.cas, 2, "exact durable candidate gets one successor CAS after whole retry confirms");
-  assert.deepEqual(plain(await materialise(h.context, h)), plain(h.targetDocument.norm));
+  assert.deepEqual(plain(await materialise(h.context, h)), plain(canonicalStarlingDocument(h.context, h.targetDocument.norm)));
   durable = await decryptedPrivateState(h.context, h);
   assert.equal(durable.migration, null);
   assert.equal(durable.accepted.sourceRevision, 4);
@@ -624,7 +659,7 @@ test("P164 persists exact candidate before ambiguous CAS, attempts it once, and 
   durable = await decryptedPrivateState(freshContext, h);
   assert.equal(durable.migration, null);
   assert.equal(durable.accepted.sourceRevision, 4);
-  assert.deepEqual(plain(await materialise(freshContext, h)), plain(h.targetDocument.norm));
+  assert.deepEqual(plain(await materialise(freshContext, h)), plain(canonicalStarlingDocument(freshContext, h.targetDocument.norm)));
 });
 
 test("P164 reconstructs a crash-after-witness successor from durable P160 operations rather than whole-document diff", async () => {
@@ -655,7 +690,7 @@ test("P164 reconstructs a crash-after-witness successor from durable P160 operat
   durable = await decryptedPrivateState(freshContext, h);
   assert.equal(durable.migration, null);
   assert.equal(durable.accepted.sourceRevision, 4);
-  assert.deepEqual(plain(await materialise(freshContext, h)), plain(h.targetDocument.norm));
+  assert.deepEqual(plain(await materialise(freshContext, h)), plain(canonicalStarlingDocument(freshContext, h.targetDocument.norm)));
 });
 
 test("P164 retains accepted-Head evidence when final proof fails and a later fresh runtime proves exact target without another CAS", async () => {

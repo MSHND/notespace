@@ -412,7 +412,11 @@ into a user-facing failure.
     function canonicalDocument(payload) {
       if (!isObject(payload) || payload.schema !== "portal.export.v1") return null;
       const logical = global.PocketStarlingObjectSealShadow;
-      if (!logical || typeof logical.canonical !== "function") return null;
+      const bridge = global.PocketStarlingBridgeShadow;
+      const placement = global.PocketStarlingPlacementShadow;
+      if (!logical || typeof logical.canonical !== "function"
+          || !bridge || typeof bridge.encode !== "function"
+          || !placement || typeof placement.audit !== "function") return null;
       try {
         const parsed = options.normaliseInput(payload);
         const dataExtras = options.normaliseRootExtras(isObject(payload.data) ? payload.data : {});
@@ -427,9 +431,42 @@ into a user-facing failure.
           rootExtras: isObject(parsed.rootExtras) ? parsed.rootExtras : {},
           dataExtras: isObject(dataExtras) ? dataExtras : {},
         };
-        const canonical = logical.canonical(document);
-        return canonical?.ok === true && typeof canonical.bytes === "string"
-          ? Object.freeze({ document: freeze(document), bytes: canonical.bytes }) : null;
+        const encoded = bridge.encode(document, { capacity: 4 });
+        if (!encoded || encoded.ok !== true || !encoded.bridge) return null;
+        const relation = placement.audit(encoded.bridge.structural);
+        if (!relation || relation.ok !== true || !relation.relation) return null;
+        const byId = new Map(document.nodes.map((node) => [node.id, node]));
+        if (byId.size !== document.nodes.length) return null;
+        const nodes = [];
+        const seen = new Set();
+        const visit = (parentId) => {
+          const children = relation.relation.children[parentId] || [];
+          for (let index = 0; index < children.length; index += 1) {
+            const nodeId = children[index];
+            const node = byId.get(nodeId);
+            if (!node || seen.has(nodeId)) return false;
+            seen.add(nodeId);
+            const nodePayload = {};
+            for (const key of Object.keys(node)) {
+              if (key !== "id" && key !== "parentId" && key !== "order") nodePayload[key] = node[key];
+            }
+            nodes.push({ id: nodeId, parentId, order: index, ...nodePayload });
+            if (!visit(nodeId)) return false;
+          }
+          return true;
+        };
+        if (!visit("root") || seen.size !== document.nodes.length) return null;
+        const projected = {
+          schema: document.schema,
+          writtenAt: document.writtenAt,
+          nodes,
+          tombstones: document.tombstones,
+          rootExtras: document.rootExtras,
+          dataExtras: document.dataExtras,
+        };
+        const canonical = logical.canonical(projected);
+        if (!canonical || canonical.ok !== true || typeof canonical.bytes !== "string") return null;
+        return Object.freeze({ document: freeze(JSON.parse(canonical.bytes)), bytes: canonical.bytes });
       } catch (_error) { return null; }
     }
 
@@ -538,8 +575,8 @@ into a user-facing failure.
           semanticAuthority: current.owner.semanticAuthority,
         });
         const prepared = await editor.prepareWorkingSet(
-          migration.operations,
-          migration.preservationProjection
+          clone(migration.operations),
+          clone(migration.preservationProjection)
         );
         if (!prepared || prepared.outcome !== "prepared") return null;
         const descriptor = durablePublication.descriptorFromPrepared(prepared);
