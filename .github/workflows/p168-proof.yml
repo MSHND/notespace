@@ -1,0 +1,51 @@
+name: P168 exact-candidate proof
+on:
+  push:
+    branches: [candidate/p168-proof]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci
+      - name: Assert exact candidate ancestry and proof-only diff
+        run: |
+          candidate=cc27b389df588ee8b90aebd6fca959fe2a081374
+          test "$(git merge-base HEAD "$candidate")" = "$candidate"
+          test "$(git rev-list --count "$candidate"..HEAD)" -eq 1
+          test "$(git rev-parse HEAD^)" = "$candidate"
+          test "$(git diff --name-only "$candidate"..HEAD)" = ".github/workflows/p168-proof.yml"
+      - name: Focused P168 proofs
+        run: timeout 180s node --test --test-concurrency=1 tests/p168-authority-adoption.test.js tests/p168-starling-reentry.test.js
+      - name: Exact affected proof matrix
+        run: |
+          timeout 480s node --test --test-concurrency=1 \
+            tests/p032-sync-remote-client.test.js \
+            tests/p034-sync-service-core.test.js \
+            tests/p041-emergency-recovery.test.js \
+            tests/p042-synced-owner-controller.test.js \
+            tests/p045-browser-sync-runtime.test.js \
+            tests/p046-sync-http-adapter.test.js \
+            tests/p047-sync-postgres-store.test.js \
+            tests/p049-sync-postgres-runtime.test.js \
+            tests/p051-local-sync-integration.test.js \
+            tests/p051a-local-sync-acceptance.test.js \
+            tests/p052-additional-device.test.js \
+            tests/p117-starling-object-head-postgres-store.test.js \
+            tests/p119-starling-object-head-service.test.js \
+            tests/p160-owner-save-preparation.test.js \
+            tests/p164-starling-successor-mirror.test.js \
+            tests/p166-persistence-authority-fence.test.js \
+            tests/p168-authority-adoption.test.js \
+            tests/p168-starling-reentry.test.js
+      - name: Repository check
+        run: timeout 600s npm run check
