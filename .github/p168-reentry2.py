@@ -107,10 +107,10 @@ patch('js/pocket-sync-local-integration.js',
             || authority.authority.transition !== null) return safeFailure("round-trip-not-ready");
         const savedPayload = currentPayload();
 ''',
-'''        if (typeof remote.createPersistenceAuthorityService === "function") {
+'''        if (authorityServices.persistenceAuthorityService) {
           const authorityOperation = operationId();
           if (!authorityOperation) return safeFailure("round-trip-unavailable");
-          const authority = await remote.createPersistenceAuthorityService({ transport }).read({
+          const authority = await authorityServices.persistenceAuthorityService.read({
             apiVersion: 1, operationId: authorityOperation, syncedPocketId,
           });
           if (authority?.authority?.currentMode === "starling") {
