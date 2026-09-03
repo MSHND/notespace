@@ -16,7 +16,28 @@ const LOCAL_MODULE_PATH = "/js/pocket-sync-local-integration.js";
 const ADDITIONAL_MODULE_PATH = "/js/pocket-sync-additional-device.js";
 const RECOVERY_MODULE_PATH = "/js/pocket-sync-emergency-recovery.js";
 const PRODUCTION_BOOTSTRAP_PATH = "/js/pocket-sync-production-bootstrap.js";
-const PRODUCTION_MODULE_TAG = `<script src="${ADDITIONAL_MODULE_PATH}"></script>\n  <script src="${RECOVERY_MODULE_PATH}"></script>\n  <script src="${LOCAL_MODULE_PATH}" data-service-root="%SERVICE_ROOT%"></script>\n  <script src="${PRODUCTION_BOOTSTRAP_PATH}"></script>`;
+const STARLING_BOOTSTRAP_PATHS = Object.freeze([
+  "/js/pocket-starling-shadow.js",
+  "/js/pocket-starling-sequence-shadow.js",
+  "/js/pocket-starling-placement-shadow.js",
+  "/js/pocket-starling-bridge-shadow.js",
+  "/js/pocket-starling-root-shadow.js",
+  "/js/pocket-starling-object-seal-shadow.js",
+  "/js/pocket-starling-semantic-authority-shadow.js",
+  "/js/pocket-starling-crypto-shadow.js",
+  "/js/pocket-starling-storage-shadow.js",
+  "/js/pocket-starling-head-shadow.js",
+  "/js/pocket-starling-publication-shadow.js",
+  "/js/pocket-starling-remote-open-shadow.js",
+  "/js/pocket-starling-materialize-shadow.js",
+  "/js/pocket-starling-owner-bootstrap.js",
+]);
+const STARLING_BOOTSTRAP_TAG = STARLING_BOOTSTRAP_PATHS.map((modulePath) => (
+  modulePath === "/js/pocket-starling-owner-bootstrap.js"
+    ? `<script src="${modulePath}" data-service-root="%SERVICE_ROOT%"></script>`
+    : `<script src="${modulePath}"></script>`
+)).join("\n  ");
+const PRODUCTION_MODULE_TAG = `<script src="${ADDITIONAL_MODULE_PATH}"></script>\n  <script src="${RECOVERY_MODULE_PATH}"></script>\n  <script src="${LOCAL_MODULE_PATH}" data-service-root="%SERVICE_ROOT%"></script>\n  ${STARLING_BOOTSTRAP_TAG}\n  <script src="${PRODUCTION_BOOTSTRAP_PATH}"></script>`;
 
 function productionError() {
   const error = new Error("Pocket Sync production composition failed.");
@@ -26,7 +47,7 @@ function productionError() {
 
 function injectedIndex(index, serviceRoot) {
   if (typeof index !== "string" || !index.includes("</body>")) throw productionError();
-  return index.replace("</body>", `  ${PRODUCTION_MODULE_TAG.replace("%SERVICE_ROOT%", serviceRoot)}\n</body>`);
+  return index.replace("</body>", `  ${PRODUCTION_MODULE_TAG.replaceAll("%SERVICE_ROOT%", serviceRoot)}\n</body>`);
 }
 
 function validServiceRoot(value) {
@@ -41,6 +62,7 @@ function productionStaticInput(browserRoot, serviceRoot) {
     browserRoot,
     additionalAssets: Object.freeze([
       LOCAL_MODULE_PATH, ADDITIONAL_MODULE_PATH, RECOVERY_MODULE_PATH, PRODUCTION_BOOTSTRAP_PATH,
+      ...STARLING_BOOTSTRAP_PATHS,
     ]),
     transformIndex(index) { return injectedIndex(index, serviceRoot); },
   });
