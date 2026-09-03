@@ -21,7 +21,7 @@ jobs:
         run: git diff --check
       - name: Core and same-owner affected tests
         run: |
-          node --test \
+          timeout 300s node --test --test-concurrency=1 \
             tests/p032-sync-remote-client.test.js \
             tests/p034-sync-service-core.test.js \
             tests/p042-synced-owner-controller.test.js \
@@ -33,4 +33,4 @@ jobs:
             tests/p164-starling-successor-mirror.test.js \
             tests/p166-persistence-authority-fence.test.js
       - name: Full check
-        run: npm run check
+        run: timeout 600s npm run check
