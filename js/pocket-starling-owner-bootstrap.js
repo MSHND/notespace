@@ -596,7 +596,6 @@ authority and never exposes owner key material or the accepted session.
       const result = await base.adoptReadyActivation(input);
       if (result?.ok === true) {
         clearOwnerPrivateState();
-        await captureMirror(null);
       }
       return result;
     }
