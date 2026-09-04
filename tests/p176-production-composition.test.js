@@ -29,9 +29,11 @@ function memoryObjectHeadStore(options = {}) {
   const objects = new Map();
   const heads = new Map();
   let initialiseFailures = options.initialiseFailures || 0;
+  let putFailures = options.putFailures || 0;
   const objectKey = (pocket, ref) => `${pocket}\u0000${ref}`;
   return Object.freeze({
     async putObject(pocket, storageRef, record) {
+      if (putFailures > 0) { putFailures -= 1; throw new Error("bounded object publication failure"); }
       const key = objectKey(pocket, storageRef), serialised = JSON.stringify(record);
       if (objects.has(key)) {
         if (JSON.stringify(objects.get(key)) !== serialised) throw new Error("immutable object mismatch");
@@ -70,6 +72,7 @@ function memoryObjectHeadStore(options = {}) {
 
 function createIndexedDb() {
   const databases = new Map();
+  const databaseStores = new Map();
   const observations = { opens: [] };
 
   function createStoreState(keyPath) {
@@ -106,6 +109,7 @@ function createIndexedDb() {
 
   function databaseFor(name, version) {
     const stores = new Map();
+    databaseStores.set(name, stores);
     return {
       version,
       get objectStoreNames() { return [...stores.keys()]; },
@@ -134,6 +138,12 @@ function createIndexedDb() {
 
   return {
     observations,
+    mutateRecord(databaseName, storeName, key, mutate) {
+      const state = databaseStores.get(databaseName)?.get(storeName);
+      if (!state || !state.records.has(key) || typeof mutate !== "function") return false;
+      state.records.set(key, mutate(state.records.get(key)));
+      return true;
+    },
     indexedDB: {
       open(name, version) {
         observations.opens.push(name);
@@ -359,6 +369,15 @@ function productionHarness(options = {}) {
     context.__p176Label = label;
     vm.runInContext("state.nodes[0].label=__p176Label;state.nodes[0].updatedAt=new Date().toISOString();", context);
   }
+  function corruptConfirmedSource() {
+    const session = context.PocketOwnerSaveBoundary.captureOwnerSaveSession();
+    const syncedPocketId = session?.controllerSession?.syncedPocketId;
+    if (!syncedPocketId) return false;
+    return idb.mutateRecord("pocket.sync.device.v1", "pockets", syncedPocketId, (record) => ({
+      ...record,
+      content: { ...record.content, record: { ...record.content.record, ciphertext: b64(bytes(32, 233)) } },
+    }));
+  }
   function routeCount(suffix) { return requests.filter((entry) => entry.url.endsWith(suffix)).length; }
   function routeIndex(suffix, occurrence = 0) {
     const indexes = requests.map((entry, index) => entry.url.endsWith(suffix) ? index : -1).filter((index) => index >= 0);
@@ -379,7 +398,8 @@ function productionHarness(options = {}) {
     return { syncedPocketId, authority: authority.authority, head: head.head, revision: revision.revision };
   }
   return {
-    context, requests, idb, service, currentPayload, installPreparation, setLabel, routeCount, routeIndex, readRemoteState,
+    context, requests, idb, service, currentPayload, installPreparation, setLabel, corruptConfirmedSource,
+    routeCount, routeIndex, readRemoteState,
     get ownerKind() { return ownerKind; }, get freezeCalls() { return freezeCalls; },
     get pickerCalls() { return pickerCalls; }, get passkeyCalls() { return passkeyCalls; }, get recoveryWrites() { return recoveryWrites; },
   };
@@ -397,6 +417,27 @@ async function activateFresh(h) {
   const roundTrip = await h.context.PocketSyncActiveIntegration.verifyRoundTrip();
   assert.deepEqual(plain(roundTrip), { ok: true, revision: 1, matchesCurrentSavedPocket: true });
   return result;
+}
+
+async function savePreparedTarget(h, label) {
+  const wholeUploadsBefore = h.routeCount("/pockets/content/conditional-upload");
+  h.setLabel(label);
+  const target = h.currentPayload();
+  h.installPreparation(target, 1);
+  const saved = await h.context.PocketOwnerSaveBoundary.save({
+    expectedSession: h.context.capturePocketFileSaveSession(),
+    freezePayload: async () => target,
+  });
+  return { saved, wholeUploadsBefore };
+}
+
+function assertWholeRecordFailClosed(h, saved, wholeUploadsBefore, bootstrapReason) {
+  assert.deepEqual(plain({ ok: saved.ok, reason: saved.reason, bootstrapReason: saved.bootstrapReason }), {
+    ok: false, reason: "starling-cutover-bootstrap-failed", bootstrapReason,
+  });
+  assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeUploadsBefore);
+  assert.equal(h.routeCount("/pockets/authority/fence/acquire"), 0);
+  assert.equal(h.routeCount("/pockets/authority/starling/adopt"), 0);
 }
 
 test("P176 exact production fresh activation bootstraps H, adopts authority, then saves dirty payload only through Starling", async () => {
@@ -456,20 +497,8 @@ test("P176 exact production fresh activation bootstraps H, adopts authority, the
 test("P176 exact production failure at initial Head establishment is bounded and cannot advance whole-record R", async () => {
   const h = productionHarness({ initialiseFailures: 1 });
   await activateFresh(h);
-  const wholeUploadsBefore = h.routeCount("/pockets/content/conditional-upload");
-  h.setLabel("Must not become R=2");
-  const target = h.currentPayload();
-  h.installPreparation(target, 1);
-  const saved = await h.context.PocketOwnerSaveBoundary.save({
-    expectedSession: h.context.capturePocketFileSaveSession(),
-    freezePayload: async () => target,
-  });
-  assert.deepEqual(plain({ ok: saved.ok, reason: saved.reason, bootstrapReason: saved.bootstrapReason }), {
-    ok: false, reason: "starling-cutover-bootstrap-failed", bootstrapReason: "bootstrap-head-outcome-unknown",
-  });
-  assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeUploadsBefore);
-  assert.equal(h.routeCount("/pockets/authority/fence/acquire"), 0);
-  assert.equal(h.routeCount("/pockets/authority/starling/adopt"), 0);
+  const { saved, wholeUploadsBefore } = await savePreparedTarget(h, "Must not become R=2");
+  assertWholeRecordFailClosed(h, saved, wholeUploadsBefore, "bootstrap-head-outcome-unknown");
   const state = await h.readRemoteState();
   assert.equal(state.revision, 1);
   assert.equal(state.authority.currentMode, "whole-record");
@@ -477,4 +506,32 @@ test("P176 exact production failure at initial Head establishment is bounded and
   assert.equal(state.head, null);
   const roundTrip = await h.context.PocketSyncActiveIntegration.verifyRoundTrip();
   assert.deepEqual(plain(roundTrip), { ok: true, revision: 1, matchesCurrentSavedPocket: true });
+});
+
+test("P176a exact production sourceGuard-side stale source is bounded and cannot fall back to whole-record", async () => {
+  const h = productionHarness();
+  await activateFresh(h);
+  assert.equal(h.corruptConfirmedSource(), true, "test mutates only the browser test store after fresh activation");
+  const { saved, wholeUploadsBefore } = await savePreparedTarget(h, "Source changed under bootstrap");
+  assertWholeRecordFailClosed(h, saved, wholeUploadsBefore, "bootstrap-source-stale");
+  const state = await h.readRemoteState();
+  assert.equal(state.revision, 1);
+  assert.equal(state.authority.currentMode, "whole-record");
+  assert.equal(state.authority.transition, null);
+  assert.equal(state.head, null);
+  assert.equal(saved.ok, false);
+});
+
+test("P176a exact production post-initialisation object publication failure is bounded and cannot fall back", async () => {
+  const h = productionHarness({ putFailures: 1 });
+  await activateFresh(h);
+  const { saved, wholeUploadsBefore } = await savePreparedTarget(h, "Publication must fail closed");
+  assertWholeRecordFailClosed(h, saved, wholeUploadsBefore, "bootstrap-object-publication-failed");
+  const state = await h.readRemoteState();
+  assert.equal(state.revision, 1);
+  assert.equal(state.authority.currentMode, "whole-record");
+  assert.equal(state.authority.transition, null);
+  assert.equal(state.head?.revision, 0, "Head initialisation may persist, but no accepted Starling authority exists");
+  assert.equal(h.routeCount("/pockets/head/compare-and-set"), 0);
+  assert.equal(saved.ok, false);
 });
