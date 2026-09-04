@@ -25,6 +25,30 @@
 
   const HEAD_SCHEMA = "pocket.starling.head.v1";
   const FINGERPRINT = /^sha256:[A-Za-z0-9_-]{43}$/;
+  const BOOTSTRAP_FAILURE_REASONS = Object.freeze([
+    "bootstrap-unavailable",
+    "no-synced-owner",
+    "bootstrap-source-unavailable",
+    "bootstrap-source-stale",
+    "bootstrap-source-not-confirmed",
+    "bootstrap-source-authentication-failed",
+    "bootstrap-foundation-unavailable",
+    "bootstrap-source-invalid",
+    "bootstrap-logical-stage-failed",
+    "bootstrap-semantic-audit-failed",
+    "bootstrap-storage-stage-failed",
+    "bootstrap-head-outcome-unknown",
+    "bootstrap-existing-head-incompatible",
+    "bootstrap-object-publication-failed",
+    "bootstrap-head-conflict",
+    "bootstrap-head-not-accepted",
+    "bootstrap-remote-open-failed",
+    "bootstrap-head-mismatch",
+    "bootstrap-head-not-genesis",
+    "bootstrap-materialize-failed",
+    "bootstrap-equivalence-failed",
+  ]);
+  const GENERIC_BOOTSTRAP_FAILURE_REASON = "bootstrap-failure-unclassified";
   let activeAdmission = null;
   let serial = Promise.resolve();
   let starlingUndoGuard = false;
@@ -56,6 +80,28 @@
   function starlingSteady(value) {
     const authority = authoritySnapshot(value);
     return !!authority && authority.currentMode === "starling" && authority.transition === null;
+  }
+  function wholeRecordSteady(value) {
+    const authority = authoritySnapshot(value);
+    return !!authority && authority.currentMode === "whole-record" && authority.transition === null;
+  }
+  function sameWholeRecordAuthorityEpoch(left, right) {
+    const initial = authoritySnapshot(left), current = authoritySnapshot(right);
+    return wholeRecordSteady(initial) && wholeRecordSteady(current)
+      && initial.authorityRevision === current.authorityRevision;
+  }
+  function cutoverFailure(reason, extra = null) {
+    return Object.freeze(extra ? { ok: false, reason, ...extra } : { ok: false, reason });
+  }
+  function boundedBootstrapFailureReason(value) {
+    return typeof value === "string" && BOOTSTRAP_FAILURE_REASONS.includes(value)
+      ? value : GENERIC_BOOTSTRAP_FAILURE_REASON;
+  }
+  function readyBootstrapState(value) {
+    const head = safeHead(value?.head);
+    return isObject(value) && value.ready === true
+      && Number.isSafeInteger(value.sourceRevision) && value.sourceRevision >= 1 && head
+      ? Object.freeze({ sourceRevision: value.sourceRevision, head }) : null;
   }
   function currentServiceRoot() {
     const value = global.document?.currentScript?.dataset?.serviceRoot;
@@ -527,16 +573,42 @@
         if (!expectedBytes || !expectedFingerprint) return controller.saveSyncedOwner({ freezePayload: once });
         const syncedPocketId = controllerSessionId(controller);
         const authority = syncedPocketId ? await readAuthority(syncedPocketId) : null;
-        if (authority) evidence?.remember(syncedPocketId, authority);
-        if (authority?.currentMode === "whole-record" && authority.transition === null
-            && typeof controller.getStarlingBootstrapState === "function"
-            && typeof controller.bootstrapInitialStarlingBase === "function") {
-          let ready = null;
-          try { ready = controller.getStarlingBootstrapState(); } catch (_error) { ready = null; }
-          if (!ready) {
-            try { await controller.bootstrapInitialStarlingBase(); } catch (_error) {}
+        if (!authority) return cutoverFailure("starling-cutover-authority-unavailable");
+        evidence?.remember(syncedPocketId, authority);
+
+        if (wholeRecordSteady(authority)) {
+          if (typeof controller.getStarlingBootstrapState !== "function"
+              || typeof controller.bootstrapInitialStarlingBase !== "function") {
+            return cutoverFailure("starling-cutover-bootstrap-failed", {
+              bootstrapReason: "bootstrap-unavailable",
+            });
           }
+          let ready = null;
+          try { ready = readyBootstrapState(controller.getStarlingBootstrapState()); }
+          catch (_error) { ready = null; }
+          if (!ready) {
+            let bootstrap;
+            try { bootstrap = await controller.bootstrapInitialStarlingBase(); }
+            catch (_error) { return cutoverFailure("starling-cutover-bootstrap-threw"); }
+            if (!bootstrap || bootstrap.ok !== true) {
+              return cutoverFailure("starling-cutover-bootstrap-failed", {
+                bootstrapReason: boundedBootstrapFailureReason(bootstrap?.reason),
+              });
+            }
+            try { ready = readyBootstrapState(controller.getStarlingBootstrapState()); }
+            catch (_error) { ready = null; }
+            if (!ready) return cutoverFailure("starling-cutover-bootstrap-not-ready");
+          }
+          const reproved = await readAuthority(syncedPocketId);
+          if (!reproved) return cutoverFailure("starling-cutover-authority-unavailable");
+          evidence?.remember(syncedPocketId, reproved);
+          if (!sameWholeRecordAuthorityEpoch(authority, reproved)) {
+            return cutoverFailure("starling-cutover-authority-changed");
+          }
+        } else if (!starlingSteady(authority)) {
+          return cutoverFailure("starling-cutover-authority-changed");
         }
+
         const context = {
           expectedBytes, expectedFingerprint, expectedHead: syncedPocketId ? await readHead(syncedPocketId) : null,
           candidate: null, baseSession: null,
