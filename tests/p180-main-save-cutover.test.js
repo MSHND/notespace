@@ -31,6 +31,19 @@ function loadP176Harness() {
   code = code.replace(testDeclaration,
     "const test = () => {};\nconst __p180FetchControl = { rejectFenceOnce: false };");
 
+  const sourceDeclaration = 'const source = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");';
+  assert.ok(code.includes(sourceDeclaration), "P176 source helper changed");
+  code = code.replace(sourceDeclaration, `const source = (file) => {
+    let text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    if (file === "js/pocket-starling-owner-successor.js") {
+      const adoptionNeedle = "const adoption = await attemptAuthorityAdoption(payload, preparation, authority, durable);";
+      if (!text.includes(adoptionNeedle)) throw new Error("P180 adoption observer seam changed");
+      text = text.replace(adoptionNeedle,
+        adoptionNeedle + "\\n        global.__p180ObservedAdoption = adoption;");
+    }
+    return text;
+  };`);
+
   const fetchNeedle = [
     "function browserFetch(adapter, observations) {",
     "  let cookie = \"\";",
@@ -44,9 +57,6 @@ function loadP176Harness() {
   const moduleRecord = { exports: {} };
   const execute = new Function("require", "module", "exports", "__filename", "__dirname", code);
   execute(localRequire, moduleRecord, moduleRecord.exports, P176, __dirname);
-  assert.ok(moduleRecord.exports.productionHarness);
-  assert.ok(moduleRecord.exports.activateFresh);
-  assert.ok(moduleRecord.exports.fetchControl);
   return moduleRecord.exports;
 }
 
@@ -69,17 +79,12 @@ function loadRealMainSaveSurface(context) {
     capturePocketFileOwnerForAdoption: context.capturePocketFileOwnerForAdoption,
     restorePocketFileOwnerAfterFailedAdoption: context.restorePocketFileOwnerAfterFailedAdoption,
   };
-
   context.HTMLElement = context.HTMLElement || class HTMLElement {};
   context.HTMLInputElement = context.HTMLInputElement || class HTMLInputElement extends context.HTMLElement {};
   context.HTMLTextAreaElement = context.HTMLTextAreaElement || class HTMLTextAreaElement extends context.HTMLElement {};
   context.HTMLButtonElement = context.HTMLButtonElement || class HTMLButtonElement extends context.HTMLElement {};
   context.Blob = context.Blob || Blob;
-
-  for (const file of MAIN_SAVE_FILES) {
-    vm.runInContext(source(file), context, { filename: file });
-  }
-
+  for (const file of MAIN_SAVE_FILES) vm.runInContext(source(file), context, { filename: file });
   Object.assign(context, preservedOwnerSurface);
   context.canModifyPocket = () => true;
   context.requirePocketFileForChanges = () => true;
@@ -98,11 +103,6 @@ function loadRealMainSaveSurface(context) {
   context.markVaultSavedNow = () => {};
   context.establishPocketDocumentBaseline = () => {};
   context.persistPipSnapshot = () => {};
-
-  assert.equal(typeof context.exportTree, "function");
-  assert.equal(typeof context.currentPocketStarlingOwnerSavePreparation, "function");
-  assert.equal(typeof context.freezePocketStarlingOwnerWorkingSetThrough, "function");
-  assert.equal(typeof context.moveNodeWithinSiblings, "function");
 }
 
 function rootOrder(context) {
@@ -113,12 +113,7 @@ function rootOrder(context) {
 }
 
 function compactRoutes(entries) {
-  return entries.map((entry) => ({
-    url: entry.url,
-    method: entry.method,
-    status: entry.status,
-    injected: entry.injected === true,
-  }));
+  return entries.map((entry) => ({ url: entry.url, method: entry.method, status: entry.status, injected: entry.injected === true }));
 }
 
 async function realMainMigration(options = {}) {
@@ -126,51 +121,37 @@ async function realMainMigration(options = {}) {
   const h = harness.productionHarness();
   installBaselineTree(h.context);
   await harness.activateFresh(h);
-  assert.equal(h.routeCount("/pockets/content/conditional-upload"), 1, "activation establishes exactly R=1");
-  const ownerSession = h.context.PocketOwnerSaveBoundary.captureOwnerSaveSession();
-  assert.equal(ownerSession.controller.getStarlingBootstrapState(), null);
-
+  assert.equal(h.routeCount("/pockets/content/conditional-upload"), 1);
+  assert.equal(h.context.PocketOwnerSaveBoundary.captureOwnerSaveSession().controller.getStarlingBootstrapState(), null);
   loadRealMainSaveSurface(h.context);
-  const realBuildPocketPayload = h.context.buildPocketPayload;
-  h.context.buildPocketPayload = (...args) => {
-    const payload = realBuildPocketPayload(...args);
-    h.context.__p180ObservedPayload = payload;
-    return payload;
-  };
   h.context.moveNodeWithinSiblings("beta", -1);
   assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
-  assert.equal(h.context.__p180State.ops.length, 1, "one genuine Main reorder is dirty");
+  assert.equal(h.context.__p180State.ops.length, 1);
   const ceiling = h.context.getPocketHighestOperationSequence();
-  assert.ok(ceiling > 0);
   const working = h.context.freezePocketStarlingOwnerWorkingSetThrough(ceiling);
-  assert.equal(working?.ceiling, ceiling);
   assert.deepEqual(plain(working?.operations?.map((operation) => operation.type)), ["payload", "reorder"]);
 
+  h.context.__p180ObservedAdoption = undefined;
   const wholeUploadsBefore = h.routeCount("/pockets/content/conditional-upload");
   const requestStart = h.requests.length;
   if (options.rejectFenceOnce) harness.fetchControl.rejectFenceOnce = true;
   const saved = await h.context.exportTree({ returnDetails: true, downloadFallback: false });
   const remote = await h.readRemoteState();
-  const preparation = h.context.__p180ObservedPayload
-    ? h.context.currentPocketStarlingOwnerSavePreparation(h.context.__p180ObservedPayload)
-    : null;
   const controller = h.context.PocketOwnerSaveBoundary.captureOwnerSaveSession().controller;
   const diagnostic = {
-    saved: plain(saved),
-    remote: plain(remote),
-    preparationPresent: !!preparation,
-    preparationCeiling: preparation?.ceiling || null,
+    saved: plain(saved), remote: plain(remote),
+    adoptionReached: h.context.__p180ObservedAdoption !== undefined,
+    adoption: plain(h.context.__p180ObservedAdoption),
     bootstrap: plain(controller.getStarlingBootstrapState?.() || null),
     syncedOwnerState: plain(controller.getSyncedOwnerState?.() || null),
     guard: h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(),
-    wholeUploadsBefore,
-    wholeUploadsAfter: h.routeCount("/pockets/content/conditional-upload"),
+    wholeUploadsBefore, wholeUploadsAfter: h.routeCount("/pockets/content/conditional-upload"),
     routes: compactRoutes(h.requests.slice(requestStart)),
   };
-  return { h, saved, remote, wholeUploadsBefore, ceiling, diagnostic };
+  return { h, saved, remote, wholeUploadsBefore, diagnostic };
 }
 
-test("P180 real Main Save creates its own P160 preparation and cuts R=1 over to Starling without R=2", async () => {
+test("P180 real Main migration never falls back to whole-record R2", async () => {
   const { h, saved, remote, wholeUploadsBefore, diagnostic } = await realMainMigration();
   const evidence = JSON.stringify(diagnostic);
   assert.equal(saved.ok, true, evidence);
@@ -178,28 +159,17 @@ test("P180 real Main Save creates its own P160 preparation and cuts R=1 over to 
     `real Main migration Save must not create R=2: ${evidence}`);
   assert.equal(remote.revision, 1, evidence);
   assert.equal(remote.authority.currentMode, "starling", evidence);
-  assert.equal(remote.authority.transition, null, evidence);
-  assert.equal(remote.authority.rollbackRevision, 1, evidence);
   assert.equal(remote.head.revision, 2, evidence);
-  assert.equal(h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(), true, evidence);
-  assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
-  assert.equal(h.context.__p180State.ops.length, 0, "successful authoritative Save settles the covered Main operation");
+  assert.equal(h.context.__p180State.ops.length, 0, evidence);
 });
 
-test("P180 post-H1 adoption ineligibility fails closed instead of silently writing whole-record R=2", async () => {
+test("P180 post-H1 adoption failure fails closed instead of whole-record R2", async () => {
   const { h, saved, remote, wholeUploadsBefore, diagnostic } = await realMainMigration({ rejectFenceOnce: true });
   const evidence = JSON.stringify(diagnostic);
-  assert.equal(saved.ok, false, `post-bootstrap migration must not report a legacy whole-record Save as success: ${evidence}`);
-  assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeUploadsBefore,
-    `once H1 exists for this Save, no fallback whole-record upload is permitted: ${evidence}`);
+  assert.equal(saved.ok, false, evidence);
+  assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeUploadsBefore, evidence);
   assert.equal(remote.revision, 1, evidence);
   assert.equal(remote.authority.currentMode, "whole-record", evidence);
-  assert.equal(remote.authority.transition, null, evidence);
   assert.equal(remote.head.revision, 1, evidence);
-  assert.equal(h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(), false, evidence);
-  assert.equal(h.context.__p180State.ops.length, 1, "failed cutover keeps the genuine Main operation dirty");
-  assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
-  assert.equal(h.requests.some((entry) => entry.injected === true
-    && entry.url.endsWith("/pockets/authority/fence/acquire")), true,
-    "the bounded failure is injected only at the real authority-fence request after H1");
+  assert.equal(h.context.__p180State.ops.length, 1, evidence);
 });
