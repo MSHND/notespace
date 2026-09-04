@@ -94,13 +94,13 @@ function createCapturedInsert(context) {
 test("P172b real P153 immediate uncovered Insert undo still cancels before Save coverage", async () => {
   const h = runtime(); assert.equal((await h.controller.adoptSyncedOwner()).ok, true);
   const operation = createCapturedInsert(h.context);
-  assert.deepEqual(h.context.freezePocketStarlingOwnerWorkingSetThrough(operation.seq).operations,
+  assert.deepEqual(plain(h.context.freezePocketStarlingOwnerWorkingSetThrough(operation.seq).operations),
     [{ type: "insert", input: { nodeId: "new", parentId: "root", toIndex: 1,
       payload: { label: "new", updatedAt: "2026-09-04T00:00:00.000Z" } } }]);
   const result = h.context.undoLastEditAction();
   assert.notEqual(result, false);
   assert.equal(h.context.nodeMap().has("new"), false);
-  assert.deepEqual(h.context.freezePocketStarlingOwnerWorkingSetThrough(h.context.state.operationHighWater).operations, []);
+  assert.deepEqual(plain(h.context.freezePocketStarlingOwnerWorkingSetThrough(h.context.state.operationHighWater).operations), []);
 });
 
 test("P172b real P153 covered Insert undo is refused before visible mutation in Starling mode", async () => {
