@@ -102,6 +102,12 @@ function runtime(mode, { outerReadFails = false } = {}) {
     "js/pocket-tree-actions.js",
     "js/pocket-multi-select.js",
   ]) vm.runInContext(source(file), context, { filename: file });
+  // Keep the real history/multi-delete mutation and undo functions, but replace display-only
+  // refresh work that depends on the complete browser chrome outside this focused harness.
+  context.refreshMeta = () => {};
+  context.renderTree = () => {};
+  context.persistPipSnapshot = () => {};
+  context.refocusTreeNavigation = () => {};
 
   const innerAuthorityService = {
     async read(input) { return { authority, syncedPocketId: input.syncedPocketId }; },
@@ -125,7 +131,6 @@ function runtime(mode, { outerReadFails = false } = {}) {
       return {
         captureSyncedOwnerSaveSession() { return { syncedPocketId: "pocket-p172b" }; },
         async adoptSyncedOwner() {
-          // This is the existing controller's own authority proof. P172's independent refresh may fail.
           const proved = await service.read({ apiVersion: 1, operationId: "inner", syncedPocketId: "pocket-p172b" });
           assert.equal(proved.authority.currentMode, mode);
           return { ok: true };
@@ -186,6 +191,6 @@ test("P172b proved whole-record owner retains legacy bulk undo compatibility whe
   deleteMany(harness.context);
   const result = harness.context.undoLastDeleteAction();
   assert.notEqual(result, false);
-  assert.deepEqual(harness.context.state.nodes.map((entry) => entry.id), ["a", "b", "c"]);
+  assert.deepEqual(plain(harness.context.state.nodes.map((entry) => entry.id)), ["a", "b", "c"]);
   assert.equal(harness.context.state.ops.at(-1).type, "undo_delete_many");
 });
