@@ -58,6 +58,7 @@ function installBaselineTree(context) {
     { id: "restore", parentId: "root", order: 1003, label: "Restore Me", details: "restore", updatedAt: timestamp, source: "manual" },
   ];
   vm.runInContext("state.nodes=__p180BaselineNodes;state.tombstones=[];state.rootExtras={};state.dataExtras={};state.ops=[];state.operationHighWater=0;state.operationDocumentAnchor=null;state.activeSaveOperationCeiling=0;", context);
+  context.__p180State = vm.runInContext("state", context);
 }
 
 function loadRealMainSaveSurface(context) {
@@ -82,7 +83,7 @@ function loadRealMainSaveSurface(context) {
   Object.assign(context, preservedOwnerSurface);
   context.canModifyPocket = () => true;
   context.requirePocketFileForChanges = () => true;
-  context.hasPocketUnsavedChanges = () => Array.isArray(context.state.ops) && context.state.ops.length > 0;
+  context.hasPocketUnsavedChanges = () => Array.isArray(context.__p180State.ops) && context.__p180State.ops.length > 0;
   context.hasUnsavedDetailsEditorChanges = () => false;
   context.hasUnsavedInlineTitleDraft = () => false;
   context.isPocketFilePermissionPromptOpen = () => false;
@@ -105,7 +106,7 @@ function loadRealMainSaveSurface(context) {
 }
 
 function rootOrder(context) {
-  return plain(context.state.nodes)
+  return plain(context.__p180State.nodes)
     .filter((node) => (node.parentId || "root") === "root")
     .sort((left, right) => Number(left.order) - Number(right.order))
     .map((node) => node.label);
@@ -122,7 +123,7 @@ async function realMainMigration(options = {}) {
   loadRealMainSaveSurface(h.context);
   h.context.moveNodeWithinSiblings("beta", -1);
   assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
-  assert.equal(h.context.state.ops.length, 1, "one genuine Main reorder is dirty");
+  assert.equal(h.context.__p180State.ops.length, 1, "one genuine Main reorder is dirty");
   const ceiling = h.context.getPocketHighestOperationSequence();
   assert.ok(ceiling > 0);
   const working = h.context.freezePocketStarlingOwnerWorkingSetThrough(ceiling);
@@ -148,7 +149,7 @@ test("P180 real Main Save creates its own P160 preparation and cuts R=1 over to 
   assert.equal(remote.head.revision, 2);
   assert.equal(h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(), true);
   assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
-  assert.equal(h.context.state.ops.length, 0, "successful authoritative Save settles the covered Main operation");
+  assert.equal(h.context.__p180State.ops.length, 0, "successful authoritative Save settles the covered Main operation");
 });
 
 test("P180 post-H1 adoption ineligibility fails closed instead of silently writing whole-record R=2", async () => {
@@ -161,7 +162,7 @@ test("P180 post-H1 adoption ineligibility fails closed instead of silently writi
   assert.equal(remote.authority.transition, null);
   assert.equal(remote.head.revision, 1, "H1 bootstrap may remain durable while authority stays whole-record");
   assert.equal(h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(), false);
-  assert.equal(h.context.state.ops.length, 1, "failed cutover keeps the genuine Main operation dirty");
+  assert.equal(h.context.__p180State.ops.length, 1, "failed cutover keeps the genuine Main operation dirty");
   assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
   assert.equal(h.requests.some((entry) => entry.injected === true
     && entry.url.endsWith("/pockets/authority/fence/acquire")), true,
