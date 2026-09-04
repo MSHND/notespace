@@ -28,7 +28,8 @@ function loadP176Harness() {
   let code = fs.readFileSync(P176, "utf8");
   const testDeclaration = 'const test = require("node:test");';
   assert.ok(code.includes(testDeclaration), "P176 harness test import changed");
-  code = code.replace(testDeclaration, "const test = () => {};");
+  code = code.replace(testDeclaration,
+    "const test = () => {};\nconst __p180FetchControl = { rejectFenceOnce: false };");
 
   const fetchNeedle = [
     "function browserFetch(adapter, observations) {",
@@ -36,45 +37,17 @@ function loadP176Harness() {
     "  return async (url, options) => {",
   ].join("\n");
   assert.ok(code.includes(fetchNeedle), "P176 browser transport harness changed");
-  code = code.replace(fetchNeedle, `${fetchNeedle}\n    if (globalThis.__p180FetchControl.rejectFenceOnce\n        && String(url).endsWith(\"/pockets/authority/fence/acquire\")) {\n      globalThis.__p180FetchControl.rejectFenceOnce = false;\n      observations.push({ url, method: options.method, body: options.body, status: 503, injected: true });\n      return new Response(JSON.stringify({ apiVersion: 1, ok: false, reason: \"injected-unavailable\" }), {\n        status: 503, headers: { \"Content-Type\": \"application/json\" },\n      });\n    }`);
-  code += "\n;globalThis.__p180P176 = { productionHarness, activateFresh };\n";
+  code = code.replace(fetchNeedle, `${fetchNeedle}\n    if (__p180FetchControl.rejectFenceOnce\n        && String(url).endsWith(\"/pockets/authority/fence/acquire\")) {\n      __p180FetchControl.rejectFenceOnce = false;\n      observations.push({ url, method: options.method, body: options.body, status: 503, injected: true });\n      return new Response(JSON.stringify({ apiVersion: 1, ok: false, reason: \"injected-unavailable\" }), {\n        status: 503, headers: { \"Content-Type\": \"application/json\" },\n      });\n    }`);
+  code += "\nmodule.exports = { productionHarness, activateFresh, fetchControl: __p180FetchControl };\n";
 
   const localRequire = createRequire(P176);
-  const sandbox = {
-    require: localRequire,
-    module: { exports: {} },
-    exports: {},
-    __filename: P176,
-    __dirname: __dirname,
-    console,
-    Buffer,
-    process,
-    setImmediate,
-    clearImmediate,
-    setTimeout,
-    clearTimeout,
-    queueMicrotask,
-    URL,
-    Request,
-    Response,
-    Headers,
-    TextEncoder,
-    TextDecoder,
-    structuredClone,
-    CryptoKey: globalThis.CryptoKey,
-    __p180FetchControl: { rejectFenceOnce: false },
-  };
-  sandbox.globalThis = sandbox;
-  sandbox.global = sandbox;
-  vm.createContext(sandbox);
-  vm.runInContext(code, sandbox, { filename: P176 });
-  assert.ok(sandbox.__p180P176?.productionHarness);
-  assert.ok(sandbox.__p180P176?.activateFresh);
-  return {
-    productionHarness: sandbox.__p180P176.productionHarness,
-    activateFresh: sandbox.__p180P176.activateFresh,
-    fetchControl: sandbox.__p180FetchControl,
-  };
+  const moduleRecord = { exports: {} };
+  const execute = new Function("require", "module", "exports", "__filename", "__dirname", code);
+  execute(localRequire, moduleRecord, moduleRecord.exports, P176, __dirname);
+  assert.ok(moduleRecord.exports.productionHarness);
+  assert.ok(moduleRecord.exports.activateFresh);
+  assert.ok(moduleRecord.exports.fetchControl);
+  return moduleRecord.exports;
 }
 
 function installBaselineTree(context) {
