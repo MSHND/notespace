@@ -103,6 +103,27 @@
       && Number.isSafeInteger(value.sourceRevision) && value.sourceRevision >= 1 && head
       ? Object.freeze({ sourceRevision: value.sourceRevision, head }) : null;
   }
+  function currentReadyBootstrapState(controller, syncedPocketId, value) {
+    const ready = readyBootstrapState(value);
+    if (!ready || typeof controller?.getSyncedOwnerState !== "function"
+        || typeof controller.captureSyncedOwnerSaveSession !== "function"
+        || typeof controller.isSyncedOwnerSaveSessionCurrent !== "function") return null;
+    try {
+      const session = controller.captureSyncedOwnerSaveSession();
+      const state = controller.getSyncedOwnerState();
+      if (!session || !isObject(state)
+          || session.syncedPocketId !== syncedPocketId || state.syncedPocketId !== syncedPocketId
+          || controller.isSyncedOwnerSaveSessionCurrent(session) !== true
+          || !Number.isSafeInteger(session.generation) || session.generation < 1
+          || !Number.isSafeInteger(state.generation) || state.generation !== session.generation
+          || state.pending !== false
+          || !Number.isSafeInteger(state.confirmedRemoteRevision) || state.confirmedRemoteRevision < 1
+          || !Number.isSafeInteger(state.knownRemoteRevision) || state.knownRemoteRevision < 1
+          || state.confirmedRemoteRevision !== state.knownRemoteRevision
+          || ready.sourceRevision !== state.confirmedRemoteRevision) return null;
+      return ready;
+    } catch (_error) { return null; }
+  }
   function currentServiceRoot() {
     const value = global.document?.currentScript?.dataset?.serviceRoot;
     return typeof value === "string" && value.startsWith("/") && !value.startsWith("//")
@@ -584,8 +605,10 @@
             });
           }
           let ready = null;
-          try { ready = readyBootstrapState(controller.getStarlingBootstrapState()); }
-          catch (_error) { ready = null; }
+          try {
+            ready = currentReadyBootstrapState(controller, syncedPocketId,
+              controller.getStarlingBootstrapState());
+          } catch (_error) { ready = null; }
           if (!ready) {
             let bootstrap;
             try { bootstrap = await controller.bootstrapInitialStarlingBase(); }
@@ -595,8 +618,10 @@
                 bootstrapReason: boundedBootstrapFailureReason(bootstrap?.reason),
               });
             }
-            try { ready = readyBootstrapState(controller.getStarlingBootstrapState()); }
-            catch (_error) { ready = null; }
+            try {
+              ready = currentReadyBootstrapState(controller, syncedPocketId,
+                controller.getStarlingBootstrapState());
+            } catch (_error) { ready = null; }
             if (!ready) return cutoverFailure("starling-cutover-bootstrap-not-ready");
           }
           const reproved = await readAuthority(syncedPocketId);
@@ -605,6 +630,11 @@
           if (!sameWholeRecordAuthorityEpoch(authority, reproved)) {
             return cutoverFailure("starling-cutover-authority-changed");
           }
+          try {
+            ready = currentReadyBootstrapState(controller, syncedPocketId,
+              controller.getStarlingBootstrapState());
+          } catch (_error) { ready = null; }
+          if (!ready) return cutoverFailure("starling-cutover-bootstrap-not-ready");
         } else if (!starlingSteady(authority)) {
           return cutoverFailure("starling-cutover-authority-changed");
         }
