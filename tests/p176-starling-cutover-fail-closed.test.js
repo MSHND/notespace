@@ -21,10 +21,15 @@ function whole(revision = 1, transition = null) {
   return { authorityRevision: revision, currentMode: "whole-record", transition,
     rollbackRevision: null, adoptionHead: null };
 }
+function ownerState(revision = 1) {
+  return { syncedPocketId: "pocket", confirmedRemoteRevision: revision,
+    knownRemoteRevision: revision, pending: false, generation: 1 };
+}
 
 function harness(options = {}) {
   const counts = { authority: 0, bootstrap: 0, underlyingSave: 0, freeze: 0 };
   let bootstrapState = options.bootstrapState === undefined ? null : options.bootstrapState;
+  const currentOwnerState = options.ownerState === undefined ? ownerState(1) : options.ownerState;
   const authoritySequence = Array.isArray(options.authorities) ? options.authorities.slice()
     : [options.authority === undefined ? WHOLE : options.authority];
   function nextAuthority() {
@@ -76,6 +81,7 @@ function harness(options = {}) {
   const baseController = {
     captureSyncedOwnerSaveSession() { return { syncedPocketId: "pocket", generation: 1 }; },
     isSyncedOwnerSaveSessionCurrent() { return true; },
+    getSyncedOwnerState() { return currentOwnerState; },
     async saveSyncedOwner(input) {
       counts.underlyingSave += 1;
       await input.freezePayload();
@@ -152,6 +158,21 @@ test("P176 refuses ok bootstrap whose current readiness state is absent or inval
     assert.deepEqual(plain(result), { ok: false, reason: "starling-cutover-bootstrap-not-ready" });
     assert.equal(h.counts.underlyingSave, 0);
   }
+});
+
+test("P176a refuses a syntactically ready P162 base that belongs to older whole-record R", async () => {
+  const stale = { ready: true, generation: 1, sourceRevision: 1, head: HEAD };
+  const h = harness({
+    bootstrapState: stale,
+    ownerState: ownerState(2),
+    bootstrapResult: { ok: true, reason: "already-ready", sourceRevision: 1, head: HEAD },
+    readyAfterBootstrap: stale,
+  });
+  const result = await h.save();
+  assert.deepEqual(plain(result), { ok: false, reason: "starling-cutover-bootstrap-not-ready" });
+  assert.equal(h.counts.bootstrap, 1, "stale ready state is treated as non-ready and bootstrap is tried once");
+  assert.equal(h.counts.underlyingSave, 0, "P164 cannot fall back to a whole-record R=3 Save");
+  assert.equal(h.counts.freeze, 1);
 });
 
 test("P176 refuses missing bootstrap API before handing a whole-record Save down", async () => {
