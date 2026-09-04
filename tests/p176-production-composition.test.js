@@ -372,11 +372,25 @@ function productionHarness(options = {}) {
   function corruptConfirmedSource() {
     const session = context.PocketOwnerSaveBoundary.captureOwnerSaveSession();
     const syncedPocketId = session?.controllerSession?.syncedPocketId;
-    if (!syncedPocketId) return false;
-    return idb.mutateRecord("pocket.sync.device.v1", "pockets", syncedPocketId, (record) => ({
-      ...record,
-      content: { ...record.content, record: { ...record.content.record, ciphertext: b64(bytes(32, 233)) } },
-    }));
+    const originalStorage = context.PocketStarlingStorageShadow;
+    if (!syncedPocketId || !originalStorage || typeof originalStorage.stageCandidate !== "function") return false;
+    let armed = true;
+    context.PocketStarlingStorageShadow = Object.freeze({
+      ...originalStorage,
+      async stageCandidate(...args) {
+        const result = await originalStorage.stageCandidate(...args);
+        if (armed) {
+          armed = false;
+          const mutated = idb.mutateRecord("pocket.sync.device.v1", "pockets", syncedPocketId, (record) => ({
+            ...record,
+            storeRevision: record.storeRevision + 1,
+          }));
+          assert.equal(mutated, true, "source mutation must occur after lazy P162 capture");
+        }
+        return result;
+      },
+    });
+    return true;
   }
   function routeCount(suffix) { return requests.filter((entry) => entry.url.endsWith(suffix)).length; }
   function routeIndex(suffix, occurrence = 0) {
@@ -505,13 +519,14 @@ test("P176 exact production failure at initial Head establishment is bounded and
   assert.equal(state.authority.transition, null);
   assert.equal(state.head, null);
   const roundTrip = await h.context.PocketSyncActiveIntegration.verifyRoundTrip();
-  assert.deepEqual(plain(roundTrip), { ok: true, revision: 1, matchesCurrentSavedPocket: true });
+  assert.deepEqual(plain(roundTrip), { ok: false, reason: "round-trip-mismatch" });
 });
 
 test("P176a exact production sourceGuard-side stale source is bounded and cannot fall back to whole-record", async () => {
   const h = productionHarness();
   await activateFresh(h);
-  assert.equal(h.corruptConfirmedSource(), true, "test mutates only the browser test store after fresh activation");
+  assert.equal(h.corruptConfirmedSource(), true,
+    "test arms an exact-source mutation after lazy P162 capture and before Head initialisation");
   const { saved, wholeUploadsBefore } = await savePreparedTarget(h, "Source changed under bootstrap");
   assertWholeRecordFailClosed(h, saved, wholeUploadsBefore, "bootstrap-source-stale");
   const state = await h.readRemoteState();
@@ -519,6 +534,7 @@ test("P176a exact production sourceGuard-side stale source is bounded and cannot
   assert.equal(state.authority.currentMode, "whole-record");
   assert.equal(state.authority.transition, null);
   assert.equal(state.head, null);
+  assert.equal(h.routeCount("/pockets/head/compare-and-set"), 0);
   assert.equal(saved.ok, false);
 });
 
