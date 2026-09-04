@@ -162,6 +162,8 @@ function harness(options = {}) {
   const baseController = {
     captureSyncedOwnerSaveSession() { return { syncedPocketId: "pocket", generation: 1 }; },
     isSyncedOwnerSaveSessionCurrent() { return true; },
+    getSyncedOwnerState() { return { syncedPocketId: "pocket", confirmedRemoteRevision: 4,
+      knownRemoteRevision: 4, pending: false, generation: 1 }; },
     getStarlingBootstrapState() { return bootstrapState; },
     async bootstrapInitialStarlingBase(...args) {
       counts.bootstrap += 1;
