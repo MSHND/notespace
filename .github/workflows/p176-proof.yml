@@ -1,0 +1,68 @@
+name: P176 exact-candidate proof
+
+on:
+  push:
+    branches: [candidate/p176-proof]
+
+permissions:
+  contents: read
+
+jobs:
+  p176-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      P176_CANDIDATE_SHA: b3db0b138eb589f7f9eb1bd55ccf6ca53e551548
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install repository dependencies
+        run: |
+          set -euo pipefail
+          timeout 600s npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify exact candidate parent and proof-only delta
+        run: |
+          set -euo pipefail
+          timeout 30s bash -c '
+            test "$(git rev-parse HEAD^)" = "$P176_CANDIDATE_SHA"
+            test "$(git rev-list --count "$P176_CANDIDATE_SHA"..HEAD)" = "1"
+            test "$(git diff --name-only "$P176_CANDIDATE_SHA"..HEAD)" = ".github/workflows/p176-proof.yml"
+          '
+
+      - name: P176b focused activation lifecycle and P176 exact production proof
+        run: |
+          set -euo pipefail
+          timeout 600s node --test --test-concurrency=1 tests/p176b-p162-fresh-activation-mirror.test.js tests/p176-starling-cutover-fail-closed.test.js tests/p176-production-composition.test.js
+
+      - name: P160 P162 P164 P168 owner and authority surfaces
+        run: |
+          set -euo pipefail
+          timeout 600s node --test --test-concurrency=1 tests/p160-starling-owner-save-preparation.test.js tests/p162-starling-owner-bootstrap.test.js tests/p164-starling-successor-mirror.test.js tests/p168-authority-adoption.test.js tests/p168-starling-reentry.test.js
+
+      - name: P170 and P172 admission surfaces
+        run: |
+          set -euo pipefail
+          timeout 600s node --test --test-concurrency=1 tests/p133-starling-fresh-logical-delete-shadow.test.js tests/p134-starling-remote-delete-save.test.js tests/p135-starling-fresh-logical-restore-shadow.test.js tests/p136-starling-remote-restore-save.test.js tests/p172-real-truth-cutover-admission.test.js tests/p172-real-p168-composition.test.js
+
+      - name: P151 P153 P155 history invariants
+        run: |
+          set -euo pipefail
+          timeout 480s node --test --test-concurrency=1 tests/p151-starling-owner-move-reorder-capture.test.js tests/p153-starling-owner-manual-insert-undo-cancel.test.js tests/p155-starling-owner-single-delete-undo-cancel.test.js
+
+      - name: Production composition schema manifest and transport surfaces
+        run: |
+          set -euo pipefail
+          timeout 600s node --test --test-concurrency=1 tests/p032-sync-remote-client.test.js tests/p034-sync-service-core.test.js tests/p046-sync-http-adapter.test.js tests/p047-postgres-store.test.js tests/p074-production-composition.test.js tests/p076-production-browser-boundary.test.js tests/p117-sync-object-head-postgres-store.test.js tests/p118-object-head-schema-adoption.test.js tests/p119-object-head-server-transport.test.js tests/p166-persistence-authority-fence.test.js
+          timeout 120s node --test --test-concurrency=1 --test-name-pattern="^P079 uses unknown for untrusted components and retains safe schema CLI output$" tests/p079-schema-diagnostic.test.js
+
+      - name: Full repository check
+        run: |
+          set -euo pipefail
+          timeout 600s npm run check
