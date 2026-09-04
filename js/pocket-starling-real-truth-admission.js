@@ -28,6 +28,7 @@
   let activeAdmission = null;
   let serial = Promise.resolve();
   let starlingUndoGuard = false;
+  let starlingUndoGuardOwner = null;
 
   function isObject(value) { return !!value && typeof value === "object" && !Array.isArray(value); }
   function exact(value, fields) {
@@ -42,6 +43,19 @@
   function sameHead(left, right) {
     return !!left && !!right && left.schema === right.schema
       && left.revision === right.revision && left.sealRef === right.sealRef;
+  }
+  function authoritySnapshot(value) {
+    if (!isObject(value) || !Number.isSafeInteger(value.authorityRevision) || value.authorityRevision < 1
+        || !["whole-record", "starling"].includes(value.currentMode)) return null;
+    if (value.currentMode === "starling") {
+      if (value.transition !== null || !Number.isSafeInteger(value.rollbackRevision)
+          || value.rollbackRevision < 1 || !safeHead(value.adoptionHead)) return null;
+    } else if (value.rollbackRevision !== null || value.adoptionHead !== null) return null;
+    return value;
+  }
+  function starlingSteady(value) {
+    const authority = authoritySnapshot(value);
+    return !!authority && authority.currentMode === "starling" && authority.transition === null;
   }
   function currentServiceRoot() {
     const value = global.document?.currentScript?.dataset?.serviceRoot;
@@ -73,10 +87,7 @@
     if (!authorityService || typeof syncedPocketId !== "string" || !syncedPocketId || !id) return null;
     try {
       const result = await authorityService.read({ apiVersion: 1, operationId: id, syncedPocketId });
-      const value = result?.authority;
-      if (!isObject(value) || !Number.isSafeInteger(value.authorityRevision) || value.authorityRevision < 1
-          || !["whole-record", "starling"].includes(value.currentMode)) return null;
-      return value;
+      return authoritySnapshot(result?.authority);
     } catch (_error) { return null; }
   }
 
@@ -400,18 +411,105 @@
       return session && typeof session.syncedPocketId === "string" ? session.syncedPocketId : null;
     } catch (_error) { return null; }
   }
-  async function refreshUndoGuard(controller) {
-    const syncedPocketId = controllerSessionId(controller);
-    if (!syncedPocketId) { starlingUndoGuard = false; return null; }
-    const authority = await readAuthority(syncedPocketId);
-    if (authority) starlingUndoGuard = authority.currentMode === "starling" && authority.transition === null;
-    return authority;
+
+  function createAuthorityEvidence() {
+    let syncedPocketId = null;
+    let authority = null;
+    return Object.freeze({
+      remember(id, value) {
+        const checked = authoritySnapshot(value);
+        if (typeof id !== "string" || !id || !checked) return null;
+        syncedPocketId = id;
+        authority = checked;
+        return checked;
+      },
+      current(id) { return id === syncedPocketId ? authority : null; },
+      clear() { syncedPocketId = null; authority = null; },
+    });
   }
 
-  function wrapController(controller) {
+  function observeAuthorityService(service, evidence) {
+    if (!isObject(service) || !evidence) return service;
+    const required = ["read", "acquireFence", "commitStarlingAdoption", "releaseFence"];
+    if (required.some((name) => typeof service[name] !== "function")) return service;
+    const wrapped = {};
+    for (const name of required) {
+      wrapped[name] = async function observedAuthorityCall(input) {
+        const result = await service[name](input);
+        evidence.remember(input?.syncedPocketId, result?.authority);
+        return result;
+      };
+    }
+    return Object.freeze(wrapped);
+  }
+
+  function controllerConfiguration(configuration, evidence) {
+    if (!isObject(configuration)) return configuration;
+    const supplied = isObject(configuration.starlingBootstrap) ? configuration.starlingBootstrap : null;
+    if (supplied) {
+      if (!isObject(supplied.persistenceAuthorityService)) return configuration;
+      return {
+        ...configuration,
+        starlingBootstrap: {
+          ...supplied,
+          persistenceAuthorityService: observeAuthorityService(supplied.persistenceAuthorityService, evidence),
+        },
+      };
+    }
+    if (!objectHeadService || !authorityService
+        || typeof global.normaliseInput !== "function"
+        || typeof global.normaliseRootExtras !== "function") return configuration;
+    return {
+      ...configuration,
+      starlingBootstrap: {
+        objectHeadService,
+        persistenceAuthorityService: observeAuthorityService(authorityService, evidence),
+        operationIdFactory(kind, index) { return operationId(`${String(kind).slice(0, 40)}-${index}`); },
+        normaliseInput: global.normaliseInput,
+        normaliseRootExtras: global.normaliseRootExtras,
+      },
+    };
+  }
+
+  function applyUndoGuard(syncedPocketId, authority, preserveSameOwner = false) {
+    if (!syncedPocketId) {
+      starlingUndoGuard = false;
+      starlingUndoGuardOwner = null;
+      return;
+    }
+    const checked = authoritySnapshot(authority);
+    if (checked) {
+      starlingUndoGuard = starlingSteady(checked);
+      starlingUndoGuardOwner = syncedPocketId;
+      return;
+    }
+    if (!(preserveSameOwner && starlingUndoGuardOwner === syncedPocketId)) {
+      starlingUndoGuard = false;
+      starlingUndoGuardOwner = syncedPocketId;
+    }
+  }
+
+  async function refreshUndoGuard(controller, evidence) {
+    const syncedPocketId = controllerSessionId(controller);
+    if (!syncedPocketId) { applyUndoGuard(null, null); return null; }
+    const proved = evidence?.current(syncedPocketId) || null;
+    if (proved) applyUndoGuard(syncedPocketId, proved);
+    const authority = await readAuthority(syncedPocketId);
+    if (authority) {
+      evidence?.remember(syncedPocketId, authority);
+      applyUndoGuard(syncedPocketId, authority);
+      return authority;
+    }
+    const retained = evidence?.current(syncedPocketId) || null;
+    if (retained) applyUndoGuard(syncedPocketId, retained);
+    else applyUndoGuard(syncedPocketId, null, true);
+    return null;
+  }
+
+  function wrapController(controller, evidence) {
     async function adoptAndRefresh(method, args) {
       const result = await controller[method](...args);
-      if (result?.ok === true) await refreshUndoGuard(controller);
+      if (result?.ok === true) await refreshUndoGuard(controller, evidence);
       return result;
     }
     async function saveSyncedOwner(input) {
@@ -429,6 +527,7 @@
         if (!expectedBytes || !expectedFingerprint) return controller.saveSyncedOwner({ freezePayload: once });
         const syncedPocketId = controllerSessionId(controller);
         const authority = syncedPocketId ? await readAuthority(syncedPocketId) : null;
+        if (authority) evidence?.remember(syncedPocketId, authority);
         if (authority?.currentMode === "whole-record" && authority.transition === null
             && typeof controller.getStarlingBootstrapState === "function"
             && typeof controller.bootstrapInitialStarlingBase === "function") {
@@ -446,7 +545,7 @@
         try { return await controller.saveSyncedOwner({ freezePayload: once }); }
         finally {
           activeAdmission = null;
-          await refreshUndoGuard(controller);
+          await refreshUndoGuard(controller, evidence);
         }
       };
       const prior = serial;
@@ -468,7 +567,11 @@
         adoptReadyRecovery: (...args) => adoptAndRefresh("adoptReadyRecovery", args),
       } : {}),
       ...(typeof controller.releaseSyncedOwner === "function" ? {
-        releaseSyncedOwner(...args) { starlingUndoGuard = false; return controller.releaseSyncedOwner(...args); },
+        releaseSyncedOwner(...args) {
+          evidence?.clear();
+          applyUndoGuard(null, null);
+          return controller.releaseSyncedOwner(...args);
+        },
       } : {}),
     });
   }
@@ -476,7 +579,10 @@
   global.PocketSyncOwnerController = Object.freeze({
     ...baseControllerApi,
     createSyncedOwnerController(configuration) {
-      return wrapController(baseControllerApi.createSyncedOwnerController(configuration));
+      const evidence = createAuthorityEvidence();
+      return wrapController(baseControllerApi.createSyncedOwnerController(
+        controllerConfiguration(configuration, evidence)
+      ), evidence);
     },
   });
 
@@ -520,7 +626,8 @@
       if (starlingUndoGuard) {
         let snapshot = null;
         try { snapshot = lastDeleteUndoSnapshot; } catch (_error) { snapshot = null; }
-        if (snapshot?.kind === "delete" && !snapshot.p155DeleteUndoWitness) {
+        if (snapshot?.kind === "delete_many"
+            || (snapshot?.kind === "delete" && !snapshot.p155DeleteUndoWitness)) {
           try { global.setStatus?.("Bulk Delete undo is unavailable after Starling authority.", "warn"); } catch (_error) {}
           return false;
         }
