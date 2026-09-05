@@ -15,10 +15,35 @@
     "keySetVersion", "recoveryVersion", "accountLocator", "pendingOperation",
     "sourceSaved", "recoveryCopyStored", "adopted", "createdAt", "updatedAt",
   ]);
+  const AUTHENTICATION_FAILURE_STAGE = "account-passkey-authentication-completion";
+  const AUTHENTICATION_FAILURE_CODES = Object.freeze([
+    "account-service-failed",
+    "account-service-invalid",
+    "authentication-options-invalid",
+    "authentication-request-invalid",
+    "passkey-api-unavailable",
+    "passkey-authentication-cancelled",
+    "passkey-authentication-response-invalid",
+    "passkey-ceremony-expired",
+    "passkey-ceremony-mismatch",
+    "passkey-not-supported",
+    "passkey-security-failed",
+    "prf-output-invalid",
+  ]);
   const fail = (reason, extra = {}) => Object.freeze(Object.assign({ ok: false, reason, adopted: false }, extra));
   const object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
   const id = (value) => typeof value === "string" && value.length > 0 && value.length <= 160 && value === value.trim();
   const freeze = (value) => Object.freeze(value);
+
+  function authenticationFailure(error) {
+    const failureCode = AUTHENTICATION_FAILURE_CODES.includes(error?.code)
+      ? error.code : "account-authentication-failed";
+    return fail("additional-device-open-failed", {
+      sourceOwnerPreserved: true,
+      failureStage: AUTHENTICATION_FAILURE_STAGE,
+      failureCode,
+    });
+  }
 
   function validFactory(value) {
     if (!object(value) || Object.keys(value).some((key) => ![...FACTORY, ...AUTHORITY_FACTORY, "strandedActivationClassifier"].includes(key))
@@ -382,13 +407,22 @@
     if (!captured || !sameTarget(dependencies, captured)) return fail("additional-device-target-invalid");
     let prf = null;
     try {
-      let authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+      let authentication;
+      try {
+        authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+      } catch (error) {
+        return authenticationFailure(error);
+      }
       if (authentication?.bootstrap === true) {
         if (authentication.ok !== true || authentication.accountAuthenticated !== true
             || authentication.contentUnlocked !== false || !id(authentication.accountId)
             || !id(authentication.credentialId)) return fail("additional-device-open-failed");
         const bootstrapAccountId = authentication.accountId;
-        authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+        try {
+          authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+        } catch (error) {
+          return authenticationFailure(error);
+        }
         if (authentication?.accountId !== bootstrapAccountId) {
           return fail("additional-device-open-failed");
         }
