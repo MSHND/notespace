@@ -3,12 +3,45 @@
 (function initialisePocketSyncLocalIntegration(global) {
   "use strict";
 
+  const OPEN_DIAGNOSTIC_STAGE = "account-passkey-authentication-completion";
+  const OPEN_DIAGNOSTIC_CODES = Object.freeze([
+    "account-authentication-failed",
+    "account-service-failed",
+    "account-service-invalid",
+    "authentication-options-invalid",
+    "authentication-request-invalid",
+    "passkey-api-unavailable",
+    "passkey-authentication-cancelled",
+    "passkey-authentication-response-invalid",
+    "passkey-ceremony-expired",
+    "passkey-ceremony-mismatch",
+    "passkey-not-supported",
+    "passkey-security-failed",
+    "prf-output-invalid",
+  ]);
+
   function frozen(value) {
     return Object.freeze(value);
   }
 
   function safeFailure(reason) {
     return frozen({ ok: false, reason });
+  }
+
+  function projectOpenDiagnostic(result) {
+    const projection = { ok: result?.ok === true };
+    if (typeof result?.reason === "string") projection.reason = result.reason;
+    if (typeof result?.adopted === "boolean") projection.adopted = result.adopted;
+    if (typeof result?.sourceOwnerPreserved === "boolean") {
+      projection.sourceOwnerPreserved = result.sourceOwnerPreserved;
+    }
+    if (result?.failureStage === OPEN_DIAGNOSTIC_STAGE) {
+      projection.failureStage = OPEN_DIAGNOSTIC_STAGE;
+    }
+    if (OPEN_DIAGNOSTIC_CODES.includes(result?.failureCode)) {
+      projection.failureCode = result.failureCode;
+    }
+    return frozen(projection);
   }
 
   function currentServiceRoot() {
@@ -72,6 +105,7 @@
       recoveryService: remote.createRecoveryService({ transport }),
     });
     let syncedPocketId = null;
+    let latestOpenDiagnostic = null;
 
     function remember(result) {
       if (result?.ok === true && result.owner?.ownerKind === "synced"
@@ -92,8 +126,15 @@
     }
 
     async function openExisting(input) {
-      try { return remember(await runtime.openExisting(input)); }
-      catch (_error) { return safeFailure("additional-device-unavailable"); }
+      let result;
+      try { result = remember(await runtime.openExisting(input)); }
+      catch (_error) { result = safeFailure("additional-device-unavailable"); }
+      latestOpenDiagnostic = projectOpenDiagnostic(result);
+      return result;
+    }
+
+    function getLatestOpenDiagnostic() {
+      return latestOpenDiagnostic ? frozen({ ...latestOpenDiagnostic }) : null;
     }
 
     function captureSwitchTarget() {
@@ -199,7 +240,8 @@
     }
 
     const integration = frozen({
-      activate, resume, openExisting, captureSwitchTarget, saveSwitchTarget, discardSwitchTarget,
+      activate, resume, openExisting, getLatestOpenDiagnostic,
+      captureSwitchTarget, saveSwitchTarget, discardSwitchTarget,
       recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip, admitAcceptedDeleteRestore,
     });
     global.PocketSyncActiveIntegration = integration;
