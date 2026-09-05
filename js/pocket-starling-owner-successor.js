@@ -171,6 +171,22 @@ into a user-facing failure.
     catch (_error) { return null; }
   }
 
+  function resolvePostBootstrapSaveWitness(payload, authority) {
+  const resolver = global.PocketStarlingRealTruthAdmission?.currentPostBootstrapSaveWitness;
+  if (typeof resolver !== "function") return null;
+  let value;
+  try { value = resolver(payload); }
+  catch (_error) { return null; }
+  const head = safeHead(value?.head);
+  if (!exact(value, ["syncedPocketId", "authorityRevision", "sourceRevision", "head"])
+      || typeof value.syncedPocketId !== "string" || !value.syncedPocketId
+      || !Number.isSafeInteger(value.authorityRevision) || value.authorityRevision < 1
+      || !Number.isSafeInteger(value.sourceRevision) || value.sourceRevision < 1
+      || value.authorityRevision !== authority?.authorityRevision || !head) return null;
+  return freeze({ syncedPocketId: value.syncedPocketId,
+    authorityRevision: value.authorityRevision, sourceRevision: value.sourceRevision, head });
+}
+
   function resolveDeleteContinuity(preparation) {
     const resolver = global.currentPocketStarlingAcceptedDeleteContinuity;
     if (typeof resolver !== "function") return null;
@@ -1386,15 +1402,26 @@ into a user-facing failure.
           durable = await loadDurableState();
         }
         if (durable?.schema === STATE_SCHEMA && durable.migration) {
+          let migrationPayload = null;
+          try { migrationPayload = await once.freezePayload(); }
+          catch (_error) {}
+          if (migrationPayload && resolvePostBootstrapSaveWitness(migrationPayload, authority)) {
+            return failure("starling-cutover-legacy-migration-unsettled");
+          }
           return saveWholeRecordWithMirror(once);
         }
         let payload;
         try { payload = await once.freezePayload(); }
         catch (_error) { return saveWholeRecordWithMirror(once); }
+        const postBootstrapWitness = resolvePostBootstrapSaveWitness(payload, authority);
         const preparation = resolvePreparation(payload);
-        if (!preparation) return saveWholeRecordWithMirror(once);
+        if (!preparation) return postBootstrapWitness
+          ? failure("starling-cutover-preparation-invalid")
+          : saveWholeRecordWithMirror(once);
         const adoption = await attemptAuthorityAdoption(payload, preparation, authority, durable);
-        if (adoption.kind === "ineligible") return saveWholeRecordWithMirror(once);
+        if (adoption.kind === "ineligible") return postBootstrapWitness
+          ? failure("starling-cutover-adoption-ineligible")
+          : saveWholeRecordWithMirror(once);
         if (adoption.kind !== "adopted") return failure(adoption.reason || "authority-switch-unsettled");
         return savePreparedStarling(payload, preparation, adoption.authority, adoption.durable);
       }

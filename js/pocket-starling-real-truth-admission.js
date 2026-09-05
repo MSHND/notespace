@@ -597,6 +597,7 @@
         if (!authority) return cutoverFailure("starling-cutover-authority-unavailable");
         evidence?.remember(syncedPocketId, authority);
 
+        let postBootstrapWitness = null;
         if (wholeRecordSteady(authority)) {
           if (typeof controller.getStarlingBootstrapState !== "function"
               || typeof controller.bootstrapInitialStarlingBase !== "function") {
@@ -635,11 +636,18 @@
               controller.getStarlingBootstrapState());
           } catch (_error) { ready = null; }
           if (!ready) return cutoverFailure("starling-cutover-bootstrap-not-ready");
+          postBootstrapWitness = Object.freeze({
+            syncedPocketId,
+            authorityRevision: reproved.authorityRevision,
+            sourceRevision: ready.sourceRevision,
+            head: ready.head,
+          });
         } else if (!starlingSteady(authority)) {
           return cutoverFailure("starling-cutover-authority-changed");
         }
 
         const context = {
+          payload, postBootstrapWitness,
           expectedBytes, expectedFingerprint, expectedHead: syncedPocketId ? await readHead(syncedPocketId) : null,
           candidate: null, baseSession: null,
         };
@@ -740,5 +748,9 @@
 
   global.PocketStarlingRealTruthAdmission = Object.freeze({
     isStarlingUndoGuardActive: () => starlingUndoGuard === true,
+    currentPostBootstrapSaveWitness(payload) {
+      const witness = activeAdmission?.postBootstrapWitness;
+      return witness && activeAdmission.payload === payload ? witness : null;
+    },
   });
 })(typeof window !== "undefined" ? window : globalThis);

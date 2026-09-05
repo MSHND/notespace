@@ -124,6 +124,13 @@ async function realMainMigration(options = {}) {
   assert.equal(h.routeCount("/pockets/content/conditional-upload"), 1);
   assert.equal(h.context.PocketOwnerSaveBoundary.captureOwnerSaveSession().controller.getStarlingBootstrapState(), null);
   loadRealMainSaveSurface(h.context);
+  if (options.preparationMode === "missing") {
+    h.context.currentPocketStarlingOwnerSavePreparation = () => null;
+  } else if (options.preparationMode === "invalid") {
+    h.context.currentPocketStarlingOwnerSavePreparation = () => ({
+      ceiling: 0, operations: [], preservationProjection: {},
+    });
+  }
   h.context.moveNodeWithinSiblings("beta", -1);
   assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
   assert.equal(h.context.__p180State.ops.length, 1);
@@ -160,16 +167,54 @@ test("P180 real Main migration never falls back to whole-record R2", async () =>
   assert.equal(remote.revision, 1, evidence);
   assert.equal(remote.authority.currentMode, "starling", evidence);
   assert.equal(remote.head.revision, 2, evidence);
+  assert.equal(h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(), true, evidence);
+  assert.deepEqual(rootOrder(h.context), ["Beta", "Alpha", "Restore Me"]);
   assert.equal(h.context.__p180State.ops.length, 0, evidence);
+
+  h.context.moveNodeWithinSiblings("alpha", -1);
+  assert.deepEqual(rootOrder(h.context), ["Alpha", "Beta", "Restore Me"]);
+  assert.equal(h.context.__p180State.ops.length, 1);
+  const laterWholeUploadsBefore = h.routeCount("/pockets/content/conditional-upload");
+  const later = await h.context.exportTree({ returnDetails: true, downloadFallback: false });
+  const laterRemote = await h.readRemoteState();
+  assert.equal(later.ok, true, JSON.stringify({ later, laterRemote }));
+  assert.equal(h.routeCount("/pockets/content/conditional-upload"), laterWholeUploadsBefore,
+    "ordinary Starling Save must not revive whole-record persistence");
+  assert.equal(laterRemote.revision, 1);
+  assert.equal(laterRemote.authority.currentMode, "starling");
+  assert.equal(laterRemote.head.revision, 3);
+  assert.equal(h.context.__p180State.ops.length, 0);
 });
 
 test("P180 post-H1 adoption failure fails closed instead of whole-record R2", async () => {
   const { h, saved, remote, wholeUploadsBefore, diagnostic } = await realMainMigration({ rejectFenceOnce: true });
   const evidence = JSON.stringify(diagnostic);
   assert.equal(saved.ok, false, evidence);
+  assert.equal(diagnostic.adoptionReached, true, evidence);
+  assert.equal(diagnostic.adoption?.kind, "ineligible", evidence);
+  assert.equal(diagnostic.routes.some((entry) => entry.injected === true
+    && entry.url.endsWith("/pockets/authority/fence/acquire")), true, evidence);
   assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeUploadsBefore, evidence);
   assert.equal(remote.revision, 1, evidence);
   assert.equal(remote.authority.currentMode, "whole-record", evidence);
   assert.equal(remote.head.revision, 1, evidence);
   assert.equal(h.context.__p180State.ops.length, 1, evidence);
+});
+
+
+test("P180 post-H1 missing or invalid preparation fails closed without R2", async (t) => {
+  for (const preparationMode of ["missing", "invalid"]) {
+    await t.test(preparationMode, async () => {
+      const { h, saved, remote, wholeUploadsBefore, diagnostic } = await realMainMigration({ preparationMode });
+      const evidence = JSON.stringify(diagnostic);
+      assert.equal(saved.ok, false, evidence);
+      assert.equal(diagnostic.adoptionReached, false, evidence);
+      assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeUploadsBefore, evidence);
+      assert.equal(remote.revision, 1, evidence);
+      assert.equal(remote.authority.currentMode, "whole-record", evidence);
+      assert.equal(remote.head.revision, 1, evidence);
+      assert.equal(h.context.PocketStarlingRealTruthAdmission.isStarlingUndoGuardActive(), false, evidence);
+      assert.equal(h.context.__p180State.ops.length, 1, evidence);
+    });
+  }
 });

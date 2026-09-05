@@ -1575,7 +1575,7 @@ function preparePocketStarlingOwnerSave(payload, ceiling) {
       source: { schema: norm.schema, writtenAt: norm.writtenAt },
       tombstones: norm.tombstones,
       rootExtras: norm.rootExtras,
-      dataExtras: norm.dataExtras,
+      dataExtras: (typeof normaliseRootExtras === "function" ? normaliseRootExtras(payload.data) : norm.dataExtras) ?? {},
     };
     if (!validPocketStarlingOwnerPreservationProjection(preservationProjection)) return false;
     const preparation = clonePocketStarlingOwnerSavePreparation({
