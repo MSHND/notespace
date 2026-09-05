@@ -1,0 +1,22 @@
+name: P185 bounded proof
+
+on:
+  push:
+    branches:
+      - candidate/p185
+
+jobs:
+  p185-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Focused P185 proof
+        run: timeout 180s node --test tests/p185-open-reentry-observability.test.js
+      - name: Historical reopen regressions
+        run: timeout 300s node --test tests/p031-sync-account-client.test.js tests/p052-additional-device.test.js tests/p168*.test.js tests/p172-real-p168-composition.test.js
+      - name: Full Pocket check
+        run: timeout 120s npm run check
