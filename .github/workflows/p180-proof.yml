@@ -1,0 +1,69 @@
+name: P180 proof
+
+on:
+  push:
+    branches:
+      - candidate/p180-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p180-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Verify exact candidate parent and proof-only diff
+        run: |
+          test "$(git rev-parse HEAD^)" = "8d3998ebe5b32296141490f6879d37c991e665ec"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/p180-proof.yml"
+      - name: Install repository dependencies for direct integration tests
+        run: npm ci
+      - name: Repair proof-only legacy harness shims
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path("tests/p172b-insert-guard-real-history.test.js")
+          text = p.read_text()
+          needle = "  context.PocketSyncRemoteClient = {"
+          if text.count(needle) != 1:
+              raise SystemExit(f"p172b insert harness seam count {text.count(needle)}")
+          text = text.replace(needle,
+              "  // Proof-only shim: focused harness does not provide full browser chrome.\n"
+              "  context.refreshMeta = () => {};\n" + needle)
+          p.write_text(text)
+
+          p = Path("tests/p172b-undo-guard-repair.test.js")
+          text = p.read_text()
+          needle = "  context.refocusTreeNavigation = () => {};"
+          if text.count(needle) != 1:
+              raise SystemExit(f"p172b undo display shim seam count {text.count(needle)}")
+          text = text.replace(needle, needle +
+              "\n  context.focusRowByNodeId = () => {};"
+              "\n  context.softlyEnsureSelectionVisible = () => {};")
+          p.write_text(text)
+          PY
+      - name: Run affected Starling matrix
+        run: |
+          files="$(find tests -maxdepth 1 -type f \( \
+            -name 'p160*.test.js' -o \
+            -name 'p162*.test.js' -o \
+            -name 'p164*.test.js' -o \
+            -name 'p168*.test.js' -o \
+            -name 'p170*.test.js' -o \
+            -name 'p172*.test.js' -o \
+            -name 'p176*.test.js' -o \
+            -name 'p180*.test.js' \
+          \) -print | sort)"
+          test -n "$files"
+          printf '%s\n' "$files"
+          timeout 300s node --test $files
+      - name: Run repository-owned full check
+        run: timeout 300s npm run check
