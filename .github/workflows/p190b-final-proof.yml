@@ -32,7 +32,7 @@ jobs:
       - name: P149 working-set lifecycle
         timeout-minutes: 2
         run: timeout 90s node --test tests/p149-starling-owner-working-set-lifecycle.test.js
-      - name: P151 move reorder capture and undo
+      - name: P151 and P151a move reorder capture and undo
         timeout-minutes: 2
         run: timeout 90s node --test tests/p151-starling-owner-move-reorder-capture.test.js
       - name: P160 save preparation
@@ -50,12 +50,9 @@ jobs:
       - name: P172 real composition
         timeout-minutes: 2
         run: timeout 90s node --test tests/p172-real-p168-composition.test.js
-      - name: P172 semantic admission
+      - name: P172 real semantic admission and undo guard
         timeout-minutes: 2
         run: timeout 90s node --test tests/p172-real-truth-cutover-admission.test.js
-      - name: P172 undo guards
-        timeout-minutes: 2
-        run: timeout 90s node --test tests/p172b-undo-guard-repair.test.js tests/p172b-insert-guard-real-history.test.js
       - name: P176 production composition
         timeout-minutes: 2
         run: timeout 90s node --test tests/p176-production-composition.test.js
