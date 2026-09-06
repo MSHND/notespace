@@ -296,6 +296,13 @@ function opener(context, fixture, local, events, options = {}) {
           hasPublicKey: !!optionsValue?.publicKey,
           conditionalMediation: Object.prototype.hasOwnProperty.call(optionsValue || {}, "mediation"),
         }]);
+        if (options.browserFailureName) {
+          const error = new Error(SECRET_SENTINEL);
+          error.name = options.browserFailureName;
+          error.stack = `${SECRET_SENTINEL}:browser-stack`;
+          error.privateProvider = SECRET_SENTINEL;
+          throw error;
+        }
         return native;
       },
     } },
@@ -489,6 +496,11 @@ test("P185 unexpected authentication exceptions collapse to one Pocket-owned gen
   const error = new Error(SECRET_SENTINEL);
   error.name = "PrivateProviderFailureName";
   error.stack = `${SECRET_SENTINEL}:private-stack`;
+  error.authenticationRequest = {
+    browserGetStarted: true, parserPath: "fallback", challengeBytes: 32, rpId: "pocket.example",
+    allowCredentialCount: 1, allowCredentialIdBytes: 32, transports: ["internal"],
+    userVerification: "required", prfInputBytes: 32, rawCredential: SECRET_SENTINEL,
+  };
   const additional = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
     crypto: {
       FORMAT: { contentType: "portal.export.v1+json" },
@@ -522,4 +534,77 @@ test("P185 unexpected authentication exceptions collapse to one Pocket-owned gen
   assert.equal(JSON.stringify(result).includes("PrivateProviderFailureName"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result, "message"), false);
   assert.equal(Object.prototype.hasOwnProperty.call(result, "stack"), false);
+});
+
+
+test("P193g browser authentication rejection carries only the exact safe request shape through additional-device and latest-open diagnostics", { timeout: TIMEOUT }, async () => {
+  opener.random = 0;
+  const context = runtime();
+  const fixture = await genuineStarlingFixture(context);
+  const local = await completedLocalRecord(context, fixture);
+  const events = [];
+  const harness = opener(context, fixture, local, events, { browserFailureName: "NotAllowedError" });
+  const result = await harness.additional.openExisting(harness.dependencies);
+  const expectedRequest = {
+    browserGetStarted: true,
+    parserPath: "fallback",
+    challengeBytes: 32,
+    rpId: "pocket.example",
+    allowCredentialCount: 1,
+    allowCredentialIdBytes: 32,
+    transports: ["internal"],
+    userVerification: "required",
+    prfInputBytes: 32,
+  };
+  assert.deepEqual(plain(result), {
+    ok: false,
+    reason: "additional-device-open-failed",
+    adopted: false,
+    sourceOwnerPreserved: true,
+    failureStage: "account-passkey-authentication-completion",
+    failureCode: "passkey-authentication-cancelled",
+    authenticationRequest: expectedRequest,
+  });
+  assert.equal(eventIndex(events, "beginAuthentication") >= 0, true);
+  assert.equal(eventIndex(events, "nativeCredential") > eventIndex(events, "beginAuthentication"), true);
+  assert.equal(events.filter(([name]) => name === "nativeCredential").length, 1);
+  assert.equal(eventIndex(events, "finishAuthentication"), -1);
+  assert.equal(eventIndex(events, "readSyncedPocket"), -1);
+  assert.equal(eventIndex(events, "readPersistenceAuthority"), -1);
+  assert.equal(eventIndex(events, "readShadowHead"), -1);
+  assert.deepEqual(mutationRoutes(events), []);
+  assert.deepEqual(harness.writes, { create: 0, replace: 0, reserve: 0 });
+  const resultText = JSON.stringify(result);
+  assert.equal(resultText.includes(SECRET_SENTINEL), false);
+  assert.equal(resultText.includes(fixtures.CREDENTIAL_ID), false);
+  assert.equal(resultText.includes(fixtures.PRF_OUTPUT_TEXT), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "message"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "stack"), false);
+
+  const tampered = {
+    ...plain(result),
+    rawException: SECRET_SENTINEL,
+    accountLocator: "private-account-locator",
+    authenticationRequest: { ...expectedRequest, rawCredential: SECRET_SENTINEL },
+  };
+  const integration = localIntegrationProjection([result, tampered]);
+  await integration.openExisting();
+  const first = integration.getLatestOpenDiagnostic();
+  assert.deepEqual(plain(first), plain(result));
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.authenticationRequest), true);
+  assert.equal(Object.isFrozen(first.authenticationRequest.transports), true);
+  assert.equal(JSON.stringify(first).includes(SECRET_SENTINEL), false);
+  assert.equal(JSON.stringify(first).includes("private-account-locator"), false);
+  const secondRead = integration.getLatestOpenDiagnostic();
+  assert.notEqual(secondRead, first);
+  assert.notEqual(secondRead.authenticationRequest, first.authenticationRequest);
+  assert.notEqual(secondRead.authenticationRequest.transports, first.authenticationRequest.transports);
+  assert.deepEqual(plain(secondRead), plain(first));
+
+  await integration.openExisting();
+  const rejectedNested = integration.getLatestOpenDiagnostic();
+  assert.equal(Object.prototype.hasOwnProperty.call(rejectedNested, "authenticationRequest"), false);
+  assert.equal(JSON.stringify(rejectedNested).includes(SECRET_SENTINEL), false);
+  assert.equal(JSON.stringify(rejectedNested).includes("private-account-locator"), false);
 });

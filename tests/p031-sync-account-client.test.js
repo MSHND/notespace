@@ -638,3 +638,138 @@ test("readable Pocket fields and secret sentinels cannot enter accepted account 
     plaintextPocket: sentinel,
   }, "authentication-operation", NOW), (e) => !e.message.includes(sentinel));
 });
+
+
+test("P193g native parser NotAllowedError retains only the bounded safe request projection without retry", async () => {
+  const { api } = loadClient();
+  const decoded = (text) => {
+    const bytesValue = Buffer.from(text, "base64url");
+    return bytesValue.buffer.slice(bytesValue.byteOffset, bytesValue.byteOffset + bytesValue.byteLength);
+  };
+  let parserCalls = 0;
+  let getCalls = 0;
+  let finishCalls = 0;
+  const rawSentinel = "P193G-NATIVE-RAW-BROWSER-DETAIL-MUST-NOT-CROSS";
+  const environment = {
+    PublicKeyCredential: {
+      parseRequestOptionsFromJSON(options) {
+        parserCalls += 1;
+        return {
+          challenge: decoded(options.challenge),
+          rpId: options.rpId,
+          allowCredentials: options.allowCredentials.map((descriptor) => ({
+            type: descriptor.type, id: decoded(descriptor.id), transports: descriptor.transports.slice(),
+          })),
+          userVerification: options.userVerification,
+          extensions: { prf: { eval: { first: decoded(options.extensions.prf.eval.first) } } },
+          timeout: options.timeout,
+        };
+      },
+    },
+    navigator: { credentials: {
+      async get() {
+        getCalls += 1;
+        const error = new Error(rawSentinel);
+        error.name = "NotAllowedError";
+        throw error;
+      },
+    } },
+  };
+  const accountService = service({
+    async finishAuthentication() { finishCalls += 1; return finishAuthentication(); },
+  });
+  const client = api.createClient({
+    accountService,
+    webAuthn: api.createBrowserWebAuthnAdapter(environment),
+    now: () => NOW,
+  });
+  await assert.rejects(
+    client.authenticatePasskey({ apiVersion: 1, operationId: "authentication-operation" }),
+    (error) => {
+      assert.equal(error.code, "passkey-authentication-cancelled");
+      assert.deepEqual(JSON.parse(JSON.stringify(error.authenticationRequest)), {
+        browserGetStarted: true,
+        parserPath: "native",
+        challengeBytes: 32,
+        rpId: "pocket.example",
+        allowCredentialCount: 1,
+        allowCredentialIdBytes: 32,
+        transports: ["internal"],
+        userVerification: "required",
+        prfInputBytes: 32,
+      });
+      assert.equal(Object.isFrozen(error.authenticationRequest), true);
+      assert.equal(Object.isFrozen(error.authenticationRequest.transports), true);
+      const publicText = JSON.stringify(error.authenticationRequest);
+      for (const raw of [CREDENTIAL_ID, CHALLENGE, PRF_INPUT, rawSentinel]) assert.equal(publicText.includes(raw), false);
+      assert.equal(error.message.includes(rawSentinel), false);
+      return true;
+    }
+  );
+  assert.equal(parserCalls, 1);
+  assert.equal(getCalls, 1);
+  assert.equal(finishCalls, 0);
+});
+
+test("P193g fallback parser NotAllowedError reports the same safe shape with fallback provenance", async () => {
+  const { api } = loadClient();
+  let getCalls = 0;
+  const rawSentinel = "P193G-FALLBACK-RAW-BROWSER-DETAIL-MUST-NOT-CROSS";
+  const adapter = api.createBrowserWebAuthnAdapter({
+    navigator: { credentials: {
+      async get() {
+        getCalls += 1;
+        const error = new Error(rawSentinel);
+        error.name = "NotAllowedError";
+        throw error;
+      },
+    } },
+  });
+  const client = api.createClient({ accountService: service(), webAuthn: adapter, now: () => NOW });
+  await assert.rejects(
+    client.authenticatePasskey({ apiVersion: 1, operationId: "authentication-operation" }),
+    (error) => {
+      assert.equal(error.code, "passkey-authentication-cancelled");
+      assert.deepEqual(JSON.parse(JSON.stringify(error.authenticationRequest)), {
+        browserGetStarted: true,
+        parserPath: "fallback",
+        challengeBytes: 32,
+        rpId: "pocket.example",
+        allowCredentialCount: 1,
+        allowCredentialIdBytes: 32,
+        transports: ["internal"],
+        userVerification: "required",
+        prfInputBytes: 32,
+      });
+      const publicText = JSON.stringify(error.authenticationRequest);
+      for (const raw of [CREDENTIAL_ID, CHALLENGE, PRF_INPUT, rawSentinel]) assert.equal(publicText.includes(raw), false);
+      return true;
+    }
+  );
+  assert.equal(getCalls, 1);
+});
+
+test("P193g invalid authentication options fail before browser get and fabricate no request diagnostic", async () => {
+  const { api } = loadClient();
+  let getCalls = 0;
+  const accountService = service({
+    async beginAuthentication() {
+      return beginAuthentication({
+        publicKeyRequestOptions: authenticationOptions({ challenge: "not+base64" }),
+      });
+    },
+  });
+  const client = api.createClient({
+    accountService,
+    webAuthn: api.createBrowserWebAuthnAdapter({
+      navigator: { credentials: { async get() { getCalls += 1; } } },
+    }),
+    now: () => NOW,
+  });
+  await assert.rejects(
+    client.authenticatePasskey({ apiVersion: 1, operationId: "authentication-operation" }),
+    (error) => error.code === "authentication-options-invalid"
+      && !Object.prototype.hasOwnProperty.call(error, "authenticationRequest")
+  );
+  assert.equal(getCalls, 0);
+});

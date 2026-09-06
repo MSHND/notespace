@@ -20,12 +20,59 @@
     "prf-output-invalid",
   ]);
 
+  const OPEN_AUTHENTICATION_REQUEST_FIELDS = Object.freeze([
+    "browserGetStarted", "parserPath", "challengeBytes", "rpId", "allowCredentialCount",
+    "allowCredentialIdBytes", "transports", "userVerification", "prfInputBytes",
+  ]);
+  const OPEN_AUTHENTICATION_REQUEST_TRANSPORTS = Object.freeze([
+    "usb", "nfc", "ble", "smart-card", "hybrid", "internal",
+  ]);
+
   function frozen(value) {
     return Object.freeze(value);
   }
 
   function safeFailure(reason) {
     return frozen({ ok: false, reason });
+  }
+
+  function projectAuthenticationRequestDiagnostic(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)
+        || Object.keys(value).length !== OPEN_AUTHENTICATION_REQUEST_FIELDS.length
+        || OPEN_AUTHENTICATION_REQUEST_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(value, field))
+        || value.browserGetStarted !== true
+        || !["native", "fallback"].includes(value.parserPath)
+        || !Number.isSafeInteger(value.challengeBytes) || value.challengeBytes < 32 || value.challengeBytes > 65536
+        || typeof value.rpId !== "string" || value.rpId.length < 1 || value.rpId.length > 160 || value.rpId !== value.rpId.trim()
+        || !Number.isSafeInteger(value.allowCredentialCount) || value.allowCredentialCount < 0 || value.allowCredentialCount > 64
+        || value.userVerification !== "required"
+        || ![null, 32].includes(value.prfInputBytes)) return null;
+    let allowCredentialIdBytes = null;
+    let transports = null;
+    if (value.allowCredentialCount === 1) {
+      if (!Number.isSafeInteger(value.allowCredentialIdBytes)
+          || value.allowCredentialIdBytes < 1 || value.allowCredentialIdBytes > 4096) return null;
+      allowCredentialIdBytes = value.allowCredentialIdBytes;
+      if (value.transports !== null) {
+        if (!Array.isArray(value.transports)
+            || value.transports.length > OPEN_AUTHENTICATION_REQUEST_TRANSPORTS.length
+            || value.transports.some((transport) => !OPEN_AUTHENTICATION_REQUEST_TRANSPORTS.includes(transport))) return null;
+        transports = frozen(value.transports.slice());
+      }
+    } else if (value.allowCredentialIdBytes !== null || value.transports !== null) {
+      return null;
+    }
+    return frozen({
+      browserGetStarted: true,
+      parserPath: value.parserPath,
+      challengeBytes: value.challengeBytes,
+      rpId: value.rpId,
+      allowCredentialCount: value.allowCredentialCount,
+      allowCredentialIdBytes,
+      transports,
+      userVerification: "required",
+      prfInputBytes: value.prfInputBytes,
+    });
   }
 
   function projectOpenDiagnostic(result) {
@@ -35,11 +82,13 @@
     if (typeof result?.sourceOwnerPreserved === "boolean") {
       projection.sourceOwnerPreserved = result.sourceOwnerPreserved;
     }
-    if (result?.failureStage === OPEN_DIAGNOSTIC_STAGE) {
-      projection.failureStage = OPEN_DIAGNOSTIC_STAGE;
-    }
-    if (OPEN_DIAGNOSTIC_CODES.includes(result?.failureCode)) {
-      projection.failureCode = result.failureCode;
+    const acceptedStage = result?.failureStage === OPEN_DIAGNOSTIC_STAGE;
+    const acceptedCode = OPEN_DIAGNOSTIC_CODES.includes(result?.failureCode);
+    if (acceptedStage) projection.failureStage = OPEN_DIAGNOSTIC_STAGE;
+    if (acceptedCode) projection.failureCode = result.failureCode;
+    if (acceptedStage && acceptedCode) {
+      const authenticationRequest = projectAuthenticationRequestDiagnostic(result?.authenticationRequest);
+      if (authenticationRequest) projection.authenticationRequest = authenticationRequest;
     }
     return frozen(projection);
   }
@@ -134,7 +183,7 @@
     }
 
     function getLatestOpenDiagnostic() {
-      return latestOpenDiagnostic ? frozen({ ...latestOpenDiagnostic }) : null;
+      return latestOpenDiagnostic ? projectOpenDiagnostic(latestOpenDiagnostic) : null;
     }
 
     function captureSwitchTarget() {

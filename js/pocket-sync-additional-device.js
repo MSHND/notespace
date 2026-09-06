@@ -30,19 +30,68 @@
     "passkey-security-failed",
     "prf-output-invalid",
   ]);
+  const AUTHENTICATION_REQUEST_DIAGNOSTIC_FIELDS = Object.freeze([
+    "browserGetStarted", "parserPath", "challengeBytes", "rpId", "allowCredentialCount",
+    "allowCredentialIdBytes", "transports", "userVerification", "prfInputBytes",
+  ]);
+  const AUTHENTICATION_REQUEST_TRANSPORTS = Object.freeze([
+    "usb", "nfc", "ble", "smart-card", "hybrid", "internal",
+  ]);
   const fail = (reason, extra = {}) => Object.freeze(Object.assign({ ok: false, reason, adopted: false }, extra));
   const object = (value) => !!value && typeof value === "object" && !Array.isArray(value);
   const id = (value) => typeof value === "string" && value.length > 0 && value.length <= 160 && value === value.trim();
   const freeze = (value) => Object.freeze(value);
 
+  function authenticationRequestDiagnostic(value) {
+    if (!object(value)
+        || Object.keys(value).length !== AUTHENTICATION_REQUEST_DIAGNOSTIC_FIELDS.length
+        || AUTHENTICATION_REQUEST_DIAGNOSTIC_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(value, field))
+        || value.browserGetStarted !== true
+        || !["native", "fallback"].includes(value.parserPath)
+        || !Number.isSafeInteger(value.challengeBytes) || value.challengeBytes < 32 || value.challengeBytes > 65536
+        || !id(value.rpId)
+        || !Number.isSafeInteger(value.allowCredentialCount) || value.allowCredentialCount < 0 || value.allowCredentialCount > 64
+        || value.userVerification !== "required"
+        || ![null, 32].includes(value.prfInputBytes)) return null;
+    let allowCredentialIdBytes = null;
+    let transports = null;
+    if (value.allowCredentialCount === 1) {
+      if (!Number.isSafeInteger(value.allowCredentialIdBytes)
+          || value.allowCredentialIdBytes < 1 || value.allowCredentialIdBytes > 4096) return null;
+      allowCredentialIdBytes = value.allowCredentialIdBytes;
+      if (value.transports !== null) {
+        if (!Array.isArray(value.transports)
+            || value.transports.length > AUTHENTICATION_REQUEST_TRANSPORTS.length
+            || value.transports.some((transport) => !AUTHENTICATION_REQUEST_TRANSPORTS.includes(transport))) return null;
+        transports = freeze(value.transports.slice());
+      }
+    } else if (value.allowCredentialIdBytes !== null || value.transports !== null) {
+      return null;
+    }
+    return freeze({
+      browserGetStarted: true,
+      parserPath: value.parserPath,
+      challengeBytes: value.challengeBytes,
+      rpId: value.rpId,
+      allowCredentialCount: value.allowCredentialCount,
+      allowCredentialIdBytes,
+      transports,
+      userVerification: "required",
+      prfInputBytes: value.prfInputBytes,
+    });
+  }
+
   function authenticationFailure(error) {
     const failureCode = AUTHENTICATION_FAILURE_CODES.includes(error?.code)
       ? error.code : "account-authentication-failed";
-    return fail("additional-device-open-failed", {
+    const extra = {
       sourceOwnerPreserved: true,
       failureStage: AUTHENTICATION_FAILURE_STAGE,
       failureCode,
-    });
+    };
+    const diagnostic = authenticationRequestDiagnostic(error?.authenticationRequest);
+    if (diagnostic) extra.authenticationRequest = diagnostic;
+    return fail("additional-device-open-failed", extra);
   }
 
   function validFactory(value) {

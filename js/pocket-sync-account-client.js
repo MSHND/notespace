@@ -31,6 +31,9 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     "hybrid",
     "internal",
   ]);
+  const AUTHENTICATION_PARSER_PATHS = new WeakMap();
+  const AUTHENTICATION_REQUEST_DIAGNOSTICS = new WeakMap();
+
   const REGISTRATION_OPTION_FIELDS = Object.freeze([
     "rp",
     "user",
@@ -178,6 +181,89 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
 
   function bufferCopy(bytes) {
     return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  }
+
+  function binaryByteLength(value) {
+    if (value instanceof ArrayBuffer) return value.byteLength;
+    if (ArrayBuffer.isView(value)) return value.byteLength;
+    return null;
+  }
+
+  function rememberAuthenticationParserPath(value, parserPath) {
+    if ((isObject(value) || typeof value === "function")
+        && ["native", "fallback"].includes(parserPath)) {
+      try { AUTHENTICATION_PARSER_PATHS.set(value, parserPath); } catch (_error) {}
+    }
+    return value;
+  }
+
+  function authenticationParserPath(value) {
+    if (!isObject(value) && typeof value !== "function") return null;
+    try { return AUTHENTICATION_PARSER_PATHS.get(value) || null; }
+    catch (_error) { return null; }
+  }
+
+  function buildAuthenticationRequestDiagnostic(publicKey, parserPath) {
+    try {
+      if (!isObject(publicKey) || !["native", "fallback"].includes(parserPath)) return null;
+      const challengeBytes = binaryByteLength(publicKey.challenge);
+      if (!Number.isSafeInteger(challengeBytes)
+          || challengeBytes < POLICY.minimumChallengeBytes || challengeBytes > 65536) return null;
+      const rpId = identifier(publicKey.rpId, "authentication-request-diagnostic-invalid");
+      if (!Array.isArray(publicKey.allowCredentials) || publicKey.allowCredentials.length > 64) return null;
+      const allowCredentialCount = publicKey.allowCredentials.length;
+      let allowCredentialIdBytes = null;
+      let transports = null;
+      if (allowCredentialCount === 1) {
+        const descriptor = publicKey.allowCredentials[0];
+        if (!isObject(descriptor)) return null;
+        allowCredentialIdBytes = binaryByteLength(descriptor.id);
+        if (!Number.isSafeInteger(allowCredentialIdBytes)
+            || allowCredentialIdBytes < 1 || allowCredentialIdBytes > 4096) return null;
+        if (descriptor.transports !== undefined) {
+          if (!Array.isArray(descriptor.transports)
+              || descriptor.transports.length > TRANSPORTS.length
+              || descriptor.transports.some((transport) => !TRANSPORTS.includes(transport))) return null;
+          transports = Object.freeze(descriptor.transports.slice());
+        }
+      }
+      if (publicKey.userVerification !== POLICY.userVerification) return null;
+      const first = publicKey.extensions?.prf?.eval?.first;
+      let prfInputBytes = null;
+      if (first !== undefined) {
+        prfInputBytes = binaryByteLength(first);
+        if (prfInputBytes !== POLICY.prfEvaluationInputBytes) return null;
+      }
+      return Object.freeze({
+        browserGetStarted: true,
+        parserPath,
+        challengeBytes,
+        rpId,
+        allowCredentialCount,
+        allowCredentialIdBytes,
+        transports,
+        userVerification: publicKey.userVerification,
+        prfInputBytes,
+      });
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function rememberAuthenticationRequestDiagnostic(error, diagnostic) {
+    if (!diagnostic || (!isObject(error) && typeof error !== "function")) return;
+    try { AUTHENTICATION_REQUEST_DIAGNOSTICS.set(error, diagnostic); } catch (_error) {}
+  }
+
+  function takeAuthenticationRequestDiagnostic(error) {
+    if (!isObject(error) && typeof error !== "function") return null;
+    try {
+      const diagnostic = AUTHENTICATION_REQUEST_DIAGNOSTICS.get(error) || null;
+      AUTHENTICATION_REQUEST_DIAGNOSTICS.delete(error);
+      return diagnostic;
+    } catch (_error) {
+      return null;
+    }
   }
 
   function canonicalBinaryText(value, code, options = {}) {
@@ -401,12 +487,15 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     const parser = publicKeyCredential && publicKeyCredential.parseRequestOptionsFromJSON;
     if (typeof parser === "function") {
       try {
-        return parser.call(publicKeyCredential, json);
+        return rememberAuthenticationParserPath(
+          parser.call(publicKeyCredential, json),
+          "native"
+        );
       } catch (_error) {
         throw accountError("authentication-options-invalid");
       }
     }
-    return fallbackAuthenticationOptions(json);
+    return rememberAuthenticationParserPath(fallbackAuthenticationOptions(json), "fallback");
   }
 
   function parseDiscoverableAuthenticationOptions(input, publicKeyCredential) {
@@ -1013,7 +1102,16 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
           jsonOptions.extensions.prf.eval.first,
           publicKeyCredential
         );
-        return credentials.get({ publicKey });
+        const diagnostic = buildAuthenticationRequestDiagnostic(
+          publicKey,
+          authenticationParserPath(publicKey)
+        );
+        try {
+          return await credentials.get({ publicKey });
+        } catch (error) {
+          rememberAuthenticationRequestDiagnostic(error, diagnostic);
+          throw error;
+        }
       },
       async getDiscoverableCredential(jsonOptions) {
         const publicKeyCredential = environment && environment.PublicKeyCredential;
@@ -1080,15 +1178,22 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
 
   function mapBrowserFailure(error, ceremonyKind) {
     if (error && typeof error.code === "string") throw error;
+    let code;
     if (error && error.name === "NotAllowedError") {
-      throw accountError(ceremonyKind === "registration"
+      code = ceremonyKind === "registration"
         ? "passkey-registration-cancelled"
-        : "passkey-authentication-cancelled");
+        : "passkey-authentication-cancelled";
+    } else if (error && error.name === "NotSupportedError") {
+      code = "passkey-not-supported";
+    } else {
+      code = "passkey-security-failed";
     }
-    if (error && error.name === "NotSupportedError") {
-      throw accountError("passkey-not-supported");
+    const mapped = accountError(code);
+    if (ceremonyKind === "authentication") {
+      const diagnostic = takeAuthenticationRequestDiagnostic(error);
+      if (diagnostic) mapped.authenticationRequest = diagnostic;
     }
-    throw accountError("passkey-security-failed");
+    throw mapped;
   }
 
   function ensureCurrent(expiry, now) {
