@@ -340,11 +340,12 @@ function moveNodeWithinSiblings(nodeId, direction) {
   state.selectedId = node.id;
   const reorderOperation = recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
   const finalIndex = sortNodesForParent(parentId).findIndex((sibling) => sibling.id === node.id);
+  const semanticToIndex = finalIndex + (index < finalIndex ? 1 : 0);
   let forwardSemanticCaptured = false;
   if (finalIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
     forwardSemanticCaptured = capturePocketStarlingNodePayloadAndStructure(reorderOperation?.seq, node, {
       type: "reorder",
-      input: { nodeId: node.id, fromIndex: index, toIndex: finalIndex },
+      input: { nodeId: node.id, fromIndex: index, toIndex: semanticToIndex },
     });
   }
   bindP151MoveUndoWitness(lastMoveUndoSnapshot, reorderOperation?.seq, forwardSemanticCaptured);
