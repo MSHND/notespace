@@ -37,6 +37,7 @@ const STARLING_BOOTSTRAP_PATHS = Object.freeze([
   "/js/pocket-starling-owner-bootstrap.js",
   "/js/pocket-starling-owner-successor.js",
   "/js/pocket-starling-real-truth-admission.js",
+  "/js/pocket-starling-save-diagnostic.js",
 ]);
 const SERVICE_ROOT_MODULE_PATHS = Object.freeze([
   "/js/pocket-starling-owner-bootstrap.js",
