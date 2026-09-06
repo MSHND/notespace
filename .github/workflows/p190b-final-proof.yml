@@ -1,0 +1,64 @@
+name: P190b final proof matrix
+
+on:
+  push:
+    branches:
+      - candidate/p190-proof
+
+jobs:
+  p190b-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        timeout-minutes: 2
+        run: npm ci
+      - name: P190 focused post-reentry H2 to H3 Save proof
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p190-starling-save-observability-and-reentry.test.js
+      - name: P190b downward reorder capture pin
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p190b-downward-reorder-capture.test.js
+      - name: P190b semantic mismatch fail-closed pin
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p190b-semantic-admission-negative.test.js
+      - name: P185 same-device reentry
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p185-open-reentry-observability.test.js
+      - name: P149 working-set lifecycle
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p149-starling-owner-working-set-lifecycle.test.js
+      - name: P151 move reorder capture and undo
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p151-starling-owner-move-reorder-capture.test.js
+      - name: P160 save preparation
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p160-starling-owner-save-preparation.test.js
+      - name: P164 owner successor and publication
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p164-starling-successor-mirror.test.js
+      - name: P168 authority adoption
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p168-authority-adoption.test.js
+      - name: P168 reentry
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p168-starling-reentry.test.js
+      - name: P172 real composition
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p172-real-p168-composition.test.js
+      - name: P172 semantic admission
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p172-real-truth-cutover-admission.test.js
+      - name: P172 undo guards
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p172b-undo-guard-repair.test.js tests/p172b-insert-guard-real-history.test.js
+      - name: P176 production composition
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p176-production-composition.test.js
+      - name: P180 historical same-runtime cutover and later Save
+        timeout-minutes: 2
+        run: timeout 90s node --test tests/p180-main-save-cutover.test.js
