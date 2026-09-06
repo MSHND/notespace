@@ -1,0 +1,30 @@
+name: P193g proof-only bounded verification
+
+on:
+  push:
+    branches:
+      - candidate/p193g-proof
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p193g
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Focused P193g proof and Pocket check
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 180s npm ci
+          timeout 180s node --test tests/p031-sync-account-client.test.js tests/p052-additional-device.test.js tests/p168-starling-reentry.test.js tests/p185-open-reentry-observability.test.js
+          timeout 300s npm run check
+          git diff --check
