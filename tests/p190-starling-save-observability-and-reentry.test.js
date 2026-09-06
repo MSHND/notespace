@@ -23,6 +23,11 @@ function loadP180Helpers() {
   assert.ok(code.includes(outerTest), "P180 test import changed");
   code = code.replace(outerTest, "const test = () => {};");
 
+  const p190MainSaveTail = '  "js/pocket-io-browser.js",\n];';
+  assert.ok(code.includes(p190MainSaveTail), "P180 Main Save module surface changed");
+  code = code.replace(p190MainSaveTail,
+    '  "js/pocket-editor-copy.js",\n  "js/pocket-io-browser.js",\n];');
+
   const p176Read = '  let code = fs.readFileSync(P176, "utf8");';
   assert.ok(code.includes(p176Read), "P180 P176 loader changed");
   code = code.replace(p176Read, `${p176Read}
