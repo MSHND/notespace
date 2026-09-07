@@ -7304,3 +7304,39 @@ test("details-first copy context ignores editor metadata and falls back only to 
   assert.equal(labelFallback.preserveLines, false);
   assert.equal(labelFallback.max, 220);
 });
+
+test("P193k6 New Pocket save picker is untyped while Open remains typed and cancellation is one-shot", async () => {
+  const creating = createFullContractContext();
+  resetState(creating, [syntheticNode("p193k6_create")]);
+  let savePickerCalls = 0;
+  let savePickerOptions = null;
+  creating.showSaveFilePicker = async (options) => {
+    savePickerCalls += 1;
+    savePickerOptions = plain(options);
+    const error = new Error("synthetic cancellation");
+    error.name = "AbortError";
+    throw error;
+  };
+
+  assert.equal(await creating.createNewPocketFile(), false);
+  assert.equal(savePickerCalls, 1);
+  assert.deepEqual(savePickerOptions, { suggestedName: "pocket-data.json" });
+  assert.equal(Object.prototype.hasOwnProperty.call(savePickerOptions, "types"), false);
+
+  const opening = createFullContractContext();
+  resetState(opening, [syntheticNode("p193k6_open")]);
+  let openPickerCalls = 0;
+  let openPickerOptions = null;
+  opening.showOpenFilePicker = async (options) => {
+    openPickerCalls += 1;
+    openPickerOptions = plain(options);
+    return [];
+  };
+
+  assert.equal(await opening.openPocketFile(), false);
+  assert.equal(openPickerCalls, 1);
+  assert.deepEqual(openPickerOptions, {
+    types: [{ description: "Pocket file", accept: { "application/json": [".json"] } }],
+    multiple: false,
+  });
+});

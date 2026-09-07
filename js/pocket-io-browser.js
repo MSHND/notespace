@@ -1279,7 +1279,6 @@ async function createNewPocketFile() {
   let preparedAdoptionLease = null;
   try {
     const handle = await window.showSaveFilePicker({
-      ...jsonFilePickerOptions(),
       suggestedName: "pocket-data.json",
     });
     if (!handle) {
