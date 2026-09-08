@@ -1,0 +1,59 @@
+name: P193k6a exact-candidate proof
+
+on:
+  push:
+    branches:
+      - candidate/p193k6-proof
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout triggering proof commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Assert exact proof lineage and candidate surface
+        shell: bash
+        env:
+          ACCEPTED_SHA: 4915c6f2e01e0bbc3373d9de720fe3d2af7650b1
+          CANDIDATE_SHA: 50fdc4c0f9042eb6cde99a67f76e7e9c1480d8e6
+        run: |
+          set -euo pipefail
+
+          test "$(git rev-parse HEAD^)" = "$CANDIDATE_SHA"
+          parent_line="$(git rev-list --parents -n 1 HEAD)"
+          set -- $parent_line
+          test "$#" -eq 2
+
+          mapfile -t proof_files < <(git diff --name-only HEAD^..HEAD)
+          test "${#proof_files[@]}" -eq 1
+          test "${proof_files[0]}" = ".github/workflows/p193k6-proof.yml"
+
+          test "$(git rev-parse "${CANDIDATE_SHA}^")" = "$ACCEPTED_SHA"
+
+          git fetch --no-tags origin "+refs/heads/candidate/p193k6:refs/remotes/origin/candidate/p193k6"
+          test "$(git rev-parse refs/remotes/origin/candidate/p193k6)" = "$CANDIDATE_SHA"
+
+          mapfile -t candidate_files < <(git diff --name-only "$ACCEPTED_SHA" "$CANDIDATE_SHA" | sort)
+          test "${#candidate_files[@]}" -eq 2
+          test "${candidate_files[0]}" = "js/pocket-io-browser.js"
+          test "${candidate_files[1]}" = "tests/pe-persistence-contract.test.js"
+      - name: Install dependencies
+        shell: bash
+        run: timeout 240s npm ci
+      - name: Focused browser-owner proof
+        shell: bash
+        run: timeout 180s node --test --test-name-pattern='P193k6 New Pocket|P061 creation keeps|Create New from a dirty Vault|Create New rechecks source identity' tests/pe-persistence-contract.test.js tests/p019-vault-ownership.test.js
+      - name: Repository Pocket check
+        shell: bash
+        run: timeout 300s npm run check
