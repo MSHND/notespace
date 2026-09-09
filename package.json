@@ -11,7 +11,8 @@
     "sync:server": "node sync-service/pocket-sync-server.js",
     "sync:local": "node sync-service/pocket-sync-local-integration-server.js",
     "sync:production": "node sync-service/pocket-sync-production-server.js",
-    "sync:production:manifest": "node sync-service/pocket-sync-production-manifest.js"
+    "sync:production:manifest": "node sync-service/pocket-sync-production-manifest.js",
+    "sync:retention:expired": "node sync-service/pocket-sync-expired-record-retention-command.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",

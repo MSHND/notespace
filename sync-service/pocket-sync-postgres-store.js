@@ -25,6 +25,14 @@ const SQL = Object.freeze({
   insert: `INSERT INTO ${TABLE} (collection, record_key, store_version, record) VALUES ($1, $2, $3, $4::jsonb)`,
   replace: `UPDATE ${TABLE} SET store_version = $4, record = $5::jsonb WHERE collection = $1 AND record_key = $2 AND store_version = $3`,
   remove: `DELETE FROM ${TABLE} WHERE collection = $1 AND record_key = $2 AND store_version = $3`,
+  selectExpiredCandidates: `SELECT collection, record_key, store_version, record FROM ${TABLE}
+    WHERE collection = ANY($1::text[])
+      AND jsonb_typeof(record) = 'object'
+      AND jsonb_typeof(record->'expiresAt') = 'string'
+      AND record->>'expiresAt' <= $2
+    ORDER BY collection ASC, record_key ASC
+    LIMIT $3
+    FOR UPDATE`,
   authorityLock: "SELECT pg_advisory_lock(hashtextextended($1::text, 166)) AS locked",
   authorityUnlock: "SELECT pg_advisory_unlock(hashtextextended($1::text, 166)) AS unlocked",
 });
@@ -58,6 +66,32 @@ function validateKey(key) {
 function validateStoreVersion(value) {
   if (!Number.isSafeInteger(value) || value < 1) throw storeError("store-version-invalid");
   return value;
+}
+
+function validateRetentionCollections(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > COLLECTIONS.length
+      || new Set(value).size !== value.length) throw storeError("store-retention-invalid");
+  value.forEach(validateCollection);
+  return value.slice();
+}
+
+function validateRetentionCutoff(value) {
+  if (typeof value !== "string" || value.length > 80) throw storeError("store-retention-invalid");
+  const milliseconds = Date.parse(value);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== value) throw storeError("store-retention-invalid");
+  return value;
+}
+
+function validateRetentionLimit(value) {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 100) throw storeError("store-retention-invalid");
+  return value;
+}
+
+function readRetentionCandidate(row) {
+  if (!isObject(row) || !COLLECTIONS.includes(row.collection) || typeof row.record_key !== "string" || row.record_key.length < 1
+      || !Object.prototype.hasOwnProperty.call(row, "store_version") || !Object.prototype.hasOwnProperty.call(row, "record")) throw storeError("store-state-invalid");
+  const record = readStoredRecord({ store_version: row.store_version, record: row.record });
+  return Object.freeze({ collection: row.collection, key: row.record_key, storeVersion: record.storeVersion, record });
 }
 
 function validateJson(value, seen) {
@@ -211,7 +245,7 @@ function createPostgresStore(options) {
         ? operation.pending.catch(() => {}) : operation.pending));
     }
 
-    const transaction = Object.freeze({
+    const transaction = {
       get(collection, key) {
         return start(() => {
           assertActive();
@@ -257,7 +291,23 @@ function createPostgresStore(options) {
           });
         });
       },
+    };
+    Object.defineProperty(transaction, "selectExpiredCandidates", {
+      value(collections, cutoff, limit) {
+        return start(() => {
+          assertActive();
+          if (mode !== "readwrite") throw storeError("store-readonly-write");
+          const safeCollections = validateRetentionCollections(collections);
+          const safeCutoff = validateRetentionCutoff(cutoff);
+          const safeLimit = validateRetentionLimit(limit);
+          return query(SQL.selectExpiredCandidates, [safeCollections, safeCutoff, safeLimit]).then((result) => {
+            if (result.rowCount !== result.rows.length || result.rows.length > safeLimit) throw storeError("store-state-invalid");
+            return Object.freeze(result.rows.map(readRetentionCandidate));
+          });
+        });
+      },
     });
+    Object.freeze(transaction);
 
     try {
       try {

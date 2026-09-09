@@ -3924,8 +3924,6 @@ function createServiceCore(input) {
   });
 }
 
-module.exports = Object.freeze({
-  POLICY,
-  COLLECTIONS,
-  createServiceCore,
-});
+const serviceExports = { POLICY, COLLECTIONS, createServiceCore };
+Object.defineProperty(serviceExports, "validateStoredRecord", { value: validateStoredRecord });
+module.exports = Object.freeze(serviceExports);
