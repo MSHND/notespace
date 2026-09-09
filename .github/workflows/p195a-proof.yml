@@ -1,0 +1,75 @@
+name: P195a proof
+
+on:
+  push:
+    branches: [candidate/p195-proof]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  p195a-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: Verify proof ancestry and patch stale P036 guard only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "0076739343b9a30c3e56f521ec67b1d87d8b6b2e"
+          python - <<'PY'
+          from pathlib import Path
+
+          def r(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f"anchor mismatch {path}: {text.count(old)}")
+              p.write_text(text.replace(old, new, 1))
+
+          r("tests/p036-key-recovery-service-core.test.js",
+            '''const METHODS = Object.freeze([\n  "beginRegistration", "finishRegistration", "beginAuthentication", "finishAuthentication",\n  "readSyncedPocket", "readRevision", "downloadEncryptedRecord", "conditionalUpload", "listEnvelopes",\n  "downloadEnvelope", "addEnvelope", "revokeEnvelope", "initialiseRecovery",\n  "beginRecovery", "finishRecovery", "rotateRecovery",\n]);''',
+            '''const METHODS = Object.freeze([\n  "beginRegistration", "finishRegistration", "beginAuthentication", "finishAuthentication",\n  "readSyncedPocket", "readRevision", "downloadEncryptedRecord", "conditionalUpload",\n  "readPersistenceAuthority", "acquirePersistenceAuthorityFence",\n  "commitStarlingAuthorityAdoption", "releasePersistenceAuthorityFence",\n  "listEnvelopes", "downloadEnvelope", "addEnvelope", "revokeEnvelope", "initialiseRecovery",\n  "beginRecovery", "finishRecovery", "rotateRecovery", "putOpaqueObject", "getOpaqueObject",\n  "objectPresence", "initialiseShadowHead", "readShadowHead", "compareAndSetShadowHead",\n]);''')
+          r("tests/p036-key-recovery-service-core.test.js",
+            '''  "keySets", "envelopes", "recoveryLocators", "recoveryCeremonies", "keyOperations",\n]);''',
+            '''  "keySets", "envelopes", "recoveryLocators", "recoveryCeremonies", "keyOperations",\n  "persistenceAuthorities",\n]);''')
+          r("tests/p036-key-recovery-service-core.test.js",
+            '\nfunction createHarness(options = {}) {',
+            '''\nfunction objectHeadStore() {\n  return Object.freeze({\n    async putObject() { return { ok: true, created: true }; },\n    async getObject() { return null; },\n    async presence(_pocket, refs) { return refs.map((storageRef) => ({ storageRef, present: false })); },\n    async initialiseHead() { return { schema: "pocket.starling.head.v1", revision: 0, sealRef: null }; },\n    async readHead() { return null; },\n    async compareAndSetHead() { return { ok: false, reason: "head-conflict" }; },\n  });\n}\n\nfunction createHarness(options = {}) {''')
+          r("tests/p036-key-recovery-service-core.test.js",
+            '  const config = { store: driver.store, webAuthnVerifier: verifier,\n',
+            '  const config = { store: driver.store, objectHeadStore: objectHeadStore(), webAuthnVerifier: verifier,\n')
+          r("tests/p036-key-recovery-service-core.test.js",
+            '    "pocket-sync-db-migrate.js",\n    "pocket-sync-http-adapter.js",',
+            '    "pocket-sync-db-migrate.js",\n    "pocket-sync-expired-record-retention-command.js",\n    "pocket-sync-expired-record-retention.js",\n    "pocket-sync-http-adapter.js",')
+          PY
+          test "$(git diff --name-only)" = "tests/p036-key-recovery-service-core.test.js"
+          git diff --check
+      - name: Install
+        run: timeout --signal=KILL 180s npm ci
+      - name: P195 focused real-candidate proof
+        run: timeout --signal=KILL 180s node --test tests/p195-expired-ephemeral-record-retention.test.js
+      - name: P034 service core guard
+        run: timeout --signal=KILL 180s node --test tests/p034-sync-service-core.test.js
+      - name: P036 key/recovery guard with proof-only stale compatibility patch
+        run: timeout --signal=KILL 180s node --test tests/p036-key-recovery-service-core.test.js
+      - name: P047 PostgreSQL store guard
+        run: timeout --signal=KILL 180s node --test tests/p047-postgres-store.test.js
+      - name: P049 runtime guard
+        run: timeout --signal=KILL 180s node --test tests/p049-sync-server-runtime.test.js
+      - name: P074 production composition guard
+        run: timeout --signal=KILL 180s node --test tests/p074-production-composition.test.js
+      - name: Pocket repository check
+        run: timeout --signal=KILL 300s npm run check
+      - name: Proof branch discipline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          test "$(git diff --name-only)" = "tests/p036-key-recovery-service-core.test.js"
+          test "$(git diff --name-only 0076739343b9a30c3e56f521ec67b1d87d8b6b2e..HEAD)" = ".github/workflows/p195a-proof.yml"
