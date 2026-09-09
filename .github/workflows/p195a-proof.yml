@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "0076739343b9a30c3e56f521ec67b1d87d8b6b2e"
+          test "$(git rev-parse HEAD~2)" = "0076739343b9a30c3e56f521ec67b1d87d8b6b2e"
           python - <<'PY'
           from pathlib import Path
 
@@ -47,6 +47,9 @@ jobs:
           r("tests/p036-key-recovery-service-core.test.js",
             '    "pocket-sync-db-migrate.js",\n    "pocket-sync-http-adapter.js",',
             '    "pocket-sync-db-migrate.js",\n    "pocket-sync-expired-record-retention-command.js",\n    "pocket-sync-expired-record-retention.js",\n    "pocket-sync-http-adapter.js",')
+          r("tests/p036-key-recovery-service-core.test.js",
+            '    "pocket-sync-local-integration-server.js",\n    "pocket-sync-postgres-schema.js",',
+            '    "pocket-sync-local-integration-server.js",\n    "pocket-sync-object-head-postgres-store.js",\n    "pocket-sync-postgres-schema.js",')
           PY
           test "$(git diff --name-only)" = "tests/p036-key-recovery-service-core.test.js"
           git diff --check
