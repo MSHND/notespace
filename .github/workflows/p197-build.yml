@@ -26,7 +26,18 @@ jobs:
       - name: Apply production seams
         run: |
           set -euo pipefail
-          python <(git show origin/candidate/p197-proof:.github/p197-build.py)
+          git show origin/candidate/p197-proof:.github/p197-build.py > /tmp/p197-build.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/p197-build.py')
+          text = p.read_text()
+          old = '''  const targetChanged = truthFileHandle !== nextHandle\n    || session.displayName !== nextName\n    || session.pipSession !== nextPip\n    || session.detachedDeviceChanges !== nextDetached\n    || session.ownerKind !== nextOwnerKind\n    || session.storagePrivacy !== nextStoragePrivacy\n    || session.vaultSessionId !== nextVaultSessionId;'''
+          new = '''  const targetChanged = truthFileHandle !== nextHandle\n    || session.writable !== nextWritable\n    || session.pipSession !== nextPip\n    || session.detachedDeviceChanges !== nextDetached\n    || session.ownerKind !== nextOwnerKind\n    || session.storagePrivacy !== nextStoragePrivacy\n    || session.vaultSessionId !== nextVaultSessionId;'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one stale targetChanged patch anchor, found {text.count(old)}')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          python /tmp/p197-build.py
           git diff --check
       - name: Install
         run: timeout --signal=KILL 180s npm ci
