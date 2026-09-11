@@ -1729,7 +1729,7 @@ async function exportTree(options = {}) {
               baselinePayload: mergedPayload,
             },
           });
-          adopted = committed?.ok === true && canContinue();
+          adopted = committed?.ok === true;
         }
       } finally {
         boundary?.releaseConcurrentRebaseLease?.(leaseToken);
