@@ -319,6 +319,7 @@ function restoreDetailsDraftOriginal() {
 }
 
 function stageDetailsEditorDraft() {
+  if (window.PocketOwnerSaveBoundary?.isConcurrentRebaseLeaseActive?.() === true) return false;
   if (!isDetailsEditorOpen()) return false;
   const nodeId = cleanText(state.detailsEdit.id, 80);
   const node = nodeId ? (nodeMap().get(nodeId) || null) : null;

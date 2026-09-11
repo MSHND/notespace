@@ -1384,7 +1384,209 @@ into a user-facing failure.
       local = await persistAuthoritativeWitness(local, witness);
       if (!local) return failure("starling-save-local-confirmation-unsettled");
       const committed = await completeAuthoritativeSave(local, canonical.bytes, { casAttempted: false });
-      return committed ? Object.freeze({ ok: true }) : failure("starling-save-unsettled");
+      if (committed) return Object.freeze({ ok: true });
+      const after = await loadDurableState();
+      const conflicted = after?.schema === AUTHORITY_STATE_SCHEMA ? after.saveWitness : null;
+      if (conflicted && conflicted.phase === "conflict" && conflicted.casMayHaveRun === true
+          && conflicted.ceiling === witness.ceiling
+          && conflicted.authorityRevision === witness.authorityRevision
+          && sameHead(conflicted.expectedHead, witness.expectedHead)
+          && conflicted.targetFingerprint === witness.targetFingerprint) {
+        return Object.freeze({ ok: false, reason: "starling-save-head-conflict",
+          rebaseCeiling: witness.ceiling });
+      }
+      return failure("starling-save-unsettled");
+    }
+
+    function starlingPayload(document) {
+      if (!isObject(document) || typeof document.schema !== "string" || !document.schema
+          || typeof document.writtenAt !== "string" || !document.writtenAt
+          || !Array.isArray(document.nodes) || !Array.isArray(document.tombstones)
+          || !isObject(document.rootExtras) || !isObject(document.dataExtras)) return null;
+      let nodes; let tombstones; let rootExtras; let dataExtras;
+      try {
+        nodes = clone(document.nodes);
+        tombstones = clone(document.tombstones);
+        rootExtras = clone(document.rootExtras);
+        dataExtras = clone(document.dataExtras);
+      } catch (_error) { return null; }
+      if (!nodes || !tombstones || !rootExtras || !dataExtras) return null;
+      return freeze({
+        ...rootExtras,
+        schema: "portal.export.v1",
+        exportedAt: document.writtenAt,
+        writtenAt: document.writtenAt,
+        mainThoughtTree: nodes,
+        mainThoughtTreeTombstones: tombstones,
+        data: { ...dataExtras, mainThoughtTree: nodes, mainThoughtTreeTombstones: tombstones },
+      });
+    }
+
+    async function materializeMergedPayload(opened) {
+      const materialize = global.PocketStarlingMaterializeShadow;
+      if (!opened || opened.outcome !== "opened" || !opened.session || !safeHead(opened.head)
+          || !materialize || typeof materialize.materializeAccepted !== "function") return null;
+      try {
+        const result = await materialize.materializeAccepted(opened.session);
+        return result?.ok === true ? starlingPayload(result.document) : null;
+      } catch (_error) { return null; }
+    }
+
+    function sameAuthorityLineage(left, right) {
+      return !!left && !!right && starlingSteady(left) && starlingSteady(right)
+        && left.authorityRevision === right.authorityRevision
+        && left.rollbackRevision === right.rollbackRevision
+        && sameHead(left.adoptionHead, right.adoptionHead);
+    }
+
+    async function acceptConcurrentRebase(durable, witness, authority, expectedHead, descriptor,
+      remoteCommitted) {
+      const current = currentPrivate();
+      if (!current || !descriptor) return failure("starling-rebase-unsettled");
+      const candidateHead = safeHead({ schema: HEAD_SCHEMA, revision: expectedHead.revision + 1,
+        sealRef: descriptor.candidateSealStorageRef });
+      if (!candidateHead) return failure("starling-rebase-unsettled");
+      const opened = await freshOpen();
+      if (!opened || opened.outcome !== "opened" || !sameHead(opened.head, candidateHead)) {
+        return failure("starling-rebase-local-confirmation-unsettled");
+      }
+      const payload = await materializeMergedPayload(opened);
+      if (!payload) return failure("starling-rebase-local-confirmation-unsettled");
+      const observedAuthority = await readSharedAuthority();
+      if (!sameAuthorityLineage(authority, observedAuthority)) {
+        return failure("starling-rebase-authority-conflict");
+      }
+      const next = authorityPlainState(observedAuthority, null, opened.head, null, null,
+        durable.acceptedDeleteReceipt);
+      if (!next || !await persistDurableState(next)) {
+        return failure("starling-rebase-local-confirmation-unsettled");
+      }
+      accepted = { token: current.session.token, generation: current.session.generation,
+        sourceRevision: observedAuthority.rollbackRevision, head: opened.head, session: opened.session };
+      return freeze({ ok: true, remoteCommitted: remoteCommitted === true,
+        coveredOperationCeiling: witness.ceiling, mergedPayload: payload });
+    }
+
+    async function acceptConcurrentNoChange(durable, witness, authority, opened) {
+      const current = currentPrivate();
+      if (!current || !opened || opened.outcome !== "opened" || !safeHead(opened.head)) {
+        return failure("starling-rebase-local-confirmation-unsettled");
+      }
+      const verified = await freshOpen();
+      const observedAuthority = await readSharedAuthority();
+      if (!verified || verified.outcome !== "opened" || !sameHead(verified.head, opened.head)
+          || !sameAuthorityLineage(authority, observedAuthority)) {
+        return failure("starling-rebase-local-confirmation-unsettled");
+      }
+      const payload = await materializeMergedPayload(verified);
+      if (!payload) return failure("starling-rebase-local-confirmation-unsettled");
+      const next = authorityPlainState(observedAuthority, null, verified.head, null, null,
+        durable.acceptedDeleteReceipt);
+      if (!next || !await persistDurableState(next)) {
+        return failure("starling-rebase-local-confirmation-unsettled");
+      }
+      accepted = { token: current.session.token, generation: current.session.generation,
+        sourceRevision: observedAuthority.rollbackRevision, head: verified.head, session: verified.session };
+      return freeze({ ok: true, remoteCommitted: false, noHeadChange: true,
+        coveredOperationCeiling: witness.ceiling, mergedPayload: payload });
+    }
+
+    async function rebaseConcurrentSyncedOwner(input) {
+      if (!input || Object.keys(input).length !== 2
+          || !Object.prototype.hasOwnProperty.call(input, "expectedSession")
+          || !Object.prototype.hasOwnProperty.call(input, "ceiling")
+          || !Number.isSafeInteger(input.ceiling) || input.ceiling < 1
+          || !base.isSyncedOwnerSaveSessionCurrent(input.expectedSession)) {
+        return failure("starling-rebase-input-invalid");
+      }
+      return serialiseOwnerOperation(async () => {
+        if (!base.isSyncedOwnerSaveSessionCurrent(input.expectedSession)
+            || !await refreshPrivateOwner()) return failure("starling-rebase-owner-session-stale");
+        const authority = await readSharedAuthority();
+        const durable = await loadDurableState();
+        const witness = durable?.schema === AUTHORITY_STATE_SCHEMA ? durable.saveWitness : null;
+        if (!authority || !durable || !witness || witness.schema !== SAVE_SCHEMA
+            || witness.phase !== "conflict" || witness.casMayHaveRun !== true
+            || witness.ceiling !== input.ceiling || !starlingSteady(authority)
+            || !sameAuthorityLineage(authority, durable.authority)
+            || witness.authorityRevision !== authority.authorityRevision
+            || !sameHead(durable.acceptedHead, witness.expectedHead)) {
+          return failure("starling-rebase-witness-unavailable");
+        }
+        if (!base.isSyncedOwnerSaveSessionCurrent(input.expectedSession)) {
+          return failure("starling-rebase-owner-session-stale");
+        }
+        const opened = await freshOpen();
+        if (!opened || opened.outcome !== "opened" || !opened.session || !safeHead(opened.head)
+            || sameHead(opened.head, witness.expectedHead)) {
+          return failure("starling-rebase-fresh-open-failed");
+        }
+        const remoteEdit = global.PocketStarlingRemoteEditShadow;
+        const publication = global.PocketStarlingDurablePublication;
+        if (!remoteEdit || typeof remoteEdit.createEditor !== "function"
+            || !publication || typeof publication.descriptorFromPrepared !== "function") {
+          return failure("starling-rebase-unavailable");
+        }
+        let prepared;
+        try {
+          const current = currentPrivate();
+          const editor = await remoteEdit.createEditor({
+            opened,
+            masterKey: current.owner.masterKey,
+            context: { syncedPocketId: current.owner.syncedPocketId },
+            semanticAuthority: current.owner.semanticAuthority,
+          });
+          prepared = await editor.prepareWorkingSet(clone(witness.operations),
+            clone(witness.preservationProjection));
+        } catch (_error) { return failure("starling-rebase-semantic-conflict"); }
+        if (prepared?.outcome === "unchanged") {
+          return acceptConcurrentNoChange(durable, witness, authority, opened);
+        }
+        if (!prepared || prepared.outcome !== "prepared") {
+          return failure("starling-rebase-semantic-conflict");
+        }
+        const descriptor = publication.descriptorFromPrepared(prepared);
+        if (!descriptor || !sameHead(descriptor.expectedHead, opened.head)) {
+          return failure("starling-rebase-preparation-invalid");
+        }
+        const coordinator = publication.createCoordinator?.({
+          objectHeadService: options.objectHeadService,
+          operationIdFactory: options.operationIdFactory,
+        });
+        if (!coordinator) return failure("starling-rebase-unavailable");
+        try { await coordinator.ensureObjects(descriptor); }
+        catch (_error) { return failure("starling-rebase-publication-failed"); }
+        let headResult;
+        try { headResult = await coordinator.attemptHead(descriptor, authority.authorityRevision); }
+        catch (_error) {
+          let reconciled;
+          try {
+            const current = currentPrivate();
+            reconciled = await coordinator.reconcile({ descriptor,
+              masterKey: current.owner.masterKey,
+              context: { syncedPocketId: current.owner.syncedPocketId } });
+          } catch (_reconcileError) { return failure("starling-rebase-outcome-unknown"); }
+          const outcomes = global.PocketStarlingHeadShadow?.OUTCOME;
+          if (!outcomes) return failure("starling-rebase-outcome-unknown");
+          if (reconciled.outcome === outcomes.COMMITTED) {
+            return acceptConcurrentRebase(durable, witness, authority, opened.head, descriptor, true);
+          }
+          if (reconciled.outcome === outcomes.CONFLICT
+              || reconciled.outcome === outcomes.COMMITTED_AND_SUPERSEDED) {
+            return failure("starling-rebase-second-head-conflict");
+          }
+          if (reconciled.outcome === outcomes.NOT_COMMITTED) {
+            return failure("starling-rebase-not-committed");
+          }
+          return failure("starling-rebase-outcome-unknown");
+        }
+        if (headResult?.outcome === "committed") {
+          return acceptConcurrentRebase(durable, witness, authority, opened.head, descriptor, true);
+        }
+        if (headResult?.outcome === "conflict") return failure("starling-rebase-second-head-conflict");
+        if (headResult?.outcome === "not-committed") return failure("starling-rebase-not-committed");
+        return failure("starling-rebase-outcome-unknown");
+      });
     }
 
     async function dispatchAuthoritySave(input) {
@@ -1746,6 +1948,7 @@ into a user-facing failure.
       isSyncedOwnerSaveSessionCurrent: base.isSyncedOwnerSaveSessionCurrent,
       getSyncedOwnerState: base.getSyncedOwnerState,
       saveSyncedOwner,
+      rebaseConcurrentSyncedOwner,
       admitAcceptedDeleteRestore,
       bootstrapInitialStarlingBase,
       getStarlingBootstrapState,

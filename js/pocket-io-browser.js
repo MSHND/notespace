@@ -368,6 +368,10 @@ function setPocketFileSession(handle, displayName, options = {}) {
     || session.ownerKind !== nextOwnerKind
     || session.storagePrivacy !== nextStoragePrivacy
     || session.vaultSessionId !== nextVaultSessionId;
+  if (window.PocketOwnerSaveBoundary?.isConcurrentRebaseLeaseActive?.() === true
+      && (targetChanged || options.forceNewSession === true)) {
+    throw new Error("Pocket owner session is leased for concurrent Save adoption.");
+  }
   const routineWriteToCurrentHandle = isPocketFilePermissionPromptOpen()
     && nextHandle === truthFileHandle
     && !targetChanged
@@ -618,6 +622,12 @@ function showPocketFileGatePrompt() {
 }
 
 function requirePocketFileForChanges() {
+  if (window.PocketOwnerSaveBoundary?.isConcurrentRebaseLeaseActive?.() === true) {
+    if (typeof setStatus === "function") {
+      setStatus("This Pocket is finishing a concurrent save. Your draft is still here.", "warn", { durationMs: 5200 });
+    }
+    return false;
+  }
   if (canModifyPocket()) return true;
   showPocketFileGatePrompt();
   return false;
@@ -1676,11 +1686,68 @@ async function exportTree(options = {}) {
         ? await boundary.save({
           expectedSession: saveSession,
           freezePayload,
+          captureOperationHighWater: () => typeof getPocketHighestOperationSequence === "function"
+            ? getPocketHighestOperationSequence()
+            : (Number(state.operationHighWater) || 0),
           vaultDialogToken: options.vaultDialogToken,
         })
         : { ok: false, reason: "owner-save-boundary-unavailable" };
     } finally {
       state.activeSaveOperationCeiling = 0;
+    }
+    let concurrentRebaseAcceptedPayload = null;
+    if (writeResult?.ok === true && writeResult.concurrentRebase === true) {
+      const boundary = window.PocketOwnerSaveBoundary;
+      const leaseToken = writeResult.rebaseLease;
+      const coveredCeiling = Number(writeResult.coveredOperationCeiling);
+      const mergedPayload = writeResult.mergedPayload;
+      const canContinue = () => !!boundary
+        && boundary.isConcurrentRebaseLeaseCurrent?.(leaseToken, saveSession, coveredCeiling) === true
+        && isPocketFileSaveSessionCurrent(saveSession)
+        && (typeof getPocketHighestOperationSequence === "function"
+          ? getPocketHighestOperationSequence()
+          : (Number(state.operationHighWater) || 0)) === coveredCeiling;
+      let adopted = false;
+      try {
+        let norm = null;
+        try { norm = normaliseInput(mergedPayload); } catch (_error) {}
+        if (norm && canContinue() && typeof commitPreparedPocketDocument === "function") {
+          const committed = commitPreparedPocketDocument(norm, {
+            schema: norm.schema || "portal.export.v1",
+            fileName: "Synced Pocket",
+            writtenAt: cleanText(mergedPayload?.writtenAt || mergedPayload?.exportedAt, 40),
+          }, {
+            handle: null,
+            displayName: "Synced Pocket",
+            ownerKind: "synced",
+            storagePrivate: "synced",
+            forceNewSession: false,
+            canContinue,
+            loadedStateOptions: {
+              skipLocalSafetyCheck: true,
+              establishDocumentBaseline: true,
+              baselinePayload: mergedPayload,
+            },
+          });
+          adopted = committed?.ok === true && canContinue();
+        }
+      } finally {
+        boundary?.releaseConcurrentRebaseLease?.(leaseToken);
+      }
+      if (!adopted) {
+        writeResult = {
+          ok: false,
+          reason: "concurrent-rebase-local-adoption-failed",
+          ownerKind: "synced",
+          target: "synced",
+          remoteCommitted: writeResult.remoteCommitted === true,
+        };
+        if (typeof setStatus === "function") {
+          setStatus("This Pocket changed elsewhere. Your changes are still here; reopen or review before saving again.", "warn", { durationMs: 7200 });
+        }
+      } else {
+        concurrentRebaseAcceptedPayload = mergedPayload;
+      }
     }
     const pickedFileAdoption = !!(
       writeResult
@@ -1700,7 +1767,7 @@ async function exportTree(options = {}) {
       }
       state.source.writtenAt = cleanText(payload.writtenAt || payload.exportedAt, 40);
       if (typeof establishPocketDocumentBaseline === "function") {
-        establishPocketDocumentBaseline(payload, state.source);
+        establishPocketDocumentBaseline(concurrentRebaseAcceptedPayload || payload, state.source);
       }
       state.detachedSafetyBase = null;
       // Only clear browser change records covered by the frozen payload.

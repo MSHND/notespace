@@ -153,6 +153,13 @@
   }
 
   function applyPayload(payload, options = {}) {
+    if (global.PocketOwnerSaveBoundary?.isConcurrentRebaseLeaseActive?.() === true) {
+      return rejection(
+        "concurrent-rebase-lease-active",
+        "Pocket is finishing a concurrent save. Your editor changes are still here; try Save again when it finishes.",
+        "Concurrent Save finishing — editor not applied"
+      );
+    }
     if (typeof global.isPocketFilePermissionPromptOpen === "function"
         && global.isPocketFilePermissionPromptOpen()) {
       return rejection(
