@@ -26,7 +26,7 @@ jobs:
       - name: Apply production seams
         run: |
           set -euo pipefail
-          python <(git show candidate/p197-proof:.github/p197-build.py)
+          python <(git show origin/candidate/p197-proof:.github/p197-build.py)
           git diff --check
       - name: Install
         run: timeout --signal=KILL 180s npm ci
