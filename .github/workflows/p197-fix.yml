@@ -1,0 +1,39 @@
+name: P197 local adoption correction
+on:
+  push:
+    branches: [candidate/p197-proof]
+    paths: [.github/workflows/p197-fix.yml]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p197
+          fetch-depth: 0
+      - name: Guard and correct post-adoption lease check
+        run: |
+          set -euo pipefail
+          test "$(git rev-list --count 0076739343b9a30c3e56f521ec67b1d87d8b6b2e..HEAD)" -eq 2
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('js/pocket-io-browser.js')
+          s=p.read_text()
+          old='adopted = committed?.ok === true && canContinue();'
+          new='adopted = committed?.ok === true;'
+          if s.count(old)!=1: raise SystemExit(f'expected one adoption anchor, found {s.count(old)}')
+          p.write_text(s.replace(old,new,1))
+          PY
+          git diff --check
+          node --check js/pocket-io-browser.js
+      - name: Commit candidate correction
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add js/pocket-io-browser.js
+          git commit -m "P197 preserve successful local merged adoption"
+          git push origin HEAD:candidate/p197
