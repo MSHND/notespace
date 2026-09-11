@@ -5,6 +5,8 @@
 
   let syncedController = null;
   let syncedGeneration = 0;
+  let concurrentRebaseLease = null;
+  let concurrentRebaseOrdinal = 0;
 
   function frozen(value) {
     return Object.freeze(value);
@@ -55,6 +57,48 @@
     return { ok: false, reason: "stale-owner-session", ownerKind };
   }
 
+  function captureOperationHighWater(input) {
+    if (typeof input?.captureOperationHighWater !== "function") return 0;
+    try {
+      const value = Number(input.captureOperationHighWater());
+      return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    } catch (_error) { return 0; }
+  }
+
+  function beginConcurrentRebaseLease(session, ceiling, input) {
+    if (concurrentRebaseLease !== null || !session || session.ownerKind !== "synced"
+        || !Number.isSafeInteger(ceiling) || ceiling < 1
+        || !isOwnerSaveSessionCurrent(session)) return null;
+    const highWater = captureOperationHighWater(input);
+    if (highWater !== ceiling) return null;
+    concurrentRebaseOrdinal += 1;
+    const token = frozen({ kind: "p197-rebase-lease", id: concurrentRebaseOrdinal });
+    concurrentRebaseLease = { token, session, ceiling, captureOperationHighWater: input.captureOperationHighWater };
+    return token;
+  }
+
+  function isConcurrentRebaseLeaseCurrent(token, expectedLocalSession = null, ceiling = null) {
+    const lease = concurrentRebaseLease;
+    if (!lease || token !== lease.token || !isOwnerSaveSessionCurrent(lease.session)) return false;
+    if (expectedLocalSession && (lease.session.localSession.id !== expectedLocalSession.id
+        || lease.session.localSession.ownerKind !== expectedLocalSession.ownerKind)) return false;
+    if (ceiling !== null && ceiling !== lease.ceiling) return false;
+    try {
+      const highWater = Number(lease.captureOperationHighWater());
+      return Number.isSafeInteger(highWater) && highWater === lease.ceiling;
+    } catch (_error) { return false; }
+  }
+
+  function releaseConcurrentRebaseLease(token) {
+    if (!concurrentRebaseLease || token !== concurrentRebaseLease.token) return false;
+    concurrentRebaseLease = null;
+    return true;
+  }
+
+  function isConcurrentRebaseLeaseActive() {
+    return concurrentRebaseLease !== null;
+  }
+
   function captureOwnerForAdoption() {
     try {
       const snapshot = global.capturePocketFileOwnerForAdoption?.();
@@ -96,6 +140,9 @@
     if (typeof input.freezePayload !== "function") {
       return { ok: false, reason: "save-input-invalid" };
     }
+    if (isConcurrentRebaseLeaseActive()) {
+      return { ok: false, reason: "concurrent-rebase-lease-active" };
+    }
     const expectedLocalSession = input.expectedSession || null;
     if (expectedLocalSession && !localSessionIsCurrent(expectedLocalSession)) {
       return staleResult(expectedLocalSession.ownerKind || "none");
@@ -112,6 +159,46 @@
     if (session.ownerKind === "synced") {
       const result = await session.controller.saveSyncedOwner({ freezePayload: input.freezePayload });
       if (!isOwnerSaveSessionCurrent(session)) return staleResult("synced");
+      if (result?.ok === false && result.reason === "starling-save-head-conflict"
+          && Number.isSafeInteger(result.rebaseCeiling) && result.rebaseCeiling >= 1
+          && typeof session.controller.rebaseConcurrentSyncedOwner === "function") {
+        const leaseToken = beginConcurrentRebaseLease(session, result.rebaseCeiling, input);
+        if (!leaseToken) {
+          return { ok: false, reason: "concurrent-rebase-local-state-advanced", ownerKind: "synced", target: "synced" };
+        }
+        let rebased;
+        try {
+          rebased = await session.controller.rebaseConcurrentSyncedOwner({
+            expectedSession: session.controllerSession,
+            ceiling: result.rebaseCeiling,
+          });
+        } catch (_error) {
+          rebased = { ok: false, reason: "starling-rebase-unsettled" };
+        }
+        if (!rebased?.ok) {
+          releaseConcurrentRebaseLease(leaseToken);
+          return Object.assign({ ownerKind: "synced", target: "synced" }, rebased || {
+            ok: false,
+            reason: "starling-rebase-unsettled",
+          });
+        }
+        if (!isConcurrentRebaseLeaseCurrent(leaseToken, session.localSession, result.rebaseCeiling)) {
+          releaseConcurrentRebaseLease(leaseToken);
+          return {
+            ok: false,
+            reason: "concurrent-rebase-local-adoption-required",
+            remoteCommitted: rebased.remoteCommitted === true,
+            ownerKind: "synced",
+            target: "synced",
+          };
+        }
+        return Object.assign({
+          ownerKind: "synced",
+          target: "synced",
+          concurrentRebase: true,
+          rebaseLease: leaseToken,
+        }, rebased);
+      }
       return Object.assign({ ownerKind: "synced", target: "synced" }, result || {
         ok: false,
         reason: "synced-save-failed",
@@ -153,6 +240,7 @@
   }
 
   function retireSyncedOwner() {
+    if (isConcurrentRebaseLeaseActive()) return false;
     if (!syncedController) return false;
     syncedGeneration += 1;
     const retired = syncedController;
@@ -162,6 +250,7 @@
   }
 
   function installSyncedOwnerForSave(controller) {
+    if (isConcurrentRebaseLeaseActive()) return false;
     if (!isSyncedController(controller)
         || controller.captureSyncedOwnerSaveSession() === null
         || !global.setPocketFileSession) return false;
@@ -187,6 +276,9 @@
     save,
     installSyncedOwnerForSave,
     retireSyncedOwner,
+    isConcurrentRebaseLeaseActive,
+    isConcurrentRebaseLeaseCurrent,
+    releaseConcurrentRebaseLease,
     hasSyncedOwner: () => isSyncedController(syncedController)
       && syncedController.captureSyncedOwnerSaveSession() !== null,
   });
