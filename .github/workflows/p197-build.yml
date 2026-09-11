@@ -33,9 +33,9 @@ jobs:
           text = p.read_text()
           old = '''  const targetChanged = truthFileHandle !== nextHandle\n    || session.displayName !== nextName\n    || session.pipSession !== nextPip\n    || session.detachedDeviceChanges !== nextDetached\n    || session.ownerKind !== nextOwnerKind\n    || session.storagePrivacy !== nextStoragePrivacy\n    || session.vaultSessionId !== nextVaultSessionId;'''
           new = '''  const targetChanged = truthFileHandle !== nextHandle\n    || session.writable !== nextWritable\n    || session.pipSession !== nextPip\n    || session.detachedDeviceChanges !== nextDetached\n    || session.ownerKind !== nextOwnerKind\n    || session.storagePrivacy !== nextStoragePrivacy\n    || session.vaultSessionId !== nextVaultSessionId;'''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one stale targetChanged patch anchor, found {text.count(old)}')
-          p.write_text(text.replace(old, new, 1))
+          if text.count(old) != 2:
+              raise SystemExit(f'expected two stale targetChanged patch literals, found {text.count(old)}')
+          p.write_text(text.replace(old, new, 2))
           PY
           python /tmp/p197-build.py
           git diff --check
