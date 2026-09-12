@@ -17,108 +17,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Guard exact post-dependency candidate
+      - name: Guard exact post-device candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "c5a8cb7d03e26108f60a5693c1aabe0f40c61a11"
-          test "$(git rev-parse HEAD^{tree})" = "3f9d85057616d645811b6c34127507443b1173c2"
+          test "$(git rev-parse HEAD)" = "f70aa4690489d6229b2f47a2ac37a7365a5161e9"
+          test "$(git rev-parse HEAD^{tree})" = "e48fd44e142fac6a918ccbadcef0d896738c98a1"
           test -z "$(git status --porcelain)"
-      - name: Repair current-contract historical harness seams
+      - name: Repair Vault ownership harness production dependency order
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          path = Path('tests/device-changes-resolution.test.js')
+          path = Path('tests/p019-vault-ownership.test.js')
           text = path.read_text()
-
-          replacements = [
-            (
-              '''async function flushMicrotasks() {\n  await Promise.resolve();\n  await Promise.resolve();\n}''',
-              '''async function flushMicrotasks() {\n  await Promise.resolve();\n  await Promise.resolve();\n  await new Promise((resolve) => setImmediate(resolve));\n  await Promise.resolve();\n}''',
-              'async polling must advance the task used by the IndexedDB mock',
-            ),
-            (
-              '''  return { records, open(name, version) {\n    if (name !== "pocket.local.safety.v1" || version !== 1) throw new Error("database invalid");\n    const request = { result: database, transaction: { abort() {} } };\n    queueMicrotask(() => { if (!created) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });\n    return request;\n  } };''',
-              '''  return { records, open(name, version) {\n    if (name === "pocketLite.recentFile.v1" && version === 1) {\n      const request = {};\n      queueMicrotask(() => request.onerror?.());\n      return request;\n    }\n    if (name !== "pocket.local.safety.v1" || version !== 1) throw new Error("database invalid");\n    const request = { result: database, transaction: { abort() {} } };\n    queueMicrotask(() => { if (!created) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });\n    return request;\n  } };''',
-              'recent-file metadata DB is optional and must fail asynchronously rather than throw from this safety-only mock',
-            ),
-            (
-              '''  body.value = options.body ?? current.details ?? "";''',
-              '''  const originalContent = context.currentPocketNodeContentText(current);\n  body.value = options.body ?? originalContent;''',
-              'details harness body must open the current canonical content',
-            ),
-            (
-              '''  state.detailsEdit = {\n    id: nodeId,\n    originalLabel: current.label,\n    originalDetails: current.details || "",\n    originalUrgent: !!current.urgent,''',
-              '''  state.detailsEdit = {\n    id: nodeId,\n    originalLabel: current.label,\n    originalDetails: current.details || "",\n    originalContent,\n    originalEditorPresent: Object.prototype.hasOwnProperty.call(current, "editor"),\n    originalEditor: Object.prototype.hasOwnProperty.call(current, "editor") ? plain(current.editor) : undefined,\n    readOnly: false,\n    originalUrgent: !!current.urgent,''',
-              'details harness state must mirror the current unified editor owner',
-            ),
-            (
-              '''  payload.body = "Edited from the detached PE";''',
-              '''  payload.text = "Edited from the detached PE";\n  payload.body = payload.text;''',
-              'successful detached PE edit must mutate canonical text, with body retained only as compatibility alias',
-            ),
-            (
-              '''  const safetyAtSaveStart = JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1"));''',
-              '''  const safetyAtSaveStart = (await context.readLocalSafetySnapshotDurably()).parsed;''',
-              'JSON-owner safety is durable IndexedDB authority',
-            ),
-            (
-              '''  const safetyDuringWrite = JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1"));''',
-              '''  const safetyDuringWrite = (await context.readLocalSafetySnapshotDurably()).parsed;''',
-              'save-race safety must read the durable JSON-owner copy',
-            ),
-            (
-              '''  const safety = plain(context.readLocalSafetySnapshot());\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Newer edit made during write");''',
-              '''  const safety = plain(await context.readLocalSafetySnapshotDurably());\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Newer edit made during write");''',
-              'post-save safety assertion must read durable JSON-owner copy',
-            ),
-            (
-              '''  const safetyBeforeSave = context.readLocalSafetySnapshot();\n  assert.ok(safetyBeforeSave);''',
-              '''  const safetyBeforeSave = await context.readLocalSafetySnapshotDurably();\n  assert.ok(safetyBeforeSave);''',
-              'final-node deletion safety precondition must await durable JSON-owner copy',
-            ),
-            (
-              '''  assert.equal(context.readLocalSafetySnapshot(), null);\n});\n\ntest("an empty-operations detached adoption retains its trustworthy BASE after creating the dirty marker"''',
-              '''  assert.equal(await context.readLocalSafetySnapshotDurably(), null);\n});\n\ntest("an empty-operations detached adoption retains its trustworthy BASE after creating the dirty marker"''',
-              'final-node deletion must verify durable current safety was cleared',
-            ),
-            (
-              '''  const safety = context.readLocalSafetySnapshot();\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Original Notes");\n});\n\ntest("PiP adoption is rejected without mutation while the file/device decision is open"''',
-              '''  const safety = await context.readLocalSafetySnapshotDurably();\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Original Notes");\n});\n\ntest("PiP adoption is rejected without mutation while the file/device decision is open"''',
-              'details save-race cancellation must verify durable JSON-owner safety',
-            ),
-          ]
-
-          for old, new, label in replacements:
-            count = text.count(old)
-            if count != 1:
-              raise SystemExit(f'{label}: expected exact seam once, found {count}')
-            text = text.replace(old, new, 1)
-
-          path.write_text(text)
+          old = '    "js/pocket-outline-persistence-policy.js",\n    "js/pocket-editor-metadata.js",'
+          new = '    "js/pocket-outline-persistence-policy.js",\n    "js/pocket-node-content.js",\n    "js/pocket-editor-metadata.js",'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exact Vault load seam once, found {count}')
+          path.write_text(text.replace(old, new, 1))
           PY
           git diff --check
-          test "$(git diff --name-only)" = "tests/device-changes-resolution.test.js"
-          git diff --stat
-          git diff -- tests/device-changes-resolution.test.js
-      - name: Commit harness repairs to real candidate
+          test "$(git diff --name-only)" = "tests/p019-vault-ownership.test.js"
+          git diff -- tests/p019-vault-ownership.test.js
+      - name: Commit Vault harness repair to real candidate
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/device-changes-resolution.test.js
-          git commit -m "P198b align device regressions with unified content and durable safety"
+          git add tests/p019-vault-ownership.test.js
+          git commit -m "P198b repair Vault harness content dependency"
           git push origin HEAD:candidate/p198
       - name: Install
         run: timeout --signal=KILL 180s npm ci
-      - name: Direct device PiP ownership regression slice
+      - name: Direct Vault ownership regression slice
         run: |
           set -euo pipefail
-          timeout --signal=KILL 120s node --check tests/device-changes-resolution.test.js
-          timeout --signal=KILL 360s node --test tests/device-changes-resolution.test.js
-          timeout --signal=KILL 240s node --test tests/p018-popout-isolation.test.js
-          timeout --signal=KILL 360s node --test tests/p019-vault-ownership.test.js
-      - name: Candidate remains bounded from P198a tip
-        run: |
-          set -euo pipefail
-          test "$(git diff --name-only dcc2a21e959c1d3855dc75f046bcf855d1674ecf..HEAD)" = "tests/device-changes-resolution.test.js"
+          timeout --signal=KILL 120s node --check tests/p019-vault-ownership.test.js
+          timeout --signal=KILL 480s node --test tests/p019-vault-ownership.test.js
