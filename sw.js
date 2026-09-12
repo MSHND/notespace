@@ -1,6 +1,6 @@
 /* pocket service worker: cache the app shell for a more app-like phone/PWA launch. */
 
-const CACHE_NAME = "pocket-shell-v10";
+const CACHE_NAME = "pocket-shell-v11";
 const SHELL_FILES = [
   "./",
   "./index.html",
@@ -14,6 +14,7 @@ const SHELL_FILES = [
   "./js/pocket-state.js",
   "./js/pocket-data.js",
   "./js/pocket-outline-persistence-policy.js",
+  "./js/pocket-node-content.js",
   "./js/pocket-storage.js",
   "./js/pocket-import.js",
   "./js/pocket-editor-copy.js",

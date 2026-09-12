@@ -1836,16 +1836,8 @@ test("PE Save from a Vault applies by revision and becomes durable only through 
   const result = await context.PocketNodePopoutEditor.applyAndSave({
     ...openingPayload,
     title: "PE encrypted title",
-    body: "PE encrypted Notes",
-    outline: [
-      {
-        id: "pe_outline",
-        text: "PE encrypted Outline",
-        depth: 0,
-        collapsed: false,
-        order: 1,
-      },
-    ],
+    text: "PE encrypted Notes\n\nPE encrypted Outline",
+    body: "PE encrypted Notes\n\nPE encrypted Outline",
   });
   assert.equal(result.ok, true);
   assert.equal(result.applied, true);
@@ -1860,8 +1852,10 @@ test("PE Save from a Vault applies by revision and becomes durable only through 
   );
   const savedNode = decrypted.mainThoughtTree[0];
   assert.equal(savedNode.label, "PE encrypted title");
-  assert.equal(savedNode.details, "PE encrypted Notes");
-  assert.equal(savedNode.editor.outline[0].text, "PE encrypted Outline");
+  assert.equal(savedNode.details, "PE encrypted Notes\n\nPE encrypted Outline");
+  assert.equal(savedNode.editor.schema, "pocket.nodeEditor.v2");
+  assert.equal(savedNode.editor.text, "PE encrypted Notes\n\nPE encrypted Outline");
+  assert.equal(Object.hasOwn(savedNode.editor, "outline"), false);
   assertNoPlaintextInWrites(vaultHandle, [
     "PE encrypted title",
     "PE encrypted Notes",
@@ -1895,6 +1889,7 @@ test("failed Vault PE persistence keeps applied in-memory content dirty and neve
 
   const result = await context.PocketNodePopoutEditor.applyAndSave({
     ...openingPayload,
+    text: "Applied but not encrypted yet",
     body: "Applied but not encrypted yet",
   });
   assert.equal(result.ok, false);
@@ -4101,7 +4096,11 @@ test("P023 one smart Choose file path classifies and opens plain JSON or Vault b
 
 test("P026 offline shell refreshes the tightened recovery prompt", () => {
   const serviceWorkerSource = source("sw.js");
-  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v9";/);
+  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v11";/);
+  assert.equal(
+    (serviceWorkerSource.match(/\.\/js\/pocket-node-content\.js/g) || []).length,
+    1,
+  );
   assert.equal(
     (serviceWorkerSource.match(/\.\/vault\.css/g) || []).length,
     1,
@@ -4607,10 +4606,12 @@ test("two independent pages own same-name Vaults, keys, sessions, and PE Saves i
   );
   assert.equal((await pageA.PocketNodePopoutEditor.applyAndSave({
     ...payloadA,
+    text: "Page A encrypted PE",
     body: "Page A encrypted PE",
   })).ok, true);
   assert.equal((await pageB.PocketNodePopoutEditor.applyAndSave({
     ...payloadB,
+    text: "Page B encrypted PE",
     body: "Page B encrypted PE",
   })).ok, true);
 
@@ -5593,8 +5594,8 @@ test("encrypted open, PE apply, and Save never log Vault plaintext or credential
   const applied = context.PocketNodePopoutEditor.apply({
     ...opening,
     title: node.label,
+    text: secrets.updatedDetails,
     body: secrets.updatedDetails,
-    mode: "text",
   }, { returnDetails: true });
   assert.equal(applied.ok, true);
   assert.equal((await context.exportTree({ returnDetails: true })).ok, true);

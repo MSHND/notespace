@@ -218,7 +218,7 @@ function createService(options = {}) {
 
 const BASE_UI_FILES = [
   "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",
-  "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", "js/pocket-import.js",
+  "js/pocket-node-content.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", "js/pocket-import.js",
 ];
 const SYNC_BASE_FILES = [
   "js/pocket-sync-security-contract.js", "js/pocket-device-changes.js", "js/pocket-sync-crypto.js",
