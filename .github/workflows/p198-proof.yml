@@ -1,0 +1,43 @@
+name: P198 independent bounded regression proof
+on:
+  push:
+    branches:
+      - candidate/p198-proof
+  workflow_dispatch:
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p198
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Guard final candidate identity and ancestry
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "678872adf4db9de8c0095fff32f603cf1b418faa"
+          test "$(git merge-base HEAD 0076739343b9a30c3e56f521ec67b1d87d8b6b2e)" = "0076739343b9a30c3e56f521ec67b1d87d8b6b2e"
+          test "$(git rev-list --count 0076739343b9a30c3e56f521ec67b1d87d8b6b2e..HEAD)" -eq 1
+          git diff --check 0076739343b9a30c3e56f521ec67b1d87d8b6b2e..HEAD
+      - name: Install
+        run: timeout --signal=KILL 180s npm ci
+      - name: Focused P198 contract
+        run: timeout --signal=KILL 180s node --test tests/p198-unified-pe-document.test.js
+      - name: Popup isolation and durable routing
+        run: timeout --signal=KILL 180s node --test tests/p018-popout-isolation.test.js
+      - name: PE persistence and save boundaries
+        run: timeout --signal=KILL 300s node --test tests/pe-persistence-contract.test.js
+      - name: Device changes and Phone paths
+        run: timeout --signal=KILL 300s node --test tests/device-changes-resolution.test.js
+      - name: Vault and recovery paths
+        run: timeout --signal=KILL 300s node --test tests/p019-vault-ownership.test.js
+      - name: Production composition inventory
+        run: timeout --signal=KILL 180s node --test tests/p074-production-composition.test.js
+      - name: Starling node payload capture
+        run: timeout --signal=KILL 180s node --test tests/p150-starling-owner-payload-capture.test.js
+      - name: Repository Pocket check
+        run: timeout --signal=KILL 300s npm run check
