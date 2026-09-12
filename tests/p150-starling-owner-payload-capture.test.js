@@ -16,11 +16,12 @@ function runtime(options = {}) {
   class HTMLElement { focus() {} select() {} }
   class HTMLInputElement extends HTMLElement { constructor(value = "") { super(); this.value = value; this.checked = false; } }
   class HTMLTextAreaElement extends HTMLElement { constructor(value = "") { super(); this.value = value; } }
+  class HTMLButtonElement extends HTMLElement {}
   const storage = new Map(), overlay = new HTMLElement();
   overlay.hidden = false;
   const context = {
     Object, Array, String, Number, Boolean, Map, Set, Error, Function, Reflect, JSON, Date, Promise, structuredClone,
-    HTMLElement, HTMLInputElement, HTMLTextAreaElement,
+    HTMLElement, HTMLInputElement, HTMLTextAreaElement, HTMLButtonElement,
     state: {
       nodes: [options.node || { id: "n1", parentId: "root", order: 0, label: "One", details: "Before", updatedAt: "2026-09-02T00:00:00.000Z" }],
       tombstones: [], rootExtras: {}, dataExtras: {}, collapsed: new Set(), selectedId: "n1", focusRootId: "", moveMode: false,
@@ -63,7 +64,8 @@ function runtime(options = {}) {
 }
 
 function editorPayload(node, changes = {}) {
-  return { id: node.id, title: node.label, body: node.details || "", originalUpdatedAt: node.updatedAt, fileSessionId: 1, sourceFileName: "p150.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "", ...changes };
+  const canonicalText = changes.text ?? changes.body ?? node.editor?.text ?? node.details ?? "";
+  return { id: node.id, title: node.label, text: canonicalText, body: canonicalText, originalUpdatedAt: node.updatedAt, fileSessionId: 1, sourceFileName: "p150.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "", ...changes, text: canonicalText };
 }
 
 function openDetails(context, values = {}) {
