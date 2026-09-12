@@ -8,7 +8,7 @@ permissions:
 jobs:
   repair:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 18
     steps:
       - uses: actions/checkout@v4
         with:
@@ -17,105 +17,69 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Guard exact post-Vault-dependency candidate
+      - name: Guard exact pre-Starling-repair candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "0efaee937e0905ac8f67e8ab223ca5ee73933dc1"
-          test "$(git rev-parse HEAD^{tree})" = "0bd99a2f9fb7c1c5beaab68b2c43b5c979fa4131"
+          test "$(git rev-parse HEAD)" = "28910a17ac0ac30c24fdbf2ac820d414815cad4a"
+          test "$(git rev-parse HEAD^{tree})" = "5efecf3b4ab4c884bb10ba03ba6c9598a5960438"
           test -z "$(git status --porcelain)"
-      - name: Align Vault regressions and offline composition with unified v2 truth
+      - name: Repair remaining historical Starling harness dependency order
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
 
-          p019 = Path('tests/p019-vault-ownership.test.js')
-          text = p019.read_text()
-          replacements = [
-            (
-              '''    title: "PE encrypted title",\n    body: "PE encrypted Notes",\n    outline: [\n      {\n        id: "pe_outline",\n        text: "PE encrypted Outline",\n        depth: 0,\n        collapsed: false,\n        order: 1,\n      },\n    ],''',
-              '''    title: "PE encrypted title",\n    text: "PE encrypted Notes\\n\\nPE encrypted Outline",\n    body: "PE encrypted Notes\\n\\nPE encrypted Outline",''',
-              'Vault PE success must mutate canonical v2 text',
+          repairs = {
+            'tests/p127-starling-remote-save.test.js': (
+              '"js/pocket-outline-persistence-policy.js","js/pocket-editor-metadata.js"',
+              '"js/pocket-outline-persistence-policy.js","js/pocket-node-content.js","js/pocket-editor-metadata.js"',
             ),
-            (
-              '''  assert.equal(savedNode.details, "PE encrypted Notes");\n  assert.equal(savedNode.editor.outline[0].text, "PE encrypted Outline");''',
-              '''  assert.equal(savedNode.details, "PE encrypted Notes\\n\\nPE encrypted Outline");\n  assert.equal(savedNode.editor.schema, "pocket.nodeEditor.v2");\n  assert.equal(savedNode.editor.text, "PE encrypted Notes\\n\\nPE encrypted Outline");\n  assert.equal(Object.hasOwn(savedNode.editor, "outline"), false);''',
-              'Vault PE success must assert one current v2 truth and no outline shadow',
+            'tests/p160-starling-owner-save-preparation.test.js': (
+              '  "js/pocket-outline-persistence-policy.js",\n  "js/pocket-editor-metadata.js",',
+              '  "js/pocket-outline-persistence-policy.js",\n  "js/pocket-node-content.js",\n  "js/pocket-editor-metadata.js",',
             ),
-            (
-              '''  const result = await context.PocketNodePopoutEditor.applyAndSave({\n    ...openingPayload,\n    body: "Applied but not encrypted yet",\n  });''',
-              '''  const result = await context.PocketNodePopoutEditor.applyAndSave({\n    ...openingPayload,\n    text: "Applied but not encrypted yet",\n    body: "Applied but not encrypted yet",\n  });''',
-              'failed Vault PE persistence must exercise a real canonical content mutation',
+            'tests/p172-real-p168-composition.test.js': (
+              '  "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",\n  "js/pocket-editor-metadata.js",',
+              '  "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",\n  "js/pocket-node-content.js", "js/pocket-editor-metadata.js",',
             ),
-            (
-              '''  assert.equal((await pageA.PocketNodePopoutEditor.applyAndSave({\n    ...payloadA,\n    body: "Page A encrypted PE",\n  })).ok, true);\n  assert.equal((await pageB.PocketNodePopoutEditor.applyAndSave({\n    ...payloadB,\n    body: "Page B encrypted PE",\n  })).ok, true);''',
-              '''  assert.equal((await pageA.PocketNodePopoutEditor.applyAndSave({\n    ...payloadA,\n    text: "Page A encrypted PE",\n    body: "Page A encrypted PE",\n  })).ok, true);\n  assert.equal((await pageB.PocketNodePopoutEditor.applyAndSave({\n    ...payloadB,\n    text: "Page B encrypted PE",\n    body: "Page B encrypted PE",\n  })).ok, true);''',
-              'independent-page PE saves must mutate canonical v2 text',
-            ),
-            (
-              '''  const applied = context.PocketNodePopoutEditor.apply({\n    ...opening,\n    title: node.label,\n    body: secrets.updatedDetails,\n    mode: "text",\n  }, { returnDetails: true });''',
-              '''  const applied = context.PocketNodePopoutEditor.apply({\n    ...opening,\n    title: node.label,\n    text: secrets.updatedDetails,\n    body: secrets.updatedDetails,\n  }, { returnDetails: true });''',
-              'Vault privacy proof must exercise canonical v2 PE mutation',
-            ),
-            (
-              '''  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v9";/);''',
-              '''  assert.match(serviceWorkerSource, /const CACHE_NAME = "pocket-shell-v11";/);\n  assert.equal(\n    (serviceWorkerSource.match(/\\.\\/js\\/pocket-node-content\\.js/g) || []).length,\n    1,\n  );''',
-              'offline shell proof must assert the current cache and central P198 content contract asset',
-            ),
-          ]
-          for old, new, label in replacements:
+          }
+          for filename, (old, new) in repairs.items():
+            path = Path(filename)
+            text = path.read_text()
             count = text.count(old)
             if count != 1:
-              raise SystemExit(f'{label}: expected exact seam once, found {count}')
-            text = text.replace(old, new, 1)
-          p019.write_text(text)
-
-          sw = Path('sw.js')
-          text = sw.read_text()
-          old = 'const CACHE_NAME = "pocket-shell-v10";'
-          if text.count(old) != 1:
-            raise SystemExit('expected exact P198 predecessor cache name once')
-          text = text.replace(old, 'const CACHE_NAME = "pocket-shell-v11";', 1)
-          old = '  "./js/pocket-outline-persistence-policy.js",\n  "./js/pocket-storage.js",'
-          new = '  "./js/pocket-outline-persistence-policy.js",\n  "./js/pocket-node-content.js",\n  "./js/pocket-storage.js",'
-          if text.count(old) != 1:
-            raise SystemExit('expected exact offline shell content-contract insertion seam once')
-          sw.write_text(text.replace(old, new, 1))
-
-          p176 = Path('tests/p176-production-composition.test.js')
-          text = p176.read_text()
-          old = '  "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",\n  "js/pocket-editor-metadata.js",'
-          new = '  "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",\n  "js/pocket-node-content.js", "js/pocket-editor-metadata.js",'
-          if text.count(old) != 1:
-            raise SystemExit('expected exact P176 production harness dependency seam once')
-          p176.write_text(text.replace(old, new, 1))
+              raise SystemExit(f'{filename}: expected exact metadata dependency seam once, found {count}')
+            path.write_text(text.replace(old, new, 1))
           PY
           git diff --check
-          printf '%s\n' "$(git diff --name-only | sort)"
-          test "$(git diff --name-only | sort)" = "$(printf '%s\n' sw.js tests/p019-vault-ownership.test.js tests/p176-production-composition.test.js | sort)"
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' tests/p127-starling-remote-save.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js | sort)"
           git diff --stat
-      - name: Commit bounded ownership and offline-composition repairs to real candidate
+      - name: Commit Starling harness repairs to real candidate
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add sw.js tests/p019-vault-ownership.test.js tests/p176-production-composition.test.js
-          git commit -m "P198b align Vault regressions and offline unified content composition"
+          git add tests/p127-starling-remote-save.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js
+          git commit -m "P198b repair Starling regression content dependencies"
           git push origin HEAD:candidate/p198
       - name: Install
         run: timeout --signal=KILL 180s npm ci
-      - name: Direct final device PiP ownership and production composition slice
+      - name: Complete direct Starling semantic-capture slice
         run: |
           set -euo pipefail
-          timeout --signal=KILL 120s node --check tests/device-changes-resolution.test.js
-          timeout --signal=KILL 120s node --check tests/p019-vault-ownership.test.js
-          timeout --signal=KILL 120s node --check tests/p176-production-composition.test.js
-          timeout --signal=KILL 360s node --test tests/device-changes-resolution.test.js
-          timeout --signal=KILL 240s node --test tests/p018-popout-isolation.test.js
-          timeout --signal=KILL 480s node --test tests/p019-vault-ownership.test.js
-          timeout --signal=KILL 480s node --test tests/p176-production-composition.test.js
-          timeout --signal=KILL 240s node --test tests/p074-production-composition.test.js
+          timeout --signal=KILL 180s node --check tests/p127-starling-remote-save.test.js
+          timeout --signal=KILL 180s node --check tests/p150-starling-owner-payload-capture.test.js
+          timeout --signal=KILL 180s node --check tests/p160-starling-owner-save-preparation.test.js
+          timeout --signal=KILL 180s node --check tests/p168-authority-adoption.test.js
+          timeout --signal=KILL 180s node --check tests/p168-starling-reentry.test.js
+          timeout --signal=KILL 180s node --check tests/p172-real-p168-composition.test.js
+          timeout --signal=KILL 480s node --test tests/p127-starling-remote-save.test.js
+          timeout --signal=KILL 480s node --test tests/p150-starling-owner-payload-capture.test.js
+          timeout --signal=KILL 480s node --test tests/p160-starling-owner-save-preparation.test.js
+          timeout --signal=KILL 480s node --test tests/p168-authority-adoption.test.js
+          timeout --signal=KILL 480s node --test tests/p168-starling-reentry.test.js
+          timeout --signal=KILL 600s node --test tests/p172-real-p168-composition.test.js
       - name: Candidate repair delta remains bounded
         run: |
           set -euo pipefail
-          test "$(git diff --name-only dcc2a21e959c1d3855dc75f046bcf855d1674ecf..HEAD | sort)" = "$(printf '%s\n' sw.js tests/device-changes-resolution.test.js tests/p019-vault-ownership.test.js tests/p176-production-composition.test.js | sort)"
+          test "$(git diff --name-only dcc2a21e959c1d3855dc75f046bcf855d1674ecf..HEAD | sort)" = "$(printf '%s\n' sw.js tests/device-changes-resolution.test.js tests/p019-vault-ownership.test.js tests/p127-starling-remote-save.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js tests/p176-production-composition.test.js | sort)"
