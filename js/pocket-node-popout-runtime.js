@@ -81,6 +81,32 @@
       var id = target.getAttribute("data-line-id") || ""; var index = lineIndex(id); if (index < 0) return -1;
       lines[index].content = target.textContent || ""; return index;
     }
+    function selectionParts(target) {
+      var selection = null;
+      try { selection = typeof environment.getSelection === "function" ? environment.getSelection() : (typeof window.getSelection === "function" ? window.getSelection() : (typeof document.getSelection === "function" ? document.getSelection() : null)); } catch (_error) { return null; }
+      if (!selection || selection.rangeCount !== 1 || typeof selection.getRangeAt !== "function") return null;
+      var range = null;
+      try { range = selection.getRangeAt(0); } catch (_error) { return null; }
+      if (!range || typeof range.cloneRange !== "function" || !range.startContainer || !range.endContainer || !(target === range.startContainer || target.contains?.(range.startContainer)) || !(target === range.endContainer || target.contains?.(range.endContainer))) return null;
+      try {
+        var before = range.cloneRange(); before.selectNodeContents(target); before.setEnd(range.startContainer, range.startOffset);
+        var after = range.cloneRange(); after.selectNodeContents(target); after.setStart(range.endContainer, range.endOffset);
+        return { prefix: before.toString(), suffix: after.toString() };
+      } catch (_error) { return null; }
+    }
+    function ingestPlainTextPaste(index, target, rawText) {
+      var parts = selectionParts(target); if (!parts) return false;
+      var pasted = content.parseLines(rawText); if (!Array.isArray(pasted) || pasted.length === 0) return false;
+      if (pasted.length === 1) {
+        lines[index].content = parts.prefix + content.serialiseLines(pasted) + parts.suffix;
+        target.textContent = lines[index].content; markMutation(); return true;
+      }
+      var anchorDepth = lines[index].depth, baselineDepth = pasted[0].depth, inserted = [];
+      for (var cursor = 0; cursor < pasted.length; cursor += 1) inserted.push(createLine(pasted[cursor].content, anchorDepth + pasted[cursor].depth - baselineDepth));
+      inserted[0].content = parts.prefix + inserted[0].content;
+      inserted[inserted.length - 1].content += parts.suffix;
+      lines.splice(index, 1, ...inserted); markMutation(); render(inserted[inserted.length - 1].id); return true;
+    }
     function toggleBranch(index) { if (!hasChildren(index)) return false; var id = lines[index].id; if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id); render(id); return true; }
     function indentBranch(index, delta) {
       if (readOnly || index < 0 || typeof content.indentSubtree !== "function") return false;
@@ -127,6 +153,7 @@
 
     titleInput.addEventListener("input", function () { markMutation(); });
     pane.addEventListener("input", function (ev) { var target = ev.target?.closest?.(".lineText[data-line-id]") || ev.target; var index = syncLineElement(target); if (index >= 0) { selectedId = lines[index].id; markMutation(); } });
+    pane.addEventListener("paste", function (ev) { var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return; ev.preventDefault(); var id=text.getAttribute("data-line-id")||"", index=lineIndex(id); if(index<0 || lineElement(id)!==text) return; var clipboard=ev.clipboardData, plainText=clipboard&&typeof clipboard.getData==="function"?clipboard.getData("text/plain"):null; if(typeof plainText!=="string") return; if(ingestPlainTextPaste(index,text,plainText)) selectedId=lines[Math.min(index,lines.length-1)].id; });
     pane.addEventListener("click", function (ev) { var gutter = ev.target?.closest?.(".lineGutter[data-line-id]"); if (gutter) { var gi=lineIndex(gutter.getAttribute("data-line-id")||""); if (gi>=0 && hasChildren(gi)) { ev.preventDefault(); toggleBranch(gi); } return; } var text=ev.target?.closest?.(".lineText[data-line-id]"); if (text) selectedId=text.getAttribute("data-line-id")||selectedId; });
     pane.addEventListener("keydown", function (ev) { var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return; var index=syncLineElement(text); if(index<0)return; selectedId=lines[index].id; if(ev.key==="Enter"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){ev.preventDefault();insertAfter(index);return;} if(ev.key==="Tab"){ev.preventDefault();indentBranch(index,ev.shiftKey?-1:1);return;} if((ev.metaKey||ev.ctrlKey)&&!ev.shiftKey&&!ev.altKey&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){ev.preventDefault();moveBranch(index,ev.key==="ArrowUp"?"up":"down");return;} });
     pane.addEventListener("dragstart", function(ev){var gutter=ev.target?.closest?.(".lineGutter[data-line-id]"); if(!gutter||readOnly)return; dragSourceId=gutter.getAttribute("data-line-id")||""; try{ev.dataTransfer?.setData?.("text/plain",dragSourceId);}catch(_error){} });
