@@ -17,50 +17,53 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Guard exact pre-Starling-repair candidate
+      - name: Guard exact post-Starling-dependency candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "28910a17ac0ac30c24fdbf2ac820d414815cad4a"
-          test "$(git rev-parse HEAD^{tree})" = "5efecf3b4ab4c884bb10ba03ba6c9598a5960438"
+          test "$(git rev-parse HEAD)" = "dce61029bb746da4c999e678638a5bca6ea7e2bb"
+          test "$(git rev-parse HEAD^{tree})" = "933ece453712e1bd6b54a66ef6996a7a39f0d53a"
           test -z "$(git status --porcelain)"
-      - name: Repair remaining historical Starling harness dependency order
+      - name: Align P150 synthetic PE fixture with current unified content owner
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-
-          repairs = {
-            'tests/p127-starling-remote-save.test.js': (
-              '"js/pocket-outline-persistence-policy.js","js/pocket-editor-metadata.js"',
-              '"js/pocket-outline-persistence-policy.js","js/pocket-node-content.js","js/pocket-editor-metadata.js"',
+          path = Path('tests/p150-starling-owner-payload-capture.test.js')
+          text = path.read_text()
+          replacements = [
+            (
+              '  class HTMLTextAreaElement extends HTMLElement { constructor(value = "") { super(); this.value = value; } }\n',
+              '  class HTMLTextAreaElement extends HTMLElement { constructor(value = "") { super(); this.value = value; } }\n  class HTMLButtonElement extends HTMLElement {}\n',
+              'synthetic details close path needs the current button element class',
             ),
-            'tests/p160-starling-owner-save-preparation.test.js': (
-              '  "js/pocket-outline-persistence-policy.js",\n  "js/pocket-editor-metadata.js",',
-              '  "js/pocket-outline-persistence-policy.js",\n  "js/pocket-node-content.js",\n  "js/pocket-editor-metadata.js",',
+            (
+              '    HTMLElement, HTMLInputElement, HTMLTextAreaElement,\n',
+              '    HTMLElement, HTMLInputElement, HTMLTextAreaElement, HTMLButtonElement,\n',
+              'synthetic context must expose the button element class',
             ),
-            'tests/p172-real-p168-composition.test.js': (
-              '  "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",\n  "js/pocket-editor-metadata.js",',
-              '  "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",\n  "js/pocket-node-content.js", "js/pocket-editor-metadata.js",',
+            (
+              'function editorPayload(node, changes = {}) {\n  return { id: node.id, title: node.label, body: node.details || "", originalUpdatedAt: node.updatedAt, fileSessionId: 1, sourceFileName: "p150.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "", ...changes };\n}\n',
+              'function editorPayload(node, changes = {}) {\n  const canonicalText = changes.text ?? changes.body ?? node.editor?.text ?? node.details ?? "";\n  return { id: node.id, title: node.label, text: canonicalText, body: canonicalText, originalUpdatedAt: node.updatedAt, fileSessionId: 1, sourceFileName: "p150.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "", ...changes, text: canonicalText };\n}\n',
+              'PE capture fixture must mutate canonical text while retaining body only as compatibility alias',
             ),
-          }
-          for filename, (old, new) in repairs.items():
-            path = Path(filename)
-            text = path.read_text()
+          ]
+          for old, new, label in replacements:
             count = text.count(old)
             if count != 1:
-              raise SystemExit(f'{filename}: expected exact metadata dependency seam once, found {count}')
-            path.write_text(text.replace(old, new, 1))
+              raise SystemExit(f'{label}: expected exact seam once, found {count}')
+            text = text.replace(old, new, 1)
+          path.write_text(text)
           PY
           git diff --check
-          test "$(git diff --name-only | sort)" = "$(printf '%s\n' tests/p127-starling-remote-save.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js | sort)"
+          test "$(git diff --name-only)" = "tests/p150-starling-owner-payload-capture.test.js"
           git diff --stat
-      - name: Commit Starling harness repairs to real candidate
+      - name: Commit P150 harness repair to real candidate
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tests/p127-starling-remote-save.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js
-          git commit -m "P198b repair Starling regression content dependencies"
+          git add tests/p150-starling-owner-payload-capture.test.js
+          git commit -m "P198b align Starling capture PE fixture with unified content"
           git push origin HEAD:candidate/p198
       - name: Install
         run: timeout --signal=KILL 180s npm ci
@@ -82,4 +85,4 @@ jobs:
       - name: Candidate repair delta remains bounded
         run: |
           set -euo pipefail
-          test "$(git diff --name-only dcc2a21e959c1d3855dc75f046bcf855d1674ecf..HEAD | sort)" = "$(printf '%s\n' sw.js tests/device-changes-resolution.test.js tests/p019-vault-ownership.test.js tests/p127-starling-remote-save.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js tests/p176-production-composition.test.js | sort)"
+          test "$(git diff --name-only dcc2a21e959c1d3855dc75f046bcf855d1674ecf..HEAD | sort)" = "$(printf '%s\n' sw.js tests/device-changes-resolution.test.js tests/p019-vault-ownership.test.js tests/p127-starling-remote-save.test.js tests/p150-starling-owner-payload-capture.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js tests/p176-production-composition.test.js | sort)"
