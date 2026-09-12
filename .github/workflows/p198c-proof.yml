@@ -1,0 +1,117 @@
+name: P198c final unified PE independent proof
+on:
+  push:
+    branches:
+      - candidate/p198c-proof
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p198c-proof
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 01 exact final candidate ancestry and proof-only delta
+        run: |
+          set -euo pipefail
+          FINAL=e6473d765d7496a130e48513a998089916266a75
+          TREE=44fc6bb7a8c84826c0512600c2a29c39fe86bcd2
+          test "$(git rev-parse origin/candidate/p198)" = "$FINAL"
+          test "$(git rev-parse "$FINAL"^{tree})" = "$TREE"
+          test "$(git merge-base HEAD "$FINAL")" = "$FINAL"
+          test "$(git rev-list --count "$FINAL"..HEAD)" = "1"
+          test "$(git diff --name-only "$FINAL"..HEAD)" = ".github/workflows/p198c-proof.yml"
+          test -z "$(git status --porcelain)"
+      - name: Install
+        run: timeout --signal=KILL 180s npm ci
+      - name: 02 syntax and focused unified PE document proof
+        run: |
+          set -euo pipefail
+          for f in js/pocket-node-content.js js/pocket-node-popout-runtime.js js/pocket-editor-copy.js sw.js tests/p198-unified-pe-document.test.js tests/pe-persistence-contract.test.js tests/device-changes-resolution.test.js tests/p019-vault-ownership.test.js tests/p127-starling-remote-save.test.js tests/p150-starling-owner-payload-capture.test.js tests/p160-starling-owner-save-preparation.test.js tests/p172-real-p168-composition.test.js tests/p176-production-composition.test.js; do
+            timeout --signal=KILL 120s node --check "$f"
+          done
+          timeout --signal=KILL 240s node --test tests/p198-unified-pe-document.test.js
+      - name: 03 P018 popout isolation
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 240s node --test tests/p018-popout-isolation.test.js
+      - name: 04 updated PE persistence contract
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 420s node --test tests/pe-persistence-contract.test.js
+      - name: 05 Phone and current-body unified content including over 4000 characters
+        run: |
+          set -euo pipefail
+          grep -q 'P198a-23 active body parser preserves canonical content beyond legacy 4000-char projection' tests/p198-unified-pe-document.test.js
+          grep -q 'P198a-27 active in-page body seam no longer routes canonical content through the 4000-char Notes parser' tests/p198-unified-pe-document.test.js
+          grep -q 'Phone-owned body surface round-trips more than 4000 canonical characters' tests/pe-persistence-contract.test.js
+          timeout --signal=KILL 240s node --test tests/p198-unified-pe-document.test.js
+          timeout --signal=KILL 420s node --test tests/pe-persistence-contract.test.js
+      - name: 06 device-change PiP and ownership regressions
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 420s node --test tests/device-changes-resolution.test.js
+          timeout --signal=KILL 240s node --test tests/p018-popout-isolation.test.js
+          timeout --signal=KILL 600s node --test tests/p019-vault-ownership.test.js
+      - name: 07 source session revision permission failed-Save and Save-and-Close safety
+        run: |
+          set -euo pipefail
+          grep -q 'source/revision/permission checks still precede mutation' tests/p198-unified-pe-document.test.js
+          grep -q 'Save and Save & Close still share one durable save path and failed saves remain dirty' tests/p198-unified-pe-document.test.js
+          grep -q 'PE apply fails closed for no file, missing or malformed identity, and a wrong document session' tests/pe-persistence-contract.test.js
+          grep -q 'cancelled, stale-guard, and thrown exports adopt the applied revision and retry pending lexical operations' tests/pe-persistence-contract.test.js
+          timeout --signal=KILL 240s node --test tests/p198-unified-pe-document.test.js
+          timeout --signal=KILL 420s node --test tests/pe-persistence-contract.test.js
+          timeout --signal=KILL 420s node --test tests/p180-main-save-cutover.test.js
+      - name: 08 search content-indicator editor-copy and recovery readers
+        run: |
+          set -euo pipefail
+          grep -q 'active in-page copy/search/recovery readers use PocketNodeContent' tests/p198-unified-pe-document.test.js
+          grep -q 'normalised search retains label, Notes, supported Outline' tests/pe-persistence-contract.test.js
+          timeout --signal=KILL 240s node --test tests/p198-unified-pe-document.test.js
+          timeout --signal=KILL 420s node --test tests/pe-persistence-contract.test.js
+      - name: 09 unknown and malformed editor fail-closed
+        run: |
+          set -euo pipefail
+          grep -q 'unknown editor stays read-only with readable details only' tests/p198-unified-pe-document.test.js
+          grep -q 'unknown editor remains opaque and apply path rejects it before mutation' tests/p198-unified-pe-document.test.js
+          grep -q 'apply and applyAndSave defend unsupported and malformed editor nodes without mutation or export' tests/pe-persistence-contract.test.js
+          timeout --signal=KILL 240s node --test tests/p198-unified-pe-document.test.js
+          timeout --signal=KILL 420s node --test tests/pe-persistence-contract.test.js
+      - name: 10 production static and offline release composition
+        run: |
+          set -euo pipefail
+          grep -q 'const CACHE_NAME = "pocket-shell-v11";' sw.js
+          test "$(grep -c '"'"'"./js/pocket-node-content.js"'"'"' sw.js)" = "1"
+          grep -q '<script src="js/pocket-node-content.js"></script>' index.html
+          timeout --signal=KILL 300s node --test tests/p074-production-composition.test.js
+          timeout --signal=KILL 600s node --test tests/p176-production-composition.test.js
+      - name: 11 Starling node-payload and owner semantic capture
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 420s node --test tests/p127-starling-remote-save.test.js
+          timeout --signal=KILL 420s node --test tests/p150-starling-owner-payload-capture.test.js
+          timeout --signal=KILL 420s node --test tests/p160-starling-owner-save-preparation.test.js
+          timeout --signal=KILL 420s node --test tests/p168-authority-adoption.test.js
+          timeout --signal=KILL 420s node --test tests/p168-starling-reentry.test.js
+          timeout --signal=KILL 600s node --test tests/p172-real-p168-composition.test.js
+      - name: 12 repository Pocket check
+        run: timeout --signal=KILL 600s npm run check
+      - name: 13 final proof branch discipline
+        run: |
+          set -euo pipefail
+          FINAL=e6473d765d7496a130e48513a998089916266a75
+          TREE=44fc6bb7a8c84826c0512600c2a29c39fe86bcd2
+          git fetch origin candidate/p198
+          test "$(git rev-parse origin/candidate/p198)" = "$FINAL"
+          test "$(git rev-parse "$FINAL"^{tree})" = "$TREE"
+          test "$(git merge-base HEAD "$FINAL")" = "$FINAL"
+          test "$(git rev-list --count "$FINAL"..HEAD)" = "1"
+          test "$(git diff --name-only "$FINAL"..HEAD)" = ".github/workflows/p198c-proof.yml"
+          test -z "$(git status --porcelain)"
