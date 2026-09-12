@@ -17,44 +17,98 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Guard exact P198b starting candidate
+      - name: Guard exact post-dependency candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "dcc2a21e959c1d3855dc75f046bcf855d1674ecf"
-          test "$(git rev-parse HEAD^{tree})" = "34b932a3693d4c81177e938652a3fbb554d8ae94"
+          test "$(git rev-parse HEAD)" = "c5a8cb7d03e26108f60a5693c1aabe0f40c61a11"
+          test "$(git rev-parse HEAD^{tree})" = "3f9d85057616d645811b6c34127507443b1173c2"
           test -z "$(git status --porcelain)"
-      - name: Apply smallest production-composition harness repair
+      - name: Repair current-contract historical harness seams
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           path = Path('tests/device-changes-resolution.test.js')
           text = path.read_text()
-          old = '    "js/pocket-outline-persistence-policy.js",\n    "js/pocket-editor-metadata.js",'
-          new = '    "js/pocket-outline-persistence-policy.js",\n    "js/pocket-node-content.js",\n    "js/pocket-editor-metadata.js",'
-          count = text.count(old)
-          if count != 1:
-              raise SystemExit(f'expected exact historical load seam once, found {count}')
-          path.write_text(text.replace(old, new, 1))
+
+          replacements = [
+            (
+              '''async function flushMicrotasks() {\n  await Promise.resolve();\n  await Promise.resolve();\n}''',
+              '''async function flushMicrotasks() {\n  await Promise.resolve();\n  await Promise.resolve();\n  await new Promise((resolve) => setImmediate(resolve));\n  await Promise.resolve();\n}''',
+              'async polling must advance the task used by the IndexedDB mock',
+            ),
+            (
+              '''  return { records, open(name, version) {\n    if (name !== "pocket.local.safety.v1" || version !== 1) throw new Error("database invalid");\n    const request = { result: database, transaction: { abort() {} } };\n    queueMicrotask(() => { if (!created) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });\n    return request;\n  } };''',
+              '''  return { records, open(name, version) {\n    if (name === "pocketLite.recentFile.v1" && version === 1) {\n      const request = {};\n      queueMicrotask(() => request.onerror?.());\n      return request;\n    }\n    if (name !== "pocket.local.safety.v1" || version !== 1) throw new Error("database invalid");\n    const request = { result: database, transaction: { abort() {} } };\n    queueMicrotask(() => { if (!created) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });\n    return request;\n  } };''',
+              'recent-file metadata DB is optional and must fail asynchronously rather than throw from this safety-only mock',
+            ),
+            (
+              '''  body.value = options.body ?? current.details ?? "";''',
+              '''  const originalContent = context.currentPocketNodeContentText(current);\n  body.value = options.body ?? originalContent;''',
+              'details harness body must open the current canonical content',
+            ),
+            (
+              '''  state.detailsEdit = {\n    id: nodeId,\n    originalLabel: current.label,\n    originalDetails: current.details || "",\n    originalUrgent: !!current.urgent,''',
+              '''  state.detailsEdit = {\n    id: nodeId,\n    originalLabel: current.label,\n    originalDetails: current.details || "",\n    originalContent,\n    originalEditorPresent: Object.prototype.hasOwnProperty.call(current, "editor"),\n    originalEditor: Object.prototype.hasOwnProperty.call(current, "editor") ? plain(current.editor) : undefined,\n    readOnly: false,\n    originalUrgent: !!current.urgent,''',
+              'details harness state must mirror the current unified editor owner',
+            ),
+            (
+              '''  payload.body = "Edited from the detached PE";''',
+              '''  payload.text = "Edited from the detached PE";\n  payload.body = payload.text;''',
+              'successful detached PE edit must mutate canonical text, with body retained only as compatibility alias',
+            ),
+            (
+              '''  const safetyAtSaveStart = JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1"));''',
+              '''  const safetyAtSaveStart = (await context.readLocalSafetySnapshotDurably()).parsed;''',
+              'JSON-owner safety is durable IndexedDB authority',
+            ),
+            (
+              '''  const safetyDuringWrite = JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1"));''',
+              '''  const safetyDuringWrite = (await context.readLocalSafetySnapshotDurably()).parsed;''',
+              'save-race safety must read the durable JSON-owner copy',
+            ),
+            (
+              '''  const safety = plain(context.readLocalSafetySnapshot());\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Newer edit made during write");''',
+              '''  const safety = plain(await context.readLocalSafetySnapshotDurably());\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Newer edit made during write");''',
+              'post-save safety assertion must read durable JSON-owner copy',
+            ),
+            (
+              '''  const safetyBeforeSave = context.readLocalSafetySnapshot();\n  assert.ok(safetyBeforeSave);''',
+              '''  const safetyBeforeSave = await context.readLocalSafetySnapshotDurably();\n  assert.ok(safetyBeforeSave);''',
+              'final-node deletion safety precondition must await durable JSON-owner copy',
+            ),
+            (
+              '''  assert.equal(context.readLocalSafetySnapshot(), null);\n});\n\ntest("an empty-operations detached adoption retains its trustworthy BASE after creating the dirty marker"''',
+              '''  assert.equal(await context.readLocalSafetySnapshotDurably(), null);\n});\n\ntest("an empty-operations detached adoption retains its trustworthy BASE after creating the dirty marker"''',
+              'final-node deletion must verify durable current safety was cleared',
+            ),
+            (
+              '''  const safety = context.readLocalSafetySnapshot();\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Original Notes");\n});\n\ntest("PiP adoption is rejected without mutation while the file/device decision is open"''',
+              '''  const safety = await context.readLocalSafetySnapshotDurably();\n  assert.ok(safety);\n  assert.equal(safety.norm.nodes[0].details, "Original Notes");\n});\n\ntest("PiP adoption is rejected without mutation while the file/device decision is open"''',
+              'details save-race cancellation must verify durable JSON-owner safety',
+            ),
+          ]
+
+          for old, new, label in replacements:
+            count = text.count(old)
+            if count != 1:
+              raise SystemExit(f'{label}: expected exact seam once, found {count}')
+            text = text.replace(old, new, 1)
+
+          path.write_text(text)
           PY
           git diff --check
           test "$(git diff --name-only)" = "tests/device-changes-resolution.test.js"
+          git diff --stat
           git diff -- tests/device-changes-resolution.test.js
-      - name: Commit repair to real candidate
+      - name: Commit harness repairs to real candidate
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tests/device-changes-resolution.test.js
-          git commit -m "P198b repair device harness content dependency"
+          git commit -m "P198b align device regressions with unified content and durable safety"
           git push origin HEAD:candidate/p198
-      - name: Re-check exact pushed candidate directly
-        run: |
-          set -euo pipefail
-          git fetch origin candidate/p198
-          git checkout --detach origin/candidate/p198
-          test "$(git show --format= --name-only HEAD | sed '/^$/d')" = "tests/device-changes-resolution.test.js"
-          grep -A3 -B1 'pocket-node-content.js' tests/device-changes-resolution.test.js
       - name: Install
         run: timeout --signal=KILL 180s npm ci
       - name: Direct device PiP ownership regression slice
