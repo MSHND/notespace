@@ -1,0 +1,43 @@
+name: P198a diagnostic persistence composition
+on:
+  push:
+    branches:
+      - candidate/p198a-repair
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p198
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Guard exact P198 continuation point
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "678872adf4db9de8c0095fff32f603cf1b418faa"
+          test "$(git merge-base HEAD 0076739343b9a30c3e56f521ec67b1d87d8b6b2e)" = "0076739343b9a30c3e56f521ec67b1d87d8b6b2e"
+      - name: Repair harness load order in worktree only
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('tests/pe-persistence-contract.test.js')
+          text=p.read_text()
+          old='  "js/pocket-outline-persistence-policy.js",\n  "js/pocket-editor-metadata.js",'
+          new='  "js/pocket-outline-persistence-policy.js",\n  "js/pocket-node-content.js",\n  "js/pocket-editor-metadata.js",'
+          if text.count(old) != 1:
+              raise SystemExit('unexpected CORE_INDEX_SCRIPTS anchor')
+          p.write_text(text.replace(old,new,1))
+          PY
+          git diff --check
+      - name: Install
+        run: timeout --signal=KILL 180s npm ci
+      - name: Persistence suite after composition-only repair
+        run: timeout --signal=KILL 300s node --test tests/pe-persistence-contract.test.js
