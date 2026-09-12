@@ -17,53 +17,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Guard exact post-Starling-dependency candidate
+      - name: Guard exact post-P150-fixture candidate
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "dce61029bb746da4c999e678638a5bca6ea7e2bb"
-          test "$(git rev-parse HEAD^{tree})" = "933ece453712e1bd6b54a66ef6996a7a39f0d53a"
+          test "$(git rev-parse HEAD)" = "3bf4ef612a99f7332a2d47671e158bc740e9bc6b"
+          test "$(git rev-parse HEAD^{tree})" = "c39725b67cceb7d04f153d8b419d6e9c331e4a92"
           test -z "$(git status --porcelain)"
-      - name: Align P150 synthetic PE fixture with current unified content owner
+      - name: Align P150 model stub with current unified save result
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           path = Path('tests/p150-starling-owner-payload-capture.test.js')
           text = path.read_text()
-          replacements = [
-            (
-              '  class HTMLTextAreaElement extends HTMLElement { constructor(value = "") { super(); this.value = value; } }\n',
-              '  class HTMLTextAreaElement extends HTMLElement { constructor(value = "") { super(); this.value = value; } }\n  class HTMLButtonElement extends HTMLElement {}\n',
-              'synthetic details close path needs the current button element class',
-            ),
-            (
-              '    HTMLElement, HTMLInputElement, HTMLTextAreaElement,\n',
-              '    HTMLElement, HTMLInputElement, HTMLTextAreaElement, HTMLButtonElement,\n',
-              'synthetic context must expose the button element class',
-            ),
-            (
-              'function editorPayload(node, changes = {}) {\n  return { id: node.id, title: node.label, body: node.details || "", originalUpdatedAt: node.updatedAt, fileSessionId: 1, sourceFileName: "p150.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "", ...changes };\n}\n',
-              'function editorPayload(node, changes = {}) {\n  const canonicalText = changes.text ?? changes.body ?? node.editor?.text ?? node.details ?? "";\n  return { id: node.id, title: node.label, text: canonicalText, body: canonicalText, originalUpdatedAt: node.updatedAt, fileSessionId: 1, sourceFileName: "p150.json", sourcePipSession: false, sourceOwnerKind: "json", sourceVaultSessionId: "", ...changes, text: canonicalText };\n}\n',
-              'PE capture fixture must mutate canonical text while retaining body only as compatibility alias',
-            ),
-          ]
-          for old, new, label in replacements:
-            count = text.count(old)
-            if count != 1:
-              raise SystemExit(f'{label}: expected exact seam once, found {count}')
-            text = text.replace(old, new, 1)
+          old = '      prepareSave(node, payload) { return { ok: true, changed: true, beforeLabel: node.label, nextLabel: String(payload.title || node.label), titleChanged: String(payload.title || node.label) !== node.label, notesChanged: true, nextDetails: String(payload.body || ""), editorChanged: false }; },'
+          new = '      prepareSave(node, payload) { const text = String(payload.text ?? payload.body ?? ""); return { ok: true, changed: true, beforeLabel: node.label, nextLabel: String(payload.title || node.label), titleChanged: String(payload.title || node.label) !== node.label, contentChanged: true, notesChanged: true, nextText: text, nextDetails: text, editorChanged: true, editorMeta: text ? { schema: "pocket.nodeEditor.v2", text } : null, preserveRawEditor: false }; },'
+          if text.count(old) != 1:
+            raise SystemExit(f'expected base P150 prepareSave stub once, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          old = '  context.PocketNodePopoutModel.prepareSave = (current) => ({ ok: true, changed: true, beforeLabel: current.label, nextLabel: current.label, titleChanged: false, notesChanged: false, nextDetails: "", editorChanged: true, editorMeta: { outline: Array.from({ length: 401 }, (_, index) => ({ id: String(index) })) } });'
+          new = '  context.PocketNodePopoutModel.prepareSave = (current) => ({ ok: true, changed: true, beforeLabel: current.label, nextLabel: current.label, titleChanged: false, contentChanged: true, notesChanged: true, nextText: "Large canonical edit", nextDetails: "Large canonical edit", editorChanged: true, editorMeta: { schema: "pocket.nodeEditor.v2", text: "Large canonical edit" }, preserveRawEditor: false });'
+          if text.count(old) != 1:
+            raise SystemExit(f'expected rollback P150 prepareSave stub once, found {text.count(old)}')
+          text = text.replace(old, new, 1)
           path.write_text(text)
           PY
           git diff --check
           test "$(git diff --name-only)" = "tests/p150-starling-owner-payload-capture.test.js"
           git diff --stat
-      - name: Commit P150 harness repair to real candidate
+      - name: Commit P150 model-stub repair to real candidate
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tests/p150-starling-owner-payload-capture.test.js
-          git commit -m "P198b align Starling capture PE fixture with unified content"
+          git commit -m "P198b align Starling capture model stub with unified save"
           git push origin HEAD:candidate/p198
       - name: Install
         run: timeout --signal=KILL 180s npm ci
