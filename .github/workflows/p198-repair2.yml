@@ -1,0 +1,100 @@
+name: P198 repair active content seam rerun
+on:
+  push:
+    branches:
+      - candidate/p198-proof
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p198
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Guard candidate before repair
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "678872adf4db9de8c0095fff32f603cf1b418faa"
+          test "$(git merge-base HEAD 0076739343b9a30c3e56f521ec67b1d87d8b6b2e)" = "0076739343b9a30c3e56f521ec67b1d87d8b6b2e"
+      - name: Reuse exact repair script and rebuild focused additions cleanly
+        run: |
+          set -euo pipefail
+          git show origin/candidate/p198-proof:.github/workflows/p198-repair.yml > /tmp/p198-repair.yml
+          python - <<'PY'
+          from pathlib import Path
+          text=Path('/tmp/p198-repair.yml').read_text()
+          marker="          python - <<'PY'\n"
+          start=text.index(marker)+len(marker)
+          end=text.index("\n          PY\n",start)
+          block=text[start:end]
+          lines=[]
+          for line in block.splitlines():
+              lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/p198-repair.py').write_text('\n'.join(lines)+'\n')
+          PY
+          python /tmp/p198-repair.py
+          git checkout HEAD -- tests/p198-unified-pe-document.test.js
+          cat >> tests/p198-unified-pe-document.test.js <<'EOF'
+
+test("P198-23 active body parser preserves canonical content beyond legacy 4000-char projection",()=>{
+  const c=ctx();
+  const long="A".repeat(5000)+"\n  child";
+  const parsed=c.PocketNodeContent.parseEditorBody(long);
+  assert.equal(parsed.text,long);
+  assert.equal(parsed.text.length>4000,true);
+  assert.equal(c.PocketNodeContent.prepareCanonical(parsed.text).editor.text,long);
+});
+
+test("P198-24 subtree indent/outdent transforms the whole plain-text branch exactly",()=>{
+  const c=ctx();
+  const start=c.PocketNodeContent.parseLines("A\nB\n  B child\nC");
+  const ind=c.PocketNodeContent.indentSubtree(start,1,1);
+  assert.equal(ind.ok,true);
+  assert.equal(c.PocketNodeContent.serialiseLines(ind.lines),"A\n  B\n    B child\nC");
+  const out=c.PocketNodeContent.indentSubtree(ind.lines,1,-1);
+  assert.equal(c.PocketNodeContent.serialiseLines(out.lines),"A\nB\n  B child\nC");
+});
+
+test("P198-25 subtree move keeps descendants attached and canonical text exact",()=>{
+  const c=ctx();
+  const start=c.PocketNodeContent.parseLines("A\n  A child\nB\n  B child\nC");
+  const down=c.PocketNodeContent.moveSubtree(start,0,"down");
+  assert.equal(down.ok,true);
+  assert.equal(c.PocketNodeContent.serialiseLines(down.lines),"B\n  B child\nA\n  A child\nC");
+  const up=c.PocketNodeContent.moveSubtree(down.lines,2,"up");
+  assert.equal(c.PocketNodeContent.serialiseLines(up.lines),"A\n  A child\nB\n  B child\nC");
+});
+
+test("P198-26 active in-page body seam no longer routes canonical content through 4000-char Notes parsing",()=>{
+  const s=source("js/pocket-editor-copy.js");
+  assert.match(s,/parsePocketNodeContentEditorBody/);
+  assert.match(s,/el\.detailEditorBody\.value = contentView\.text/);
+  const start=s.indexOf("function hasUnsavedDetailsEditorChanges");
+  const end=s.indexOf("function inspectActiveInlineTitleDraft",start);
+  assert.doesNotMatch(s.slice(start,end),/normaliseDetails\([^,]+, 4000\)|parseUrgentDetailsBody/);
+});
+EOF
+          git diff --check
+      - name: Install and bounded repair proof
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 180s npm ci
+          for f in js/pocket-node-content.js js/pocket-node-popout-runtime.js js/pocket-editor-copy.js; do timeout --signal=KILL 120s node --check "$f"; done
+          timeout --signal=KILL 180s node --test tests/p198-unified-pe-document.test.js
+          timeout --signal=KILL 180s node --test tests/p018-popout-isolation.test.js
+      - name: Commit repair to same candidate
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add js/pocket-node-content.js js/pocket-node-popout-runtime.js js/pocket-editor-copy.js tests/p198-unified-pe-document.test.js
+          git diff --cached --check
+          git commit -m "P198 repair full canonical active body seam"
+          git push origin HEAD:candidate/p198
