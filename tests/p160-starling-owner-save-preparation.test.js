@@ -11,6 +11,7 @@ const FILES = [
   "js/pocket-state.js",
   "js/pocket-data.js",
   "js/pocket-outline-persistence-policy.js",
+  "js/pocket-node-content.js",
   "js/pocket-editor-metadata.js",
   "js/pocket-pe-import-preserve.js",
   "js/pocket-storage.js",

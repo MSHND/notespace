@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname, "..");
 const H = "pocket.starling.head.v1";
 const FILES = [
   "js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js",
-  "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", "js/pocket-import.js",
+  "js/pocket-node-content.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", "js/pocket-import.js",
   "js/pocket-sync-security-contract.js", "js/pocket-sync-crypto.js", "js/pocket-sync-device-store.js",
   "js/pocket-sync-owner-controller.js", "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js",
   "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js", "js/pocket-starling-root-shadow.js",
