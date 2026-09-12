@@ -14,6 +14,7 @@ const CORE_INDEX_SCRIPTS = [
   "js/pocket-state.js",
   "js/pocket-data.js",
   "js/pocket-outline-persistence-policy.js",
+  "js/pocket-node-content.js",
   "js/pocket-editor-metadata.js",
   "js/pocket-pe-import-preserve.js",
   "js/pocket-storage.js",
@@ -153,6 +154,8 @@ function createBrowserContext(options = {}) {
     },
     HTMLElement: options.HTMLElement || class HTMLElement {},
     HTMLInputElement: options.HTMLInputElement || class HTMLInputElement {},
+    HTMLTextAreaElement: options.HTMLTextAreaElement || class HTMLTextAreaElement {},
+    HTMLButtonElement: options.HTMLButtonElement || class HTMLButtonElement {},
     open() { return null; },
     close() {},
     confirm() { return true; },
@@ -259,10 +262,10 @@ function establishSyntheticSession(context, name = "synthetic.json") {
 
 function editorPayload(context, node, overrides = {}) {
   const current = lexicalState(context).nodes.find((candidate) => candidate.id === node.id) || node;
-  return {
-    ...plain(context.PocketNodePopoutModel.buildPayload(current)),
-    ...plain(overrides),
-  };
+  const payload = { ...plain(context.PocketNodePopoutModel.buildPayload(current)), ...plain(overrides) };
+  if (Object.hasOwn(overrides, "body") && !Object.hasOwn(overrides, "text")) payload.text = String(overrides.body ?? "");
+  if (Object.hasOwn(overrides, "text") && !Object.hasOwn(overrides, "body")) payload.body = String(overrides.text ?? "");
+  return payload;
 }
 
 function deferred() {

@@ -65,7 +65,8 @@
     function render(preferredId) {
       if (!Array.isArray(lines) || lines.length === 0) lines = [createLine("", 0)];
       pane.innerHTML = "";
-      for (var i = 0; i < lines.length; i += 1) if (!isHidden(i)) pane.appendChild(createRow(lines[i], i));
+      var visible = typeof content.visibleIndexes === "function" ? new Set(content.visibleIndexes(lines, collapsed)) : null;
+      for (var i = 0; i < lines.length; i += 1) if (!visible || visible.has(i)) pane.appendChild(createRow(lines[i], i));
       if (preferredId) requestAnimationFrame(function () { focusLine(preferredId); });
     }
     function lineElement(id) {
@@ -82,22 +83,14 @@
     }
     function toggleBranch(index) { if (!hasChildren(index)) return false; var id = lines[index].id; if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id); render(id); return true; }
     function indentBranch(index, delta) {
-      if (readOnly || index < 0) return false; var end = subtreeEnd(index); var rootDepth = lines[index].depth; var nextDepth = rootDepth + delta;
-      if (nextDepth < 0 || nextDepth > 8) return false;
-      if (delta > 0 && index === 0) return false;
-      for (var i = index; i < end; i += 1) { var candidate = lines[i].depth + delta; if (candidate < 0 || candidate > 8) return false; }
-      for (var j = index; j < end; j += 1) lines[j].depth += delta;
-      markMutation(); render(lines[index].id); return true;
+      if (readOnly || index < 0 || typeof content.indentSubtree !== "function") return false;
+      var transformed = content.indentSubtree(lines, index, delta); if (!transformed || transformed.ok !== true) return false;
+      var id = lines[index].id; lines = transformed.lines; markMutation(); render(id); return true;
     }
-    function previousSiblingIndex(index) { var depth = lines[index].depth; for (var i = index - 1; i >= 0; i -= 1) { if (lines[i].depth === depth) return i; if (lines[i].depth < depth) break; } return -1; }
-    function nextSiblingIndex(index) { var depth = lines[index].depth; var cursor = subtreeEnd(index); return cursor < lines.length && lines[cursor].depth === depth ? cursor : -1; }
     function moveBranch(index, direction) {
-      if (readOnly || index < 0 || (direction !== "up" && direction !== "down")) return false;
-      var start = index, end = subtreeEnd(index), target = direction === "up" ? previousSiblingIndex(index) : nextSiblingIndex(index); if (target < 0) return false;
-      var branch = lines.splice(start, end - start);
-      if (direction === "up") lines.splice(target, 0, ...branch);
-      else { var afterTarget = subtreeEnd(target - branch.length); if (target > start) { var targetNow = target - branch.length; afterTarget = subtreeEnd(targetNow); } lines.splice(afterTarget, 0, ...branch); }
-      markMutation(); render(branch[0].id); return true;
+      if (readOnly || index < 0 || typeof content.moveSubtree !== "function") return false;
+      var id = lines[index].id; var transformed = content.moveSubtree(lines, index, direction); if (!transformed || transformed.ok !== true) return false;
+      lines = transformed.lines; markMutation(); render(id); return true;
     }
     function moveBranchBefore(sourceId, targetId) {
       var source = lineIndex(sourceId), target = lineIndex(targetId); if (readOnly || source < 0 || target < 0 || source === target) return false;

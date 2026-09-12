@@ -56,6 +56,11 @@
     return normaliseLineEndings(value).trim().slice(0, DETAILS_CHARS);
   }
 
+  function parseEditorBody(value) {
+    const source = String(value == null ? "" : value);
+    return { text: normaliseCanonicalText(source), urgent: /(^|\s)#urgent\b/i.test(source) };
+  }
+
   function validateText(value) {
     if (typeof value !== "string") return { ok: false, reason: "invalid-editor-text" };
     const text = normaliseCanonicalText(value);
@@ -196,6 +201,42 @@
       && (Number(lines[index + 1].depth) || 0) > (Number(lines[index].depth) || 0);
   }
 
+  function indentSubtree(lines, index, delta) {
+    if (!Array.isArray(lines) || !Number.isInteger(index) || index < 0 || index >= lines.length || (delta !== 1 && delta !== -1)) return { ok: false, lines };
+    if (delta > 0 && index === 0) return { ok: false, lines };
+    const end = subtreeEnd(lines, index); const copy = lines.map((line) => ({ ...line }));
+    for (let cursor = index; cursor < end; cursor += 1) { const next = (Number(copy[cursor].depth) || 0) + delta; if (next < 0 || next > MAX_DEPTH) return { ok: false, lines }; }
+    for (let cursor = index; cursor < end; cursor += 1) copy[cursor].depth += delta;
+    return { ok: true, lines: copy };
+  }
+
+  function siblingBefore(lines, index) {
+    const depth = Number(lines[index]?.depth) || 0;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) { const candidateDepth = Number(lines[cursor]?.depth) || 0; if (candidateDepth === depth) return cursor; if (candidateDepth < depth) break; }
+    return -1;
+  }
+
+  function moveSubtree(lines, index, direction) {
+    if (!Array.isArray(lines) || !Number.isInteger(index) || index < 0 || index >= lines.length || (direction !== "up" && direction !== "down")) return { ok: false, lines };
+    const depth = Number(lines[index].depth) || 0; const end = subtreeEnd(lines, index); const target = direction === "up" ? siblingBefore(lines, index) : end;
+    if (target < 0 || target >= lines.length || (Number(lines[target].depth) || 0) !== depth) return { ok: false, lines };
+    const copy = lines.map((line) => ({ ...line })); const branch = copy.splice(index, end - index);
+    if (direction === "up") copy.splice(target, 0, ...branch);
+    else { const targetStart = target - branch.length; const targetEnd = subtreeEnd(copy, targetStart); copy.splice(targetEnd, 0, ...branch); }
+    return { ok: true, lines: copy };
+  }
+
+  function visibleIndexes(lines, collapsedIds) {
+    if (!Array.isArray(lines)) return [];
+    const collapsed = collapsedIds instanceof Set ? collapsedIds : new Set(Array.isArray(collapsedIds) ? collapsedIds : []); const visible = [];
+    for (let index = 0; index < lines.length; index += 1) {
+      let depth = Number(lines[index]?.depth) || 0; let hidden = false;
+      for (let cursor = index - 1; cursor >= 0; cursor -= 1) { const parentDepth = Number(lines[cursor]?.depth) || 0; if (parentDepth >= depth) continue; if (collapsed.has(lines[cursor]?.id)) { hidden = true; break; } depth = parentDepth; if (depth <= 0) break; }
+      if (!hidden) visible.push(index);
+    }
+    return visible;
+  }
+
   function smartContinuation(content) {
     const marker = parseMarker(content);
     if (marker.kind === "number") {
@@ -217,6 +258,7 @@
     normaliseCanonicalText,
     normaliseDetails,
     validateText,
+    parseEditorBody,
     readNode,
     projectV1Outline,
     detailsProjection,
@@ -226,6 +268,9 @@
     serialiseLines,
     subtreeEnd,
     hasChildren,
+    indentSubtree,
+    moveSubtree,
+    visibleIndexes,
     smartContinuation,
     utf8ByteLength,
   });

@@ -65,6 +65,13 @@ function preparePocketNodeContentWrite(text) {
     : { ok: true, editor: null, details: normaliseDetails(text, 4000), text: normaliseDetails(text, Number.MAX_SAFE_INTEGER) };
 }
 
+function parsePocketNodeContentEditorBody(rawValue) {
+  const contract = window.PocketNodeContent;
+  if (contract && typeof contract.parseEditorBody === "function") return contract.parseEditorBody(rawValue);
+  const source = String(rawValue || "");
+  return { text: normaliseDetails(source, Number.MAX_SAFE_INTEGER), urgent: /(^|\s)#urgent\b/i.test(source) };
+}
+
 function applyPocketNodeContentWrite(node, prepared) {
   if (!node || !prepared || prepared.ok !== true) return false;
   if (prepared.details) node.details = prepared.details;
@@ -90,8 +97,8 @@ function hasUnsavedDetailsEditorChanges() {
   const node = nodeId ? (nodeMap().get(nodeId) || null) : null;
   const baseLabel = node ? cleanText(node.label, 220) : cleanText(state.detailsEdit.originalLabel, 220);
   const baseBody = node
-    ? composeDetailsEditorValue(currentPocketNodeContentText(node), node.urgent)
-    : normaliseDetails(state.detailsEdit.originalContent, Number.MAX_SAFE_INTEGER);
+    ? currentPocketNodeContentText(node)
+    : String(state.detailsEdit.originalContent || "");
   const baseUrgent = node
     ? normaliseUrgentFlag(node.urgent)
     : normaliseUrgentFlag(state.detailsEdit.originalUrgent);
@@ -99,8 +106,8 @@ function hasUnsavedDetailsEditorChanges() {
     ? normaliseCopyContextFlag(node.copyContext)
     : normaliseCopyContextFlag(state.detailsEdit.originalCopyContext);
   const nextLabel = cleanText(el.detailEditorLabel?.value, 220);
-  const nextBody = normaliseDetails(el.detailEditorBody?.value, 4000);
-  const parsedBody = parseUrgentDetailsBody(nextBody);
+  const nextBody = String(el.detailEditorBody?.value || "");
+  const parsedBody = parsePocketNodeContentEditorBody(nextBody);
   const nextUrgent = (el.detailEditorUrgent instanceof HTMLInputElement && el.detailEditorUrgent.checked)
     || parsedBody.urgent;
   const nextCopyContext = el.detailEditorCopyContext instanceof HTMLInputElement
@@ -108,7 +115,7 @@ function hasUnsavedDetailsEditorChanges() {
     : false;
   return (
     nextLabel !== baseLabel
-    || parsedBody.details !== normaliseDetails(baseBody, 4000)
+    || parsedBody.text !== parsePocketNodeContentEditorBody(baseBody).text
     || nextUrgent !== baseUrgent
     || nextCopyContext !== baseCopyContext
   );
@@ -358,8 +365,8 @@ function stageDetailsEditorDraft() {
   const node = nodeId ? (nodeMap().get(nodeId) || null) : null;
   if (!node) return false;
   const nextLabel = cleanText(el.detailEditorLabel?.value, 220);
-  const parsedDetails = parseUrgentDetailsBody(String(el.detailEditorBody?.value || ""));
-  const nextDetails = parsedDetails.details;
+  const parsedDetails = parsePocketNodeContentEditorBody(String(el.detailEditorBody?.value || ""));
+  const nextDetails = parsedDetails.text;
   const nextUrgent = (el.detailEditorUrgent instanceof HTMLInputElement && el.detailEditorUrgent.checked)
     || parsedDetails.urgent;
   const nextCopyContext = el.detailEditorCopyContext instanceof HTMLInputElement
@@ -492,10 +499,10 @@ function openDetailsEditorForSelectedNode() {
     el.detailEditorLabel.value = cleanText(node.label, 220);
   }
   if (el.detailEditorBody instanceof HTMLTextAreaElement) {
-    el.detailEditorBody.value = composeDetailsEditorValue(contentView.text, node.urgent);
+    el.detailEditorBody.value = contentView.text;
   }
   if (el.detailEditorUrgent instanceof HTMLInputElement) {
-    const parsedBody = parseUrgentDetailsBody(node.details);
+    const parsedBody = parsePocketNodeContentEditorBody(contentView.text);
     el.detailEditorUrgent.checked = normaliseUrgentFlag(node.urgent) || parsedBody.urgent;
   }
   if (el.detailEditorCopyContext instanceof HTMLInputElement) {
@@ -543,7 +550,7 @@ function saveDetailsEditor() {
     && !isManagedSystemBucketNode(node)
     && !(parentNode && isCompletedSystemBucketNode(parentNode))
   );
-  const parsedDetails = parseUrgentDetailsBody(
+  const parsedDetails = parsePocketNodeContentEditorBody(
     canApplyCompletionMove ? stripCompletionTags(rawBodyValue) : rawBodyValue
   );
   const nextUrgent = (el.detailEditorUrgent instanceof HTMLInputElement && el.detailEditorUrgent.checked)
@@ -559,7 +566,7 @@ function saveDetailsEditor() {
     }
     return;
   }
-  const nextDetails = parsedDetails.details;
+  const nextDetails = parsedDetails.text;
   const prevLabel = cleanText(node.label, 220);
   const prevDetails = currentPocketNodeContentText(node);
   const prevUrgent = normaliseUrgentFlag(node.urgent);
