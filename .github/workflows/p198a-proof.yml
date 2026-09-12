@@ -1,0 +1,63 @@
+name: P198a independent bounded proof
+on:
+  push:
+    branches:
+      - candidate/p198a-proof
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p198a-proof
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Guard clean final candidate and proof-only delta
+        run: |
+          set -euo pipefail
+          FINAL=dcc2a21e959c1d3855dc75f046bcf855d1674ecf
+          test "$(git merge-base HEAD "$FINAL")" = "$FINAL"
+          test "$(git rev-list --count "$FINAL"..HEAD)" = "1"
+          test "$(git diff --name-only "$FINAL"..HEAD)" = ".github/workflows/p198a-proof.yml"
+          test "$(git diff --name-only 678872adf4db9de8c0095fff32f603cf1b418faa.."$FINAL" | sort)" = "$(printf '%s\n' js/pocket-editor-copy.js js/pocket-node-content.js js/pocket-node-popout-runtime.js tests/p198-unified-pe-document.test.js tests/pe-persistence-contract.test.js | sort)"
+      - name: Install
+        run: timeout --signal=KILL 180s npm ci
+      - name: Syntax and focused unified PE proof
+        run: |
+          set -euo pipefail
+          for f in js/pocket-node-content.js js/pocket-node-popout-runtime.js js/pocket-editor-copy.js tests/p198-unified-pe-document.test.js tests/pe-persistence-contract.test.js; do timeout --signal=KILL 120s node --check "$f"; done
+          timeout --signal=KILL 180s node --test tests/p198-unified-pe-document.test.js
+          timeout --signal=KILL 180s node --test tests/p018-popout-isolation.test.js
+          timeout --signal=KILL 300s node --test tests/pe-persistence-contract.test.js
+      - name: Affected editor, Phone, device-change and ownership regressions
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 360s node --test tests/device-changes-resolution.test.js
+          timeout --signal=KILL 360s node --test tests/p019-vault-ownership.test.js
+      - name: Save, source identity and Starling owner payload regressions
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 240s node --test tests/p127-starling-remote-save.test.js
+          timeout --signal=KILL 240s node --test tests/p150-starling-owner-payload-capture.test.js
+          timeout --signal=KILL 240s node --test tests/p160-starling-owner-save-preparation.test.js
+          timeout --signal=KILL 240s node --test tests/p180-main-save-cutover.test.js
+      - name: Release and static production composition
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 180s node --test tests/p074-production-composition.test.js
+          timeout --signal=KILL 240s node --test tests/p176-production-composition.test.js
+      - name: Repository Pocket check
+        run: timeout --signal=KILL 600s npm run check
+      - name: Final proof branch discipline
+        run: |
+          set -euo pipefail
+          FINAL=dcc2a21e959c1d3855dc75f046bcf855d1674ecf
+          test "$(git merge-base HEAD "$FINAL")" = "$FINAL"
+          test "$(git rev-list --count "$FINAL"..HEAD)" = "1"
+          test "$(git diff --name-only "$FINAL"..HEAD)" = ".github/workflows/p198a-proof.yml"
