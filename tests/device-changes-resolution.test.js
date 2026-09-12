@@ -32,6 +32,8 @@ function deferred() {
 async function flushMicrotasks() {
   await Promise.resolve();
   await Promise.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  await Promise.resolve();
 }
 
 async function waitFor(predicate, rounds = 20) {
@@ -356,6 +358,11 @@ function createLocalSafetyIndexedDb() {
     close() {},
   };
   return { records, open(name, version) {
+    if (name === "pocketLite.recentFile.v1" && version === 1) {
+      const request = {};
+      queueMicrotask(() => request.onerror?.());
+      return request;
+    }
     if (name !== "pocket.local.safety.v1" || version !== 1) throw new Error("database invalid");
     const request = { result: database, transaction: { abort() {} } };
     queueMicrotask(() => { if (!created) request.onupgradeneeded?.({ oldVersion: 0 }); request.onsuccess?.(); });
@@ -632,7 +639,8 @@ function installDetailsEditorHarness(context, nodeId, options = {}) {
   const copyContext = new context.HTMLInputElement();
   overlay.hidden = false;
   label.value = options.label ?? current.label;
-  body.value = options.body ?? current.details ?? "";
+  const originalContent = context.currentPocketNodeContentText(current);
+  body.value = options.body ?? originalContent;
   urgent.checked = !!options.urgent;
   copyContext.checked = !!options.copyContext;
   for (const control of [label, body, urgent, copyContext]) {
@@ -651,6 +659,10 @@ function installDetailsEditorHarness(context, nodeId, options = {}) {
     id: nodeId,
     originalLabel: current.label,
     originalDetails: current.details || "",
+    originalContent,
+    originalEditorPresent: Object.prototype.hasOwnProperty.call(current, "editor"),
+    originalEditor: Object.prototype.hasOwnProperty.call(current, "editor") ? plain(current.editor) : undefined,
+    readOnly: false,
     originalUrgent: !!current.urgent,
     originalCopyContext: !!current.copyContext,
     draftOpRecorded: false,
@@ -2022,7 +2034,8 @@ test("a PE opened after detached adoption edits safely and saves only to its new
   );
   assert.equal(context.restoreLocalSafetySnapshot(snapshot), true);
   const payload = plain(context.PocketNodePopoutModel.buildPayload(state.nodes[0]));
-  payload.body = "Edited from the detached PE";
+  payload.text = "Edited from the detached PE";
+  payload.body = payload.text;
 
   const result = await context.PocketNodePopoutEditor.applyAndSave(payload);
 
@@ -2881,7 +2894,7 @@ test("a save race baselines exactly the written payload and keeps newer operatio
     { schema: "portal.export.v1", fileName: handle.name, writtenAt: "2026-07-01T00:00:00.000Z" },
   ), true);
   context.recordOp({ type: "first-edit", id: "race" });
-  const safetyAtSaveStart = JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1"));
+  const safetyAtSaveStart = (await context.readLocalSafetySnapshotDurably()).parsed;
   const coveredSequence = safetyAtSaveStart.deviceChanges.highestSequence;
   assert.ok(Number.isSafeInteger(coveredSequence) && coveredSequence > 0);
 
@@ -2892,7 +2905,7 @@ test("a save race baselines exactly the written payload and keeps newer operatio
     "an in-flight save protects operations covered by its frozen payload");
   state.nodes[0].details = "Newer edit made during write";
   context.recordOp({ type: "newer-edit", id: "race" });
-  const safetyDuringWrite = JSON.parse(context.__storage.get("pocketLite.localSafety.snapshot.v1"));
+  const safetyDuringWrite = (await context.readLocalSafetySnapshotDurably()).parsed;
   const newerSequence = safetyDuringWrite.deviceChanges.highestSequence;
   assert.ok(newerSequence > coveredSequence);
   releaseWrite();
@@ -2910,7 +2923,7 @@ test("a save race baselines exactly the written payload and keeps newer operatio
     baseline.fingerprint,
     context.PocketDeviceChanges.fingerprintDocument(written),
   );
-  const safety = plain(context.readLocalSafetySnapshot());
+  const safety = plain(await context.readLocalSafetySnapshotDurably());
   assert.ok(safety);
   assert.equal(safety.norm.nodes[0].details, "Newer edit made during write");
   assert.equal(safety.parsed.deviceChanges.highestSequence, newerSequence);
@@ -3046,7 +3059,7 @@ test("explicit Save persists deletion of the final node and clears only the cove
   state.nodes = [];
   state.tombstones = [{ id: "last", deletedAt: "2026-07-20T00:00:00.000Z" }];
   context.recordOp({ type: "delete", id: "last" });
-  const safetyBeforeSave = context.readLocalSafetySnapshot();
+  const safetyBeforeSave = await context.readLocalSafetySnapshotDurably();
   assert.ok(safetyBeforeSave);
   assert.deepEqual(plain(safetyBeforeSave.norm.nodes), []);
   context.__productionRefreshMeta();
@@ -3059,7 +3072,7 @@ test("explicit Save persists deletion of the final node and clears only the cove
   assert.deepEqual(written.mainThoughtTree, []);
   assert.equal(written.mainThoughtTreeTombstones[0].id, "last");
   assert.deepEqual(plain(state.ops), []);
-  assert.equal(context.readLocalSafetySnapshot(), null);
+  assert.equal(await context.readLocalSafetySnapshotDurably(), null);
 });
 
 test("an empty-operations detached adoption retains its trustworthy BASE after creating the dirty marker", () => {
@@ -3164,7 +3177,7 @@ test("cancelling a continued details draft during a save race retains a post-sav
   assert.ok(state.ops.length >= 1);
   assert.ok(state.ops.every((operation) => operation.seq > coveredSequence));
   assert.ok(state.ops.some((operation) => operation.type === "details_draft_reverted"));
-  const safety = context.readLocalSafetySnapshot();
+  const safety = await context.readLocalSafetySnapshotDurably();
   assert.ok(safety);
   assert.equal(safety.norm.nodes[0].details, "Original Notes");
 });
