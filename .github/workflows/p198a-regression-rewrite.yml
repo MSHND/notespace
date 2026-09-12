@@ -55,7 +55,7 @@ jobs:
       - name: Retain every passing legacy test and replace retired product assumptions
         run: |
           set -euo pipefail
-          cat > /tmp/p198a-rewrite.js <<'NODE'
+          cat > .p198a-rewrite.js <<'NODE'
           const fs = require('fs');
           const acorn = require('acorn');
           const file = 'tests/pe-persistence-contract.test.js';
@@ -179,7 +179,8 @@ jobs:
           fs.writeFileSync(file, text + replacement);
           console.log(`removed ${removals.length} failing P013-era tests; retained all non-failing tests; appended P198a replacements`);
           NODE
-          node /tmp/p198a-rewrite.js
+          node .p198a-rewrite.js
+          rm .p198a-rewrite.js
           git diff --check
           node --check tests/pe-persistence-contract.test.js
       - name: Prove rewritten persistence suite and focused contracts
