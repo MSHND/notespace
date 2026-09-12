@@ -1,0 +1,70 @@
+name: P198b bounded candidate harness repair
+on:
+  push:
+    branches:
+      - candidate/p198b-repair
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/p198
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Guard exact P198b starting candidate
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "dcc2a21e959c1d3855dc75f046bcf855d1674ecf"
+          test "$(git rev-parse HEAD^{tree})" = "34b932a3693d4c81177e938652a3fbb554d8ae94"
+          test -z "$(git status --porcelain)"
+      - name: Apply smallest production-composition harness repair
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/device-changes-resolution.test.js')
+          text = path.read_text()
+          old = '    "js/pocket-outline-persistence-policy.js",\n    "js/pocket-editor-metadata.js",'
+          new = '    "js/pocket-outline-persistence-policy.js",\n    "js/pocket-node-content.js",\n    "js/pocket-editor-metadata.js",'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exact historical load seam once, found {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "tests/device-changes-resolution.test.js"
+          git diff -- tests/device-changes-resolution.test.js
+      - name: Commit repair to real candidate
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/device-changes-resolution.test.js
+          git commit -m "P198b repair device harness content dependency"
+          git push origin HEAD:candidate/p198
+      - name: Re-check exact pushed candidate directly
+        run: |
+          set -euo pipefail
+          git fetch origin candidate/p198
+          git checkout --detach origin/candidate/p198
+          test "$(git show --format= --name-only HEAD | sed '/^$/d')" = "tests/device-changes-resolution.test.js"
+          grep -A3 -B1 'pocket-node-content.js' tests/device-changes-resolution.test.js
+      - name: Install
+        run: timeout --signal=KILL 180s npm ci
+      - name: Direct device PiP ownership regression slice
+        run: |
+          set -euo pipefail
+          timeout --signal=KILL 120s node --check tests/device-changes-resolution.test.js
+          timeout --signal=KILL 360s node --test tests/device-changes-resolution.test.js
+          timeout --signal=KILL 240s node --test tests/p018-popout-isolation.test.js
+          timeout --signal=KILL 360s node --test tests/p019-vault-ownership.test.js
+      - name: Candidate remains bounded from P198a tip
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only dcc2a21e959c1d3855dc75f046bcf855d1674ecf..HEAD)" = "tests/device-changes-resolution.test.js"
