@@ -52,7 +52,7 @@ function runtime(options = {}) {
     PocketNodePopoutTarget: { getById(id) { return context.nodeMap().get(id) || null; }, get(id) { return context.nodeMap().get(id) || null; } },
     PocketNodePopoutModel: {
       buildPayload() { return {}; }, classifyNodeEditor() { return { kind: "text" }; },
-      prepareSave(node, payload) { return { ok: true, changed: true, beforeLabel: node.label, nextLabel: String(payload.title || node.label), titleChanged: String(payload.title || node.label) !== node.label, notesChanged: true, nextDetails: String(payload.body || ""), editorChanged: false }; },
+      prepareSave(node, payload) { const text = String(payload.text ?? payload.body ?? ""); return { ok: true, changed: true, beforeLabel: node.label, nextLabel: String(payload.title || node.label), titleChanged: String(payload.title || node.label) !== node.label, contentChanged: true, notesChanged: true, nextText: text, nextDetails: text, editorChanged: true, editorMeta: text ? { schema: "pocket.nodeEditor.v2", text } : null, preserveRawEditor: false }; },
     },
     __storage: storage,
   };
@@ -171,7 +171,7 @@ test("P150 captures changed PE payloads but rejects stale applies and discards a
   const before = plain(context.freezePocketStarlingOwnerWorkingSetThrough(pe.seq).operations);
   assert.equal(context.PocketNodePopoutEditor.apply(editorPayload(node, { originalUpdatedAt: "stale", body: "Rejected" }), { returnDetails: true }).ok, false);
   assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(pe.seq).operations), before);
-  context.PocketNodePopoutModel.prepareSave = (current) => ({ ok: true, changed: true, beforeLabel: current.label, nextLabel: current.label, titleChanged: false, notesChanged: false, nextDetails: "", editorChanged: true, editorMeta: { outline: Array.from({ length: 401 }, (_, index) => ({ id: String(index) })) } });
+  context.PocketNodePopoutModel.prepareSave = (current) => ({ ok: true, changed: true, beforeLabel: current.label, nextLabel: current.label, titleChanged: false, contentChanged: true, notesChanged: true, nextText: "Large canonical edit", nextDetails: "Large canonical edit", editorChanged: true, editorMeta: { schema: "pocket.nodeEditor.v2", text: "Large canonical edit" }, preserveRawEditor: false });
   context.saveLocalSafetySnapshotDurably = async () => false;
   const rollback = await context.PocketNodePopoutEditor.applyAndSave(editorPayload(node));
   assert.equal(rollback.reason, "large-outline-safety-copy-failed");
