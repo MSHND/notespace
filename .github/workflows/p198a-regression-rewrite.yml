@@ -55,7 +55,7 @@ jobs:
       - name: Retain every passing legacy test and replace retired product assumptions
         run: |
           set -euo pipefail
-          node <<'NODE'
+          cat > /tmp/p198a-rewrite.js <<'NODE'
           const fs = require('fs');
           const acorn = require('acorn');
           const file = 'tests/pe-persistence-contract.test.js';
@@ -78,132 +78,108 @@ jobs:
           }
           removals.sort((a,b)=>b.start-a.start);
           for (const r of removals) text=text.slice(0,r.start)+text.slice(r.end);
-          const replacement = String.raw`
-
-// P198a replaces retired P013 Notes/Outline-mode regression assumptions with the
-// one-document v2 contract while retaining every legacy test that still passed unchanged.
-
-test("P198a regression composition loads the shared content contract before metadata and PE owners", () => {
-  const scripts = indexScriptSources();
-  const content = scripts.indexOf("js/pocket-node-content.js");
-  assert.ok(content > scripts.indexOf("js/pocket-outline-persistence-policy.js"));
-  assert.ok(content < scripts.indexOf("js/pocket-editor-metadata.js"));
-  assert.ok(content < scripts.indexOf("js/pocket-node-popout-model.js"));
-  assert.ok(content < scripts.indexOf("js/pocket-editor-copy.js"));
-});
-
-test("P198a regression preserves a large canonical v2 document through export and normalise round-trip", () => {
-  const context = createCoreContext();
-  const text = "Header\\n" + "A".repeat(12000) + "\\n  child\\n    grandchild";
-  const prepared = context.PocketNodeContent.prepareCanonical(text);
-  assert.equal(prepared.ok, true);
-  assert.ok(prepared.details.length <= 4000);
-  const node = syntheticNode("p198a_large_v2", { details: prepared.details, editor: prepared.editor });
-  resetState(context, [node]);
-  const exported = context.buildPocketPayload("2026-09-12T00:00:00.000Z");
-  const exportedNode = exported.mainThoughtTree.find((item) => item.id === node.id);
-  assert.equal(exportedNode.editor.schema, "pocket.nodeEditor.v2");
-  assert.equal(exportedNode.editor.text, text);
-  assert.ok((exportedNode.details || "").length <= 4000);
-  const reloaded = context.normaliseInput(exported);
-  const reloadedNode = reloaded.nodes.find((item) => item.id === node.id);
-  assert.equal(reloadedNode.editor.text, text);
-  assert.equal(context.PocketNodeContent.readNode(reloadedNode).text, text);
-});
-
-test("P198a regression keeps unknown editor payloads opaque, readable and mutation-blocked", () => {
-  const context = createFullContractContext();
-  const rawEditor = { schema: "pocket.nodeEditor.v99", future: { opaque: true }, padding: "z".repeat(9000) };
-  const node = syntheticNode("p198a_unknown", { details: "Readable fallback", editor: rawEditor });
-  resetState(context, [node]);
-  const payload = editorPayload(context, node);
-  assert.equal(payload.readOnly, true);
-  assert.equal(payload.text, "Readable fallback");
-  assert.deepEqual(plain(lexicalState(context).nodes[0].editor), rawEditor);
-  const attempted = { ...payload, text: "must not apply", body: "must not apply" };
-  const result = context.PocketNodePopoutEditor.apply(attempted, { returnDetails: true });
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "unsupported-editor");
-  assert.deepEqual(plain(lexicalState(context).nodes[0].editor), rawEditor);
-});
-
-test("P198a regression enforces node revision rejection against the unified canonical document", () => {
-  const context = createFullContractContext();
-  const prepared = context.PocketNodeContent.prepareCanonical("Original\\n  child");
-  const node = syntheticNode("p198a_revision", { details: prepared.details, editor: prepared.editor });
-  resetState(context, [node]);
-  const payload = editorPayload(context, node, { text: "Edited\\n  child", body: "Edited\\n  child" });
-  lexicalState(context).nodes[0].updatedAt = "2026-01-01T00:00:00.001Z";
-  const before = plain(lexicalState(context).nodes[0]);
-  const result = context.PocketNodePopoutEditor.apply(payload, { returnDetails: true });
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, "node-revision-changed");
-  assert.deepEqual(plain(lexicalState(context).nodes[0]), before);
-});
-
-test("P198a regression proves the active in-page and Phone-owned body surface round-trips more than 4000 canonical characters without truth-file writes", () => {
-  class FakeHTMLElement {
-    constructor() { this.hidden=true; this.textContent=""; this.title=""; this.readOnly=false; this.disabled=false; this.classList={add(){},remove(){},toggle(){},contains(){return false;}}; }
-    addEventListener() {}
-    focus() {}
-    select() {}
-  }
-  class FakeInput extends FakeHTMLElement { constructor(){ super(); this.value=""; this.checked=false; } }
-  class FakeTextArea extends FakeInput {}
-  class FakeButton extends FakeHTMLElement {}
-  const elements = new Map([
-    ["detailOverlay", new FakeHTMLElement()], ["detailEditorTitle", new FakeHTMLElement()], ["detailEditorPath", new FakeHTMLElement()],
-    ["detailEditorLabel", new FakeInput()], ["detailEditorBody", new FakeTextArea()], ["detailEditorUrgent", new FakeInput()],
-    ["detailEditorCopyContext", new FakeInput()], ["btnDetailSave", new FakeButton()],
-  ]);
-  const context = createFullContractContext({
-    HTMLElement: FakeHTMLElement, HTMLInputElement: FakeInput, HTMLTextAreaElement: FakeTextArea, HTMLButtonElement: FakeButton,
-    document: { body:{classList:{add(){},remove(){},toggle(){},contains(name){return name === "phoneMode";}}}, activeElement:null, getElementById(id){return elements.get(id)||null;}, addEventListener(){} },
-  });
-  context.flashTouchedRow=()=>{}; context.persistPipSnapshot=()=>{}; context.saveLocalSafetySnapshot=()=>{}; context.clearLocalSafetySnapshot=()=>{};
-  const original = "Phone canonical start\\n" + "P".repeat(5200) + "\\n  child";
-  const prepared = context.PocketNodeContent.prepareCanonical(original);
-  const node = syntheticNode("p198a_phone_long", { label:"Phone long", details:prepared.details, editor:prepared.editor });
-  const state = resetState(context,[node]); state.selectedId=node.id;
-  context.openDetailsEditorForSelectedNode();
-  assert.equal(elements.get("detailEditorBody").value, original);
-  const edited = original + "\\n    edited descendant";
-  elements.get("detailEditorBody").value = edited;
-  context.saveDetailsEditor();
-  const saved = state.nodes[0];
-  assert.equal(saved.editor.schema, "pocket.nodeEditor.v2");
-  assert.equal(saved.editor.text, edited);
-  assert.ok((saved.details || "").length <= 4000);
-  assert.equal(context.__surfaceCalls.exportTree, 0);
-  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
-
-  const editorBeforeCancel = plain(saved.editor); const detailsBeforeCancel = saved.details;
-  state.selectedId=node.id; context.openDetailsEditorForSelectedNode();
-  elements.get("detailEditorBody").value = edited + "\\n      draft only";
-  context.stageDetailsEditorDraft();
-  assert.notDeepEqual(plain(state.nodes[0].editor), editorBeforeCancel);
-  context.closeDetailsEditor({ restoreFocus:false, revertDraft:true });
-  assert.deepEqual(plain(state.nodes[0].editor), editorBeforeCancel);
-  assert.equal(state.nodes[0].details, detailsBeforeCancel);
-  assert.equal(context.__surfaceCalls.exportTree, 0);
-  assert.equal(context.__surfaceCalls.writeTruthFile, 0);
-});
-
-test("P198a regression canonical envelope accepts ordinary long v2 text but rejects material above the shared bound", () => {
-  const context = createCoreContext();
-  const long = "L".repeat(5200) + "\\n  child";
-  const accepted = context.PocketNodeContent.prepareCanonical(long);
-  assert.equal(accepted.ok, true);
-  assert.equal(accepted.editor.text, long);
-  assert.ok(accepted.details.length <= 4000);
-  const over = "x".repeat(context.PocketNodeContent.LIMITS.canonicalBytes + 1);
-  assert.equal(context.PocketNodeContent.prepareCanonical(over).ok, false);
-});
-`;
-          text += replacement;
-          fs.writeFileSync(file,text);
+          const replacement = [
+            '',
+            '// P198a replaces retired P013 Notes/Outline-mode regression assumptions with the one-document v2 contract.',
+            'test("P198a regression composition loads the shared content contract before metadata and PE owners", () => {',
+            '  const scripts = indexScriptSources();',
+            '  const content = scripts.indexOf("js/pocket-node-content.js");',
+            '  assert.ok(content > scripts.indexOf("js/pocket-outline-persistence-policy.js"));',
+            '  assert.ok(content < scripts.indexOf("js/pocket-editor-metadata.js"));',
+            '  assert.ok(content < scripts.indexOf("js/pocket-node-popout-model.js"));',
+            '  assert.ok(content < scripts.indexOf("js/pocket-editor-copy.js"));',
+            '});',
+            '',
+            'test("P198a regression preserves a large canonical v2 document through export and normalise round-trip", () => {',
+            '  const context = createCoreContext();',
+            '  const text = "Header\\n" + "A".repeat(12000) + "\\n  child\\n    grandchild";',
+            '  const prepared = context.PocketNodeContent.prepareCanonical(text);',
+            '  assert.equal(prepared.ok, true);',
+            '  assert.ok(prepared.details.length <= 4000);',
+            '  const node = syntheticNode("p198a_large_v2", { details: prepared.details, editor: prepared.editor });',
+            '  resetState(context, [node]);',
+            '  const exported = context.buildPocketPayload("2026-09-12T00:00:00.000Z");',
+            '  const exportedNode = exported.mainThoughtTree.find((item) => item.id === node.id);',
+            '  assert.equal(exportedNode.editor.schema, "pocket.nodeEditor.v2");',
+            '  assert.equal(exportedNode.editor.text, text);',
+            '  assert.ok((exportedNode.details || "").length <= 4000);',
+            '  const reloaded = context.normaliseInput(exported);',
+            '  const reloadedNode = reloaded.nodes.find((item) => item.id === node.id);',
+            '  assert.equal(reloadedNode.editor.text, text);',
+            '  assert.equal(context.PocketNodeContent.readNode(reloadedNode).text, text);',
+            '});',
+            '',
+            'test("P198a regression keeps unknown editor payloads opaque, readable and mutation-blocked", () => {',
+            '  const context = createFullContractContext();',
+            '  const rawEditor = { schema: "pocket.nodeEditor.v99", future: { opaque: true }, padding: "z".repeat(9000) };',
+            '  const node = syntheticNode("p198a_unknown", { details: "Readable fallback", editor: rawEditor });',
+            '  resetState(context, [node]);',
+            '  const payload = editorPayload(context, node);',
+            '  assert.equal(payload.readOnly, true);',
+            '  assert.equal(payload.text, "Readable fallback");',
+            '  assert.deepEqual(plain(lexicalState(context).nodes[0].editor), rawEditor);',
+            '  const attempted = { ...payload, text: "must not apply", body: "must not apply" };',
+            '  const result = context.PocketNodePopoutEditor.apply(attempted, { returnDetails: true });',
+            '  assert.equal(result.ok, false);',
+            '  assert.equal(result.reason, "unsupported-editor");',
+            '  assert.deepEqual(plain(lexicalState(context).nodes[0].editor), rawEditor);',
+            '});',
+            '',
+            'test("P198a regression enforces node revision rejection against the unified canonical document", () => {',
+            '  const context = createFullContractContext();',
+            '  const prepared = context.PocketNodeContent.prepareCanonical("Original\\n  child");',
+            '  const node = syntheticNode("p198a_revision", { details: prepared.details, editor: prepared.editor });',
+            '  resetState(context, [node]);',
+            '  const payload = editorPayload(context, node, { text: "Edited\\n  child", body: "Edited\\n  child" });',
+            '  lexicalState(context).nodes[0].updatedAt = "2026-01-01T00:00:00.001Z";',
+            '  const before = plain(lexicalState(context).nodes[0]);',
+            '  const result = context.PocketNodePopoutEditor.apply(payload, { returnDetails: true });',
+            '  assert.equal(result.ok, false);',
+            '  assert.equal(result.reason, "node-revision-changed");',
+            '  assert.deepEqual(plain(lexicalState(context).nodes[0]), before);',
+            '});',
+            '',
+            'test("P198a regression proves the active in-page and Phone-owned body surface round-trips more than 4000 canonical characters without truth-file writes", () => {',
+            '  class FakeHTMLElement { constructor() { this.hidden=true; this.textContent=""; this.title=""; this.readOnly=false; this.disabled=false; this.classList={add(){},remove(){},toggle(){},contains(){return false;}}; } addEventListener() {} focus() {} select() {} }',
+            '  class FakeInput extends FakeHTMLElement { constructor(){ super(); this.value=""; this.checked=false; } }',
+            '  class FakeTextArea extends FakeInput {}',
+            '  class FakeButton extends FakeHTMLElement {}',
+            '  const elements = new Map([["detailOverlay",new FakeHTMLElement()],["detailEditorTitle",new FakeHTMLElement()],["detailEditorPath",new FakeHTMLElement()],["detailEditorLabel",new FakeInput()],["detailEditorBody",new FakeTextArea()],["detailEditorUrgent",new FakeInput()],["detailEditorCopyContext",new FakeInput()],["btnDetailSave",new FakeButton()]]);',
+            '  const context = createFullContractContext({ HTMLElement:FakeHTMLElement, HTMLInputElement:FakeInput, HTMLTextAreaElement:FakeTextArea, HTMLButtonElement:FakeButton, document:{ body:{classList:{add(){},remove(){},toggle(){},contains(name){return name === "phoneMode";}}}, activeElement:null, getElementById(id){return elements.get(id)||null;}, addEventListener(){} } });',
+            '  context.flashTouchedRow=()=>{}; context.persistPipSnapshot=()=>{}; context.saveLocalSafetySnapshot=()=>{}; context.clearLocalSafetySnapshot=()=>{};',
+            '  const original = "Phone canonical start\\n" + "P".repeat(5200) + "\\n  child";',
+            '  const prepared = context.PocketNodeContent.prepareCanonical(original);',
+            '  const node = syntheticNode("p198a_phone_long", { label:"Phone long", details:prepared.details, editor:prepared.editor });',
+            '  const state = resetState(context,[node]); state.selectedId=node.id;',
+            '  context.openDetailsEditorForSelectedNode();',
+            '  assert.equal(elements.get("detailEditorBody").value, original);',
+            '  const edited = original + "\\n    edited descendant";',
+            '  elements.get("detailEditorBody").value = edited;',
+            '  context.saveDetailsEditor();',
+            '  const saved = state.nodes[0];',
+            '  assert.equal(saved.editor.schema, "pocket.nodeEditor.v2");',
+            '  assert.equal(saved.editor.text, edited);',
+            '  assert.ok((saved.details || "").length <= 4000);',
+            '  assert.equal(context.__surfaceCalls.exportTree, 0);',
+            '  assert.equal(context.__surfaceCalls.writeTruthFile, 0);',
+            '});',
+            '',
+            'test("P198a regression canonical envelope accepts ordinary long v2 text but rejects material above the shared bound", () => {',
+            '  const context = createCoreContext();',
+            '  const long = "L".repeat(5200) + "\\n  child";',
+            '  const accepted = context.PocketNodeContent.prepareCanonical(long);',
+            '  assert.equal(accepted.ok, true);',
+            '  assert.equal(accepted.editor.text, long);',
+            '  assert.ok(accepted.details.length <= 4000);',
+            '  const over = "x".repeat(context.PocketNodeContent.LIMITS.canonicalBytes + 1);',
+            '  assert.equal(context.PocketNodeContent.prepareCanonical(over).ok, false);',
+            '});',
+            ''
+          ].join('\n');
+          fs.writeFileSync(file, text + replacement);
           console.log(`removed ${removals.length} failing P013-era tests; retained all non-failing tests; appended P198a replacements`);
           NODE
+          node /tmp/p198a-rewrite.js
           git diff --check
           node --check tests/pe-persistence-contract.test.js
       - name: Prove rewritten persistence suite and focused contracts
