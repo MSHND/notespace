@@ -128,9 +128,7 @@
   }
 
   function largeJsonOutlineSave(prepared, payload) {
-    return prepared.editorChanged === true
-      && Array.isArray(prepared.editorMeta?.outline)
-      && prepared.editorMeta.outline.length > 400
+    return prepared.contentChanged === true
       && payload?.sourceOwnerKind === "json"
       && global.capturePocketFileSaveSession?.()?.ownerKind === "json";
   }
@@ -265,11 +263,9 @@
     }
     const updatedAt = nextNodeUpdatedAt(currentUpdatedAt);
     if (prepared.titleChanged) node.label = prepared.nextLabel;
-    if (prepared.notesChanged) {
+    if (prepared.contentChanged) {
       if (prepared.nextDetails) node.details = prepared.nextDetails;
       else delete node.details;
-    }
-    if (prepared.editorChanged) {
       if (prepared.editorMeta) node.editor = prepared.editorMeta;
       else delete node.editor;
     }
@@ -282,10 +278,10 @@
         return rejection(
           safety.reason,
           safety.reason === "large-outline-local-file-too-large"
-            ? "This Outline would create a Pocket file that cannot be safely reopened. Nothing was changed."
+            ? "This editor document would create a Pocket file that cannot be safely reopened. Nothing was changed."
             : "Pocket could not retain a complete current safety copy for this large Outline. Nothing was changed.",
           safety.reason === "large-outline-local-file-too-large"
-            ? "Outline is too large for this Pocket file — not saved"
+            ? "Editor document is too large for this Pocket file — not saved"
             : "Large Outline safety copy failed — not saved"
         );
       }
@@ -293,8 +289,7 @@
 
     const changedSections = [];
     if (prepared.titleChanged) changedSections.push("title");
-    if (prepared.notesChanged) changedSections.push("notes");
-    if (prepared.editorChanged) changedSections.push("outline");
+    if (prepared.contentChanged) changedSections.push("content");
     const changedSection = changedSections.join("-and-");
     const operation = typeof recordOp === "function"
       ? recordOp({ type: "details_edit", id: id, path: typeof getPath === "function" ? getPath(id) : "", changed: changedSection })

@@ -410,6 +410,7 @@ function createMainPage(broker, pageId, options = {}) {
   context.window = context;
   context.globalThis = context;
   vm.createContext(context);
+  runScript(context, "js/pocket-node-content.js");
   runScript(context, "js/pocket-node-popout-template.js");
   runScript(context, "js/pocket-node-popout-runtime.js");
   runScript(context, "js/pocket-node-popout-window.js");
@@ -491,10 +492,11 @@ test("P094c keeps generated hostile external-runtime startup pending until its l
   assert.equal(popup.closed, false);
   const html = popup.html;
   assert.match(html, /<textarea id="pocketNodePopoutPayload" hidden aria-hidden="true">/);
+  assert.match(html, /<script src="\/notespace\/js\/pocket-node-content\.js"><\/script>/);
   assert.match(html, /<script src="\/notespace\/js\/pocket-node-popout-runtime\.js"><\/script>/);
   assert.doesNotMatch(html, /<script(?!\s+src=)[^>]*>/i);
-  assert.equal((html.match(/<script\b/gi) || []).length, 1);
-  assert.equal((html.match(/<\/textarea>/gi) || []).length, 2);
+  assert.equal((html.match(/<script\b/gi) || []).length, 2);
+  assert.equal((html.match(/<\/textarea>/gi) || []).length, 1);
   assert.doesNotMatch(html, /<script>window\.pwned/i);
   const identity = currentIdentity(page);
   const preReady = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(

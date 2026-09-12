@@ -35,6 +35,14 @@
     });
   }
 
+  function contentAssetUrl() {
+    try {
+      return new global.URL("js/pocket-node-content.js", global.location.href).pathname;
+    } catch (_error) {
+      return "/js/pocket-node-content.js";
+    }
+  }
+
   function runtimeAssetUrl() {
     try {
       return new global.URL("js/pocket-node-popout-runtime.js", global.location.href).pathname;
@@ -57,8 +65,10 @@
       popupOwnerToken: ownerToken,
       popupInstanceToken: popupToken
     };
+    if (!global.PocketNodeContent) throw new Error("PocketNodeContent is not loaded.");
     return global.PocketNodePopoutTemplate.render(runtimePayload, {
       htmlEscape: escape,
+      contentAssetUrl: contentAssetUrl(),
       runtimeAssetUrl: runtimeAssetUrl()
     });
   }

@@ -91,15 +91,16 @@
     if (!activeViewer) return false;
     const node = activeViewer.nodeMap.get(activeViewer.selectedId) || null;
     const label = node ? clean(node.label, 220) || "Untitled" : "Select a recovered item";
-    const details = node ? String(node.details || "").replace(/\r/g, "") : "";
-    const outline = node ? outlineText(node) : "";
+    const contentView = node ? global.PocketNodeContent?.readNode?.(node) : null;
+    const details = contentView?.text || (node ? String(node.details || "").replace(/\r/g, "") : "");
+    const outline = "";
     const labelElement = dom("vaultRecoverySelectedLabel");
     const detailsElement = dom("vaultRecoverySelectedDetails");
     const outlineSection = dom("vaultRecoverySelectedOutlineSection");
     const outlineElement = dom("vaultRecoverySelectedOutline");
     if (labelElement) labelElement.textContent = label;
     if (detailsElement) {
-      detailsElement.textContent = details || "No readable Notes.";
+      detailsElement.textContent = details || "No readable content.";
     }
     if (outlineElement) outlineElement.textContent = outline;
     if (outlineSection) outlineSection.hidden = !outline;

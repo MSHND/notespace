@@ -1,128 +1,53 @@
 /* First-class node.editor recognition and opaque JSON preservation helpers. */
-
 (function initialisePocketEditorMetadata(global) {
   "use strict";
 
-  const EDITOR_SCHEMA = "pocket.nodeEditor.v1";
   const FIRST_CLASS_NODE_FIELDS = ["editor"];
 
-  function persistencePolicy() {
-    const policy = global.PocketOutlinePersistencePolicy;
-    if (!policy || typeof policy.assessOutline !== "function") {
-      throw new Error("PocketOutlinePersistencePolicy is not loaded.");
+  function contract() {
+    if (!global.PocketNodeContent || typeof global.PocketNodeContent.classifyEditor !== "function") {
+      throw new Error("PocketNodeContent is not loaded.");
     }
-    return policy;
-  }
-
-  function clean(value, max = 80) {
-    return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
-  }
-
-  function normaliseEditorBlock(raw, index) {
-    const source = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-    const depth = Number(source.depth);
-    return {
-      id: clean(source.id, 80) || (typeof makeId === "function" ? makeId("block") : "block_" + index),
-      text: String(source.text == null ? "" : source.text).replace(/\r/g, "").slice(0, 4000),
-      depth: Number.isFinite(depth) ? Math.max(0, Math.min(8, Math.round(depth))) : 0,
-      collapsed: source.collapsed === true,
-      order: index + 1
-    };
-  }
-
-  function isMeaningfulOutline(outline) {
-    return Array.isArray(outline) && outline.some(function (block) {
-      return !!block
-        && typeof block === "object"
-        && !Array.isArray(block)
-        && (
-          String(block.text == null ? "" : block.text).trim().length > 0
-          || (Number(block.depth) || 0) > 0
-          || block.collapsed === true
-        );
-    });
+    return global.PocketNodeContent;
   }
 
   function cloneJsonCompatibleValue(value) {
     const ancestors = new Set();
-
     function clone(current) {
       if (current === null) return { ok: true, value: null };
       if (typeof current === "string" || typeof current === "boolean") return { ok: true, value: current };
-      if (typeof current === "number") {
-        return Number.isFinite(current) ? { ok: true, value: current } : { ok: false, value: undefined };
-      }
-      if (typeof current !== "object" || ancestors.has(current)) return { ok: false, value: undefined };
-
+      if (typeof current === "number") return Number.isFinite(current) ? { ok: true, value: current } : { ok: false };
+      if (typeof current !== "object" || ancestors.has(current)) return { ok: false };
       ancestors.add(current);
       const output = Array.isArray(current) ? [] : {};
-      const keys = Array.isArray(current) ? Array.from({ length: current.length }, (_unused, index) => String(index)) : Object.keys(current);
+      const keys = Array.isArray(current) ? Array.from({ length: current.length }, (_unused, i) => String(i)) : Object.keys(current);
       for (const key of keys) {
         const child = clone(current[key]);
-        if (!child.ok) {
-          ancestors.delete(current);
-          return { ok: false, value: undefined };
-        }
+        if (!child.ok) { ancestors.delete(current); return { ok: false }; }
         if (Array.isArray(output)) output.push(child.value);
         else Object.defineProperty(output, key, { value: child.value, enumerable: true, writable: true, configurable: true });
       }
       ancestors.delete(current);
       return { ok: true, value: output };
     }
-
-    try {
-      return clone(value);
-    } catch (_error) {
-      return { ok: false, value: undefined };
-    }
-  }
-
-  function normaliseSupportedEditorValue(value) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    if (value.schema !== EDITOR_SCHEMA || value.mode !== "outline" || !Array.isArray(value.outline)) return null;
-    if (!persistencePolicy().assessOutline(value.outline).ok) return null;
-    const outline = value.outline.map(normaliseEditorBlock);
-    if (!persistencePolicy().assessOutline(outline).ok) return null;
-    if (!isMeaningfulOutline(outline)) return null;
-    return { schema: EDITOR_SCHEMA, mode: "outline", outline };
-  }
-
-  function normaliseSupportedEditorMeta(value) {
-    const cloned = cloneJsonCompatibleValue(value);
-    return cloned.ok ? normaliseSupportedEditorValue(cloned.value) : null;
-  }
-
-  function editorSchemaDiagnostic(value) {
-    try {
-      if (!value || typeof value !== "object" || Array.isArray(value)) return "";
-      const schema = value.schema;
-      if (typeof schema === "string") return schema.slice(0, 80);
-      if (typeof schema === "boolean") return String(schema);
-      if (typeof schema === "number" && Number.isFinite(schema)) return String(schema).slice(0, 80);
-      if (schema === null) return "null";
-    } catch (_error) {}
-    return "";
+    try { return clone(value); } catch (_error) { return { ok: false }; }
   }
 
   function classifyEditorMeta(value, options = {}) {
-    const hasPresentOption = !!options && Object.prototype.hasOwnProperty.call(options, "present");
-    const present = hasPresentOption ? options.present === true : value !== undefined;
-    if (!present || value === null) {
-      return { kind: "none", supported: false, schema: "", normalised: null };
-    }
+    return contract().classifyEditor(value, options);
+  }
 
-    const cloned = cloneJsonCompatibleValue(value);
-    const diagnosticValue = cloned.ok ? cloned.value : value;
-    const schema = editorSchemaDiagnostic(diagnosticValue);
-    if (!cloned.ok) {
-      return { kind: "unsupported-or-malformed", supported: false, schema, normalised: null };
-    }
+  function normaliseSupportedEditorMeta(value) {
+    const classification = contract().classifyEditor(value, { present: value !== undefined });
+    return classification.supported ? classification.normalised : null;
+  }
 
-    const normalised = normaliseSupportedEditorValue(cloned.value);
-    if (!normalised) {
-      return { kind: "unsupported-or-malformed", supported: false, schema, normalised: null };
-    }
-    return { kind: "supported-v1-outline", supported: true, schema: EDITOR_SCHEMA, normalised };
+  function isMeaningfulOutline(outline) {
+    return Array.isArray(outline) && outline.some(function (block) {
+      return !!block && typeof block === "object" && !Array.isArray(block)
+        && (String(block.text == null ? "" : block.text).trim().length > 0
+          || (Number(block.depth) || 0) > 0 || block.collapsed === true);
+    });
   }
 
   function copyFirstClassNodeFields(source, target) {
@@ -138,11 +63,13 @@
 
   global.normaliseTreeEditorMeta = normaliseSupportedEditorMeta;
   global.PocketEditorMetadata = Object.freeze({
-    EDITOR_SCHEMA,
+    EDITOR_SCHEMA: contract().V1_SCHEMA,
+    EDITOR_SCHEMA_V1: contract().V1_SCHEMA,
+    EDITOR_SCHEMA_V2: contract().V2_SCHEMA,
     classifyEditorMeta,
     normaliseSupportedEditorMeta,
     isMeaningfulOutline,
     copyFirstClassNodeFields,
-    cloneJsonCompatibleValue
+    cloneJsonCompatibleValue,
   });
 })(window);

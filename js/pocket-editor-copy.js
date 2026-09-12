@@ -48,6 +48,38 @@ function toggleUnfoldAll() {
   persistPipSnapshot();
 }
 
+function currentPocketNodeContentView(node) {
+  const contract = window.PocketNodeContent;
+  if (contract && typeof contract.readNode === "function") return contract.readNode(node);
+  return { kind: "details", readOnly: false, text: normaliseDetails(node?.details, 4000) };
+}
+
+function currentPocketNodeContentText(node) {
+  return currentPocketNodeContentView(node).text || "";
+}
+
+function preparePocketNodeContentWrite(text) {
+  const contract = window.PocketNodeContent;
+  return contract && typeof contract.prepareCanonical === "function"
+    ? contract.prepareCanonical(text)
+    : { ok: true, editor: null, details: normaliseDetails(text, 4000), text: normaliseDetails(text, Number.MAX_SAFE_INTEGER) };
+}
+
+function applyPocketNodeContentWrite(node, prepared) {
+  if (!node || !prepared || prepared.ok !== true) return false;
+  if (prepared.details) node.details = prepared.details;
+  else delete node.details;
+  if (prepared.editor) node.editor = prepared.editor;
+  else delete node.editor;
+  return true;
+}
+
+function clonePocketNodeEditorValue(node) {
+  if (!node || !Object.prototype.hasOwnProperty.call(node, "editor")) return { present: false, value: undefined };
+  try { return { present: true, value: JSON.parse(JSON.stringify(node.editor)) }; }
+  catch (_error) { return { present: true, value: node.editor }; }
+}
+
 function isDetailsEditorOpen() {
   return !!state.detailsEdit.id && !(el.detailOverlay?.hidden ?? true);
 }
@@ -58,8 +90,8 @@ function hasUnsavedDetailsEditorChanges() {
   const node = nodeId ? (nodeMap().get(nodeId) || null) : null;
   const baseLabel = node ? cleanText(node.label, 220) : cleanText(state.detailsEdit.originalLabel, 220);
   const baseBody = node
-    ? composeDetailsEditorValue(node.details, node.urgent)
-    : normaliseDetails(state.detailsEdit.originalDetails, 4000);
+    ? composeDetailsEditorValue(currentPocketNodeContentText(node), node.urgent)
+    : normaliseDetails(state.detailsEdit.originalContent, Number.MAX_SAFE_INTEGER);
   const baseUrgent = node
     ? normaliseUrgentFlag(node.urgent)
     : normaliseUrgentFlag(state.detailsEdit.originalUrgent);
@@ -273,6 +305,8 @@ function restoreDetailsDraftOriginal() {
   const originalDetails = normaliseDetails(edit.originalDetails, 4000);
   if (originalDetails) node.details = originalDetails;
   else delete node.details;
+  if (edit.originalEditorPresent === true) node.editor = edit.originalEditor;
+  else delete node.editor;
   if (normaliseUrgentFlag(edit.originalUrgent)) node.urgent = true;
   else delete node.urgent;
   if (normaliseCopyContextFlag(edit.originalCopyContext)) node.copyContext = true;
@@ -319,7 +353,7 @@ function restoreDetailsDraftOriginal() {
 }
 
 function stageDetailsEditorDraft() {
-  if (!isDetailsEditorOpen()) return false;
+  if (!isDetailsEditorOpen() || state.detailsEdit.readOnly === true) return false;
   const nodeId = cleanText(state.detailsEdit.id, 80);
   const node = nodeId ? (nodeMap().get(nodeId) || null) : null;
   if (!node) return false;
@@ -346,9 +380,9 @@ function stageDetailsEditorDraft() {
     else delete node.copyContext;
     changed = true;
   }
-  if (nextDetails !== normaliseDetails(node.details, 4000)) {
-    if (nextDetails) node.details = nextDetails;
-    else delete node.details;
+  if (nextDetails !== currentPocketNodeContentText(node)) {
+    const preparedContent = preparePocketNodeContentWrite(nextDetails);
+    if (!preparedContent.ok || !applyPocketNodeContentWrite(node, preparedContent)) return false;
     changed = true;
   }
   if (!changed) {
@@ -394,6 +428,10 @@ function closeDetailsEditor(options = {}) {
     id: "",
     originalLabel: "",
     originalDetails: "",
+    originalContent: "",
+    originalEditorPresent: false,
+    originalEditor: undefined,
+    readOnly: false,
     originalUrgent: false,
     originalCopyContext: false,
     draftOpRecorded: false,
@@ -407,6 +445,9 @@ function closeDetailsEditor(options = {}) {
   if (el.detailEditorCopyContext instanceof HTMLInputElement) {
     el.detailEditorCopyContext.checked = false;
   }
+  if (el.detailEditorLabel instanceof HTMLInputElement) el.detailEditorLabel.readOnly = false;
+  if (el.detailEditorBody instanceof HTMLTextAreaElement) el.detailEditorBody.readOnly = false;
+  if (el.btnDetailSave instanceof HTMLButtonElement) el.btnDetailSave.disabled = false;
   if (options.restoreFocus === false) return;
   refocusTreeNavigation(preferredNodeId);
 }
@@ -422,10 +463,16 @@ function openDetailsEditorForSelectedNode() {
     setStatus("Selected node was not found.", "warn");
     return;
   }
+  const contentView = currentPocketNodeContentView(node);
+  const rawEditor = clonePocketNodeEditorValue(node);
   state.detailsEdit = {
     id: node.id,
     originalLabel: cleanText(node.label, 220),
     originalDetails: normaliseDetails(node.details, 4000),
+    originalContent: contentView.text || "",
+    originalEditorPresent: rawEditor.present,
+    originalEditor: rawEditor.value,
+    readOnly: contentView.readOnly === true,
     originalUrgent: normaliseUrgentFlag(node.urgent),
     originalCopyContext: normaliseCopyContextFlag(node.copyContext),
     draftOpRecorded: false,
@@ -445,7 +492,7 @@ function openDetailsEditorForSelectedNode() {
     el.detailEditorLabel.value = cleanText(node.label, 220);
   }
   if (el.detailEditorBody instanceof HTMLTextAreaElement) {
-    el.detailEditorBody.value = composeDetailsEditorValue(node.details, node.urgent);
+    el.detailEditorBody.value = composeDetailsEditorValue(contentView.text, node.urgent);
   }
   if (el.detailEditorUrgent instanceof HTMLInputElement) {
     const parsedBody = parseUrgentDetailsBody(node.details);
@@ -454,6 +501,9 @@ function openDetailsEditorForSelectedNode() {
   if (el.detailEditorCopyContext instanceof HTMLInputElement) {
     el.detailEditorCopyContext.checked = normaliseCopyContextFlag(node.copyContext);
   }
+  if (el.detailEditorLabel instanceof HTMLInputElement) el.detailEditorLabel.readOnly = contentView.readOnly === true;
+  if (el.detailEditorBody instanceof HTMLTextAreaElement) el.detailEditorBody.readOnly = contentView.readOnly === true;
+  if (el.btnDetailSave instanceof HTMLButtonElement) el.btnDetailSave.disabled = contentView.readOnly === true;
   if (el.detailOverlay instanceof HTMLElement) {
     el.detailOverlay.hidden = false;
   }
@@ -467,6 +517,10 @@ function openDetailsEditorForSelectedNode() {
 }
 
 function saveDetailsEditor() {
+  if (state.detailsEdit.readOnly === true) {
+    setStatus("Unsupported editor data — not saved", "warn");
+    return;
+  }
   const nodeId = cleanText(state.detailsEdit.id, 80);
   if (!nodeId) {
     closeDetailsEditor({ restoreFocus: true });
@@ -507,7 +561,7 @@ function saveDetailsEditor() {
   }
   const nextDetails = parsedDetails.details;
   const prevLabel = cleanText(node.label, 220);
-  const prevDetails = normaliseDetails(node.details, 4000);
+  const prevDetails = currentPocketNodeContentText(node);
   const prevUrgent = normaliseUrgentFlag(node.urgent);
   const prevCopyContext = normaliseCopyContextFlag(node.copyContext);
   const labelChanged = nextLabel !== prevLabel;
@@ -532,13 +586,17 @@ function saveDetailsEditor() {
     );
     return;
   }
+  const preparedContent = detailsChanged ? preparePocketNodeContentWrite(nextDetails) : null;
+  if (detailsChanged && (!preparedContent || preparedContent.ok !== true)) {
+    setStatus("Editor document is too large — not saved", "warn");
+    return;
+  }
   node.label = nextLabel;
   if (nextUrgent) node.urgent = true;
   else delete node.urgent;
   if (nextCopyContext) node.copyContext = true;
   else delete node.copyContext;
-  if (nextDetails) node.details = nextDetails;
-  else delete node.details;
+  if (detailsChanged) applyPocketNodeContentWrite(node, preparedContent);
   node.updatedAt = nowIso();
   let completionResult = { moved: false, bucketId: "" };
   if (canApplyCompletionMove) {
@@ -682,13 +740,14 @@ function shouldCopyOnSingleClick(node, hasKids) {
 }
 
 function copyContextPayloadForNode(node) {
-  const details = normaliseDetails(node && node.details, 4000);
+  const contentView = currentPocketNodeContentView(node);
+  const details = contentView.text || "";
   if (details) {
     return {
       text: details,
-      kind: "details",
+      kind: "content",
       preserveLines: true,
-      max: 4000,
+      max: window.PocketNodeContent?.LIMITS?.canonicalBytes || 2016384,
     };
   }
 
