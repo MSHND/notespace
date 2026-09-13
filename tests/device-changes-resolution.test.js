@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const DEVICE_CHANGES_SOURCE = "js/pocket-device-changes.js";
@@ -426,6 +427,10 @@ function createIntegrationContext(options = {}) {
     Set,
     Promise,
     Blob,
+    crypto: webcrypto,
+    TextEncoder,
+    Uint8Array,
+    ArrayBuffer,
     structuredClone: globalThis.structuredClone,
     location: { href: options.href || "https://example.test/index.html" },
     document,
@@ -2878,17 +2883,30 @@ test("a save race baselines exactly the written payload and keeps newer operatio
   let signalWriteStarted;
   const writeStarted = new Promise((resolve) => { signalWriteStarted = resolve; });
   const heldWrite = new Promise((resolve) => { releaseWrite = resolve; });
+  const initialPayload = payloadFromDocument(documentWith([
+    node("race", { label: "Before save", details: "Payload at save start" }),
+  ]));
+  let physicalText = `${JSON.stringify(initialPayload, null, 2)}\n`;
+  let pendingText = "";
   const handle = fakeHandle("race.json", {
-    async onWrite() {
+    getFile() {
+      return {
+        name: "race.json",
+        async text() { return physicalText; },
+      };
+    },
+    async onWrite(text) {
+      pendingText = text;
       signalWriteStarted();
       await heldWrite;
     },
+    async onClose() { physicalText = pendingText; },
   });
   const context = createIntegrationContext();
+  assert.equal(await context.loadFromFileHandle(handle, { displayName: handle.name }), true);
   const state = resetIntegrationState(context, [
     node("race", { label: "Before save", details: "Payload at save start" }),
   ]);
-  context.setPocketFileSession(handle, handle.name, { forceNewSession: true });
   assert.equal(context.establishPocketDocumentBaseline(
     payloadFromDocument(documentWith([node("race", { label: "Baseline", details: "Old Notes" })])),
     { schema: "portal.export.v1", fileName: handle.name, writtenAt: "2026-07-01T00:00:00.000Z" },
@@ -3046,11 +3064,19 @@ test("corrupted empty safety payloads are rejected while explicit zero-node safe
 });
 
 test("explicit Save persists deletion of the final node and clears only the covered safety state", async () => {
-  const handle = fakeHandle("empty-pocket.json");
-  const context = createUiIntegrationContext();
   const last = node("last", { label: "Last item" });
+  let physicalText = `${JSON.stringify(payloadFromDocument(documentWith([last])), null, 2)}\n`;
+  let pendingText = "";
+  const handle = fakeHandle("empty-pocket.json", {
+    getFile() {
+      return { name: "empty-pocket.json", async text() { return physicalText; } };
+    },
+    async onWrite(text) { pendingText = text; },
+    async onClose() { physicalText = pendingText; },
+  });
+  const context = createUiIntegrationContext();
+  assert.equal(await context.loadFromFileHandle(handle, { displayName: handle.name }), true);
   const state = resetIntegrationState(context, [last]);
-  context.setPocketFileSession(handle, handle.name, { forceNewSession: true });
   assert.equal(context.establishPocketDocumentBaseline(
     payloadFromDocument(documentWith([last])),
     { schema: "portal.export.v1", fileName: handle.name, writtenAt: "2026-07-01T00:00:00.000Z" },
@@ -3135,17 +3161,27 @@ test("cancelling a continued details draft during a save race retains a post-sav
   let signalWriteStarted;
   const writeStarted = new Promise((resolve) => { signalWriteStarted = resolve; });
   const heldWrite = new Promise((resolve) => { releaseWrite = resolve; });
+  const initialPayload = payloadFromDocument(documentWith([
+    node("draft", { label: "Draft item", details: "Original Notes" }),
+  ]));
+  let physicalText = `${JSON.stringify(initialPayload, null, 2)}\n`;
+  let pendingText = "";
   const handle = fakeHandle("details-race.json", {
-    async onWrite() {
+    getFile() {
+      return { name: "details-race.json", async text() { return physicalText; } };
+    },
+    async onWrite(text) {
+      pendingText = text;
       signalWriteStarted();
       await heldWrite;
     },
+    async onClose() { physicalText = pendingText; },
   });
   const context = createIntegrationContext();
+  assert.equal(await context.loadFromFileHandle(handle, { displayName: handle.name }), true);
   const state = resetIntegrationState(context, [
     node("draft", { label: "Draft item", details: "Original Notes" }),
   ]);
-  context.setPocketFileSession(handle, handle.name, { forceNewSession: true });
   assert.equal(context.establishPocketDocumentBaseline(
     payloadFromDocument(documentWith([
       node("draft", { label: "Draft item", details: "Original Notes" }),
@@ -4426,15 +4462,25 @@ test("P017: an in-flight File A save cannot fall through to a picker after File 
       throw new Error("pending File B must block a fallback save picker");
     },
   });
+  const initialPayload = payloadFromDocument(documentWith([
+    node("file_a", { label: "File A", details: "Unsaved A" }),
+  ]));
+  let permissionCalls = 0;
+  const fileAHandle = fakeHandle("file-a.json", {
+    getFile() {
+      return { name: "file-a.json", async text() { return `${JSON.stringify(initialPayload, null, 2)}\n`; } };
+    },
+    queryPermission() {
+      permissionCalls += 1;
+      return permissionCalls === 1 ? "granted" : activePermission.promise;
+    },
+    requestPermission: "denied",
+  });
+  assert.equal(await context.loadFromFileHandle(fileAHandle, { displayName: fileAHandle.name }), true);
   const state = resetIntegrationState(context, [
     node("file_a", { label: "File A", details: "Unsaved A" }),
   ], [{ type: "file-a-edit", seq: 11 }]);
   const opsBefore = plain(state.ops);
-  const fileAHandle = fakeHandle("file-a.json", {
-    queryPermission() { return activePermission.promise; },
-    requestPermission: "denied",
-  });
-  context.setPocketFileSession(fileAHandle, fileAHandle.name, { forceNewSession: true });
   const sessionBefore = context.capturePocketFileSaveSession();
   const saveAttempt = context.exportTree({ returnDetails: true });
   assert.equal(await waitFor(() => fileAHandle.calls.queryPermission === 1), true);

@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { webcrypto } = require("node:crypto");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
 const FIXTURE_DIR = path.join(__dirname, "fixtures", "pe-persistence");
@@ -135,6 +136,10 @@ function createBrowserContext(options = {}) {
     Map,
     Set,
     Promise,
+    crypto: webcrypto,
+    TextEncoder,
+    Uint8Array,
+    ArrayBuffer,
     structuredClone: globalThis.structuredClone,
     location: { href: options.href || "https://example.test/index.html" },
     console: { log() {}, info() {}, warn() {}, error() {} },
@@ -3014,16 +3019,26 @@ test("returned PiP whole-document adoption renews the editor source session", as
 
 test("document sessions renew on each successful load but not on a routine same-handle session refresh", async () => {
   const context = createFullContractContext();
-  const handle = { name: "same.json" };
+  let physicalText = "";
+  const handle = {
+    name: "same.json",
+    async getFile() {
+      return {
+        name: "same.json",
+        async text() { return physicalText; },
+      };
+    },
+  };
   const makeFile = (label) => ({
     name: "same.json",
     async text() {
-      return JSON.stringify({
+      physicalText = JSON.stringify({
         schema: "portal.export.v1",
         writtenAt: "2026-01-01T00:00:00.000Z",
         mainThoughtTree: [syntheticNode("same_handle", { label, details: label })],
         mainThoughtTreeTombstones: [],
       });
+      return physicalText;
     },
   });
 
@@ -3050,20 +3065,29 @@ test("successful write to the already active handle keeps the document session i
   const context = createFullContractContext();
   resetState(context, [syntheticNode("same_write", { details: "Write safely" })], [{ type: "same_write_change" }]);
   let writes = 0;
+  let physicalText = `${JSON.stringify(context.buildPocketPayload("2026-01-02T00:00:00.000Z"), null, 2)}\n`;
   const handle = {
     name: "same-write.json",
     async queryPermission() { return "granted"; },
+    async getFile() {
+      return {
+        name: "same-write.json",
+        async text() { return physicalText; },
+      };
+    },
     async createWritable() {
       return {
         async write(value) {
           writes += 1;
           assert.match(String(value), /"same_write"/);
+          physicalText = String(value);
         },
         async close() {},
       };
     },
   };
-  context.setPocketFileSession(handle, "same-write.json", { forceNewSession: true });
+  assert.equal(await context.loadFromFileHandle(handle, { displayName: "same-write.json" }), true);
+  lexicalState(context).ops = [{ type: "same_write_change" }];
   const beforeIdentity = plain(context.capturePocketEditorSourceIdentity());
   const saveSession = context.capturePocketFileSaveSession();
   const payload = context.buildPocketPayload("2026-01-02T00:00:00.000Z");
@@ -3640,24 +3664,39 @@ test("cancelled, stale-guard, and thrown exports adopt the applied revision and 
 
 test("queued truth write reports file-session-changed and never writes the newly active file", async () => {
   const context = createFullContractContext();
-  const state = resetState(context, [syntheticNode("queued_x", { details: "File A" })], [{ type: "queued_change" }]);
+  const initialNode = syntheticNode("queued_x", { details: "File A" });
+  resetState(context, [initialNode]);
   let releaseWrite;
   let signalWriteStarted;
   const writeStarted = new Promise((resolve) => { signalWriteStarted = resolve; });
   const holdWrite = new Promise((resolve) => { releaseWrite = resolve; });
   let writesA = 0;
   let writesB = 0;
+  let pendingA = "";
+  let physicalA = `${JSON.stringify({
+    schema: "portal.export.v1",
+    writtenAt: "2026-01-01T00:00:00.000Z",
+    mainThoughtTree: [initialNode],
+    mainThoughtTreeTombstones: [],
+  }, null, 2)}\n`;
   const handleA = {
     name: "A.json",
     async queryPermission() { return "granted"; },
+    async getFile() {
+      return {
+        name: "A.json",
+        async text() { return physicalA; },
+      };
+    },
     async createWritable() {
       return {
-        async write() {
+        async write(value) {
           writesA += 1;
+          pendingA = String(value);
           signalWriteStarted();
           await holdWrite;
         },
-        async close() {},
+        async close() { physicalA = pendingA; },
       };
     },
   };
@@ -3671,7 +3710,9 @@ test("queued truth write reports file-session-changed and never writes the newly
       };
     },
   };
-  context.setPocketFileSession(handleA, "A.json", { forceNewSession: true });
+  assert.equal(await context.loadFromFileHandle(handleA, { displayName: "A.json" }), true);
+  const state = lexicalState(context);
+  state.ops = [{ type: "queued_change" }];
   const savePromise = context.exportTree({ returnDetails: true, downloadFallback: false });
   await writeStarted;
   state.nodes = [syntheticNode("queued_x", { details: "File B" })];
@@ -3884,19 +3925,41 @@ test("P061 creation keeps the old owner intact on cancel, write failure, or adop
 
 test("successful picked and newly created truth-file targets establish new editor source identities", async () => {
   const context = createFullContractContext();
-  const state = resetState(context, [syntheticNode("save_as", { details: "Save as" })], [{ type: "save_as_change" }]);
+  const initialNode = syntheticNode("save_as", { details: "Save as" });
+  const state = resetState(context, [initialNode]);
+  let activeText = `${JSON.stringify(context.buildPocketPayload("2026-01-02T00:00:00.000Z"), null, 2)}\n`;
+  const activeHandle = {
+    name: "active.json",
+    async queryPermission() { return "granted"; },
+    async getFile() {
+      return {
+        name: "active.json",
+        async text() { return activeText; },
+      };
+    },
+  };
+  assert.equal(await context.loadFromFileHandle(activeHandle, { displayName: "active.json" }), true);
+  state.ops = [{ type: "save_as_change" }];
   const beforeIdentity = plain(context.capturePocketEditorSourceIdentity());
   let pickerCalls = 0;
   let writes = 0;
+  let pickedText = "";
   const pickedHandle = {
     name: "picked.json",
     async isSameEntry(other) { return other === this; },
     async queryPermission() { return "granted"; },
+    async getFile() {
+      return {
+        name: "picked.json",
+        async text() { return pickedText; },
+      };
+    },
     async createWritable() {
       return {
         async write(value) {
           writes += 1;
           assert.match(String(value), /"save_as"/);
+          pickedText = String(value);
         },
         async close() {},
       };
@@ -3919,15 +3982,23 @@ test("successful picked and newly created truth-file targets establish new edito
   assert.equal(state.ops.length, 0);
 
   let createdWrites = 0;
+  let createdText = "";
   const createdHandle = {
     name: "created.json",
     async isSameEntry(other) { return other === this; },
     async queryPermission() { return "granted"; },
+    async getFile() {
+      return {
+        name: "created.json",
+        async text() { return createdText; },
+      };
+    },
     async createWritable() {
       return {
         async write(value) {
           createdWrites += 1;
           assert.equal(String(value).includes('"portal.export.v1"'), true);
+          createdText = String(value);
         },
         async close() {},
       };

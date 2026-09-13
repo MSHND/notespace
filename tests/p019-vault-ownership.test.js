@@ -4489,11 +4489,14 @@ test("queued JSON Save completes before Vault adoption, so no JSON write occurs 
   const jsonHandle = createSyntheticHandle("queued-json.json", {
     writeDeferred: writeGate,
   });
+  const jsonPayload = pocketPayload({ nodes: [makeNode("queued_json")] });
+  jsonHandle.content = `${JSON.stringify(jsonPayload, null, 2)}\n`;
   installOwnerDocument(
     context,
     jsonHandle,
-    pocketPayload({ nodes: [makeNode("queued_json")] }),
+    jsonPayload,
   );
+  assert.equal(await context.loadFromFileHandle(jsonHandle, { displayName: jsonHandle.name }), true);
   lexicalState(context).nodes[0].details = "JSON change already saving";
   context.recordOp({ type: "queued-json-save" });
   const saving = context.exportTree({ returnDetails: true });
@@ -4632,11 +4635,14 @@ test("two independent pages own same-name Vaults, keys, sessions, and PE Saves i
 test("ordinary JSON, detached Save picker, and no-file gate remain intact", async () => {
   const context = createVaultContext();
   const jsonHandle = createSyntheticHandle("ordinary.json");
+  const jsonPayload = pocketPayload({ nodes: [makeNode("ordinary_json")] });
+  jsonHandle.content = `${JSON.stringify(jsonPayload, null, 2)}\n`;
   const state = installOwnerDocument(
     context,
     jsonHandle,
-    pocketPayload({ nodes: [makeNode("ordinary_json")] }),
+    jsonPayload,
   );
+  assert.equal(await context.loadFromFileHandle(jsonHandle, { displayName: jsonHandle.name }), true);
   state.nodes[0].details = "Ordinary readable JSON";
   context.recordOp({ type: "ordinary-json-save" });
   assert.equal((await context.exportTree({ returnDetails: true })).ok, true);

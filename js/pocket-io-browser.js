@@ -153,6 +153,61 @@ let pocketFilePermissionReturnFocus = null;
 let pendingPocketFilePermissionContinuation = null;
 let pendingPocketFilePermissionKind = "json";
 let pendingPocketFilePermissionCancel = null;
+let localFileContentBaseline = null;
+
+function clearLocalFileContentBaseline() {
+  localFileContentBaseline = null;
+}
+
+async function fingerprintLocalFileText(text) {
+  if (typeof text !== "string"
+      || typeof TextEncoder !== "function"
+      || typeof window.crypto?.subtle?.digest !== "function") return "";
+  try {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await window.crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  } catch {
+    return "";
+  }
+}
+
+async function readLocalFileContentFingerprint(handle) {
+  if (!handle || typeof handle.getFile !== "function") return null;
+  try {
+    const file = await handle.getFile();
+    const text = await file?.text?.();
+    const fingerprint = await fingerprintLocalFileText(text);
+    return fingerprint ? { text, fingerprint } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function establishLocalFileContentBaseline(handle, text) {
+  const fingerprint = await fingerprintLocalFileText(text);
+  if (!fingerprint
+      || !handle
+      || truthFileHandle !== handle
+      || pocketDocumentOwnerKind() !== "json") return false;
+  localFileContentBaseline = {
+    handle,
+    sessionId: pocketFileSessionId,
+    fingerprint,
+  };
+  return true;
+}
+
+function currentLocalFileContentBaseline(session, handle) {
+  const baseline = localFileContentBaseline;
+  return baseline
+    && baseline.handle === handle
+    && baseline.sessionId === session?.id
+    && typeof baseline.fingerprint === "string"
+    && baseline.fingerprint.length === 64
+    ? baseline
+    : null;
+}
 
 function pocketDocumentOwnerKind() {
   return pocketFileState().ownerKind;
@@ -378,6 +433,7 @@ function setPocketFileSession(handle, displayName, options = {}) {
     if (typeof cancelCandidate === "function") cancelCandidate("owner-changed");
   }
   truthFileHandle = nextHandle;
+  if (targetChanged || options.forceNewSession === true) clearLocalFileContentBaseline();
   session.writable = nextWritable;
   session.displayName = nextName;
   if (!routineWriteToCurrentHandle) {
@@ -422,6 +478,7 @@ function clearPocketFileSession(options = {}) {
     || !!session.vaultSessionId;
   if (session.ownerKind === "synced") window.PocketOwnerSaveBoundary?.retireSyncedOwner?.();
   truthFileHandle = null;
+  clearLocalFileContentBaseline();
   session.writable = false;
   session.displayName = "";
   session.pendingName = "";
@@ -466,6 +523,7 @@ function capturePocketFileOwnerForAdoption() {
     handle: truthFileHandle,
     sessionId: pocketFileSessionId,
     session: { ...session },
+    localFileContentBaseline,
     vaultSessionRollback: window.PocketVault?.captureActiveSessionForRollback?.() || null,
   };
 }
@@ -478,6 +536,7 @@ function restorePocketFileOwnerAfterFailedAdoption(snapshot) {
     : null;
   if (!restoredSession) return false;
   state.pocketFile = restoredSession;
+  localFileContentBaseline = snapshot.localFileContentBaseline || null;
   pocketFileSessionId = Number.isSafeInteger(snapshot.sessionId)
     ? snapshot.sessionId
     : pocketFileSessionId;
@@ -1049,7 +1108,7 @@ async function writePocketPayloadToHandle(payload, handle, options = {}) {
     }
     await writable.close();
     if (!isCurrent()) return { ok: false, reason: "file-session-changed" };
-    return { ok: true };
+    return { ok: true, data };
   } catch (err) {
     try { await writable.abort?.(); } catch {}
     throw err;
@@ -1099,13 +1158,32 @@ async function writeTruthFile(payload, options = {}) {
 
   try {
     if (activeHandle) {
-      const existingAttempt = await writePocketPayloadToHandle(payload, activeHandle);
+      if (!expectedSessionIsCurrent()) return { ok: false, reason: "file-session-changed" };
+      const baseline = currentLocalFileContentBaseline(expectedSession, activeHandle);
+      if (!baseline) return { ok: false, reason: "local-file-baseline-unavailable" };
+      const beforeWrite = await readLocalFileContentFingerprint(activeHandle);
+      if (!expectedSessionIsCurrent()) return { ok: false, reason: "file-session-changed" };
+      if (!beforeWrite) return { ok: false, reason: "local-file-baseline-unavailable" };
+      if (beforeWrite.fingerprint !== baseline.fingerprint) {
+        return { ok: false, reason: "external-file-changed" };
+      }
+      const existingAttempt = await writePocketPayloadToHandle(payload, activeHandle, {
+        isCurrent: expectedSessionIsCurrent,
+      });
       if (!expectedSessionIsCurrent()) {
         return { ok: false, reason: "file-session-changed" };
       }
       if (existingAttempt.ok) {
+        const afterWrite = await readLocalFileContentFingerprint(activeHandle);
+        if (!expectedSessionIsCurrent()) return { ok: false, reason: "file-session-changed" };
+        if (!afterWrite || afterWrite.text !== existingAttempt.data) {
+          return { ok: false, reason: "external-file-changed" };
+        }
         const name = cleanText(activeHandle.name || state.source?.fileName, 120);
         setPocketFileSession(activeHandle, name);
+        if (!await establishLocalFileContentBaseline(activeHandle, existingAttempt.data)) {
+          return { ok: false, reason: "local-file-baseline-unavailable" };
+        }
         void storeRecentPocketFileMeta(name);
         return {
           ...existingAttempt,
@@ -1116,6 +1194,7 @@ async function writeTruthFile(payload, options = {}) {
       if (isPocketFilePermissionPromptOpen()) {
         return { ok: false, reason: "file-permission-pending" };
       }
+      if (existingAttempt.reason === "file-session-changed") return existingAttempt;
       if (existingAttempt.permissionDenied) return existingAttempt;
     }
 
@@ -1130,6 +1209,9 @@ async function writeTruthFile(payload, options = {}) {
     if (pickedAttempt.ok) {
       const name = cleanText(pickedHandle.name || "pocket-data.json", 120);
       setPocketFileSession(pickedHandle, name, { forceNewSession: true });
+      if (!await establishLocalFileContentBaseline(pickedHandle, pickedAttempt.data)) {
+        return { ok: false, reason: "local-file-baseline-unavailable" };
+      }
       state.source.fileName = name;
       const adoptedIdentity = capturePocketEditorSourceIdentity();
       void storeRecentPocketFileMeta(name);
@@ -1322,7 +1404,7 @@ async function createNewPocketFile() {
         isCurrent: sourceIsCurrent,
       });
       if (!written.ok || !sourceIsCurrent()) return written;
-      return commitPreparedPocketDocument(norm, sourceInfo, {
+      const committed = await commitPreparedPocketDocument(norm, sourceInfo, {
         handle,
         displayName: name,
         ownerKind: "json",
@@ -1334,6 +1416,10 @@ async function createNewPocketFile() {
           baselinePayload: payload,
         },
       });
+      if (!committed.ok) return committed;
+      return await establishLocalFileContentBaseline(handle, written.data)
+        ? committed
+        : { ok: false, reason: "local-file-baseline-unavailable" };
     });
     if (!result.ok) {
       setStatus("Pocket could not create that file. Your current document is unchanged.", "warn", { durationMs: 7200 });
@@ -1773,6 +1859,16 @@ async function exportTree(options = {}) {
       refocusTreeNavigation(state.selectedId);
       return exportTreeResult(options, false, writeResult.reason || "synced-save-failed");
     }
+    if (writeResult.reason === "external-file-changed") {
+      setStatus("This Pocket changed elsewhere. Your changes are still here.", "warn", { durationMs: 7200 });
+      refocusTreeNavigation(state.selectedId);
+      return exportTreeResult(options, false, "external-file-changed");
+    }
+    if (writeResult.reason === "local-file-baseline-unavailable") {
+      setStatus("Pocket could not verify this file before saving. Your changes are still here.", "warn", { durationMs: 7200 });
+      refocusTreeNavigation(state.selectedId);
+      return exportTreeResult(options, false, "local-file-baseline-unavailable");
+    }
     if (options.downloadFallback === false) {
       const message = writeResult.permissionDenied
         ? "Save access denied. Use main Save to choose a writable file."
@@ -1873,6 +1969,7 @@ async function loadFromFile(file, options = {}) {
           loadedStateOptions: loadedStateOptions(extraOptions),
         });
         if (!committed.ok) return false;
+        if (!await establishLocalFileContentBaseline(pendingFileSession.handle, text)) return false;
         pendingFileSession.adoptedIdentity = committed.sourceIdentity;
         return true;
       });
