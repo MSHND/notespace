@@ -1,0 +1,81 @@
+name: P198h4 frozen multiline-paste proof
+
+on:
+  push:
+    branches:
+      - candidate/p198h4-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Exact proof-branch guard
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "292621b1a56a8e94825cc4649d6a1e898d09d503"
+          test "$(git show -s --format=%T HEAD^)" = "82794cfa60267e71283dfadc5919bf1bd703f4b1"
+          test "$(git rev-parse HEAD^^)" = "e6473d765d7496a130e48513a998089916266a75"
+          test "$(git show -s --format=%T HEAD^^)" = "44fc6bb7a8c84826c0512600c2a29c39fe86bcd2"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/p198h4-proof.yml"
+      - name: Install locked dependencies
+        run: timeout 300s npm ci
+      - name: Syntax check
+        run: timeout 30s node --check js/pocket-node-popout-runtime.js && timeout 30s node --check tests/p198h-pe-multiline-paste.test.js
+      - name: Focused P198h runtime paste regression
+        run: |
+          set -o pipefail
+          timeout 120s node --test tests/p198h-pe-multiline-paste.test.js | tee /tmp/p198h4-focused.log
+          grep -Fxq 'ℹ pass 2' /tmp/p198h4-focused.log
+          grep -Fxq 'ℹ fail 0' /tmp/p198h4-focused.log
+      - name: P198 unified PE document
+        run: |
+          set -o pipefail
+          timeout 120s node --test tests/p198-unified-pe-document.test.js | tee /tmp/p198h4-p198.log
+          grep -Fxq 'ℹ pass 27' /tmp/p198h4-p198.log
+          grep -Fxq 'ℹ fail 0' /tmp/p198h4-p198.log
+      - name: PE persistence contract
+        run: |
+          set -o pipefail
+          timeout 120s node --test tests/pe-persistence-contract.test.js | tee /tmp/p198h4-persistence.log
+          grep -Fxq 'ℹ pass 85' /tmp/p198h4-persistence.log
+          grep -Fxq 'ℹ fail 0' /tmp/p198h4-persistence.log
+      - name: P018 popout isolation
+        run: |
+          set -o pipefail
+          timeout 120s node --test tests/p018-popout-isolation.test.js | tee /tmp/p198h4-p018.log
+          grep -Fxq 'ℹ pass 20' /tmp/p198h4-p018.log
+          grep -Fxq 'ℹ fail 0' /tmp/p198h4-p018.log
+      - name: P019 vault ownership
+        run: |
+          set -o pipefail
+          timeout 180s node --test tests/p019-vault-ownership.test.js | tee /tmp/p198h4-p019.log
+          grep -Fxq 'ℹ pass 150' /tmp/p198h4-p019.log
+          grep -Fxq 'ℹ fail 0' /tmp/p198h4-p019.log
+      - name: P076 production browser boundary
+        run: |
+          set -o pipefail
+          timeout 120s node --test tests/p076-production-browser-boundary.test.js | tee /tmp/p198h4-p076.log
+          grep -Fxq 'ℹ pass 5' /tmp/p198h4-p076.log
+          grep -Fxq 'ℹ fail 0' /tmp/p198h4-p076.log
+      - name: Pocket check
+        run: timeout 300s npm run check
+      - name: Final branch discipline
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "292621b1a56a8e94825cc4649d6a1e898d09d503"
+          test "$(git show -s --format=%T HEAD^)" = "82794cfa60267e71283dfadc5919bf1bd703f4b1"
+          test "$(git rev-parse HEAD^^)" = "e6473d765d7496a130e48513a998089916266a75"
+          test "$(git show -s --format=%T HEAD^^)" = "44fc6bb7a8c84826c0512600c2a29c39fe86bcd2"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/p198h4-proof.yml"
+          test -z "$(git diff --name-only HEAD^ HEAD -- js tests)"
