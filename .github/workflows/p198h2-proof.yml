@@ -1,0 +1,55 @@
+name: P198h2 frozen multiline-paste proof
+
+on:
+  push:
+    branches:
+      - candidate/p198h2-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Exact proof-branch guard
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "292621b1a56a8e94825cc4649d6a1e898d09d503"
+          test "$(git rev-parse HEAD^\{tree\})" = "82794cfa60267e71283dfadc5919bf1bd703f4b1"
+          test "$(git rev-parse HEAD^^)" = "e6473d765d7496a130e48513a998089916266a75"
+          test "$(git rev-parse HEAD^^\{tree\})" = "44fc6bb7a8c84826c0512600c2a29c39fe86bcd2"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/p198h2-proof.yml"
+      - run: timeout 300s npm ci
+      - name: Syntax check
+        run: timeout 30s node --check js/pocket-node-popout-runtime.js && timeout 30s node --check tests/p198h-pe-multiline-paste.test.js
+      - name: Focused P198h runtime paste regression
+        run: timeout 120s node --test tests/p198h-pe-multiline-paste.test.js
+      - name: P198 unified PE document
+        run: timeout 120s node --test tests/p198-unified-pe-document.test.js
+      - name: PE persistence contract
+        run: timeout 120s node --test tests/pe-persistence-contract.test.js
+      - name: P018 popout isolation
+        run: timeout 120s node --test tests/p018-popout-isolation.test.js
+      - name: P019 vault ownership
+        run: timeout 180s node --test tests/p019-vault-ownership.test.js
+      - name: P076 production browser boundary
+        run: timeout 120s node --test tests/p076-production-browser-boundary.test.js
+      - name: Pocket check
+        run: timeout 300s npm run check
+      - name: Final branch discipline
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "292621b1a56a8e94825cc4649d6a1e898d09d503"
+          test "$(git rev-parse HEAD^\{tree\})" = "82794cfa60267e71283dfadc5919bf1bd703f4b1"
+          test "$(git rev-parse HEAD^^)" = "e6473d765d7496a130e48513a998089916266a75"
+          test "$(git rev-parse HEAD^^\{tree\})" = "44fc6bb7a8c84826c0512600c2a29c39fe86bcd2"
+          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/p198h2-proof.yml"
