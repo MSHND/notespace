@@ -1,0 +1,81 @@
+name: P199a frozen candidate proof
+
+on:
+  push:
+    branches:
+      - candidate/p199a-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify frozen authority and proof-only delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "125abeb0dffdb54223275011c06c10d481f7fe5a"
+          test "$(git show -s --format=%T HEAD^)" = "3a604e4467d6524288c548796c213c4b63dea832"
+          test "$(git rev-parse HEAD^^)" = "292621b1a56a8e94825cc4649d6a1e898d09d503"
+          test "$(git show -s --format=%T HEAD^^)" = "82794cfa60267e71283dfadc5919bf1bd703f4b1"
+          test "$(git diff --name-only HEAD^..HEAD)" = ".github/workflows/p199a-proof.yml"
+          test -z "$(git diff --name-only HEAD^..HEAD -- js tests package.json package-lock.json)"
+
+      - name: Install exact dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e 'const { spawn } = require("node:child_process"); const child = spawn("npm", ["ci"], { stdio: "inherit" }); let timedOut = false; const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 5000); }, 300000); child.on("exit", (code) => { clearTimeout(timer); process.exit(timedOut ? 124 : (code ?? 1)); });'
+
+      - name: Run ordered P199 proof and regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_with_watchdog() {
+            local seconds="$1"
+            shift
+            node -e 'const [seconds, command, ...args] = process.argv.slice(1); const child = require("node:child_process").spawn(command, args, { stdio: "inherit" }); let timedOut = false; const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 5000); }, Number(seconds) * 1000); child.on("exit", (code) => { clearTimeout(timer); process.exit(timedOut ? 124 : (code ?? 1)); });' "$seconds" "$@"
+          }
+          require_passes() {
+            local file="$1"
+            local expected="$2"
+            local log
+            log="$(mktemp)"
+            run_with_watchdog 240 node --test "$file" | tee "$log"
+            grep -Fqx "ℹ pass $expected" "$log"
+            grep -Fqx "ℹ fail 0" "$log"
+            rm -f "$log"
+          }
+          require_zero_failures() {
+            local file="$1"
+            local log
+            log="$(mktemp)"
+            run_with_watchdog 300 node --test "$file" | tee "$log"
+            grep -Fqx "ℹ fail 0" "$log"
+            rm -f "$log"
+          }
+          run_with_watchdog 60 node --check js/pocket-io-browser.js
+          run_with_watchdog 60 node --check tests/p199-local-file-stale-overwrite.test.js
+          require_passes tests/p199-local-file-stale-overwrite.test.js 3
+          require_passes tests/device-changes-resolution.test.js 78
+          require_passes tests/pe-persistence-contract.test.js 85
+          require_zero_failures tests/p019-vault-ownership.test.js
+          require_zero_failures tests/p043-owner-aware-save-boundary.test.js
+          require_zero_failures tests/p180-main-save-cutover.test.js
+          require_passes tests/p198-unified-pe-document.test.js 27
+          require_zero_failures tests/p198h-pe-multiline-paste.test.js
+          require_passes tests/p076-production-browser-boundary.test.js 5
+          run_with_watchdog 300 npm run check | tee /tmp/p199a-check.log
+          grep -Fqx "Pocket check passed" /tmp/p199a-check.log
