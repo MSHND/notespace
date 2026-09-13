@@ -1,0 +1,105 @@
+name: P199e1 frozen candidate proof
+
+on:
+  push:
+    branches:
+      - candidate/p199e1-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Exact proof-branch guard
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "a6dccc1e3ff8fd823861a6241280346d98d033e7"
+          test "$(git show -s --format=%T HEAD^)" = "3fc91125e9fa852716e2df81ad5aa7a2fa8be140"
+          test "$(git show -s --format=%H HEAD^^)" = "125abeb0dffdb54223275011c06c10d481f7fe5a"
+          test "$(git show -s --format=%T HEAD^^)" = "3a604e4467d6524288c548796c213c4b63dea832"
+          test "$(git diff --name-only HEAD^..HEAD)" = ".github/workflows/p199e1-proof.yml"
+          test "$(git diff --name-only HEAD^^..HEAD^)" = $'js/pocket-node-popout-runtime.js\ntests/p199e-pe-stale-file-conflict.test.js'
+      - name: Install locked dependencies
+        run: timeout 300s npm ci
+      - name: Syntax check changed runtime
+        run: timeout 30s node --check js/pocket-node-popout-runtime.js
+      - name: Syntax check focused test
+        run: timeout 30s node --check tests/p199e-pe-stale-file-conflict.test.js
+      - name: Focused P199e runtime proof
+        run: |
+          set -euo pipefail
+          timeout 180s node --test tests/p199e-pe-stale-file-conflict.test.js | tee /tmp/p199e1-focused.log
+          grep -Fxq 'ℹ pass 1' /tmp/p199e1-focused.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-focused.log
+      - name: P199 stale-overwrite regression
+        run: |
+          set -euo pipefail
+          timeout 180s node --test tests/p199-local-file-stale-overwrite.test.js | tee /tmp/p199e1-p199.log
+          grep -Fxq 'ℹ pass 3' /tmp/p199e1-p199.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p199.log
+      - name: P198 unified PE regression
+        run: |
+          set -euo pipefail
+          timeout 180s node --test tests/p198-unified-pe-document.test.js | tee /tmp/p199e1-p198.log
+          grep -Fxq 'ℹ pass 27' /tmp/p199e1-p198.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p198.log
+      - name: P198h multiline-paste regression
+        run: |
+          set -euo pipefail
+          timeout 120s node --test tests/p198h-pe-multiline-paste.test.js | tee /tmp/p199e1-p198h.log
+          grep -Fxq 'ℹ pass 2' /tmp/p199e1-p198h.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p198h.log
+      - name: PE persistence contract
+        run: |
+          set -euo pipefail
+          timeout 240s node --test tests/pe-persistence-contract.test.js | tee /tmp/p199e1-persistence.log
+          grep -Fxq 'ℹ pass 85' /tmp/p199e1-persistence.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-persistence.log
+      - name: P019 Vault ownership
+        run: |
+          set -euo pipefail
+          timeout 300s node --test tests/p019-vault-ownership.test.js | tee /tmp/p199e1-p019.log
+          grep -Fxq 'ℹ pass 150' /tmp/p199e1-p019.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p019.log
+      - name: P043 owner-aware save boundary
+        run: |
+          set -euo pipefail
+          timeout 180s node --test tests/p043-owner-aware-save-boundary.test.js | tee /tmp/p199e1-p043.log
+          grep -Fxq 'ℹ pass 6' /tmp/p199e1-p043.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p043.log
+      - name: P180 Main save cutover
+        run: |
+          set -euo pipefail
+          timeout 240s node --test tests/p180-main-save-cutover.test.js | tee /tmp/p199e1-p180.log
+          grep -Fxq 'ℹ pass 5' /tmp/p199e1-p180.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p180.log
+      - name: P076 production browser boundary
+        run: |
+          set -euo pipefail
+          timeout 180s node --test tests/p076-production-browser-boundary.test.js | tee /tmp/p199e1-p076.log
+          grep -Fxq 'ℹ pass 5' /tmp/p199e1-p076.log
+          grep -Fxq 'ℹ fail 0' /tmp/p199e1-p076.log
+      - name: Pocket check
+        run: |
+          set -euo pipefail
+          timeout 300s npm run check | tee /tmp/p199e1-check.log
+          grep -Fxq 'Pocket check passed' /tmp/p199e1-check.log
+      - name: Final branch discipline
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "a6dccc1e3ff8fd823861a6241280346d98d033e7"
+          test "$(git show -s --format=%T HEAD^)" = "3fc91125e9fa852716e2df81ad5aa7a2fa8be140"
+          test "$(git show -s --format=%H HEAD^^)" = "125abeb0dffdb54223275011c06c10d481f7fe5a"
+          test "$(git show -s --format=%T HEAD^^)" = "3a604e4467d6524288c548796c213c4b63dea832"
+          test "$(git diff --name-only HEAD^..HEAD)" = ".github/workflows/p199e1-proof.yml"
+          test "$(git diff --name-only HEAD^^..HEAD^)" = $'js/pocket-node-popout-runtime.js\ntests/p199e-pe-stale-file-conflict.test.js'
