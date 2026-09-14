@@ -1019,3 +1019,215 @@ test("P018 PE opening remains blocked by the existing P017 and P016 main-page ga
     assert.equal(openCalls, 0, scenario.label);
   }
 });
+
+test("P205 reuses a ready same-node PE without replacing its session or revision baseline", async () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p205_ready");
+  const original = editorPayload("p205_ready_node", {
+    body: "Original draft",
+    originalUpdatedAt: "2026-07-27T00:00:00.000Z",
+  });
+  assert.equal(page.context.PocketNodePopoutWindow.open(original), true);
+  const popup = broker.popups[0];
+  const identity = { ...popup.identity };
+  const html = popup.html;
+  const before = { ...popup.calls };
+
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_ready_node", {
+    body: "Replacement request",
+    originalUpdatedAt: "2026-07-27T00:00:09.000Z",
+  })), true);
+
+  assert.equal(broker.openCalls.length, 1);
+  assert.equal(broker.popups.length, 1);
+  assert.equal(popup.calls.documentOpen, before.documentOpen);
+  assert.equal(popup.calls.documentWrite, before.documentWrite);
+  assert.equal(popup.calls.documentClose, before.documentClose);
+  assert.equal(popup.calls.focus, before.focus + 1);
+  assert.equal(popup.html, html);
+  assert.deepEqual(popup.identity, identity);
+  assert.deepEqual(plain(currentIdentity(page)), {
+    ownerToken: identity.ownerToken,
+    popupToken: identity.popupToken,
+    targetName: popup.name,
+  });
+
+  const saved = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    { ...original, body: "Saved through original session" },
+    popup,
+  );
+  assert.equal(saved.ok, true);
+  assert.equal(page.metrics.truthWrites, 1);
+});
+
+test("P205 reuses a dirty same-node PE without replacement, discard, or implicit close", () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p205_dirty");
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_dirty_node")), true);
+  const popup = broker.popups[0];
+  popup.dirty = true;
+  const beforeFocus = popup.calls.focus;
+  const beforeWrite = popup.calls.documentWrite;
+  const beforeClose = popup.calls.close;
+  const beforeDialog = popup.calls.unsavedDialog;
+
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_dirty_node", {
+    body: "Must not replace dirty draft",
+  })), true);
+
+  assert.equal(broker.openCalls.length, 1);
+  assert.equal(broker.popups.length, 1);
+  assert.equal(popup.calls.documentWrite, beforeWrite);
+  assert.equal(popup.calls.focus, beforeFocus + 1);
+  assert.equal(popup.calls.close, beforeClose);
+  assert.equal(popup.calls.unsavedDialog, beforeDialog);
+  assert.equal(popup.dirty, true);
+  assert.equal(page.context.PocketNodePopoutWindow.hasUnsavedChanges(), true);
+});
+
+test("P205 reuses a genuine pending same-node PE and preserves its original startup session", async () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p205_pending");
+  const original = editorPayload("p205_pending_node", {
+    body: "Original pending payload",
+    sourceOwnerKind: "json",
+    sourceVaultSessionId: "",
+  });
+  let popup = null;
+  broker.nextPopup = (opener) => {
+    popup = new ExternalRuntimePopup(opener);
+    return popup;
+  };
+
+  assert.equal(page.context.PocketNodePopoutWindow.open(original), true);
+  const identity = plain(currentIdentity(page));
+  const beforeWrite = popup.calls.documentWrite;
+  const beforeOpen = popup.calls.documentOpen;
+  const beforeClose = popup.calls.documentClose;
+  assert.equal(popup.PocketNodePopoutSession, null);
+
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_pending_node", {
+    body: "Must not replace pending payload",
+    sourceOwnerKind: "json",
+    sourceVaultSessionId: "",
+  })), true);
+  assert.equal(broker.openCalls.length, 1);
+  assert.equal(broker.popups.length, 1);
+  assert.equal(popup.calls.documentOpen, beforeOpen);
+  assert.equal(popup.calls.documentWrite, beforeWrite);
+  assert.equal(popup.calls.documentClose, beforeClose);
+  assert.equal(popup.calls.focus, 1);
+
+  popup.runExternalRuntime();
+  assert.equal(popup.startupPayload.body, "Original pending payload");
+  popup.completeLifecycle();
+  assert.deepEqual(plain(popup.PocketNodePopoutSession.getIdentity()), {
+    ownerToken: identity.ownerToken,
+    popupToken: identity.popupToken,
+  });
+  const saved = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    { ...original, body: "Saved after original pending lifecycle" },
+    popup,
+  );
+  assert.equal(saved.ok, true);
+  assert.equal(page.metrics.truthWrites, 1);
+});
+
+test("P205 preserves simultaneous independent PE windows for different nodes", () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p205_different");
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_node_a")), true);
+  const first = broker.popups[0];
+  const firstIdentity = { ...first.identity };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_node_b")), true);
+  const second = broker.popups[1];
+  const secondIdentity = { ...second.identity };
+
+  assert.equal(broker.openCalls.length, 2);
+  assert.equal(broker.popups.length, 2);
+  assert.notStrictEqual(first, second);
+  assert.notEqual(firstIdentity.popupToken, secondIdentity.popupToken);
+  assert.equal(first.closed, false);
+  assert.equal(second.closed, false);
+  assert.equal(first.calls.documentWrite, 1);
+  assert.equal(second.calls.documentWrite, 1);
+});
+
+test("P205 retires closed or invalid same-node bookkeeping and permits one safe fresh PE", () => {
+  const closedBroker = createPopupBroker();
+  const closedPage = createMainPage(closedBroker, "p205_closed");
+  assert.equal(closedPage.context.PocketNodePopoutWindow.open(editorPayload("p205_closed_node")), true);
+  const closedOld = closedBroker.popups[0];
+  const closedOldToken = closedOld.identity.popupToken;
+  const closedOldWrite = closedOld.calls.documentWrite;
+  closedOld.closed = true;
+
+  assert.equal(closedPage.context.PocketNodePopoutWindow.open(editorPayload("p205_closed_node")), true);
+  const closedFresh = closedBroker.popups[1];
+  assert.equal(closedBroker.openCalls.length, 2);
+  assert.equal(closedOld.calls.close, 0);
+  assert.equal(closedOld.calls.documentWrite, closedOldWrite);
+  assert.notEqual(closedFresh.identity.popupToken, closedOldToken);
+
+  const invalidBroker = createPopupBroker();
+  const invalidPage = createMainPage(invalidBroker, "p205_invalid");
+  assert.equal(invalidPage.context.PocketNodePopoutWindow.open(editorPayload("p205_invalid_node")), true);
+  const invalidOld = invalidBroker.popups[0];
+  const invalidOldToken = invalidOld.identity.popupToken;
+  const invalidOldWrite = invalidOld.calls.documentWrite;
+  invalidOld.identity.popupToken = "tampered_popup_token";
+
+  assert.equal(invalidPage.context.PocketNodePopoutWindow.open(editorPayload("p205_invalid_node")), true);
+  const invalidFresh = invalidBroker.popups[1];
+  assert.equal(invalidBroker.openCalls.length, 2);
+  assert.equal(invalidOld.closed, false);
+  assert.equal(invalidOld.calls.close, 0);
+  assert.equal(invalidOld.calls.documentWrite, invalidOldWrite);
+  assert.notEqual(invalidFresh.identity.popupToken, invalidOldToken);
+});
+
+test("P205 same-node reuse keeps the original owner, popup token, and caller window as Save authority", async () => {
+  const broker = createPopupBroker();
+  const page = createMainPage(broker, "p205_auth");
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_auth_node")), true);
+  const popup = broker.popups[0];
+  const identity = { ...popup.identity };
+  assert.equal(page.context.PocketNodePopoutWindow.open(editorPayload("p205_auth_node")), true);
+  assert.equal(broker.openCalls.length, 1);
+
+  const wrongOwner = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    "owner_wrong",
+    identity.popupToken,
+    editorPayload("p205_auth_node"),
+    popup,
+  );
+  const wrongPopup = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    "popup_wrong",
+    editorPayload("p205_auth_node"),
+    popup,
+  );
+  const wrongCaller = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    editorPayload("p205_auth_node"),
+    {},
+  );
+  for (const rejected of [wrongOwner, wrongPopup, wrongCaller]) {
+    assert.equal(rejected.reason, "popup-session-changed");
+  }
+  assert.equal(page.metrics.truthWrites, 0);
+
+  const accepted = await page.context.PocketNodePopoutWindow.applyAndSaveFromOwnedPopup(
+    identity.ownerToken,
+    identity.popupToken,
+    editorPayload("p205_auth_node", { body: "Original session still authorised" }),
+    popup,
+  );
+  assert.equal(accepted.ok, true);
+  assert.equal(page.metrics.truthWrites, 1);
+});

@@ -30,7 +30,7 @@
   }
 
   function htmlEscape(value) {
-    return String(value || "").replace(/[&<>"]/g, function (ch) {
+    return String(value || "").replace(/[&<>\"]/g, function (ch) {
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[ch];
     });
   }
@@ -149,6 +149,23 @@
     return sessionMatches(session, record.popupToken) ? session : null;
   }
 
+  function nodeIdFromPayload(payload) {
+    return payload && typeof payload.id === "string" && payload.id
+      ? payload.id
+      : null;
+  }
+
+  function pendingPopupIsOwned(record) {
+    if (!record || !isOpen(record.window)) return false;
+    try {
+      if (record.window.opener !== global) return false;
+      const session = sessionFor(record.window);
+      return !session || sessionMatches(session, record.popupToken);
+    } catch (_error) {
+      return false;
+    }
+  }
+
   function removeStartupListener(record) {
     if (!record || !record.startupListener) return;
     try {
@@ -166,6 +183,37 @@
     if (lastOpenedPopup === record) {
       lastOpenedPopup = Array.from(livePopups).at(-1) || null;
     }
+  }
+
+  function focusPopup(record) {
+    try {
+      if (record && record.window && typeof record.window.focus === "function") record.window.focus();
+    } catch (_error) {}
+  }
+
+  function reusePopupForNode(nodeId) {
+    if (!nodeId) return false;
+    for (const record of Array.from(livePopups)) {
+      if (!record || record.nodeId !== nodeId) continue;
+      if (record.startupState === "ready") {
+        if (!ownedSession(record)) {
+          unregisterPopup(record);
+          continue;
+        }
+      } else if (record.startupState === "pending") {
+        if (!pendingPopupIsOwned(record)) {
+          unregisterPopup(record);
+          continue;
+        }
+      } else {
+        unregisterPopup(record);
+        continue;
+      }
+      lastOpenedPopup = record;
+      focusPopup(record);
+      return true;
+    }
+    return false;
   }
 
   function closeFreshPopup(record) {
@@ -304,6 +352,7 @@
       window: win,
       popupToken: popupToken,
       targetName: targetName,
+      nodeId: nodeIdFromPayload(payload),
       startupState: "pending",
       startupListener: null
     };
@@ -318,6 +367,7 @@
 
   function open(payload, helpers) {
     helpers = helpers || {};
+    if (reusePopupForNode(nodeIdFromPayload(payload))) return true;
     return openFresh(payload, helpers);
   }
 
