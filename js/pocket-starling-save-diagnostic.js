@@ -30,6 +30,15 @@ those transitions are sealed and successfully persisted.
   const DURABLE_PHASES = Object.freeze([
     "captured", "prepared", "objects-present", "cas-ambiguous", "conflict",
   ]);
+  const STAGE_ELAPSED_FIELDS = Object.freeze([
+    Object.freeze(["captured", "captured"]),
+    Object.freeze(["prepared", "prepared"]),
+    Object.freeze(["objects-present", "objectsPresent"]),
+    Object.freeze(["cas-ambiguous", "casAmbiguous"]),
+    Object.freeze(["conflict", "conflict"]),
+    Object.freeze(["remote-proved", "remoteProved"]),
+    Object.freeze(["accepted", "accepted"]),
+  ]);
   const FAILURE_CODES = Object.freeze([
     "save-failed",
     "save-input-invalid",
@@ -98,12 +107,55 @@ those transitions are sealed and successfully persisted.
     return typeof reason === "string" && FAILURE_CODES.includes(reason) ? reason : "save-failed";
   }
 
+  function freshStageElapsedMs() {
+    return {
+      captured: null,
+      prepared: null,
+      objectsPresent: null,
+      casAmbiguous: null,
+      conflict: null,
+      remoteProved: null,
+      accepted: null,
+    };
+  }
+
+  function safeStageElapsed(value) {
+    return Number.isSafeInteger(value) && value >= 0 && value <= MAX_ELAPSED_MS ? value : null;
+  }
+
+  function projectedStageElapsedMs(active) {
+    const values = active?.stageElapsedMs || {};
+    return frozen({
+      captured: safeStageElapsed(values.captured),
+      prepared: safeStageElapsed(values.prepared),
+      objectsPresent: safeStageElapsed(values.objectsPresent),
+      casAmbiguous: safeStageElapsed(values.casAmbiguous),
+      conflict: safeStageElapsed(values.conflict),
+      remoteProved: safeStageElapsed(values.remoteProved),
+      accepted: safeStageElapsed(values.accepted),
+    });
+  }
+
+  function recordFirstStageElapsed(active, stage) {
+    if (!active?.stageElapsedMs) return;
+    const entry = STAGE_ELAPSED_FIELDS.find(([name]) => name === stage);
+    if (!entry) return;
+    const field = entry[1];
+    if (active.stageElapsedMs[field] !== null) return;
+    const elapsed = boundedElapsed(active.startedAt);
+    const floor = safeStageElapsed(active.lastStageElapsedMs);
+    const value = floor === null ? elapsed : Math.max(floor, elapsed);
+    active.stageElapsedMs[field] = value;
+    active.lastStageElapsedMs = value;
+  }
+
   function projection(active, outcome, failureCode = null) {
     return frozen({
       outcome: OUTCOMES.includes(outcome) ? outcome : "failed",
       highestStage: STAGES.includes(active?.highestStage) ? active.highestStage : "pre-authority",
       failureCode: outcome === "failed" ? safeFailureCode(failureCode) : null,
-      elapsedMs: outcome === "started" ? boundedElapsed(active.startedAt) : boundedElapsed(active.startedAt),
+      elapsedMs: boundedElapsed(active.startedAt),
+      stageElapsedMs: projectedStageElapsedMs(active),
     });
   }
 
@@ -114,6 +166,7 @@ those transitions are sealed and successfully persisted.
 
   function reach(active, stage) {
     if (!active || !STAGES.includes(stage)) return;
+    recordFirstStageElapsed(active, stage);
     if (stageRank(stage) > stageRank(active.highestStage)) active.highestStage = stage;
     publish(active, "started");
   }
@@ -228,6 +281,8 @@ those transitions are sealed and successfully persisted.
           highestStage: "pre-authority",
           payload: null,
           pendingPersistStage: null,
+          stageElapsedMs: freshStageElapsedMs(),
+          lastStageElapsedMs: null,
         };
         activeRef.current = active;
         publish(active, "started");
@@ -271,6 +326,12 @@ those transitions are sealed and successfully persisted.
   });
 
   global.PocketStarlingSaveDiagnostic = frozen({
-    getLatest() { return latest ? frozen({ ...latest }) : null; },
+    getLatest() {
+      if (!latest) return null;
+      return frozen({
+        ...latest,
+        stageElapsedMs: frozen({ ...latest.stageElapsedMs }),
+      });
+    },
   });
 })(typeof window !== "undefined" ? window : globalThis);
