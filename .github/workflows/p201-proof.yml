@@ -1,0 +1,19 @@
+name: P201 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p201-proof
+
+jobs:
+  p201-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 120s npm ci
+      - run: timeout 120s node --test tests/p190-starling-save-observability-and-reentry.test.js
+      - run: timeout 120s npm run check
