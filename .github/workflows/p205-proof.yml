@@ -1,0 +1,21 @@
+name: P205 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p205-proof
+
+jobs:
+  p205-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 19483f130f0b267aeeb6918b62eb6040f79dd149
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 120s npm ci
+      - run: timeout 120s node --test tests/p018-popout-isolation.test.js
+      - run: timeout 120s npm run check
