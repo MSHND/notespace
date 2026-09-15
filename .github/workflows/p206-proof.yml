@@ -1,0 +1,17 @@
+name: P206 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p206-proof
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: timeout 180s node --test tests/p190-starling-save-observability-and-reentry.test.js tests/p206-starling-save-detail-observability.test.js
