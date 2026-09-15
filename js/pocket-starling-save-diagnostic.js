@@ -4,7 +4,8 @@ This wrapper is observational only. It never changes Save authority, persistence
 ordering, remote writes, retry behaviour, dirty semantics or durable owner-state
 shape. It remembers only a fixed safe projection of the latest Save and derives
 Starling durable phases from the already-accepted owner-state transitions as
-those transitions are sealed and successfully persisted.
+those transitions are sealed and successfully persisted. P206 adds only bounded
+substage timing around already-existing steady-Starling operations.
 */
 (function initialisePocketStarlingSaveDiagnostic(global) {
   "use strict";
@@ -38,6 +39,17 @@ those transitions are sealed and successfully persisted.
     Object.freeze(["conflict", "conflict"]),
     Object.freeze(["remote-proved", "remoteProved"]),
     Object.freeze(["accepted", "accepted"]),
+  ]);
+  const DETAIL_ELAPSED_FIELDS = Object.freeze([
+    "sourceAccepted",
+    "prepareSourceAccepted",
+    "workingSetPrepared",
+    "descriptorPrepared",
+    "objectsEnsured",
+    "headCommitted",
+    "proofOpened",
+    "proofMaterialized",
+    "proofVerified",
   ]);
   const FAILURE_CODES = Object.freeze([
     "save-failed",
@@ -75,6 +87,7 @@ those transitions are sealed and successfully persisted.
 
   let latest = null;
   let serial = 0;
+  let currentDetailActive = null;
 
   function isObject(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
@@ -119,20 +132,49 @@ those transitions are sealed and successfully persisted.
     };
   }
 
-  function safeStageElapsed(value) {
+  function freshDetailElapsedMs() {
+    return {
+      sourceAccepted: null,
+      prepareSourceAccepted: null,
+      workingSetPrepared: null,
+      descriptorPrepared: null,
+      objectsEnsured: null,
+      headCommitted: null,
+      proofOpened: null,
+      proofMaterialized: null,
+      proofVerified: null,
+    };
+  }
+
+  function safeElapsed(value) {
     return Number.isSafeInteger(value) && value >= 0 && value <= MAX_ELAPSED_MS ? value : null;
   }
 
   function projectedStageElapsedMs(active) {
     const values = active?.stageElapsedMs || {};
     return frozen({
-      captured: safeStageElapsed(values.captured),
-      prepared: safeStageElapsed(values.prepared),
-      objectsPresent: safeStageElapsed(values.objectsPresent),
-      casAmbiguous: safeStageElapsed(values.casAmbiguous),
-      conflict: safeStageElapsed(values.conflict),
-      remoteProved: safeStageElapsed(values.remoteProved),
-      accepted: safeStageElapsed(values.accepted),
+      captured: safeElapsed(values.captured),
+      prepared: safeElapsed(values.prepared),
+      objectsPresent: safeElapsed(values.objectsPresent),
+      casAmbiguous: safeElapsed(values.casAmbiguous),
+      conflict: safeElapsed(values.conflict),
+      remoteProved: safeElapsed(values.remoteProved),
+      accepted: safeElapsed(values.accepted),
+    });
+  }
+
+  function projectedDetailElapsedMs(active) {
+    const values = active?.detailElapsedMs || {};
+    return frozen({
+      sourceAccepted: safeElapsed(values.sourceAccepted),
+      prepareSourceAccepted: safeElapsed(values.prepareSourceAccepted),
+      workingSetPrepared: safeElapsed(values.workingSetPrepared),
+      descriptorPrepared: safeElapsed(values.descriptorPrepared),
+      objectsEnsured: safeElapsed(values.objectsEnsured),
+      headCommitted: safeElapsed(values.headCommitted),
+      proofOpened: safeElapsed(values.proofOpened),
+      proofMaterialized: safeElapsed(values.proofMaterialized),
+      proofVerified: safeElapsed(values.proofVerified),
     });
   }
 
@@ -143,7 +185,7 @@ those transitions are sealed and successfully persisted.
     const field = entry[1];
     if (active.stageElapsedMs[field] !== null) return;
     const elapsed = boundedElapsed(active.startedAt);
-    const floor = safeStageElapsed(active.lastStageElapsedMs);
+    const floor = safeElapsed(active.lastStageElapsedMs);
     const value = floor === null ? elapsed : Math.max(floor, elapsed);
     active.stageElapsedMs[field] = value;
     active.lastStageElapsedMs = value;
@@ -156,6 +198,7 @@ those transitions are sealed and successfully persisted.
       failureCode: outcome === "failed" ? safeFailureCode(failureCode) : null,
       elapsedMs: boundedElapsed(active.startedAt),
       stageElapsedMs: projectedStageElapsedMs(active),
+      detailElapsedMs: projectedDetailElapsedMs(active),
     });
   }
 
@@ -164,12 +207,183 @@ those transitions are sealed and successfully persisted.
     latest = projection(active, outcome, failureCode);
   }
 
+  function detailPredecessor(name) {
+    const index = DETAIL_ELAPSED_FIELDS.indexOf(name);
+    return index > 0 ? DETAIL_ELAPSED_FIELDS[index - 1] : null;
+  }
+
+  function recordFirstDetailElapsed(active, name) {
+    if (!active || currentDetailActive !== active || !active.detailElapsedMs
+        || !DETAIL_ELAPSED_FIELDS.includes(name) || active.detailElapsedMs[name] !== null) return;
+    const predecessor = detailPredecessor(name);
+    if (predecessor && active.detailElapsedMs[predecessor] === null) return;
+    const elapsed = boundedElapsed(active.startedAt);
+    const floor = safeElapsed(active.lastDetailElapsedMs);
+    const value = floor === null ? elapsed : Math.max(floor, elapsed);
+    active.detailElapsedMs[name] = value;
+    active.lastDetailElapsedMs = value;
+    publish(active, "started");
+  }
+
+  function safelyRecordDetail(active, name) {
+    try { recordFirstDetailElapsed(active, name); }
+    catch (_error) {}
+  }
+
   function reach(active, stage) {
     if (!active || !STAGES.includes(stage)) return;
     recordFirstStageElapsed(active, stage);
     if (stageRank(stage) > stageRank(active.highestStage)) active.highestStage = stage;
     publish(active, "started");
   }
+
+  function sameObservedHead(left, right) {
+    return isObject(left) && isObject(right)
+      && left.schema === right.schema && left.revision === right.revision && left.sealRef === right.sealRef;
+  }
+
+  function installRemoteOpenDetailObserver() {
+    const base = global.PocketStarlingRemoteOpenShadow;
+    if (!isObject(base) || typeof base.createRemoteOpener !== "function") return;
+    try {
+      global.PocketStarlingRemoteOpenShadow = frozen({
+        ...base,
+        createRemoteOpener(...args) {
+          const opener = base.createRemoteOpener.apply(base, args);
+          if (!isObject(opener) || typeof opener.openRemote !== "function") return opener;
+          return frozen({
+            ...opener,
+            async openRemote(...openArgs) {
+              const active = currentDetailActive;
+              const result = await opener.openRemote.apply(opener, openArgs);
+              try {
+                if (!active || result?.outcome !== "opened" || !result.session || active.payload === null) {
+                  return result;
+                }
+                if (active.detailElapsedMs?.headCommitted !== null) {
+                  safelyRecordDetail(active, "proofOpened");
+                } else if (active.stageElapsedMs?.captured === null) {
+                  safelyRecordDetail(active, "sourceAccepted");
+                } else if (active.stageElapsedMs?.prepared === null) {
+                  safelyRecordDetail(active, "prepareSourceAccepted");
+                }
+              } catch (_error) {}
+              return result;
+            },
+          });
+        },
+      });
+    } catch (_error) {}
+  }
+
+  function installRemoteEditDetailObserver() {
+    const base = global.PocketStarlingRemoteEditShadow;
+    if (!isObject(base) || typeof base.createEditor !== "function") return;
+    try {
+      global.PocketStarlingRemoteEditShadow = frozen({
+        ...base,
+        async createEditor(...args) {
+          const editor = await base.createEditor.apply(base, args);
+          if (!isObject(editor) || typeof editor.prepareWorkingSet !== "function") return editor;
+          return frozen({
+            ...editor,
+            async prepareWorkingSet(...prepareArgs) {
+              const active = currentDetailActive;
+              const result = await editor.prepareWorkingSet.apply(editor, prepareArgs);
+              try {
+                if (active && result?.outcome === "prepared"
+                    && active.detailElapsedMs?.prepareSourceAccepted !== null) {
+                  safelyRecordDetail(active, "workingSetPrepared");
+                }
+              } catch (_error) {}
+              return result;
+            },
+          });
+        },
+      });
+    } catch (_error) {}
+  }
+
+  function installPublicationDetailObserver() {
+    const base = global.PocketStarlingDurablePublication;
+    if (!isObject(base) || typeof base.descriptorFromPrepared !== "function"
+        || typeof base.createCoordinator !== "function") return;
+    try {
+      global.PocketStarlingDurablePublication = frozen({
+        ...base,
+        descriptorFromPrepared(...args) {
+          const active = currentDetailActive;
+          const descriptor = base.descriptorFromPrepared.apply(base, args);
+          try {
+            const prepared = args[0];
+            if (active && descriptor && prepared?.outcome === "prepared"
+                && active.detailElapsedMs?.workingSetPrepared !== null
+                && sameObservedHead(descriptor.expectedHead, prepared.expectedHead)) {
+              safelyRecordDetail(active, "descriptorPrepared");
+            }
+          } catch (_error) {}
+          return descriptor;
+        },
+        createCoordinator(...args) {
+          const coordinator = base.createCoordinator.apply(base, args);
+          if (!isObject(coordinator)) return coordinator;
+          const wrapped = { ...coordinator };
+          if (typeof coordinator.ensureObjects === "function") {
+            wrapped.ensureObjects = async function ensureObjects(...ensureArgs) {
+              const active = currentDetailActive;
+              const result = await coordinator.ensureObjects.apply(coordinator, ensureArgs);
+              try {
+                if (active && active.detailElapsedMs?.descriptorPrepared !== null) {
+                  safelyRecordDetail(active, "objectsEnsured");
+                }
+              } catch (_error) {}
+              return result;
+            };
+          }
+          if (typeof coordinator.attemptHead === "function") {
+            wrapped.attemptHead = async function attemptHead(...headArgs) {
+              const active = currentDetailActive;
+              const result = await coordinator.attemptHead.apply(coordinator, headArgs);
+              try {
+                if (active && result?.outcome === "committed"
+                    && active.detailElapsedMs?.objectsEnsured !== null) {
+                  safelyRecordDetail(active, "headCommitted");
+                }
+              } catch (_error) {}
+              return result;
+            };
+          }
+          return frozen(wrapped);
+        },
+      });
+    } catch (_error) {}
+  }
+
+  function installMaterializeDetailObserver() {
+    const base = global.PocketStarlingMaterializeShadow;
+    if (!isObject(base) || typeof base.materializeAccepted !== "function") return;
+    try {
+      global.PocketStarlingMaterializeShadow = frozen({
+        ...base,
+        async materializeAccepted(...args) {
+          const active = currentDetailActive;
+          const result = await base.materializeAccepted.apply(base, args);
+          try {
+            if (active && result?.ok === true && result.document
+                && active.detailElapsedMs?.proofOpened !== null) {
+              safelyRecordDetail(active, "proofMaterialized");
+            }
+          } catch (_error) {}
+          return result;
+        },
+      });
+    } catch (_error) {}
+  }
+
+  installRemoteOpenDetailObserver();
+  installRemoteEditDetailObserver();
+  installPublicationDetailObserver();
+  installMaterializeDetailObserver();
 
   function currentPreparationExists(active) {
     if (!active?.payload) return false;
@@ -211,7 +425,10 @@ those transitions are sealed and successfully persisted.
         const active = activeRef.current;
         const marker = durableMarker(active, args[0]);
         if (active && marker) {
-          if (marker === "accepted") reach(active, "remote-proved");
+          if (marker === "accepted") {
+            safelyRecordDetail(active, "proofVerified");
+            reach(active, "remote-proved");
+          }
           active.pendingPersistStage = marker;
         }
         try { return await crypto.sealContent(...args); }
@@ -283,8 +500,11 @@ those transitions are sealed and successfully persisted.
           pendingPersistStage: null,
           stageElapsedMs: freshStageElapsedMs(),
           lastStageElapsedMs: null,
+          detailElapsedMs: freshDetailElapsedMs(),
+          lastDetailElapsedMs: null,
         };
         activeRef.current = active;
+        currentDetailActive = active;
         publish(active, "started");
         const wrappedInput = input && typeof input.freezePayload === "function"
           ? {
@@ -309,6 +529,7 @@ those transitions are sealed and successfully persisted.
           active.payload = null;
           active.pendingPersistStage = null;
           if (activeRef.current === active) activeRef.current = null;
+          if (currentDetailActive === active) currentDetailActive = null;
         }
       },
     });
@@ -331,6 +552,7 @@ those transitions are sealed and successfully persisted.
       return frozen({
         ...latest,
         stageElapsedMs: frozen({ ...latest.stageElapsedMs }),
+        detailElapsedMs: frozen({ ...latest.detailElapsedMs }),
       });
     },
   });

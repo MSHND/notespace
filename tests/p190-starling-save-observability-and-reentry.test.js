@@ -22,6 +22,17 @@ const STAGE_ELAPSED_KEYS = Object.freeze([
   "remoteProved",
   "accepted",
 ]);
+const DETAIL_ELAPSED_KEYS = Object.freeze([
+  "sourceAccepted",
+  "prepareSourceAccepted",
+  "workingSetPrepared",
+  "descriptorPrepared",
+  "objectsEnsured",
+  "headCommitted",
+  "proofOpened",
+  "proofMaterialized",
+  "proofVerified",
+]);
 
 const source = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
 const plain = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
@@ -38,10 +49,33 @@ function nullStageElapsedMs() {
   };
 }
 
+function nullDetailElapsedMs() {
+  return {
+    sourceAccepted: null,
+    prepareSourceAccepted: null,
+    workingSetPrepared: null,
+    descriptorPrepared: null,
+    objectsEnsured: null,
+    headCommitted: null,
+    proofOpened: null,
+    proofMaterialized: null,
+    proofVerified: null,
+  };
+}
+
 function assertStageElapsedShape(diagnostic) {
   assert.deepEqual(Object.keys(diagnostic.stageElapsedMs), STAGE_ELAPSED_KEYS);
   assert.equal(Object.isFrozen(diagnostic.stageElapsedMs), true);
   Object.values(diagnostic.stageElapsedMs).forEach((value) => {
+    assert.ok(value === null || (Number.isSafeInteger(value) && value >= 0 && value <= 86400000));
+    if (value !== null) assert.ok(value <= diagnostic.elapsedMs);
+  });
+}
+
+function assertDetailElapsedShape(diagnostic) {
+  assert.deepEqual(Object.keys(diagnostic.detailElapsedMs), DETAIL_ELAPSED_KEYS);
+  assert.equal(Object.isFrozen(diagnostic.detailElapsedMs), true);
+  Object.values(diagnostic.detailElapsedMs).forEach((value) => {
     assert.ok(value === null || (Number.isSafeInteger(value) && value >= 0 && value <= 86400000));
     if (value !== null) assert.ok(value <= diagnostic.elapsedMs);
   });
@@ -175,7 +209,7 @@ test("P190 production-shaped ordinary post-reentry Main Save advances H2 to remo
 
   const diagnostic = h.context.PocketStarlingSaveDiagnostic.getLatest();
   assert.deepEqual(Object.keys(diagnostic).sort(), [
-    "elapsedMs", "failureCode", "highestStage", "outcome", "stageElapsedMs",
+    "detailElapsedMs", "elapsedMs", "failureCode", "highestStage", "outcome", "stageElapsedMs",
   ]);
   assert.equal(diagnostic.outcome, "accepted");
   assert.equal(diagnostic.highestStage, "accepted",
@@ -184,9 +218,14 @@ test("P190 production-shaped ordinary post-reentry Main Save advances H2 to remo
   assert.equal(Number.isSafeInteger(diagnostic.elapsedMs), true);
   assert.ok(diagnostic.elapsedMs >= 0 && diagnostic.elapsedMs <= 86400000);
   assertStageElapsedShape(diagnostic);
+  assertDetailElapsedShape(diagnostic);
   assert.deepEqual(
     STAGE_ELAPSED_KEYS.filter((key) => diagnostic.stageElapsedMs[key] !== null),
     ["captured", "prepared", "objectsPresent", "casAmbiguous", "remoteProved", "accepted"],
+  );
+  assert.deepEqual(
+    DETAIL_ELAPSED_KEYS.filter((key) => diagnostic.detailElapsedMs[key] !== null),
+    DETAIL_ELAPSED_KEYS,
   );
   const reachedStageTimes = STAGE_ELAPSED_KEYS
     .map((key) => diagnostic.stageElapsedMs[key])
@@ -194,13 +233,20 @@ test("P190 production-shaped ordinary post-reentry Main Save advances H2 to remo
   reachedStageTimes.forEach((value, index) => {
     if (index > 0) assert.ok(value >= reachedStageTimes[index - 1]);
   });
+  const reachedDetailTimes = DETAIL_ELAPSED_KEYS.map((key) => diagnostic.detailElapsedMs[key]);
+  reachedDetailTimes.forEach((value, index) => {
+    if (index > 0) assert.ok(value >= reachedDetailTimes[index - 1]);
+  });
   assert.equal(Object.isFrozen(diagnostic), true);
   const diagnosticAgain = h.context.PocketStarlingSaveDiagnostic.getLatest();
   assert.notEqual(diagnosticAgain, diagnostic,
     "each diagnostic read must be a fresh frozen copy");
   assert.notEqual(diagnosticAgain.stageElapsedMs, diagnostic.stageElapsedMs,
     "each stage timing projection must also be a fresh frozen copy");
+  assert.notEqual(diagnosticAgain.detailElapsedMs, diagnostic.detailElapsedMs,
+    "each detail timing projection must also be a fresh frozen copy");
   assert.equal(Object.isFrozen(diagnosticAgain.stageElapsedMs), true);
+  assert.equal(Object.isFrozen(diagnosticAgain.detailElapsedMs), true);
   assert.equal(JSON.stringify(diagnostic).includes(SECRET), false);
   assert.ok(elapsedMs >= 0 && elapsedMs < TIMEOUT, "bounded elapsed timing is evidence only, not a performance target");
 });
@@ -233,8 +279,10 @@ test("P190 production-shaped early private-owner failure stays dirty, performs n
     outcome: "failed", highestStage: "authority-read",
     failureCode: "authority-owner-state-unavailable", elapsedMs: diagnostic.elapsedMs,
     stageElapsedMs: nullStageElapsedMs(),
+    detailElapsedMs: nullDetailElapsedMs(),
   });
   assertStageElapsedShape(diagnostic);
+  assertDetailElapsedShape(diagnostic);
   assert.equal(Object.isFrozen(diagnostic), true);
   assert.equal(JSON.stringify(diagnostic).includes(syncedPocketId), false,
     "latest-Save projection must not expose synced Pocket locators");
@@ -323,7 +371,9 @@ test("P201 deterministic stage timing records first successful reach only and re
     remoteProved: 11,
     accepted: 13,
   });
+  assert.deepEqual(plain(diagnostic.detailElapsedMs), nullDetailElapsedMs());
   assertStageElapsedShape(diagnostic);
+  assertDetailElapsedShape(diagnostic);
   const reached = [
     diagnostic.stageElapsedMs.captured,
     diagnostic.stageElapsedMs.prepared,
@@ -355,7 +405,9 @@ test("P190 diagnostic retains only the highest successfully durable captured pha
   assert.equal(diagnostic.stageElapsedMs.conflict, null);
   assert.equal(diagnostic.stageElapsedMs.remoteProved, null);
   assert.equal(diagnostic.stageElapsedMs.accepted, null);
+  assert.deepEqual(plain(diagnostic.detailElapsedMs), nullDetailElapsedMs());
   assertStageElapsedShape(diagnostic);
+  assertDetailElapsedShape(diagnostic);
   assert.equal(JSON.stringify(diagnostic).includes(SECRET), false);
 });
 
@@ -377,7 +429,9 @@ test("P190 conflict diagnostic remains failed at conflict and never self-promote
     remoteProved: null,
     accepted: null,
   });
+  assert.deepEqual(plain(diagnostic.detailElapsedMs), nullDetailElapsedMs());
   assertStageElapsedShape(diagnostic);
+  assertDetailElapsedShape(diagnostic);
 });
 
 test("P190 diagnostic maps unknown/private failure material to one fixed generic code and returns copy-safe frozen projections", { timeout: 5000 }, async () => {
@@ -392,10 +446,13 @@ test("P190 diagnostic maps unknown/private failure material to one fixed generic
   assert.equal(Object.isFrozen(second), true);
   assert.notEqual(first, second);
   assert.notEqual(first.stageElapsedMs, second.stageElapsedMs);
+  assert.notEqual(first.detailElapsedMs, second.detailElapsedMs);
   assert.deepEqual(plain(first.stageElapsedMs), nullStageElapsedMs());
+  assert.deepEqual(plain(first.detailElapsedMs), nullDetailElapsedMs());
   assertStageElapsedShape(first);
+  assertDetailElapsedShape(first);
   assert.equal(JSON.stringify(first).includes(SECRET), false);
   assert.deepEqual(Object.keys(first).sort(), [
-    "elapsedMs", "failureCode", "highestStage", "outcome", "stageElapsedMs",
+    "detailElapsedMs", "elapsedMs", "failureCode", "highestStage", "outcome", "stageElapsedMs",
   ]);
 });
