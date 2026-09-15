@@ -27,7 +27,7 @@
     return {
       types: [{
         description: "Pocket file",
-        accept: { "application/json": [".json", ".vault"] },
+        accept: { "application/json": [".json", ".pocket", ".vault"] },
       }],
       multiple: false,
     };
