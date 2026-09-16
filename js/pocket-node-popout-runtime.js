@@ -118,6 +118,16 @@
       var id = lines[index].id; var transformed = content.moveSubtree(lines, index, direction); if (!transformed || transformed.ok !== true) return false;
       lines = transformed.lines; markMutation(); render(id); return true;
     }
+    function removeEmptyLine(index) {
+      if (readOnly || index < 0 || lines.length <= 1 || typeof content.removeEmptyLine !== "function") return false;
+      var removedId = lines[index].id;
+      var preferredId = index > 0 ? lines[index - 1].id : "";
+      var transformed = content.removeEmptyLine(lines, index); if (!transformed || transformed.ok !== true) return false;
+      lines = transformed.lines; collapsed.delete(removedId);
+      if (!preferredId && lines[0]) preferredId = lines[0].id;
+      selectedId = preferredId || "";
+      markMutation(); render(selectedId); return true;
+    }
     function moveBranchBefore(sourceId, targetId) {
       var source = lineIndex(sourceId), target = lineIndex(targetId); if (readOnly || source < 0 || target < 0 || source === target) return false;
       var end = subtreeEnd(source); if (target > source && target < end) return false; var branch = lines.splice(source, end - source); if (target > source) target -= branch.length;
@@ -155,7 +165,7 @@
     pane.addEventListener("input", function (ev) { var target = ev.target?.closest?.(".lineText[data-line-id]") || ev.target; var index = syncLineElement(target); if (index >= 0) { selectedId = lines[index].id; markMutation(); } });
     pane.addEventListener("paste", function (ev) { var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return; ev.preventDefault(); var id=text.getAttribute("data-line-id")||"", index=lineIndex(id); if(index<0 || lineElement(id)!==text) return; var clipboard=ev.clipboardData, plainText=clipboard&&typeof clipboard.getData==="function"?clipboard.getData("text/plain"):null; if(typeof plainText!=="string") return; if(ingestPlainTextPaste(index,text,plainText)) selectedId=lines[Math.min(index,lines.length-1)].id; });
     pane.addEventListener("click", function (ev) { var gutter = ev.target?.closest?.(".lineGutter[data-line-id]"); if (gutter) { var gi=lineIndex(gutter.getAttribute("data-line-id")||""); if (gi>=0 && hasChildren(gi)) { ev.preventDefault(); toggleBranch(gi); } return; } var text=ev.target?.closest?.(".lineText[data-line-id]"); if (text) selectedId=text.getAttribute("data-line-id")||selectedId; });
-    pane.addEventListener("keydown", function (ev) { var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return; var index=syncLineElement(text); if(index<0)return; selectedId=lines[index].id; if(ev.key==="Enter"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){ev.preventDefault();insertAfter(index);return;} if(ev.key==="Tab"){ev.preventDefault();indentBranch(index,ev.shiftKey?-1:1);return;} if((ev.metaKey||ev.ctrlKey)&&!ev.shiftKey&&!ev.altKey&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){ev.preventDefault();moveBranch(index,ev.key==="ArrowUp"?"up":"down");return;} });
+    pane.addEventListener("keydown", function (ev) { var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return; var index=syncLineElement(text); if(index<0)return; selectedId=lines[index].id; if(ev.key==="Backspace"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey&&lines[index].content===""&&lines.length>1&&lineElement(lines[index].id)===text){if(removeEmptyLine(index))ev.preventDefault();return;} if(ev.key==="Enter"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){ev.preventDefault();insertAfter(index);return;} if(ev.key==="Tab"){ev.preventDefault();indentBranch(index,ev.shiftKey?-1:1);return;} if((ev.metaKey||ev.ctrlKey)&&!ev.shiftKey&&!ev.altKey&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){ev.preventDefault();moveBranch(index,ev.key==="ArrowUp"?"up":"down");return;} });
     pane.addEventListener("dragstart", function(ev){var gutter=ev.target?.closest?.(".lineGutter[data-line-id]"); if(!gutter||readOnly)return; dragSourceId=gutter.getAttribute("data-line-id")||""; try{ev.dataTransfer?.setData?.("text/plain",dragSourceId);}catch(_error){} });
     pane.addEventListener("dragover", function(ev){if(dragSourceId)ev.preventDefault();});
     pane.addEventListener("drop", function(ev){if(!dragSourceId)return;var row=ev.target?.closest?.(".docRow[data-line-id]");var target=row?.getAttribute?.("data-line-id")||"";ev.preventDefault();if(target)moveBranchBefore(dragSourceId,target);dragSourceId="";});
