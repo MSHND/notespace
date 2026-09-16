@@ -62,12 +62,12 @@
       var text = document.createElement("div"); text.className = "lineText"; text.setAttribute("data-line-id", line.id); text.contentEditable = readOnly ? "false" : "true"; text.spellcheck = true; text.textContent = line.content;
       row.appendChild(gutter); row.appendChild(text); return row;
     }
-    function render(preferredId) {
+    function render(preferredId, caretAtEnd) {
       if (!Array.isArray(lines) || lines.length === 0) lines = [createLine("", 0)];
       pane.innerHTML = "";
       var visible = typeof content.visibleIndexes === "function" ? new Set(content.visibleIndexes(lines, collapsed)) : null;
       for (var i = 0; i < lines.length; i += 1) if (!visible || visible.has(i)) pane.appendChild(createRow(lines[i], i));
-      if (preferredId) requestAnimationFrame(function () { focusLine(preferredId); });
+      if (preferredId) requestAnimationFrame(function () { focusLine(preferredId, caretAtEnd === true); });
     }
     function lineElement(id) {
       if (!pane || typeof pane.querySelectorAll !== "function") return null;
@@ -75,7 +75,17 @@
       for (var i = 0; i < nodes.length; i += 1) if (nodes[i].getAttribute("data-line-id") === id) return nodes[i];
       return null;
     }
-    function focusLine(id) { var el = lineElement(id); if (el && typeof el.focus === "function") el.focus({ preventScroll: true }); }
+    function focusLine(id, caretAtEnd) {
+      var el = lineElement(id); if (!el || typeof el.focus !== "function") return;
+      el.focus({ preventScroll: true });
+      if (!caretAtEnd) return;
+      try {
+        var selection = typeof environment.getSelection === "function" ? environment.getSelection() : (typeof window.getSelection === "function" ? window.getSelection() : (typeof document.getSelection === "function" ? document.getSelection() : null));
+        var range = typeof document.createRange === "function" ? document.createRange() : null;
+        if (!selection || !range || typeof range.selectNodeContents !== "function" || typeof range.collapse !== "function" || typeof selection.removeAllRanges !== "function" || typeof selection.addRange !== "function") return;
+        range.selectNodeContents(el); range.collapse(false); selection.removeAllRanges(); selection.addRange(range);
+      } catch (_error) {}
+    }
     function syncLineElement(target) {
       if (!target || typeof target.getAttribute !== "function") return -1;
       var id = target.getAttribute("data-line-id") || ""; var index = lineIndex(id); if (index < 0) return -1;
@@ -124,12 +134,12 @@
       var transformed = content.removeEmptyLine(lines, index); if (!transformed || transformed.ok !== true) return false;
       lines = transformed.lines; collapsed.delete(removedId);
       var visible = typeof content.visibleIndexes === "function" ? content.visibleIndexes(lines, collapsed) : [];
-      var preferredIndex = -1;
-      for (var cursor = visible.length - 1; cursor >= 0; cursor -= 1) if (visible[cursor] < index) { preferredIndex = visible[cursor]; break; }
+      var preferredIndex = -1, caretAtEnd = false;
+      for (var cursor = visible.length - 1; cursor >= 0; cursor -= 1) if (visible[cursor] < index) { preferredIndex = visible[cursor]; caretAtEnd = true; break; }
       if (preferredIndex < 0) for (var next = 0; next < visible.length; next += 1) if (visible[next] >= index) { preferredIndex = visible[next]; break; }
       if (preferredIndex < 0 && visible.length > 0) preferredIndex = visible[0];
       selectedId = preferredIndex >= 0 && lines[preferredIndex] ? lines[preferredIndex].id : "";
-      markMutation(); render(selectedId); return true;
+      markMutation(); render(selectedId, caretAtEnd); return true;
     }
     function moveBranchBefore(sourceId, targetId) {
       var source = lineIndex(sourceId), target = lineIndex(targetId); if (readOnly || source < 0 || target < 0 || source === target) return false;
