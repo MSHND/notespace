@@ -121,11 +121,14 @@
     function removeEmptyLine(index) {
       if (readOnly || index < 0 || lines.length <= 1 || typeof content.removeEmptyLine !== "function") return false;
       var removedId = lines[index].id;
-      var preferredId = index > 0 ? lines[index - 1].id : "";
       var transformed = content.removeEmptyLine(lines, index); if (!transformed || transformed.ok !== true) return false;
       lines = transformed.lines; collapsed.delete(removedId);
-      if (!preferredId && lines[0]) preferredId = lines[0].id;
-      selectedId = preferredId || "";
+      var visible = typeof content.visibleIndexes === "function" ? content.visibleIndexes(lines, collapsed) : [];
+      var preferredIndex = -1;
+      for (var cursor = visible.length - 1; cursor >= 0; cursor -= 1) if (visible[cursor] < index) { preferredIndex = visible[cursor]; break; }
+      if (preferredIndex < 0) for (var next = 0; next < visible.length; next += 1) if (visible[next] >= index) { preferredIndex = visible[next]; break; }
+      if (preferredIndex < 0 && visible.length > 0) preferredIndex = visible[0];
+      selectedId = preferredIndex >= 0 && lines[preferredIndex] ? lines[preferredIndex].id : "";
       markMutation(); render(selectedId); return true;
     }
     function moveBranchBefore(sourceId, targetId) {
