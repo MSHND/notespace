@@ -13,7 +13,7 @@ jobs:
       - name: Check out exact repaired P207 candidate
         uses: actions/checkout@v4
         with:
-          ref: 4b0a407940dd63cb5d46acbee56742a9f31c9c33
+          ref: 5678049fab4c105d9c72a3324608546c489c95dd
           persist-credentials: false
       - name: Use Node 24
         uses: actions/setup-node@v4
