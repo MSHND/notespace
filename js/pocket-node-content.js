@@ -226,6 +226,16 @@
     return { ok: true, lines: copy };
   }
 
+  function removeEmptyLine(lines, index) {
+    if (!Array.isArray(lines) || lines.length <= 1 || !Number.isInteger(index) || index < 0 || index >= lines.length) return { ok: false, lines };
+    if (!lines[index] || lines[index].content !== "") return { ok: false, lines };
+    const end = subtreeEnd(lines, index);
+    const copy = lines.map((line) => ({ ...line }));
+    copy.splice(index, 1);
+    for (let cursor = index; cursor < end - 1; cursor += 1) copy[cursor].depth = (Number(copy[cursor].depth) || 0) - 1;
+    return { ok: true, lines: copy };
+  }
+
   function visibleIndexes(lines, collapsedIds) {
     if (!Array.isArray(lines)) return [];
     const collapsed = collapsedIds instanceof Set ? collapsedIds : new Set(Array.isArray(collapsedIds) ? collapsedIds : []); const visible = [];
@@ -270,6 +280,7 @@
     hasChildren,
     indentSubtree,
     moveSubtree,
+    removeEmptyLine,
     visibleIndexes,
     smartContinuation,
     utf8ByteLength,
