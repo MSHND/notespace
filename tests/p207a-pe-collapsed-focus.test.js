@@ -12,22 +12,19 @@ function source(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
-function loadContent() {
+function loadModules() {
   const context = vm.createContext({ window: {}, TextEncoder });
   context.globalThis = context;
   vm.runInContext(source("js/pocket-node-content.js"), context, { filename: "js/pocket-node-content.js" });
-  return context.window.PocketNodeContent;
-}
-
-function loadRuntime() {
-  const context = vm.createContext({ window: {} });
   vm.runInContext(source("js/pocket-node-popout-runtime.js"), context, { filename: "js/pocket-node-popout-runtime.js" });
-  return context.window.PocketNodePopoutRuntime;
+  return {
+    content: context.window.PocketNodeContent,
+    runtime: context.window.PocketNodePopoutRuntime,
+  };
 }
 
 function createHarness(text) {
-  const content = loadContent();
-  const runtime = loadRuntime();
+  const { content, runtime } = loadModules();
   const controls = new Map();
   let dirtyMarks = 0;
   let document;
