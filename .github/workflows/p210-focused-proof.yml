@@ -1,0 +1,15 @@
+name: P210 focused proof
+
+on:
+  push:
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test tests/p210-friction-pack.test.js tests/p210-browser-lexical-scope.test.js tests/p207-pe-empty-line-backspace.test.js tests/p207a-pe-collapsed-focus.test.js tests/p207e-pe-caret-after-empty-backspace.test.js tests/p209-pe-vertical-caret-travel.test.js
+      - run: npm run check
