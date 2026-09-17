@@ -104,7 +104,7 @@
         return { prefix: before.toString(), suffix: after.toString() };
       } catch (_error) { return null; }
     }
-    function collapsedCaretOffset(target) {
+    function collapsedCaretState(target) {
       var selection = null;
       try { selection = typeof environment.getSelection === "function" ? environment.getSelection() : (typeof window.getSelection === "function" ? window.getSelection() : (typeof document.getSelection === "function" ? document.getSelection() : null)); } catch (_error) { return null; }
       if (!selection || selection.rangeCount !== 1 || typeof selection.getRangeAt !== "function") return null;
@@ -113,9 +113,19 @@
       if (!range || range.collapsed !== true || typeof range.cloneRange !== "function" || !range.startContainer || !range.endContainer || !(target === range.startContainer || target.contains?.(range.startContainer)) || !(target === range.endContainer || target.contains?.(range.endContainer))) return null;
       try {
         var before = range.cloneRange(); before.selectNodeContents(target); before.setEnd(range.startContainer, range.startOffset);
-        return before.toString().length;
+        var rowY = null, rect = null;
+        if (typeof range.getBoundingClientRect === "function") rect = range.getBoundingClientRect();
+        if ((!rect || !Number.isFinite(Number(rect.top)) || !Number.isFinite(Number(rect.bottom))) && typeof range.getClientRects === "function") {
+          var rects = range.getClientRects(); if (rects && rects.length) rect = rects[0];
+        }
+        if (rect) {
+          var top = Number(rect.top), bottom = Number(rect.bottom);
+          if (Number.isFinite(top) && Number.isFinite(bottom) && bottom - top > 0.5) rowY = (top + bottom) / 2;
+        }
+        return { offset: before.toString().length, rowY: rowY };
       } catch (_error) { return null; }
     }
+    function collapsedCaretOffset(target) { var state = collapsedCaretState(target); return state ? state.offset : null; }
     function textPointAtOffset(target, offset) {
       var targetOffset = Math.max(0, Math.min(Number(offset) || 0, String(target && target.textContent || "").length));
       var remaining = targetOffset, lastText = null;
@@ -150,10 +160,14 @@
         el.focus({ preventScroll: true }); selection.removeAllRanges(); selection.addRange(range); return true;
       } catch (_error) { return false; }
     }
-    function schedulePlainVerticalCaretBridge(sourceId, sourceElement, direction, offset) {
+    function schedulePlainVerticalCaretBridge(sourceId, sourceElement, direction, offset, rowY) {
       requestAnimationFrame(function () {
         if (!sourceElement || document.activeElement !== sourceElement || lineElement(sourceId) !== sourceElement) return;
-        var currentOffset = collapsedCaretOffset(sourceElement); if (currentOffset === null || currentOffset !== offset) return;
+        var current = collapsedCaretState(sourceElement); if (!current) return;
+        var hasVisualRows = Number.isFinite(Number(rowY)) && Number.isFinite(Number(current.rowY));
+        if (hasVisualRows) {
+          if (Math.abs(Number(current.rowY) - Number(rowY)) > 2) return;
+        } else if (current.offset !== offset) return;
         var sourceIndex = lineIndex(sourceId); if (sourceIndex < 0) return;
         var visible = typeof content.visibleIndexes === "function" ? content.visibleIndexes(lines, collapsed) : [];
         var position = visible.indexOf(sourceIndex); if (position < 0) return;
@@ -245,8 +259,8 @@
       if((ev.metaKey||ev.ctrlKey)&&!ev.shiftKey&&!ev.altKey&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){ev.preventDefault();moveBranch(index,ev.key==="ArrowUp"?"up":"down");return;}
       if(!ev.altKey&&!ev.metaKey&&!ev.ctrlKey&&!ev.shiftKey&&!ev.isComposing&&ev.keyCode!==229&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){
         if(document.activeElement!==text)return;
-        var caretOffset=collapsedCaretOffset(text); if(caretOffset===null)return;
-        schedulePlainVerticalCaretBridge(lines[index].id,text,ev.key==="ArrowUp"?-1:1,caretOffset); return;
+        var caretState=collapsedCaretState(text); if(!caretState)return;
+        schedulePlainVerticalCaretBridge(lines[index].id,text,ev.key==="ArrowUp"?-1:1,caretState.offset,caretState.rowY); return;
       }
     });
     pane.addEventListener("dragstart", function(ev){var gutter=ev.target?.closest?.(".lineGutter[data-line-id]"); if(!gutter||readOnly)return; dragSourceId=gutter.getAttribute("data-line-id")||""; try{ev.dataTransfer?.setData?.("text/plain",dragSourceId);}catch(_error){} });
