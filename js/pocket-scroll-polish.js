@@ -9,6 +9,27 @@
     return typeof cleanText === "function" ? cleanText(value, 80) : String(value || "").trim();
   }
 
+  function runtimeState() {
+    try {
+      if (typeof state !== "undefined") return state;
+    } catch (_error) {}
+    return global.state && typeof global.state === "object" ? global.state : null;
+  }
+
+  function currentNodeMap() {
+    try {
+      if (typeof nodeMap === "function") return nodeMap();
+    } catch (_error) {}
+    return typeof global.nodeMap === "function" ? global.nodeMap() : null;
+  }
+
+  function currentChildren(nodeId) {
+    try {
+      if (typeof sortNodesForParent === "function") return sortNodesForParent(nodeId);
+    } catch (_error) {}
+    return typeof global.sortNodesForParent === "function" ? global.sortNodesForParent(nodeId) : [];
+  }
+
   function findRow(nodeId) {
     const id = cleanId(nodeId);
     if (!id || !(el.treeRoot instanceof HTMLElement)) return null;
@@ -42,11 +63,12 @@
   }
 
   function isRecentTypeJumpFor(id) {
-    const typeJump = state && state.typeJump ? state.typeJump : null;
+    const currentState = runtimeState();
+    const typeJump = currentState && currentState.typeJump ? currentState.typeJump : null;
     if (!typeJump) return false;
     const lastAt = Number(typeJump.lastAt || 0);
     if (!lastAt || Date.now() - lastAt > 220) return false;
-    return cleanId(state.selectedId) === cleanId(id);
+    return cleanId(currentState.selectedId) === cleanId(id);
   }
 
   function editableTarget(target) {
@@ -59,12 +81,14 @@
     pendingPlainLeftParentCentre = null;
     if (!ev || ev.key !== "ArrowLeft" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
     if (editableTarget(ev.target)) return;
-    const currentId = cleanId(global.state?.selectedId);
-    if (!currentId || typeof global.nodeMap !== "function" || typeof global.sortNodesForParent !== "function") return;
-    const current = global.nodeMap().get(currentId) || null;
+    const currentState = runtimeState();
+    const currentId = cleanId(currentState?.selectedId);
+    const map = currentNodeMap();
+    if (!currentState || !currentId || !map || typeof map.get !== "function") return;
+    const current = map.get(currentId) || null;
     if (!current) return;
-    const kids = global.sortNodesForParent(current.id);
-    if (kids.length > 0 && !global.state.collapsed.has(current.id)) return;
+    const kids = currentChildren(current.id);
+    if (kids.length > 0 && !currentState.collapsed.has(current.id)) return;
     const parentId = cleanId(current.parentId);
     if (!parentId || parentId === "root") return;
     pendingPlainLeftParentCentre = {
@@ -77,8 +101,9 @@
   function consumePlainLeftParentCentre(id) {
     const pending = pendingPlainLeftParentCentre;
     pendingPlainLeftParentCentre = null;
+    const currentState = runtimeState();
     if (!pending || pending.toId !== id || Date.now() - pending.at > 260) return false;
-    return cleanId(global.state?.selectedId) === id && pending.fromId !== id;
+    return cleanId(currentState?.selectedId) === id && pending.fromId !== id;
   }
 
   global.focusRowByNodeId = function focusRowByNodeId(nodeId, options = {}) {
