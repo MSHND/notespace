@@ -92,6 +92,81 @@
     return false;
   }
 
+  function resolveOrdinaryMainInlineDraft() {
+    const inlineEditId = typeof global.state?.inlineEdit?.id === "string"
+      ? global.state.inlineEdit.id
+      : "";
+    if (!inlineEditId) return { ok: true, active: false, committed: false };
+    if (typeof global.captureActiveInlineEditForOwnerSwitch !== "function"
+        || typeof global.commitActiveInlineEditForOwnerSwitch !== "function") {
+      return { ok: false, active: true, reason: "inline-draft-commit-unavailable" };
+    }
+
+    let captured;
+    try {
+      captured = global.captureActiveInlineEditForOwnerSwitch();
+    } catch (_error) {
+      return { ok: false, active: true, reason: "inline-draft-capture-failed" };
+    }
+    if (!captured || captured.ok !== true) {
+      return captured && typeof captured === "object"
+        ? { ...captured, ok: false, active: captured.active !== false }
+        : { ok: false, active: true, reason: "inline-draft-invalid" };
+    }
+    if (captured.active !== true) {
+      return { ok: false, active: true, reason: "inline-draft-ambiguous" };
+    }
+
+    const expectedSession = typeof global.capturePocketFileSaveSession === "function"
+      ? global.capturePocketFileSaveSession()
+      : null;
+    const sessionIsCurrent = () => {
+      if (!expectedSession) return true;
+      return typeof global.isPocketFileSaveSessionCurrent === "function"
+        && global.isPocketFileSaveSessionCurrent(expectedSession) === true;
+    };
+    if (!sessionIsCurrent()) return { ok: false, active: true, reason: "stale-owner-session" };
+
+    let committed;
+    try {
+      committed = global.commitActiveInlineEditForOwnerSwitch(captured, {
+        isCurrent: sessionIsCurrent,
+      });
+    } catch (_error) {
+      return { ok: false, active: true, reason: "inline-draft-commit-failed" };
+    }
+    if (!committed || committed.ok !== true) {
+      return committed && typeof committed === "object"
+        ? { ...committed, ok: false, active: committed.active !== false }
+        : { ok: false, active: true, reason: "inline-draft-commit-failed" };
+    }
+    if (!sessionIsCurrent()) return { ok: false, active: true, reason: "stale-owner-session" };
+    return { ...committed, ok: true, active: false, committed: true };
+  }
+
+  function installOrdinarySaveDraftResolver() {
+    const original = global.saveCurrentContext;
+    if (typeof original !== "function" || original.__pocketP210DraftResolver === true) return false;
+
+    function saveCurrentContextWithDraftResolution(...args) {
+      const resolved = resolveOrdinaryMainInlineDraft();
+      if (!resolved || resolved.ok !== true) {
+        if (typeof global.setStatus === "function") {
+          global.setStatus("Finish or correct the active item name before saving.", "warn", { durationMs: 5200 });
+        }
+        return false;
+      }
+      return original.apply(this, args);
+    }
+
+    Object.defineProperty(saveCurrentContextWithDraftResolution, "__pocketP210DraftResolver", {
+      value: true,
+      enumerable: false,
+    });
+    global.saveCurrentContext = saveCurrentContextWithDraftResolution;
+    return true;
+  }
+
   async function save(input = {}) {
     if (typeof input.freezePayload !== "function") {
       return { ok: false, reason: "save-input-invalid" };
@@ -184,10 +259,13 @@
   global.PocketOwnerSaveBoundary = frozen({
     captureOwnerSaveSession,
     isOwnerSaveSessionCurrent,
+    resolveOrdinaryMainInlineDraft,
     save,
     installSyncedOwnerForSave,
     retireSyncedOwner,
     hasSyncedOwner: () => isSyncedController(syncedController)
       && syncedController.captureSyncedOwnerSaveSession() !== null,
   });
+
+  installOrdinarySaveDraftResolver();
 })(window);
