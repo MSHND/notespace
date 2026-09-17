@@ -1,0 +1,27 @@
+name: P209e focused proof 2
+
+on:
+  push:
+    branches:
+      - candidate/p209e-proof2
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact repaired P209e candidate
+        uses: actions/checkout@v4
+        with:
+          ref: e2d1468dc47e120b63db672e006a5b233527fcfb
+          persist-credentials: false
+      - name: Use Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm ci
+      - name: Run focused P207/P207a/P207e/P209e proof
+        run: timeout 180s node --test tests/p207-pe-empty-line-backspace.test.js tests/p207a-pe-collapsed-focus.test.js tests/p207e-pe-caret-after-empty-backspace.test.js tests/p209-pe-vertical-caret-travel.test.js
+      - name: Run ordinary repository check
+        run: npm run check
