@@ -164,9 +164,9 @@
       requestAnimationFrame(function () {
         if (!sourceElement || document.activeElement !== sourceElement || lineElement(sourceId) !== sourceElement) return;
         var current = collapsedCaretState(sourceElement); if (!current) return;
-        var hasVisualRows = Number.isFinite(Number(rowY)) && Number.isFinite(Number(current.rowY));
+        var hasVisualRows = typeof rowY === "number" && Number.isFinite(rowY) && typeof current.rowY === "number" && Number.isFinite(current.rowY);
         if (hasVisualRows) {
-          if (Math.abs(Number(current.rowY) - Number(rowY)) > 2) return;
+          if (Math.abs(current.rowY - rowY) > 2) return;
         } else if (current.offset !== offset) return;
         var sourceIndex = lineIndex(sourceId); if (sourceIndex < 0) return;
         var visible = typeof content.visibleIndexes === "function" ? content.visibleIndexes(lines, collapsed) : [];
