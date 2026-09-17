@@ -27,6 +27,7 @@ function createHarness(text) {
   const { content, runtime } = loadModules();
   const controls = new Map();
   const rafQueue = [];
+  const visualRows = new Map();
   let dirtyMarks = 0;
   let document;
   let ranges = [];
@@ -260,6 +261,23 @@ function createHarness(text) {
       if (start === null || end === null) return "";
       return text.slice(Math.min(start, end), Math.max(start, end));
     }
+    getBoundingClientRect() {
+      let root = this.startContainer;
+      while (root) {
+        const classes = String(root.className || "").split(/\s+/);
+        if (root.nodeType === 1 && classes.includes("lineText") && root.getAttribute?.("data-line-id")) break;
+        root = root.parentNode;
+      }
+      if (!root) return { top: 0, bottom: 0, height: 0 };
+      const offset = absoluteOffset(root, this.startContainer, this.startOffset);
+      const top = visualRows.get(`${root.getAttribute("data-line-id")}:${offset}`);
+      if (!Number.isFinite(top)) return { top: 0, bottom: 0, height: 0 };
+      return { top, bottom: top + 16, height: 16 };
+    }
+    getClientRects() {
+      const rect = this.getBoundingClientRect();
+      return rect.height > 0 ? [rect] : [];
+    }
   }
 
   const selection = {
@@ -342,6 +360,10 @@ function createHarness(text) {
     }));
   }
 
+  function setVisualRow(id, offset, top) {
+    visualRows.set(`${id}:${Number(offset) || 0}`, Number(top));
+  }
+
   function setCaret(id, offset) {
     const target = lineById(id);
     assert.ok(target, `expected ${id} to be rendered`);
@@ -407,6 +429,7 @@ function createHarness(text) {
     lineById,
     gutterById,
     visibleLines,
+    setVisualRow,
     setCaret,
     setSelection,
     caret,
@@ -418,6 +441,64 @@ function createHarness(text) {
     isDirty: () => window.PocketNodePopoutSession.hasUnsavedChanges(),
   };
 }
+
+test("physical regression: first ArrowDown bridges when Chrome snaps to the end of the same visual row", () => {
+  const harness = createHarness("Alpha\nBravoBravo\nCharlie");
+  harness.setVisualRow("line_1", 5, 40);
+  harness.setVisualRow("line_1", 10, 40.8);
+  harness.setCaret("line_1", 5);
+  const before = harness.visibleLines();
+
+  const event = harness.key("line_1", "ArrowDown");
+  assert.equal(event.defaultPrevented, false);
+  assert.equal(harness.pendingFrames(), 1);
+
+  // Simulate Chrome consuming the first Down by snapping to this same row's end.
+  harness.setCaret("line_1", 10);
+  harness.flushFrames();
+
+  assert.deepEqual(harness.caret(), { lineId: "line_2", offset: 5, collapsed: true });
+  assert.deepEqual(harness.visibleLines(), before);
+  assert.equal(harness.dirtyMarks(), 0);
+  assert.equal(harness.isDirty(), false);
+});
+
+test("same-row ArrowUp snap bridges to the previous visible line using the original intent", () => {
+  const harness = createHarness("AlphaAlpha\nBravoBravo\nCharlie");
+  harness.setVisualRow("line_1", 6, 40);
+  harness.setVisualRow("line_1", 0, 40);
+  harness.setCaret("line_1", 6);
+
+  const event = harness.key("line_1", "ArrowUp");
+  assert.equal(event.defaultPrevented, false);
+  harness.setCaret("line_1", 0);
+  harness.flushFrames();
+
+  assert.deepEqual(harness.caret(), { lineId: "line_0", offset: 6, collapsed: true });
+  assert.equal(harness.dirtyMarks(), 0);
+  assert.equal(harness.isDirty(), false);
+});
+
+test("genuine wrapped-row native movement inside the same editable wins in both directions", () => {
+  const harness = createHarness("Alpha\nWrappedSourceText\nCharlie");
+  harness.setVisualRow("line_1", 4, 20);
+  harness.setVisualRow("line_1", 8, 40);
+  harness.setCaret("line_1", 4);
+
+  const down = harness.key("line_1", "ArrowDown");
+  assert.equal(down.defaultPrevented, false);
+  harness.setCaret("line_1", 8);
+  harness.flushFrames();
+  assert.deepEqual(harness.caret(), { lineId: "line_1", offset: 8, collapsed: true });
+
+  const up = harness.key("line_1", "ArrowUp");
+  assert.equal(up.defaultPrevented, false);
+  harness.setCaret("line_1", 4);
+  harness.flushFrames();
+  assert.deepEqual(harness.caret(), { lineId: "line_1", offset: 4, collapsed: true });
+  assert.equal(harness.dirtyMarks(), 0);
+  assert.equal(harness.isDirty(), false);
+});
 
 test("plain ArrowDown bridges only after native movement leaves caret and focus unchanged", () => {
   const harness = createHarness("Alpha\nBeta");
