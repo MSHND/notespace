@@ -92,9 +92,17 @@
     return false;
   }
 
+  function runtimeState() {
+    try {
+      if (typeof state !== "undefined") return state;
+    } catch (_error) {}
+    return global.state && typeof global.state === "object" ? global.state : null;
+  }
+
   function resolveOrdinaryMainInlineDraft() {
-    const inlineEditId = typeof global.state?.inlineEdit?.id === "string"
-      ? global.state.inlineEdit.id
+    const currentState = runtimeState();
+    const inlineEditId = typeof currentState?.inlineEdit?.id === "string"
+      ? currentState.inlineEdit.id
       : "";
     if (!inlineEditId) return { ok: true, active: false, committed: false };
     if (typeof global.captureActiveInlineEditForOwnerSwitch !== "function"
