@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const surfaceDependencies = require("../js/pocket-surface-dependencies.js");
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -103,11 +104,14 @@ test("P210 B opening-focus policy sends titled PE straight to body and untitled 
   assert.equal(polish.openingFocusTarget({ title: "", readOnly: false }), "title");
   assert.equal(polish.openingFocusTarget({ title: "Existing", readOnly: true }), "none");
 
+  assert.deepEqual([...surfaceDependencies.scriptsFor("pe")], [
+    "js/pocket-node-content.js",
+    "js/pocket-node-popout-runtime.js",
+    "js/pocket-node-popout-polish.js",
+  ]);
   const template = source("js/pocket-node-popout-template.js");
-  const runtimeIndex = template.indexOf("${runtimeAssetUrl}");
-  const polishIndex = template.indexOf("${polishAssetUrl}");
-  assert.ok(runtimeIndex >= 0 && polishIndex > runtimeIndex, "polish must run synchronously after native runtime");
-  assert.match(template, /pocket-node-popout-polish\.js/);
+  assert.match(template, /PocketSurfaceDependencies/);
+  assert.doesNotMatch(template, /pocket-node-popout-(?:runtime|polish)\.js/);
   assert.doesNotMatch(source("js/pocket-node-popout-editor.js"), /pocket-node-popout-polish/);
   assert.doesNotMatch(source("js/pocket-node-popout-window.js"), /focusOpeningSurface/);
 });

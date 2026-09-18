@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const surfaceDependencies = require("../js/pocket-surface-dependencies.js");
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -286,12 +287,11 @@ function productionOrderHarness(payload) {
   };
 }
 
-test("P210h production template loads runtime before polish", () => {
-  const template = source("js/pocket-node-popout-template.js");
-  const runtimeIndex = template.indexOf("${runtimeAssetUrl}");
-  const polishIndex = template.indexOf("${polishAssetUrl}");
-  assert.ok(runtimeIndex >= 0);
-  assert.ok(polishIndex > runtimeIndex);
+test("P210h PE surface contract keeps runtime before polish", () => {
+  const scripts = [...surfaceDependencies.scriptsFor("pe")];
+  assert.ok(scripts.indexOf("js/pocket-node-popout-runtime.js") >= 0);
+  assert.ok(scripts.indexOf("js/pocket-node-popout-polish.js") > scripts.indexOf("js/pocket-node-popout-runtime.js"));
+  assert.match(source("js/pocket-node-popout-template.js"), /PocketSurfaceDependencies/);
 });
 
 test("P210h runtime no longer creates unconditional title-first startup focus", () => {

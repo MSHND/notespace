@@ -23,6 +23,7 @@ const {
   createReviewedStaticHandler,
   createReviewedStaticManifest,
 } = require("../sync-service/pocket-sync-static-assets.js");
+const surfaceDependencies = require("../js/pocket-surface-dependencies.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const ORIGIN = "https://pocket.murrayhenderson.com.au";
@@ -196,7 +197,8 @@ test("P076 release manifest exactly hashes the frozen production static bytes", 
   assert.ok(manifest.length > 60);
   for (const required of [
     "/index.html", "/sw.js", "/styles.css", "/manifest.json",
-    "/js/pocket-node-popout-runtime.js",
+    "/js/pocket-surface-dependencies.js",
+    ...surfaceDependencies.scriptsFor("pe").map((asset) => `/${asset}`),
     "/js/pocket-sync-production-bootstrap.js", "/js/pocket-sync-additional-device.js",
     "/js/pocket-sync-emergency-recovery.js", "/js/pocket-sync-local-integration.js",
   ]) assert.ok(manifest.some((entry) => entry.path === required), required);
@@ -223,6 +225,36 @@ test("P076 release manifest exactly hashes the frozen production static bytes", 
   assert.equal(command.status, 0, command.stderr);
   assert.equal(command.stderr, "");
   assert.deepEqual(JSON.parse(command.stdout), { version: 1, assets: manifest });
+});
+
+test("P210n production reviewed-static admission consumes the canonical PE surface authority", async () => {
+  const dependencies = surfaceDependencies.scriptsFor("pe").map((asset) => `/${asset}`);
+  assert.deepEqual(dependencies, [
+    "/js/pocket-node-content.js",
+    "/js/pocket-node-popout-runtime.js",
+    "/js/pocket-node-popout-polish.js",
+  ]);
+  const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: SERVICE_ROOT });
+  const manifestByPath = new Map(manifest.map((entry) => [entry.path, entry]));
+  const handler = createProductionIntegrationHandler({
+    application: { async handle() { throw new Error("unexpected API call"); } },
+    browserRoot: ROOT, serviceRoot: SERVICE_ROOT,
+  });
+  for (const dependency of dependencies) {
+    const entry = manifestByPath.get(dependency);
+    assert.ok(entry, dependency);
+    const served = await send(handler, request("GET", dependency));
+    assert.equal(served.statusCode, 200, dependency);
+    assert.equal(served.headers["content-type"], "text/javascript; charset=utf-8", dependency);
+    assert.equal(served.headers["cache-control"], "no-store", dependency);
+    assert.equal(served.headers["x-content-type-options"], "nosniff", dependency);
+    assert.equal(served.body.byteLength, entry.bytes, dependency);
+    assert.equal(crypto.createHash("sha256").update(served.body).digest("hex"), entry.sha256, dependency);
+    assert.deepEqual(served.body, fs.readFileSync(path.join(ROOT, dependency.replace(/^\//, ""))), dependency);
+  }
+  for (const blocked of ["/package.json", "/tests/p076-production-browser-boundary.test.js"]) {
+    assert.equal((await send(handler, request("GET", blocked))).statusCode, 404, blocked);
+  }
 });
 
 test("P076 manifest is deterministic and fails closed for unsafe inventory entries", async (t) => {
