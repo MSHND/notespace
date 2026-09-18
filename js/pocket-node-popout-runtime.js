@@ -269,7 +269,7 @@
     saveBtn.addEventListener("click",function(){save(false);}); saveCloseBtn.addEventListener("click",function(){save(true);}); document.getElementById("closeBtn")?.addEventListener("click",closeSafely); unsavedSaveBtn.addEventListener("click",function(){save(true);}); unsavedDiscardBtn.addEventListener("click",discardAndClose); unsavedCancelBtn.addEventListener("click",keepEditing);
     document.addEventListener("keydown",function(ev){if((ev.metaKey||ev.ctrlKey)&&(ev.key==="s"||ev.key==="S")){ev.preventDefault();save(false);return;} if(ev.key==="Escape"){ev.preventDefault();if(!unsavedDialog.hidden){keepEditing();return;}closeSafely();}});
     if(typeof window.addEventListener==="function")window.addEventListener("beforeunload",function(ev){if(readOnly||!dirty||allowedToClose)return;ev.preventDefault();ev.returnValue="";});
-    applyReadOnlyState(); if(!readOnly){titleInput.focus?.(); titleInput.select?.();}
+    applyReadOnlyState();
     return true;
   }
   function initialPayloadFromDocument() { if (!global.document || typeof global.document.getElementById !== "function") return null; var carrier=global.document.getElementById("pocketNodePopoutPayload"); if(!carrier||carrier.tagName!=="TEXTAREA")return null; try{var value=JSON.parse(carrier.value);return value&&typeof value==="object"&&!Array.isArray(value)?value:null;}catch(_error){return null;} }

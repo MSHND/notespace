@@ -12,157 +12,347 @@ function source(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
-function listenerStore() {
-  const entries = [];
+function classList() {
+  const values = new Set();
   return {
-    add(type, handler, options) {
-      entries.push({ type, handler, once: options === true ? false : options?.once === true });
+    add(...names) { names.forEach((name) => values.add(name)); },
+    remove(...names) { names.forEach((name) => values.delete(name)); },
+    toggle(name, force) {
+      const next = force === undefined ? !values.has(name) : !!force;
+      if (next) values.add(name);
+      else values.delete(name);
+      return next;
     },
-    remove(type, handler) {
-      for (let index = entries.length - 1; index >= 0; index -= 1) {
-        if (entries[index].type === type && entries[index].handler === handler) entries.splice(index, 1);
-      }
-    },
-    fire(type, event = {}) {
-      const current = entries.filter((entry) => entry.type === type);
-      for (const entry of current) {
-        entry.handler(event);
-        if (entry.once) this.remove(type, entry.handler);
-      }
-    },
-    count(type) {
-      return entries.filter((entry) => entry.type === type).length;
-    },
+    contains(name) { return values.has(name); },
   };
 }
 
-function loadStartupHarness(payload, options = {}) {
-  const windowEvents = listenerStore();
-  const documentEvents = listenerStore();
-  const calls = { ownerLoad: 0, titleFocus: 0, titleSelect: 0, bodyFocus: 0 };
-  const userSurface = { id: "userSurface" };
-  let doc;
+function productionOrderHarness(payload) {
+  const listeners = new Map();
+  const calls = { titleFocus: 0, titleSelect: 0, bodyFocus: 0 };
+  let currentRange = null;
 
-  const title = {
-    id: "titleInput",
-    focus() { calls.titleFocus += 1; doc.activeElement = title; },
-    select() { calls.titleSelect += 1; },
-  };
-  const body = {
-    id: "line_0",
-    focus() { calls.bodyFocus += 1; doc.activeElement = body; },
-  };
-  const pane = {
-    id: "outlinePane",
-    querySelector(selector) {
-      return selector === ".lineText[data-line-id]" ? body : null;
+  const doc = {
+    activeElement: null,
+    body: { classList: classList() },
+    getElementById(id) { return controls.get(id) || null; },
+    createElement(tag) { return element(tag); },
+    createRange() {
+      return {
+        startContainer: null,
+        endContainer: null,
+        startOffset: 0,
+        endOffset: 0,
+        collapsed: false,
+        selectNodeContents(target) {
+          this.startContainer = target;
+          this.endContainer = target;
+          this.startOffset = 0;
+          this.endOffset = String(target.textContent || "").length;
+          this.collapsed = false;
+        },
+        collapse(toStart) {
+          this.collapsed = true;
+          if (toStart) {
+            this.endContainer = this.startContainer;
+            this.endOffset = this.startOffset;
+          } else {
+            this.startContainer = this.endContainer;
+            this.startOffset = this.endOffset;
+          }
+        },
+      };
     },
-    addEventListener() {},
-  };
-  const dialog = { id: "unsavedDialog", hidden: true };
-  const carrier = {
-    id: "pocketNodePopoutPayload",
-    tagName: "TEXTAREA",
-    value: JSON.stringify(payload),
-  };
-  const elements = new Map([
-    ["titleInput", title],
-    ["outlinePane", pane],
-    ["unsavedDialog", dialog],
-    ["pocketNodePopoutPayload", carrier],
-  ]);
-
-  doc = {
-    readyState: options.readyState || "loading",
-    activeElement: payload.readOnly === true ? userSurface : title,
-    getElementById(id) { return elements.get(id) || null; },
-    addEventListener(type, handler, capture) { documentEvents.add(type, handler, capture); },
-    removeEventListener(type, handler) { documentEvents.remove(type, handler); },
+    addEventListener(type, handler, capture) {
+      const key = `${type}:${capture === true}`;
+      if (!listeners.has(key)) listeners.set(key, []);
+      listeners.get(key).push(handler);
+    },
+    removeEventListener(type, handler, capture) {
+      const key = `${type}:${capture === true}`;
+      listeners.set(key, (listeners.get(key) || []).filter((entry) => entry !== handler));
+    },
   };
 
-  const context = vm.createContext({ console, JSON, Object, Array, Number, String, Math, Set });
+  function element(tag) {
+    const attrs = new Map();
+    const children = [];
+    return {
+      tagName: String(tag).toUpperCase(),
+      id: "",
+      className: "",
+      style: {},
+      children,
+      parentNode: null,
+      value: "",
+      textContent: "",
+      hidden: false,
+      disabled: false,
+      readOnly: false,
+      contentEditable: "false",
+      isContentEditable: false,
+      classList: classList(),
+      addEventListener() {},
+      setAttribute(name, value) {
+        attrs.set(String(name), String(value));
+        if (String(name).toLowerCase() === "contenteditable") {
+          this.contentEditable = String(value);
+          this.isContentEditable = String(value).toLowerCase() === "true";
+        }
+      },
+      getAttribute(name) { return attrs.get(String(name)) || null; },
+      appendChild(child) { child.parentNode = this; children.push(child); return child; },
+      focus() { doc.activeElement = this; },
+      select() {},
+      click() {},
+      contains(node) {
+        if (node === this) return true;
+        return children.some((child) => child.contains?.(node));
+      },
+      closest(selector) {
+        let current = this;
+        while (current) {
+          const names = String(current.className || "").split(/\s+/);
+          if (selector === ".lineText[data-line-id]" && names.includes("lineText") && current.getAttribute?.("data-line-id")) return current;
+          if (selector === ".docRow[data-line-id]" && names.includes("docRow") && current.getAttribute?.("data-line-id")) return current;
+          current = current.parentNode;
+        }
+        return null;
+      },
+      querySelector(selector) {
+        return this.querySelectorAll(selector)[0] || null;
+      },
+      querySelectorAll(selector) {
+        const found = [];
+        const visit = (node) => {
+          for (const child of node.children || []) {
+            const names = String(child.className || "").split(/\s+/);
+            if (selector === ".lineText[data-line-id]" && names.includes("lineText") && child.getAttribute?.("data-line-id")) found.push(child);
+            if (selector === ".docRow[data-line-id]" && names.includes("docRow") && child.getAttribute?.("data-line-id")) found.push(child);
+            visit(child);
+          }
+        };
+        visit(this);
+        return found;
+      },
+      getBoundingClientRect() { return { top: 0, bottom: 24 }; },
+      scrollBy() {},
+    };
+  }
+
+  const controls = new Map();
+  for (const [id, tag] of Object.entries({
+    titleInput: "input",
+    outlinePane: "div",
+    saveState: "span",
+    saveBtn: "button",
+    saveCloseBtn: "button",
+    unsavedDialog: "div",
+    unsavedSaveBtn: "button",
+    unsavedDiscardBtn: "button",
+    unsavedCancelBtn: "button",
+    closeBtn: "button",
+  })) {
+    const control = element(tag);
+    control.id = id;
+    controls.set(id, control);
+  }
+  controls.get("unsavedDialog").hidden = true;
+
+  const title = controls.get("titleInput");
+  title.value = payload.title || "";
+  title.focus = () => { calls.titleFocus += 1; doc.activeElement = title; };
+  title.select = () => { calls.titleSelect += 1; };
+
+  const pane = controls.get("outlinePane");
+  pane.scrollTop = 0;
+  pane.scrollHeight = 200;
+  pane.clientHeight = 100;
+
+  const row = element("div");
+  row.className = "docRow";
+  row.setAttribute("data-line-id", "line_0");
+  row.setAttribute("data-depth", "0");
+  const gutter = element("button");
+  gutter.className = "lineGutter";
+  gutter.setAttribute("data-line-id", "line_0");
+  const body = element("div");
+  body.className = "lineText";
+  body.setAttribute("data-line-id", "line_0");
+  body.setAttribute("contenteditable", payload.readOnly === true ? "false" : "true");
+  body.textContent = "Body";
+  body.focus = () => { calls.bodyFocus += 1; doc.activeElement = body; };
+  row.appendChild(gutter);
+  row.appendChild(body);
+  pane.appendChild(row);
+
+  const carrier = element("textarea");
+  carrier.id = "pocketNodePopoutPayload";
+  carrier.value = JSON.stringify({
+    id: "fixture",
+    title: payload.title || "",
+    text: "Body",
+    readOnly: payload.readOnly === true,
+    fileSessionId: 1,
+    sourceFileName: "fixture.json",
+    sourcePipSession: false,
+    sourceOwnerKind: "json",
+    sourceVaultSessionId: "",
+    originalUpdatedAt: "2026-09-18T00:00:00.000Z",
+    popupOwnerToken: "owner",
+    popupInstanceToken: "popup",
+  });
+  controls.set("pocketNodePopoutPayload", carrier);
+
+  const selection = {
+    rangeCount: 0,
+    removeAllRanges() { currentRange = null; this.rangeCount = 0; },
+    addRange(range) { currentRange = range; this.rangeCount = 1; },
+    getRangeAt(index) {
+      if (index !== 0 || !currentRange) throw new Error("no range");
+      return currentRange;
+    },
+  };
+
+  const windowListeners = new Map();
+  const content = {
+    parseLines(text) { return [{ depth: 0, content: String(text || "") }]; },
+    serialiseLines(lines) { return lines.map((line) => line.content).join("\n"); },
+    hasChildren() { return false; },
+    subtreeEnd(index) { return index + 1; },
+    visibleIndexes(lines) { return lines.map((_line, index) => index); },
+    smartContinuation() { return { content: "", exitList: false }; },
+  };
+
+  const context = vm.createContext({
+    console,
+    JSON,
+    Object,
+    Array,
+    Number,
+    String,
+    Math,
+    Set,
+    Map,
+    Date,
+    Promise,
+  });
   context.window = context;
   context.globalThis = context;
   context.document = doc;
-  context.getSelection = () => null;
+  context.navigator = {};
+  context.PocketNodeContent = content;
+  context.getSelection = () => selection;
   context.requestAnimationFrame = () => 1;
   context.setTimeout = () => 1;
-  context.addEventListener = (type, handler, optionsValue) => windowEvents.add(type, handler, optionsValue);
-  context.removeEventListener = (type, handler) => windowEvents.remove(type, handler);
-  doc.defaultView = context;
+  context.clearTimeout = () => {};
+  context.close = () => {};
+  context.addEventListener = (type, handler) => {
+    if (!windowListeners.has(type)) windowListeners.set(type, []);
+    windowListeners.get(type).push(handler);
+  };
+  context.removeEventListener = (type, handler) => {
+    windowListeners.set(type, (windowListeners.get(type) || []).filter((entry) => entry !== handler));
+  };
+  context.fireWindow = (type) => {
+    for (const handler of [...(windowListeners.get(type) || [])]) handler({ type });
+  };
 
-  windowEvents.add("load", () => {
-    calls.ownerLoad += 1;
-    if (options.ownerRestoresTitle === true) doc.activeElement = title;
+  vm.runInContext(source("js/pocket-node-popout-runtime.js"), context, {
+    filename: "js/pocket-node-popout-runtime.js",
   });
+  const afterRuntime = { activeElement: doc.activeElement, titleFocus: calls.titleFocus, titleSelect: calls.titleSelect, bodyFocus: calls.bodyFocus };
 
   vm.runInContext(source("js/pocket-node-popout-polish.js"), context, {
     filename: "js/pocket-node-popout-polish.js",
   });
 
   return {
-    polish: context.PocketNodePopoutPolish,
-    calls,
+    context,
     doc,
     title,
     body,
-    userSurface,
-    fireLoad() { windowEvents.fire("load"); },
-    fireDocument(type, event = {}) { documentEvents.fire(type, event); },
-    loadListenerCount() { return windowEvents.count("load"); },
+    selection,
+    calls,
+    afterRuntime,
+    getRange() { return currentRange; },
+    fireWindow(type) { context.fireWindow(type); },
+    typeImmediately(text) {
+      const target = doc.activeElement;
+      if (target === title) title.value += String(text);
+      else if (target === body) body.textContent += String(text);
+      return target;
+    },
   };
 }
 
-test("P210d titled editable popup finishes real startup body-first after earlier owner load focus", () => {
-  const h = loadStartupHarness({ title: "Existing", readOnly: false }, { ownerRestoresTitle: true });
-  assert.equal(h.doc.activeElement, h.title, "native startup still begins title-first");
-  assert.equal(h.calls.bodyFocus, 0, "polish must wait for the real startup boundary");
+test("P210h production template loads runtime before polish", () => {
+  const template = source("js/pocket-node-popout-template.js");
+  const runtimeIndex = template.indexOf("${runtimeAssetUrl}");
+  const polishIndex = template.indexOf("${polishAssetUrl}");
+  assert.ok(runtimeIndex >= 0);
+  assert.ok(polishIndex > runtimeIndex);
+});
 
-  h.fireLoad();
+test("P210h runtime no longer creates unconditional title-first startup focus", () => {
+  const runtime = source("js/pocket-node-popout-runtime.js");
+  assert.doesNotMatch(runtime, /applyReadOnlyState\(\);\s*if\(!readOnly\)\{titleInput\.focus/);
+  assert.doesNotMatch(runtime, /titleInput\.focus\?\.\(\);\s*titleInput\.select\?\.\(\);/);
 
-  assert.equal(h.calls.ownerLoad, 1);
+  const h = productionOrderHarness({ title: "Existing", readOnly: false });
+  assert.equal(h.afterRuntime.activeElement, null);
+  assert.equal(h.afterRuntime.titleFocus, 0);
+  assert.equal(h.afterRuntime.titleSelect, 0);
+});
+
+test("P210h real production order gives titled editable body a usable collapsed caret before immediate typing", () => {
+  const h = productionOrderHarness({ title: "Existing", readOnly: false });
   assert.equal(h.doc.activeElement, h.body);
   assert.equal(h.calls.bodyFocus, 1);
+  assert.equal(h.calls.titleFocus, 0);
+  assert.equal(h.selection.rangeCount, 1);
+  const range = h.getRange();
+  assert.ok(range);
+  assert.equal(range.collapsed, true);
+  assert.equal(range.startContainer, h.body);
 
-  h.fireLoad();
-  assert.equal(h.calls.bodyFocus, 1, "opening focus runs at most once");
+  const originalTitle = h.title.value;
+  const target = h.typeImmediately("xyz");
+  assert.equal(target, h.body);
+  assert.equal(h.body.textContent, "Bodyxyz");
+  assert.equal(h.title.value, originalTitle);
 });
 
-test("P210d genuinely untitled editable popup finishes startup title-first", () => {
-  const h = loadStartupHarness({ title: "   ", readOnly: false }, { ownerRestoresTitle: true });
-  h.fireLoad();
+test("P210h real production order keeps genuinely untitled editable popup title-first", () => {
+  const h = productionOrderHarness({ title: "", readOnly: false });
+  assert.equal(h.afterRuntime.activeElement, null);
   assert.equal(h.doc.activeElement, h.title);
-  assert.equal(h.calls.bodyFocus, 0);
   assert.equal(h.calls.titleFocus, 1);
   assert.equal(h.calls.titleSelect, 1);
+  assert.equal(h.calls.bodyFocus, 0);
 });
 
-test("P210d read-only popup receives no opening-focus override", () => {
-  const h = loadStartupHarness({ title: "Existing", readOnly: true });
-  const before = h.doc.activeElement;
-  h.fireLoad();
-  assert.equal(h.doc.activeElement, before);
+test("P210h read-only popup receives no editing-focus override", () => {
+  const h = productionOrderHarness({ title: "Existing", readOnly: true });
+  assert.equal(h.afterRuntime.activeElement, null);
+  assert.equal(h.doc.activeElement, null);
   assert.equal(h.calls.titleFocus, 0);
   assert.equal(h.calls.bodyFocus, 0);
 });
 
-test("P210d user interaction before deferred opening focus is never overwritten", () => {
-  const h = loadStartupHarness({ title: "Existing", readOnly: false });
-  h.doc.activeElement = h.userSurface;
-  h.fireDocument("pointerdown", { target: h.userSurface });
-  h.fireLoad();
-  assert.equal(h.doc.activeElement, h.userSurface);
-  assert.equal(h.calls.bodyFocus, 0);
-  assert.equal(h.calls.titleFocus, 0);
+test("P210h later manual focus is not stolen by a load-time reassertion", () => {
+  const h = productionOrderHarness({ title: "Existing", readOnly: false });
+  assert.equal(h.doc.activeElement, h.body);
+  h.title.focus();
+  assert.equal(h.doc.activeElement, h.title);
+  h.fireWindow("load");
+  assert.equal(h.doc.activeElement, h.title);
+  assert.equal(h.calls.bodyFocus, 1, "opening focus is one-shot");
 });
 
-test("P210d repair remains presentation-only and binds once to startup readiness", () => {
+test("P210h polish owns startup focus synchronously without timing correction machinery", () => {
   const polish = source("js/pocket-node-popout-polish.js");
-  assert.match(polish, /installOpeningFocus\(doc, payloadFromDocument\(doc\), global\)/);
-  assert.match(polish, /addEventListener\("load", finishOpeningFocus, \{ once: true \}\)/);
-  assert.doesNotMatch(polish, /setInterval|MutationObserver|applyAndSave|recordOp|buildPocketPayload/);
-
-  const runtime = source("js/pocket-node-popout-runtime.js");
-  assert.match(runtime, /PocketNodePopoutRuntime=Object\.freeze\(\{initialise\}\)/);
-  assert.match(runtime, /titleInput\.focus\?\.\(\); titleInput\.select\?\.\(\);/);
+  assert.match(polish, /function installOpeningFocus\(doc, payload\) \{\s*return focusOpeningSurface\(doc, payload\);\s*\}/);
+  assert.doesNotMatch(polish, /finishOpeningFocus|userInteracted|addEventListener\("load"|setInterval|MutationObserver/);
+  assert.doesNotMatch(polish, /applyAndSave|recordOp|buildPocketPayload/);
 });

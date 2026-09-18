@@ -113,6 +113,8 @@ function createHarness(options = {}) {
   });
 
   activeElement = title;
+  calls.bodyFocus = 0;
+  selection.removeAllRanges();
 
   function event(overrides = {}) {
     return {
