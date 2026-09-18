@@ -62,12 +62,108 @@
       var text = document.createElement("div"); text.className = "lineText"; text.setAttribute("data-line-id", line.id); text.contentEditable = readOnly ? "false" : "true"; text.spellcheck = true; text.textContent = line.content;
       row.appendChild(gutter); row.appendChild(text); return row;
     }
-    function render(preferredId, caretAtEnd) {
+    function paneRows() {
+      try { return Array.prototype.slice.call(pane.children || []); } catch (_error) { return []; }
+    }
+    function rowElement(id) {
+      var rows = paneRows();
+      for (var i = 0; i < rows.length; i += 1) if (rows[i]?.getAttribute?.("data-line-id") === id) return rows[i];
+      return null;
+    }
+    function rowParts(row) {
+      var result = { gutter: null, text: null }, nodes = row && (row.children || row.childNodes) || [];
+      for (var i = 0; i < nodes.length; i += 1) {
+        var node = nodes[i]; if (!node || node.nodeType === 3) continue;
+        var classes = String(node.className || "").split(/\s+/);
+        if (!result.gutter && classes.includes("lineGutter")) result.gutter = node;
+        if (!result.text && classes.includes("lineText")) result.text = node;
+      }
+      return result;
+    }
+    function visibleIndexes() {
+      if (typeof content.visibleIndexes === "function") return content.visibleIndexes(lines, collapsed);
+      var result = []; for (var i = 0; i < lines.length; i += 1) if (!isHidden(i)) result.push(i); return result;
+    }
+    function updateRowPresentation(row, index, updateText) {
+      var line = lines[index]; if (!row || !line) return false;
+      var depth = Math.max(0, Math.min(8, Number(line.depth) || 0));
+      if (row.getAttribute?.("data-line-id") !== line.id) row.setAttribute?.("data-line-id", line.id);
+      if (row.getAttribute?.("data-depth") !== String(depth)) row.setAttribute?.("data-depth", String(depth));
+      if (row.style) row.style.paddingLeft = (4 + depth * 22) + "px";
+      var parts = rowParts(row), branch = hasChildren(index), folded = collapsed.has(line.id);
+      if (parts.gutter) {
+        var gutterClass = "lineGutter" + (branch ? " branch" : " empty");
+        if (parts.gutter.className !== gutterClass) parts.gutter.className = gutterClass;
+        parts.gutter.setAttribute?.("data-line-id", line.id);
+        var glyph = branch ? (folded ? "▸" : "▾") : "";
+        if (parts.gutter.textContent !== glyph) parts.gutter.textContent = glyph;
+        parts.gutter.setAttribute?.("aria-label", branch ? (folded ? "Expand branch" : "Collapse branch") : "Line");
+        parts.gutter.draggable = branch && !readOnly;
+      }
+      if (parts.text) {
+        parts.text.setAttribute?.("data-line-id", line.id);
+        if (updateText === true && parts.text.textContent !== line.content) parts.text.textContent = line.content;
+      }
+      return true;
+    }
+    function rowNeedsPresentationRefresh(row, index) {
+      var line = lines[index]; if (!row || !line) return true;
+      if (row.getAttribute?.("data-depth") !== String(Math.max(0, Math.min(8, Number(line.depth) || 0)))) return true;
+      var parts = rowParts(row), branch = hasChildren(index), folded = collapsed.has(line.id);
+      if (!parts.gutter) return false;
+      if (parts.gutter.className !== "lineGutter" + (branch ? " branch" : " empty")) return true;
+      if (parts.gutter.textContent !== (branch ? (folded ? "▸" : "▾") : "")) return true;
+      return false;
+    }
+    function detachRow(row) {
+      if (!row || row.parentNode !== pane) return;
+      if (typeof pane.removeChild === "function") { pane.removeChild(row); return; }
+      if (Array.isArray(pane.children)) { var ci = pane.children.indexOf(row); if (ci >= 0) pane.children.splice(ci, 1); }
+      if (Array.isArray(pane.childNodes) && pane.childNodes !== pane.children) { var ni = pane.childNodes.indexOf(row); if (ni >= 0) pane.childNodes.splice(ni, 1); }
+      row.parentNode = null;
+    }
+    function placeRowAt(row, position) {
+      var current = paneRows(), currentIndex = current.indexOf(row);
+      if (currentIndex === position) return;
+      var before = current[position] || null;
+      if (typeof pane.insertBefore === "function") { pane.insertBefore(row, before); return; }
+      if (row.parentNode === pane) detachRow(row);
+      current = paneRows();
+      var at = Math.max(0, Math.min(position, current.length));
+      if (Array.isArray(pane.children)) pane.children.splice(at, 0, row);
+      if (Array.isArray(pane.childNodes) && pane.childNodes !== pane.children) pane.childNodes.splice(at, 0, row);
+      row.parentNode = pane;
+    }
+    function rebuildProjectionForRecovery(preferredId, caretAtEnd) {
       if (!Array.isArray(lines) || lines.length === 0) lines = [createLine("", 0)];
       pane.innerHTML = "";
-      var visible = typeof content.visibleIndexes === "function" ? new Set(content.visibleIndexes(lines, collapsed)) : null;
-      for (var i = 0; i < lines.length; i += 1) if (!visible || visible.has(i)) pane.appendChild(createRow(lines[i], i));
-      if (preferredId) requestAnimationFrame(function () { focusLine(preferredId, caretAtEnd === true); });
+      var visible = visibleIndexes();
+      for (var i = 0; i < visible.length; i += 1) pane.appendChild(createRow(lines[visible[i]], visible[i]));
+      if (preferredId) focusLine(preferredId, caretAtEnd === true);
+      return true;
+    }
+    function patchProjection(options) {
+      options = options || {};
+      if (!Array.isArray(lines) || lines.length === 0) return false;
+      var affected = new Set(Array.isArray(options.affectedIds) ? options.affectedIds : []);
+      var textIds = new Set(Array.isArray(options.textIds) ? options.textIds : []);
+      var visible = visibleIndexes(), desiredIds = new Set();
+      for (var i = 0; i < visible.length; i += 1) desiredIds.add(lines[visible[i]].id);
+      var existingRows = paneRows();
+      for (var r = 0; r < existingRows.length; r += 1) {
+        var existingId = existingRows[r]?.getAttribute?.("data-line-id") || "";
+        if (!desiredIds.has(existingId)) detachRow(existingRows[r]);
+      }
+      for (var position = 0; position < visible.length; position += 1) {
+        var index = visible[position], line = lines[index], row = rowElement(line.id), created = false;
+        if (!row) { row = createRow(line, index); created = true; }
+        placeRowAt(row, position);
+        if (created || affected.has(line.id) || rowNeedsPresentationRefresh(row, index)) {
+          updateRowPresentation(row, index, created || textIds.has(line.id));
+        }
+      }
+      if (options.focusId) focusLine(options.focusId, options.caretAtEnd === true);
+      return true;
     }
     function lineElement(id) {
       if (!pane || typeof pane.querySelectorAll !== "function") return null;
@@ -187,22 +283,22 @@
       for (var cursor = 0; cursor < pasted.length; cursor += 1) inserted.push(createLine(pasted[cursor].content, anchorDepth + pasted[cursor].depth - baselineDepth));
       inserted[0].content = parts.prefix + inserted[0].content;
       inserted[inserted.length - 1].content += parts.suffix;
-      lines.splice(index, 1, ...inserted); markMutation(); render(inserted[inserted.length - 1].id); return true;
+      lines.splice(index, 1, ...inserted); markMutation(); patchProjection({ affectedIds: inserted.map(function (line) { return line.id; }), textIds: inserted.map(function (line) { return line.id; }), focusId: inserted[inserted.length - 1].id }); return true;
     }
-    function toggleBranch(index) { if (!hasChildren(index)) return false; var id = lines[index].id; if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id); render(id); return true; }
+    function toggleBranch(index) { if (!hasChildren(index)) return false; var id = lines[index].id; if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id); patchProjection({ affectedIds: [id], focusId: id }); return true; }
     function indentBranch(index, delta) {
       if (readOnly || index < 0 || typeof content.indentSubtree !== "function") return false;
       var transformed = content.indentSubtree(lines, index, delta); if (!transformed || transformed.ok !== true) return false;
-      var id = lines[index].id; lines = transformed.lines; markMutation(); render(id); return true;
+      var id = lines[index].id, end = subtreeEnd(index), affectedIds = lines.slice(index, end).map(function (line) { return line.id; }); lines = transformed.lines; markMutation(); patchProjection({ affectedIds: affectedIds, focusId: id }); return true;
     }
     function moveBranch(index, direction) {
       if (readOnly || index < 0 || typeof content.moveSubtree !== "function") return false;
-      var id = lines[index].id; var transformed = content.moveSubtree(lines, index, direction); if (!transformed || transformed.ok !== true) return false;
-      lines = transformed.lines; markMutation(); render(id); return true;
+      var id = lines[index].id, end = subtreeEnd(index), affectedIds = lines.slice(index, end).map(function (line) { return line.id; }); var transformed = content.moveSubtree(lines, index, direction); if (!transformed || transformed.ok !== true) return false;
+      lines = transformed.lines; markMutation(); patchProjection({ affectedIds: affectedIds, focusId: id }); return true;
     }
     function removeEmptyLine(index) {
       if (readOnly || index < 0 || lines.length <= 1 || typeof content.removeEmptyLine !== "function") return false;
-      var removedId = lines[index].id;
+      var removedId = lines[index].id, removedEnd = subtreeEnd(index), affectedIds = lines.slice(index + 1, removedEnd).map(function (line) { return line.id; });
       var transformed = content.removeEmptyLine(lines, index); if (!transformed || transformed.ok !== true) return false;
       lines = transformed.lines; collapsed.delete(removedId);
       var visible = typeof content.visibleIndexes === "function" ? content.visibleIndexes(lines, collapsed) : [];
@@ -211,18 +307,18 @@
       if (preferredIndex < 0) for (var next = 0; next < visible.length; next += 1) if (visible[next] >= index) { preferredIndex = visible[next]; break; }
       if (preferredIndex < 0 && visible.length > 0) preferredIndex = visible[0];
       selectedId = preferredIndex >= 0 && lines[preferredIndex] ? lines[preferredIndex].id : "";
-      markMutation(); render(selectedId, caretAtEnd); return true;
+      markMutation(); patchProjection({ affectedIds: affectedIds, focusId: selectedId, caretAtEnd: caretAtEnd }); return true;
     }
     function moveBranchBefore(sourceId, targetId) {
       var source = lineIndex(sourceId), target = lineIndex(targetId); if (readOnly || source < 0 || target < 0 || source === target) return false;
       var end = subtreeEnd(source); if (target > source && target < end) return false; var branch = lines.splice(source, end - source); if (target > source) target -= branch.length;
       var delta = lines[target] ? lines[target].depth - branch[0].depth : 0; for (var i = 0; i < branch.length; i += 1) branch[i].depth = Math.max(0, Math.min(8, branch[i].depth + delta));
-      lines.splice(target, 0, ...branch); markMutation(); render(branch[0].id); return true;
+      lines.splice(target, 0, ...branch); markMutation(); patchProjection({ affectedIds: branch.map(function (line) { return line.id; }), focusId: branch[0].id }); return true;
     }
     function insertAfter(index) {
       var marker = content.smartContinuation(lines[index].content);
-      if (marker.exitList) { lines[index].content = ""; markMutation(); render(lines[index].id); return lines[index].id; }
-      var next = createLine(marker.content, lines[index].depth); lines.splice(index + 1, 0, next); markMutation(); render(next.id); return next.id;
+      if (marker.exitList) { lines[index].content = ""; markMutation(); patchProjection({ affectedIds: [lines[index].id], textIds: [lines[index].id], focusId: lines[index].id }); return lines[index].id; }
+      var next = createLine(marker.content, lines[index].depth); lines.splice(index + 1, 0, next); markMutation(); patchProjection({ affectedIds: [next.id], textIds: [next.id], focusId: next.id }); return next.id;
     }
     function applyReadOnlyState() { if (!readOnly) return; titleInput.readOnly = true; saveBtn.disabled = true; saveCloseBtn.disabled = true; setDirty(false); }
     function buildPayload() { return { id: payload.id, title: titleInput.value, text: buildText(), body: buildText(), updatedAt: new Date().toISOString(), fileSessionId: payload.fileSessionId, sourceFileName: payload.sourceFileName, sourcePipSession: payload.sourcePipSession, sourceOwnerKind: payload.sourceOwnerKind, sourceVaultSessionId: payload.sourceVaultSessionId, originalUpdatedAt: payload.originalUpdatedAt }; }
@@ -244,7 +340,7 @@
     function save(closeAfter) { if (readOnly || saveInFlight) return false; hideUnsavedDialog(); if (!hasCompleteSaveContext()) { handleSaveResult({ok:false,reason:"missing-source-identity"},closeAfter,editGeneration); return false; } setSaveState("saving…",""); saveInFlight = true; var generation = editGeneration; var outgoing = buildPayload(); try { var target = openerPopoutWindow(); if (target && typeof target.applyAndSaveFromOwnedPopup === "function") { Promise.resolve(target.applyAndSaveFromOwnedPopup(ownerToken,popupToken,outgoing,window)).then(function (result) { saveInFlight=false; handleSaveResult(result,closeAfter,generation); }, function (error) { saveInFlight=false; console.error(error); setDirty(true); setSaveState("Truth-file write failed — not saved","failed"); }); return true; } } catch (error) { console.error(error); } saveInFlight=false; handleSaveResult({ok:false,reason:"popup-session-changed"},closeAfter,generation); return false; }
     function closeSafely() { if (readOnly || !dirty) { allowedToClose=true; window.close(); return; } showUnsavedDialog(); }
 
-    if (typeof environment.probe === "function") { environment.probe(Object.freeze({ parse: content.parseLines, serialise: content.serialiseLines, smartContinuation: content.smartContinuation, hasChildren: content.hasChildren, subtreeEnd: content.subtreeEnd, buildText: buildText, indentBranch: indentBranch, moveBranch: moveBranch, toggleBranch: toggleBranch, lines: function(){ return JSON.parse(JSON.stringify(lines)); }, collapsed: function(){ return Array.from(collapsed); } })); return true; }
+    if (typeof environment.probe === "function") { environment.probe(Object.freeze({ parse: content.parseLines, serialise: content.serialiseLines, smartContinuation: content.smartContinuation, hasChildren: content.hasChildren, subtreeEnd: content.subtreeEnd, buildText: buildText, indentBranch: indentBranch, moveBranch: moveBranch, toggleBranch: toggleBranch, removeEmptyLine: removeEmptyLine, moveBranchBefore: moveBranchBefore, insertAfter: insertAfter, ingestPlainTextPaste: ingestPlainTextPaste, patchProjection: patchProjection, rebuildProjectionForRecovery: rebuildProjectionForRecovery, lines: function(){ return JSON.parse(JSON.stringify(lines)); }, collapsed: function(){ return Array.from(collapsed); } })); return true; }
 
     titleInput.addEventListener("input", function () { markMutation(); });
     pane.addEventListener("input", function (ev) { var target = ev.target?.closest?.(".lineText[data-line-id]") || ev.target; var index = syncLineElement(target); if (index >= 0) { selectedId = lines[index].id; markMutation(); } });
