@@ -14,7 +14,7 @@ function source(relativePath) {
 
 function createHarness(options = {}) {
   const listeners = new Map();
-  const calls = { preventDefault: 0, bodyFocus: 0 };
+  const calls = { preventDefault: 0, bodyFocus: 0, gutterFocus: 0 };
   let activeElement = null;
   let currentRange = null;
 
@@ -38,9 +38,15 @@ function createHarness(options = {}) {
     contains(node) { return node === body; },
   };
 
+  const gutter = {
+    id: "gutter_0",
+    focus() { calls.gutterFocus += 1; activeElement = gutter; },
+  };
+
   const pane = {
     id: "outlinePane",
     querySelector(selector) {
+      if (selector === ".lineGutter[data-line-id]" || selector === ".lineGutter.branch[data-line-id]") return gutter;
       if (selector !== ".lineText[data-line-id]" || options.missingBody === true) return null;
       return body;
     },
@@ -75,15 +81,27 @@ function createHarness(options = {}) {
   function createRange() {
     return {
       startContainer: null,
+      endContainer: null,
+      startOffset: 0,
+      endOffset: 0,
       collapsed: false,
       selectNodeContents(element) {
         this.startContainer = element;
+        this.endContainer = element;
+        this.startOffset = 0;
+        this.endOffset = String(element.textContent || "").length;
         this.collapsed = false;
       },
       collapse(toStart) {
-        this.collapsed = true;
-        this.startContainer = body;
         this.toStart = toStart;
+        this.collapsed = true;
+        if (toStart === true) {
+          this.endContainer = this.startContainer;
+          this.endOffset = this.startOffset;
+        } else {
+          this.startContainer = this.endContainer;
+          this.startOffset = this.endOffset;
+        }
       },
     };
   }
@@ -135,6 +153,7 @@ function createHarness(options = {}) {
     doc,
     title,
     body,
+    gutter,
     selection,
     calls,
     event,
@@ -142,26 +161,30 @@ function createHarness(options = {}) {
   };
 }
 
-test("P210e editable title plain Tab hands off to first editable body with one collapsed caret", () => {
+test("P210q editable title plain Tab bypasses gutter and lands at start of first editable body line", () => {
   const h = createHarness();
   const ev = h.event();
 
   assert.equal(h.polish.handleTitleBodyTab(ev, h.doc, { title: "Existing", readOnly: false }), true);
   assert.equal(h.doc.activeElement, h.body);
-  assert.equal(h.calls.bodyFocus, 1);
   assert.equal(h.calls.preventDefault, 1);
+  assert.equal(h.calls.bodyFocus, 1);
+  assert.equal(h.calls.gutterFocus, 0);
   assert.equal(h.selection.rangeCount, 1);
 
   const range = h.getRange();
   assert.ok(range);
   assert.equal(range.collapsed, true);
+  assert.equal(range.toStart, true, "title Tab must collapse the body range toward its start");
   assert.equal(range.startContainer, h.body);
+  assert.equal(range.endContainer, h.body);
+  assert.equal(range.startOffset, 0);
+  assert.equal(range.endOffset, 0);
   assert.equal(h.selection.toString(), "", "body content must not be preselected");
 
   const immediateTextInputTarget = h.doc.activeElement;
   assert.equal(immediateTextInputTarget, h.body, "typing immediately after Tab targets the body without a click");
 });
-
 test("P210e Shift+Tab is left native", () => {
   const h = createHarness();
   const ev = h.event({ shiftKey: true });
@@ -169,6 +192,24 @@ test("P210e Shift+Tab is left native", () => {
   assert.equal(h.doc.activeElement, h.title);
   assert.equal(h.calls.preventDefault, 0);
   assert.equal(h.selection.rangeCount, 0);
+});
+
+test("P210q modified Tab and composition remain native", () => {
+  for (const overrides of [
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+    { isComposing: true },
+  ]) {
+    const h = createHarness();
+    const ev = h.event(overrides);
+    assert.equal(h.polish.handleTitleBodyTab(ev, h.doc, { title: "Existing", readOnly: false }), false);
+    assert.equal(h.doc.activeElement, h.title);
+    assert.equal(h.calls.preventDefault, 0);
+    assert.equal(h.calls.bodyFocus, 0);
+    assert.equal(h.calls.gutterFocus, 0);
+    assert.equal(h.selection.rangeCount, 0);
+  }
 });
 
 test("P210e read-only title/body handoff is not overridden", () => {
@@ -187,8 +228,16 @@ test("P210e missing or non-editable body target does not trap focus", () => {
     assert.equal(h.polish.handleTitleBodyTab(ev, h.doc, { title: "Existing", readOnly: false }), false);
     assert.equal(h.doc.activeElement, h.title);
     assert.equal(h.calls.preventDefault, 0);
+    assert.equal(h.calls.bodyFocus, 0);
+    assert.equal(h.calls.gutterFocus, 0);
     assert.equal(h.selection.rangeCount, 0);
   }
+});
+
+test("P210q changes only title-Tab caret direction and preserves opening-focus end placement", () => {
+  const polish = source("js/pocket-node-popout-polish.js");
+  assert.match(polish, /return first \? placeCaretInElement\(doc, first, true\) : false;/);
+  assert.match(polish, /placeCaretInElement\(doc, body, false\)/);
 });
 
 test("P210e new path is title-only and leaves runtime body Tab indentation ownership unchanged", () => {

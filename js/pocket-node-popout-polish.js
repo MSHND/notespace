@@ -111,7 +111,7 @@
 
     const body = editableBodyEntryTarget(doc);
     if (!body || !canPlaceCollapsedCaret(doc)) return false;
-    if (placeCaretInElement(doc, body, true) !== true || !collapsedCaretOwnedBy(doc, body)) return false;
+    if (placeCaretInElement(doc, body, false) !== true || !collapsedCaretOwnedBy(doc, body)) return false;
 
     ev.preventDefault?.();
     return true;
