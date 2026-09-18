@@ -16,6 +16,7 @@ const LOCAL_MODULE_PATH = "/js/pocket-sync-local-integration.js";
 const ADDITIONAL_MODULE_PATH = "/js/pocket-sync-additional-device.js";
 const RECOVERY_MODULE_PATH = "/js/pocket-sync-emergency-recovery.js";
 const PRODUCTION_BOOTSTRAP_PATH = "/js/pocket-sync-production-bootstrap.js";
+const POPUP_POLISH_PATH = "/js/pocket-node-popout-polish.js";
 const STARLING_BOOTSTRAP_PATHS = Object.freeze([
   "/js/pocket-starling-shadow.js",
   "/js/pocket-starling-sequence-shadow.js",
@@ -74,6 +75,7 @@ function productionStaticInput(browserRoot, serviceRoot) {
     browserRoot,
     additionalAssets: Object.freeze([
       LOCAL_MODULE_PATH, ADDITIONAL_MODULE_PATH, RECOVERY_MODULE_PATH, PRODUCTION_BOOTSTRAP_PATH,
+      POPUP_POLISH_PATH,
       ...STARLING_BOOTSTRAP_PATHS,
     ]),
     transformIndex(index) { return injectedIndex(index, serviceRoot); },

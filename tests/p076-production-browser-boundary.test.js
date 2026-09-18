@@ -8,6 +8,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
 const { spawnSync } = require("node:child_process");
+const vm = require("node:vm");
 
 const {
   createProductionIntegrationHandler,
@@ -74,6 +75,48 @@ function assertCommonHeaders(result, csp = PRODUCTION_CSP) {
   assert.equal(result.headers["permissions-policy"], "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
   assert.doesNotMatch(result.headers["permissions-policy"], /publickey-credentials/i);
   assert.equal(result.headers["content-security-policy"], csp);
+}
+
+function popupScriptDependenciesFromProductSources() {
+  const context = vm.createContext({
+    console,
+    JSON,
+    Object,
+    Array,
+    Number,
+    String,
+    Math,
+    Set,
+    Map,
+  });
+  context.window = context;
+  context.globalThis = context;
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "js/pocket-node-content.js"), "utf8"), context, {
+    filename: "js/pocket-node-content.js",
+  });
+  vm.runInContext(fs.readFileSync(path.join(ROOT, "js/pocket-node-popout-template.js"), "utf8"), context, {
+    filename: "js/pocket-node-popout-template.js",
+  });
+  const template = context.PocketNodePopoutTemplate;
+  assert.equal(typeof template?.render, "function");
+
+  const html = template.render({
+    id: "p210l-contract",
+    title: "Reviewed popup",
+    path: "Root / Reviewed popup",
+    text: "Body",
+    readOnly: false,
+  }, {
+    contentAssetUrl: "/js/pocket-node-content.js",
+    runtimeAssetUrl: "/js/pocket-node-popout-runtime.js",
+  });
+  const dependencies = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"[^>]*><\/script>/gi)]
+    .map((match) => match[1]);
+  assert.ok(dependencies.length > 0);
+  for (const dependency of dependencies) {
+    assert.match(dependency, /^\/js\/[A-Za-z0-9._/-]+\.js$/);
+  }
+  return Object.freeze([...new Set(dependencies)].sort());
 }
 
 function productionHarness() {
@@ -196,7 +239,7 @@ test("P076 release manifest exactly hashes the frozen production static bytes", 
   assert.ok(manifest.length > 60);
   for (const required of [
     "/index.html", "/sw.js", "/styles.css", "/manifest.json",
-    "/js/pocket-node-popout-runtime.js",
+    "/js/pocket-node-popout-runtime.js", "/js/pocket-node-popout-polish.js",
     "/js/pocket-sync-production-bootstrap.js", "/js/pocket-sync-additional-device.js",
     "/js/pocket-sync-emergency-recovery.js", "/js/pocket-sync-local-integration.js",
   ]) assert.ok(manifest.some((entry) => entry.path === required), required);
@@ -223,6 +266,52 @@ test("P076 release manifest exactly hashes the frozen production static bytes", 
   assert.equal(command.status, 0, command.stderr);
   assert.equal(command.stderr, "");
   assert.deepEqual(JSON.parse(command.stdout), { version: 1, assets: manifest });
+});
+
+test("P210l every popup script dependency is reviewed, hashed and executable in production", async () => {
+  const dependencies = popupScriptDependenciesFromProductSources();
+  assert.deepEqual(dependencies, [
+    "/js/pocket-node-content.js",
+    "/js/pocket-node-popout-polish.js",
+    "/js/pocket-node-popout-runtime.js",
+  ]);
+
+  const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: SERVICE_ROOT });
+  const manifestByPath = new Map(manifest.map((entry) => [entry.path, entry]));
+  const handler = createProductionIntegrationHandler({
+    application: { async handle() { throw new Error("unexpected API call"); } },
+    browserRoot: ROOT,
+    serviceRoot: SERVICE_ROOT,
+  });
+
+  for (const dependency of dependencies) {
+    const entry = manifestByPath.get(dependency);
+    assert.ok(entry, `missing reviewed popup dependency: ${dependency}`);
+    const served = await send(handler, request("GET", dependency));
+    assert.equal(served.statusCode, 200, dependency);
+    assert.equal(served.headers["content-type"], "text/javascript; charset=utf-8", dependency);
+    assert.equal(served.headers["cache-control"], "no-store", dependency);
+    assert.equal(served.headers["x-content-type-options"], "nosniff", dependency);
+    assert.ok(Buffer.isBuffer(served.body), dependency);
+    assert.equal(served.body.byteLength, entry.bytes, dependency);
+    assert.equal(
+      crypto.createHash("sha256").update(served.body).digest("hex"),
+      entry.sha256,
+      dependency,
+    );
+    assert.deepEqual(
+      served.body,
+      fs.readFileSync(path.join(ROOT, dependency.replace(/^\//, ""))),
+      dependency,
+    );
+  }
+
+  for (const blocked of ["/package.json", "/tests/p076-production-browser-boundary.test.js"]) {
+    const result = await send(handler, request("GET", blocked));
+    assert.equal(result.statusCode, 404, blocked);
+    assert.equal(result.headers["cache-control"], "no-store", blocked);
+    assert.equal(result.headers["x-content-type-options"], "nosniff", blocked);
+  }
 });
 
 test("P076 manifest is deterministic and fails closed for unsafe inventory entries", async (t) => {
