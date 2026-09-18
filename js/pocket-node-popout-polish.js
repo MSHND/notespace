@@ -107,6 +107,52 @@
     return finishOpeningFocus();
   }
 
+  function editableBodyEntryTarget(doc) {
+    const pane = doc?.getElementById?.("outlinePane");
+    const first = pane?.querySelector?.(".lineText[data-line-id]") || null;
+    if (!first) return null;
+    const declared = String(first.getAttribute?.("contenteditable") ?? first.contentEditable ?? "").toLowerCase();
+    if (first.isContentEditable !== true && declared !== "true") return null;
+    return first;
+  }
+
+  function collapsedCaretOwnedBy(doc, element) {
+    if (!element || doc?.activeElement !== element) return false;
+    const selection = selectionFor(doc);
+    if (!selection || selection.rangeCount !== 1 || typeof selection.getRangeAt !== "function") return false;
+    let range;
+    try { range = selection.getRangeAt(0); } catch (_error) { return false; }
+    if (!range || range.collapsed !== true || !range.startContainer) return false;
+    return range.startContainer === element || element.contains?.(range.startContainer) === true;
+  }
+
+  function canPlaceCollapsedCaret(doc) {
+    const selection = selectionFor(doc);
+    const range = typeof doc?.createRange === "function" ? doc.createRange() : null;
+    return !!selection
+      && !!range
+      && typeof range.selectNodeContents === "function"
+      && typeof range.collapse === "function"
+      && typeof selection.removeAllRanges === "function"
+      && typeof selection.addRange === "function"
+      && typeof selection.getRangeAt === "function";
+  }
+
+  function handleTitleBodyTab(ev, doc, payload) {
+    if (!ev || ev.key !== "Tab" || ev.shiftKey || ev.metaKey || ev.ctrlKey || ev.altKey || ev.isComposing) return false;
+    if (!payload || payload.readOnly === true) return false;
+
+    const title = doc?.getElementById?.("titleInput");
+    if (!title || doc.activeElement !== title || ev.target !== title || title.readOnly === true || title.disabled === true) return false;
+
+    const body = editableBodyEntryTarget(doc);
+    if (!body || !canPlaceCollapsedCaret(doc)) return false;
+    if (placeCaretInElement(doc, body, true) !== true || !collapsedCaretOwnedBy(doc, body)) return false;
+
+    ev.preventDefault?.();
+    return true;
+  }
+
   function finiteRect(rect) {
     if (!rect) return null;
     const top = Number(rect.top);
@@ -317,7 +363,8 @@
     if (!pane || !dialog) return false;
     doc.__pocketP210PolishInstalled = true;
 
-    installOpeningFocus(doc, payloadFromDocument(doc), global);
+    const payload = payloadFromDocument(doc);
+    installOpeningFocus(doc, payload, global);
 
     let comfortQueued = false;
     const scheduleComfort = () => {
@@ -338,6 +385,7 @@
     pane.addEventListener?.("focusin", scheduleComfort);
     doc.addEventListener?.("keydown", (ev) => {
       if (handleDirtyDialogKeydown(ev, doc)) return;
+      if (handleTitleBodyTab(ev, doc, payload)) return;
       handlePlainLeft(ev, doc);
     }, true);
     return true;
@@ -352,6 +400,7 @@
     keepActiveLineComfortable,
     nextDialogActionIndex,
     handleDirtyDialogKeydown,
+    handleTitleBodyTab,
     parentRowIndex,
     handlePlainLeft,
     softCenterPeRow,
