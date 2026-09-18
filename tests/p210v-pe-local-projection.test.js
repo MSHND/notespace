@@ -25,6 +25,7 @@ function createHarness(text) {
   let ranges = [];
   let clearCount = 0;
   let runtimeCreateCount = 0;
+  const presentationCounts = new Map();
 
   class TextNode {
     constructor(value = "") {
@@ -135,6 +136,14 @@ function createHarness(text) {
       const siblings = this.parentNode.childNodes || [];
       const index = siblings.indexOf(this);
       return index >= 0 && index + 1 < siblings.length ? siblings[index + 1] : null;
+    },
+  });
+  Object.defineProperty(Element.prototype, "previousSibling", {
+    get() {
+      if (!this.parentNode) return null;
+      const siblings = this.parentNode.childNodes || [];
+      const index = siblings.indexOf(this);
+      return index > 0 ? siblings[index - 1] : null;
     },
   });
   Object.defineProperty(Element.prototype, "firstChild", {
@@ -279,6 +288,9 @@ function createHarness(text) {
     window, document, content,
     getSelection() { return selection; },
     requestAnimationFrame(callback) { if (typeof callback === "function") callback(); return 1; },
+    presentationProbe(kind, count) {
+      presentationCounts.set(kind, (presentationCounts.get(kind) || 0) + (Number(count) || 1));
+    },
     probe(value) { api = value; },
   }), true);
   assert.ok(api);
@@ -324,6 +336,8 @@ function createHarness(text) {
     clearCount: () => clearCount,
     runtimeCreateCount: () => runtimeCreateCount,
     newRowsComparedWith,
+    resetPresentationCounts() { presentationCounts.clear(); },
+    presentationCounts() { return Object.fromEntries(presentationCounts); },
   };
 }
 
@@ -339,7 +353,7 @@ test("P210v/P210w source invariant keeps full reconstruction recovery-only and o
   const end = runtime.indexOf("function applyReadOnlyState", start);
   assert.ok(start >= 0 && end > start);
   const operations = runtime.slice(start, end);
-  assert.doesNotMatch(operations, /pane\.innerHTML|pane\.children|querySelectorAll|rebuildProjectionForRecovery|full-pane-enumeration|patchProjection/);
+  assert.doesNotMatch(operations, /pane\.innerHTML|pane\.children|querySelectorAll|rebuildProjectionForRecovery|full-pane-enumeration|patchProjection|content\.visibleIndexes/);
   for (const name of ["ingestPlainTextPaste", "toggleBranch", "indentBranch", "moveBranch", "removeEmptyLine", "moveBranchBefore", "insertAfter"]) {
     const at = operations.indexOf(`function ${name}`);
     assert.ok(at >= 0, name);
@@ -481,6 +495,160 @@ test("P210v multi-line paste replaces only the affected span and preserves unrel
   assert.equal(h.rowState(newRows[1].getAttribute("data-line-id")).depth, 1);
   assert.equal(h.document.activeElement?.getAttribute("data-line-id"), newRows[1].getAttribute("data-line-id"));
   assert.equal(h.clearCount(), 0);
+});
+
+
+function p210wLines(prefix, unrelatedCount) {
+  const lines = [...prefix];
+  for (let index = 0; index < unrelatedCount; index += 1) lines.push(`Unrelated ${index}`);
+  return lines.join("\n");
+}
+
+function p210wCountsAfter(harness, action) {
+  harness.resetPresentationCounts();
+  action();
+  return harness.presentationCounts();
+}
+
+function assertNoGlobalPresentationWork(counts) {
+  assert.equal(counts["full-pane-enumeration"] || 0, 0);
+  assert.equal(counts["recovery-full-scan"] || 0, 0);
+}
+
+test("P210w Enter presentation cost is constant from tiny to 1000-row unrelated document", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["Alpha", "Tail"], unrelated));
+    const farId = `line_${unrelated + 1}`;
+    const farRow = h.rowById(farId);
+    const counts = p210wCountsAfter(h, () => {
+      const inserted = h.api.insertAfter(0);
+      assert.ok(inserted);
+      assert.equal(h.document.activeElement?.getAttribute("data-line-id"), inserted);
+    });
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(counts["row-create"] || 0, 1);
+    assert.equal(counts["row-insert"] || 0, 1);
+    assertNoGlobalPresentationWork(counts);
+    return counts;
+  }
+  const small = run(2);
+  const large = run(1000);
+  assert.deepEqual(large, small);
+});
+
+test("P210w list-exit Enter remains constant and touches no unrelated presentation row", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["1. ", "Tail"], unrelated));
+    const farId = `line_${unrelated + 1}`;
+    const farRow = h.rowById(farId);
+    const counts = p210wCountsAfter(h, () => {
+      assert.equal(h.api.insertAfter(0), "line_0");
+      assert.equal(h.lineById("line_0").textContent, "");
+    });
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(counts["row-create"] || 0, 0);
+    assert.equal(counts["row-remove"] || 0, 0);
+    assertNoGlobalPresentationWork(counts);
+    return counts;
+  }
+  assert.deepEqual(run(1000), run(2));
+});
+
+test("P210w collapse/expand work scales with subtree, not unrelated visible document size", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["Parent", "  Child", "  Child two", "Tail"], unrelated));
+    const farId = `line_${unrelated + 3}`;
+    const farRow = h.rowById(farId);
+    const collapse = p210wCountsAfter(h, () => assert.equal(h.api.toggleBranch(0), true));
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(collapse["row-remove"] || 0, 2);
+    assertNoGlobalPresentationWork(collapse);
+    const expand = p210wCountsAfter(h, () => assert.equal(h.api.toggleBranch(0), true));
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(expand["row-create"] || 0, 2);
+    assert.equal(expand["row-insert"] || 0, 2);
+    assertNoGlobalPresentationWork(expand);
+    return { collapse, expand };
+  }
+  assert.deepEqual(run(1000), run(2));
+});
+
+test("P210w indent/outdent work scales with affected subtree only", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["Parent", "Child", "  Grandchild", "Tail"], unrelated));
+    const farId = `line_${unrelated + 3}`;
+    const farRow = h.rowById(farId);
+    const indent = p210wCountsAfter(h, () => assert.equal(h.api.indentBranch(1, 1), true));
+    assert.equal(h.rowById(farId), farRow);
+    assertNoGlobalPresentationWork(indent);
+    const outdent = p210wCountsAfter(h, () => assert.equal(h.api.indentBranch(1, -1), true));
+    assert.equal(h.rowById(farId), farRow);
+    assertNoGlobalPresentationWork(outdent);
+    return { indent, outdent };
+  }
+  assert.deepEqual(run(1000), run(2));
+});
+
+test("P210w empty-line removal uses visible neighbours and scales with promoted subtree only", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["Top", "", "  Child", "    Grand", "Tail"], unrelated));
+    const farId = `line_${unrelated + 4}`;
+    const farRow = h.rowById(farId);
+    const counts = p210wCountsAfter(h, () => assert.equal(h.api.removeEmptyLine(1), true));
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(h.document.activeElement?.getAttribute("data-line-id"), "line_0");
+    assert.equal(counts["row-remove"] || 0, 1);
+    assertNoGlobalPresentationWork(counts);
+    return counts;
+  }
+  assert.deepEqual(run(1000), run(2));
+});
+
+test("P210w Ctrl/Cmd move work is bounded by moved/relationship region", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["One", "Two", "Three"], unrelated));
+    const farId = `line_${unrelated + 2}`;
+    const farRow = h.rowById(farId);
+    const counts = p210wCountsAfter(h, () => assert.equal(h.api.moveBranch(1, "up"), true));
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(counts["row-move"] || 0, 1);
+    assertNoGlobalPresentationWork(counts);
+    return counts;
+  }
+  assert.deepEqual(run(1000), run(2));
+});
+
+test("P210w drag/drop move work is bounded by moved branch and direct relationships", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["A", "  Achild", "B", "C"], unrelated));
+    const farId = `line_${unrelated + 3}`;
+    const farRow = h.rowById(farId);
+    const counts = p210wCountsAfter(h, () => assert.equal(h.api.moveBranchBefore("line_0", "line_3"), true));
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(counts["row-move"] || 0, 2);
+    assertNoGlobalPresentationWork(counts);
+    return counts;
+  }
+  assert.deepEqual(run(1000), run(2));
+});
+
+test("P210w multi-line paste work is bounded by inserted/replaced span", () => {
+  function run(unrelated) {
+    const h = createHarness(p210wLines(["Alpha", "Beta", "Tail"], unrelated));
+    const farId = `line_${unrelated + 2}`;
+    const farRow = h.rowById(farId);
+    h.setSelection("line_1", 1, 3);
+    const counts = p210wCountsAfter(h, () => {
+      assert.equal(h.api.ingestPlainTextPaste(1, h.lineById("line_1"), "X\n  Y"), true);
+    });
+    assert.equal(h.rowById(farId), farRow);
+    assert.equal(counts["row-create"] || 0, 2);
+    assert.equal(counts["row-remove"] || 0, 1);
+    assert.equal(counts["row-insert"] || 0, 2);
+    assertNoGlobalPresentationWork(counts);
+    return counts;
+  }
+  assert.deepEqual(run(1000), run(2));
 });
 
 test("P210v full reconstruction remains an explicit exceptional recovery boundary", () => {

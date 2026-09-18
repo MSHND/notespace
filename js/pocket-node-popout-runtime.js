@@ -373,16 +373,15 @@
     function removeEmptyLine(index) {
       if (readOnly || index < 0 || lines.length <= 1 || typeof content.removeEmptyLine !== "function") return false;
       var removedId = lines[index].id, removedEnd = subtreeEnd(index);
+      var removedRow = rowForId(removedId); if (!removedRow) return false;
+      var previousVisibleId = removedRow.previousSibling?.getAttribute?.("data-line-id") || "";
+      var nextVisibleId = removedRow.nextSibling?.getAttribute?.("data-line-id") || "";
       var promotedCount = Math.max(0, removedEnd - index - 1);
       var oldBoundaryIds = [lines[index - 1]?.id || "", lines[removedEnd]?.id || ""];
       var transformed = content.removeEmptyLine(lines, index); if (!transformed || transformed.ok !== true) return false;
       lines = transformed.lines; collapsed.delete(removedId); detachVisibleRow(removedId);
-      var visible = typeof content.visibleIndexes === "function" ? content.visibleIndexes(lines, collapsed) : [];
-      var preferredIndex = -1, caretAtEnd = false;
-      for (var cursor = visible.length - 1; cursor >= 0; cursor -= 1) if (visible[cursor] < index) { preferredIndex = visible[cursor]; caretAtEnd = true; break; }
-      if (preferredIndex < 0) for (var next = 0; next < visible.length; next += 1) if (visible[next] >= index) { preferredIndex = visible[next]; break; }
-      if (preferredIndex < 0 && visible.length > 0) preferredIndex = visible[0];
-      selectedId = preferredIndex >= 0 && lines[preferredIndex] ? lines[preferredIndex].id : "";
+      selectedId = previousVisibleId || nextVisibleId || "";
+      var caretAtEnd = !!previousVisibleId;
       markMutation();
       for (var promoted = 0; promoted < promotedCount; promoted += 1) refreshRowAt(index + promoted, false);
       refreshRowsAt([index - 1, index + promotedCount]);
