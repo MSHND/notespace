@@ -67,6 +67,46 @@
     return first ? placeCaretInElement(doc, first, true) : false;
   }
 
+  function installOpeningFocus(doc, payload, windowCandidate) {
+    const target = openingFocusTarget(payload);
+    if (target === "none") return false;
+
+    const win = windowCandidate || doc?.defaultView || global;
+    let completed = false;
+    let userInteracted = false;
+    const interactionEvents = ["pointerdown", "mousedown", "touchstart", "keydown"];
+
+    const noteInteraction = () => {
+      if (!completed) userInteracted = true;
+    };
+    const cleanup = () => {
+      for (const type of interactionEvents) {
+        try { doc?.removeEventListener?.(type, noteInteraction, true); } catch (_error) {}
+      }
+      try { win?.removeEventListener?.("load", finishOpeningFocus); } catch (_error) {}
+    };
+    function finishOpeningFocus() {
+      if (completed) return false;
+      completed = true;
+      cleanup();
+      if (userInteracted) return false;
+      return focusOpeningSurface(doc, payload);
+    }
+
+    for (const type of interactionEvents) {
+      doc?.addEventListener?.(type, noteInteraction, true);
+    }
+
+    if (String(doc?.readyState || "").toLowerCase() === "complete") {
+      return finishOpeningFocus();
+    }
+    if (win && typeof win.addEventListener === "function") {
+      win.addEventListener("load", finishOpeningFocus, { once: true });
+      return true;
+    }
+    return finishOpeningFocus();
+  }
+
   function finiteRect(rect) {
     if (!rect) return null;
     const top = Number(rect.top);
@@ -277,7 +317,7 @@
     if (!pane || !dialog) return false;
     doc.__pocketP210PolishInstalled = true;
 
-    focusOpeningSurface(doc, payloadFromDocument(doc));
+    installOpeningFocus(doc, payloadFromDocument(doc), global);
 
     let comfortQueued = false;
     const scheduleComfort = () => {
@@ -307,6 +347,7 @@
     install,
     openingFocusTarget,
     focusOpeningSurface,
+    installOpeningFocus,
     comfortScrollDelta,
     keepActiveLineComfortable,
     nextDialogActionIndex,
