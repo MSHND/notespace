@@ -89,7 +89,7 @@ function createHarness(options = {}) {
   }
 
   const doc = {
-    readyState: "complete",
+    readyState: "loading",
     get activeElement() { return activeElement; },
     set activeElement(value) { activeElement = value; },
     getElementById(id) { return elements.get(id) || null; },

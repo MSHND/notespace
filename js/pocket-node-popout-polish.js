@@ -363,8 +363,8 @@
     if (!pane || !dialog) return false;
     doc.__pocketP210PolishInstalled = true;
 
+    installOpeningFocus(doc, payloadFromDocument(doc), global);
     const payload = payloadFromDocument(doc);
-    installOpeningFocus(doc, payload, global);
 
     let comfortQueued = false;
     const scheduleComfort = () => {
