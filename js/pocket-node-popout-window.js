@@ -35,29 +35,10 @@
     });
   }
 
-  function contentAssetUrl() {
-    try {
-      return new global.URL("js/pocket-node-content.js", global.location.href).pathname;
-    } catch (_error) {
-      return "/js/pocket-node-content.js";
-    }
-  }
-
-  function runtimeAssetUrl() {
-    try {
-      return new global.URL("js/pocket-node-popout-runtime.js", global.location.href).pathname;
-    } catch (_error) {
-      return "/js/pocket-node-popout-runtime.js";
-    }
-  }
-
   function editorHtml(payload, helpers, popupToken) {
     helpers = helpers || {};
     if (!global.PocketNodePopoutTemplate || typeof global.PocketNodePopoutTemplate.render !== "function") {
       throw new Error("PocketNodePopoutTemplate is not loaded.");
-    }
-    if (!global.PocketNodePopoutRuntime || typeof global.PocketNodePopoutRuntime.initialise !== "function") {
-      throw new Error("PocketNodePopoutRuntime is not loaded.");
     }
     const escape = typeof helpers.htmlEscape === "function" ? helpers.htmlEscape : htmlEscape;
     const runtimePayload = {
@@ -66,11 +47,7 @@
       popupInstanceToken: popupToken
     };
     if (!global.PocketNodeContent) throw new Error("PocketNodeContent is not loaded.");
-    return global.PocketNodePopoutTemplate.render(runtimePayload, {
-      htmlEscape: escape,
-      contentAssetUrl: contentAssetUrl(),
-      runtimeAssetUrl: runtimeAssetUrl()
-    });
+    return global.PocketNodePopoutTemplate.render(runtimePayload, { htmlEscape: escape });
   }
 
   function setBlockedPopupStatus(helpers) {

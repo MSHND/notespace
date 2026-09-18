@@ -10,6 +10,7 @@ const {
   createReviewedStaticHandler,
   createReviewedStaticManifest,
 } = require("./pocket-sync-static-assets.js");
+const surfaceDependencies = require("../js/pocket-surface-dependencies.js");
 
 const BROWSER_ROOT = path.resolve(__dirname, "..");
 const LOCAL_MODULE_PATH = "/js/pocket-sync-local-integration.js";
@@ -74,6 +75,7 @@ function productionStaticInput(browserRoot, serviceRoot) {
     browserRoot,
     additionalAssets: Object.freeze([
       LOCAL_MODULE_PATH, ADDITIONAL_MODULE_PATH, RECOVERY_MODULE_PATH, PRODUCTION_BOOTSTRAP_PATH,
+      ...surfaceDependencies.scriptsFor("pe").map((asset) => `/${asset}`),
       ...STARLING_BOOTSTRAP_PATHS,
     ]),
     transformIndex(index) { return injectedIndex(index, serviceRoot); },
