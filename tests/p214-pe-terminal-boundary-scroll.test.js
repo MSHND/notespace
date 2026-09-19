@@ -104,3 +104,85 @@ test("P214 Phase A: terminal ArrowDown comfort cycles must not walk viewport upw
   assert.equal(h.pane.scrollTop, 300, "terminal no-op must leave viewport stable");
   assert.deepEqual(h.scrollCalls, [], "degenerate caret geometry must not generate phantom upward scrolls");
 });
+
+
+test("P214 terminal ArrowUp equivalent comfort cycles do not walk viewport downward from degenerate caret geometry", () => {
+  const h = loadPolishHarness({
+    rangeRect: { top: 900, bottom: 900, height: 0 },
+    clientRects: [],
+    editableRect: { top: 140, bottom: 160, height: 20 },
+    rowRect: { top: 138, bottom: 162, height: 24 },
+    scrollTop: 120,
+  });
+
+  for (let i = 0; i < 5; i += 1) h.polish.keepActiveLineComfortable(h.doc);
+
+  assert.equal(h.pane.scrollTop, 120);
+  assert.deepEqual(h.scrollCalls, []);
+});
+
+test("P214 rejects degenerate Range geometry and uses editable fallback for bounded lower comfort correction", () => {
+  const h = loadPolishHarness({
+    rangeRect: { top: 0, bottom: 0, height: 0 },
+    clientRects: [],
+    editableRect: { top: 480, bottom: 496, height: 16 },
+    rowRect: { top: 478, bottom: 498, height: 20 },
+    scrollTop: 300,
+  });
+
+  assert.equal(h.polish.keepActiveLineComfortable(h.doc), true);
+  assert.equal(h.scrollCalls.length, 1);
+  assert.equal(h.scrollCalls[0].top, 26);
+  assert.equal(h.scrollCalls[0].behavior, "smooth");
+});
+
+test("P214 uses a usable client rect when collapsed Range bounding rect is degenerate", () => {
+  const h = loadPolishHarness({
+    rangeRect: { top: 0, bottom: 0, height: 0 },
+    clientRects: [{ top: 478, bottom: 494, height: 16 }],
+    editableRect: { top: 250, bottom: 266, height: 16 },
+    scrollTop: 300,
+  });
+
+  assert.equal(h.polish.keepActiveLineComfortable(h.doc), true);
+  assert.equal(h.scrollCalls.length, 1);
+  assert.equal(h.scrollCalls[0].top, 24);
+});
+
+test("P214 valid caret geometry preserves lower, upper and comfortable scroll contract", () => {
+  const lower = loadPolishHarness({
+    rangeRect: { top: 478, bottom: 494, height: 16 },
+    editableRect: { top: 250, bottom: 266, height: 16 },
+    scrollTop: 300,
+  });
+  assert.equal(lower.polish.keepActiveLineComfortable(lower.doc), true);
+  assert.equal(lower.scrollCalls[0].top, 24);
+
+  const upper = loadPolishHarness({
+    rangeRect: { top: 110, bottom: 126, height: 16 },
+    editableRect: { top: 250, bottom: 266, height: 16 },
+    scrollTop: 300,
+  });
+  assert.equal(upper.polish.keepActiveLineComfortable(upper.doc), true);
+  assert.equal(upper.scrollCalls[0].top, -20);
+
+  const comfortable = loadPolishHarness({
+    rangeRect: { top: 250, bottom: 266, height: 16 },
+    editableRect: { top: 480, bottom: 496, height: 16 },
+    scrollTop: 300,
+  });
+  assert.equal(comfortable.polish.keepActiveLineComfortable(comfortable.doc), false);
+  assert.deepEqual(comfortable.scrollCalls, []);
+});
+
+test("P214 does not treat coordinate top zero as invalid when caret height is meaningful", () => {
+  const h = loadPolishHarness({
+    rangeRect: { top: 0, bottom: 16, height: 16 },
+    clientRects: [],
+    editableRect: { top: 280, bottom: 296, height: 16 },
+    paneRect: { top: -100, bottom: 300, height: 400 },
+    scrollTop: 100,
+  });
+  assert.equal(h.polish.keepActiveLineComfortable(h.doc), false);
+  assert.deepEqual(h.scrollCalls, []);
+});

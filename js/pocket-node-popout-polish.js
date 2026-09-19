@@ -143,6 +143,15 @@
     return active.closest(".lineText[data-line-id]");
   }
 
+  function usableCaretRect(rect) {
+    const finite = finiteRect(rect);
+    if (!finite) return null;
+    const declaredHeight = Number(rect?.height);
+    const geometricHeight = finite.bottom - finite.top;
+    const height = Number.isFinite(declaredHeight) ? Math.max(declaredHeight, geometricHeight) : geometricHeight;
+    return Number.isFinite(height) && height >= 0.5 ? finite : null;
+  }
+
   function selectionRectFor(doc, editable) {
     const selection = selectionFor(doc);
     if (!selection || selection.rangeCount !== 1 || typeof selection.getRangeAt !== "function") return null;
@@ -151,12 +160,16 @@
     if (!range || range.collapsed !== true || !range.startContainer) return null;
     if (!(range.startContainer === editable || editable.contains?.(range.startContainer))) return null;
     try {
-      let rect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
-      if ((!rect || Number(rect.bottom) - Number(rect.top) < 0.5) && typeof range.getClientRects === "function") {
-        const rects = range.getClientRects();
-        if (rects && rects.length) rect = rects[0];
+      const rangeRect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
+      const usableRangeRect = usableCaretRect(rangeRect);
+      if (usableRangeRect) return usableRangeRect;
+      if (typeof range.getClientRects !== "function") return null;
+      const rects = range.getClientRects();
+      for (let index = 0; rects && index < rects.length; index += 1) {
+        const usableClientRect = usableCaretRect(rects[index]);
+        if (usableClientRect) return usableClientRect;
       }
-      return finiteRect(rect);
+      return null;
     } catch (_error) {
       return null;
     }

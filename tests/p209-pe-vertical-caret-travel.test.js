@@ -90,6 +90,12 @@ function createHarness(text) {
   }), true);
 
   const pane = controls.get("outlinePane");
+  pane.scrollTop = 222;
+  const viewportScrollCalls = [];
+  pane.scrollBy = function (options) {
+    viewportScrollCalls.push({ ...options });
+    this.scrollTop += Number(options?.top) || 0;
+  };
   const parsed = content.parseLines(text);
   pane.innerHTML = "";
   parsed.forEach((line, index) => {
@@ -205,6 +211,7 @@ function createHarness(text) {
     flushFrames,
     pendingFrames: () => rafQueue.length,
     dirtyMarks: () => dirtyMarks,
+    viewport: () => ({ scrollTop: pane.scrollTop, scrollCalls: viewportScrollCalls.slice() }),
     isDirty: () => window.PocketNodePopoutSession.hasUnsavedChanges(),
   };
 }
@@ -356,20 +363,23 @@ test("native focus or selection movement to another editable wins and Pocket doe
   assert.equal(harness.dirtyMarks(), 0);
 });
 
-test("first and last visible boundaries remain harmless native no-ops", () => {
+test("first and last visible boundaries remain harmless native no-ops with stable runtime viewport", () => {
   const harness = createHarness("Alpha\nBeta");
+  const initialViewport = harness.viewport();
   harness.setCaret("line_0", 2);
 
   const up = harness.key("line_0", "ArrowUp");
   assert.equal(up.defaultPrevented, false);
   harness.flushFrames();
   assert.deepEqual(harness.caret(), { lineId: "line_0", offset: 2, collapsed: true });
+  assert.deepEqual(harness.viewport(), initialViewport, "first-node boundary must not move viewport");
 
   harness.setCaret("line_1", 2);
   const down = harness.key("line_1", "ArrowDown");
   assert.equal(down.defaultPrevented, false);
   harness.flushFrames();
   assert.deepEqual(harness.caret(), { lineId: "line_1", offset: 2, collapsed: true });
+  assert.deepEqual(harness.viewport(), initialViewport, "last-node boundary must not move viewport");
   assert.equal(harness.dirtyMarks(), 0);
 });
 
