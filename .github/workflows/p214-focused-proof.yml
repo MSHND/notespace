@@ -1,0 +1,16 @@
+name: P214 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p214-proof2
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test tests/p214-pe-terminal-boundary-scroll.test.js tests/p209-pe-vertical-caret-travel.test.js tests/p210d-pe-opening-focus.test.js tests/p210e-pe-body-entry-focus.test.js tests/p210-friction-pack.test.js tests/p210v-pe-local-projection.test.js tests/p210x-shared-pe-test-dom.test.js tests/p207-pe-empty-line-backspace.test.js tests/p207a-pe-collapsed-focus.test.js tests/p207e-pe-caret-after-empty-backspace.test.js
