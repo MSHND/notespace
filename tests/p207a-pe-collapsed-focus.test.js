@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { createPeTestDom } = require("./helpers/pe-test-dom");
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -29,97 +30,12 @@ function createHarness(text) {
   let dirtyMarks = 0;
   let document;
 
-  class Element {
-    constructor(tagName = "div") {
-      this.tagName = String(tagName).toUpperCase();
-      this.className = "";
-      this.style = {};
-      this.attributes = new Map();
-      this.children = [];
-      this.parentNode = null;
-      this.listeners = new Map();
-      this.textContent = "";
-      this.value = "";
-      this.hidden = false;
-      this.disabled = false;
-      this.readOnly = false;
-      this.contentEditable = "false";
-      this.spellcheck = false;
-      this.draggable = false;
-      this.classList = {
-        toggle: (name, force) => {
-          if (name === "isDirty" && force === true) dirtyMarks += 1;
-          return !!force;
-        },
-        add() {},
-        remove() {},
-        contains() { return false; },
-      };
-    }
-
-    setAttribute(name, value) { this.attributes.set(String(name), String(value)); }
-    getAttribute(name) { return this.attributes.has(String(name)) ? this.attributes.get(String(name)) : null; }
-    addEventListener(type, handler) {
-      if (!this.listeners.has(type)) this.listeners.set(type, []);
-      this.listeners.get(type).push(handler);
-    }
-    dispatch(type, values = {}) {
-      const event = {
-        type,
-        target: this,
-        key: "",
-        ctrlKey: false,
-        metaKey: false,
-        altKey: false,
-        shiftKey: false,
-        defaultPrevented: false,
-        preventDefault() { this.defaultPrevented = true; },
-        stopPropagation() {},
-        stopImmediatePropagation() { this.immediatePropagationStopped = true; },
-        ...values,
-      };
-      for (const handler of this.listeners.get(type) || []) {
-        handler(event);
-        if (event.immediatePropagationStopped) break;
-      }
-      return event;
-    }
-    appendChild(child) { child.parentNode = this; this.children.push(child); return child; }
-    contains(candidate) {
-      return candidate === this || this.children.some((child) => child.contains?.(candidate));
-    }
-    closest(selector) {
-      let candidate = this;
-      while (candidate) {
-        const classes = String(candidate.className || "").split(/\s+/);
-        if (selector === ".lineText[data-line-id]" && classes.includes("lineText") && candidate.getAttribute("data-line-id")) return candidate;
-        if (selector === ".lineGutter[data-line-id]" && classes.includes("lineGutter") && candidate.getAttribute("data-line-id")) return candidate;
-        if (selector === ".docRow[data-line-id]" && classes.includes("docRow") && candidate.getAttribute("data-line-id")) return candidate;
-        candidate = candidate.parentNode;
-      }
-      return null;
-    }
-    querySelectorAll(selector) {
-      const result = [];
-      const visit = (candidate) => {
-        for (const child of candidate.children || []) {
-          const classes = String(child.className || "").split(/\s+/);
-          if (selector === ".lineText[data-line-id]" && classes.includes("lineText") && child.getAttribute("data-line-id")) result.push(child);
-          if (selector === ".lineGutter[data-line-id]" && classes.includes("lineGutter") && child.getAttribute("data-line-id")) result.push(child);
-          visit(child);
-        }
-      };
-      visit(this);
-      return result;
-    }
-    focus() { document.activeElement = this; }
-    select() {}
-  }
-
-  Object.defineProperty(Element.prototype, "innerHTML", {
-    get() { return ""; },
-    set() { this.children.length = 0; },
+  const peDom = createPeTestDom({
+    onClassToggle(name, force) {
+      if (name === "isDirty" && force === true) dirtyMarks += 1;
+    },
   });
+  const { Element } = peDom;
 
   document = {
     activeElement: null,
@@ -128,6 +44,7 @@ function createHarness(text) {
     getElementById(id) { return controls.get(id) || null; },
     addEventListener() {},
   };
+  peDom.bindDocument(document);
 
   for (const id of [
     "titleInput", "outlinePane", "saveState", "saveBtn", "saveCloseBtn", "unsavedDialog",

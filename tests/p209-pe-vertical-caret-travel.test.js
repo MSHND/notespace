@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
+const { createPeTestDom } = require("./helpers/pe-test-dom");
 
 const ROOT = path.resolve(__dirname, "..");
 
@@ -32,260 +33,25 @@ function createHarness(text) {
   let document;
   let ranges = [];
 
-  class TextNode {
-    constructor(value = "") {
-      this.nodeType = 3;
-      this.nodeValue = String(value);
-      this.parentNode = null;
-    }
-    get textContent() { return this.nodeValue; }
-    set textContent(value) { this.nodeValue = String(value); }
-    contains(candidate) { return candidate === this; }
-  }
-
-  class Element {
-    constructor(tagName = "div") {
-      this.nodeType = 1;
-      this.tagName = String(tagName).toUpperCase();
-      this.className = "";
-      this.style = {};
-      this.attributes = new Map();
-      this.children = [];
-      this.childNodes = [];
-      this.parentNode = null;
-      this.listeners = new Map();
-      this.value = "";
-      this.hidden = false;
-      this.disabled = false;
-      this.readOnly = false;
-      this.contentEditable = "false";
-      this.spellcheck = false;
-      this.draggable = false;
-      this.classList = {
-        toggle: (name, force) => {
-          if (name === "isDirty" && force === true) dirtyMarks += 1;
-          return !!force;
-        },
-        add() {},
-        remove() {},
-        contains() { return false; },
-      };
-    }
-
-    setAttribute(name, value) { this.attributes.set(String(name), String(value)); }
-    getAttribute(name) { return this.attributes.has(String(name)) ? this.attributes.get(String(name)) : null; }
-    addEventListener(type, handler) {
-      if (!this.listeners.has(type)) this.listeners.set(type, []);
-      this.listeners.get(type).push(handler);
-    }
-    dispatch(type, values = {}) {
-      const event = {
-        type,
-        target: this,
-        key: "",
-        keyCode: 0,
-        ctrlKey: false,
-        metaKey: false,
-        altKey: false,
-        shiftKey: false,
-        isComposing: false,
-        defaultPrevented: false,
-        preventDefault() { this.defaultPrevented = true; },
-        stopPropagation() {},
-        stopImmediatePropagation() { this.immediatePropagationStopped = true; },
-        ...values,
-      };
-      for (const handler of this.listeners.get(type) || []) {
-        handler(event);
-        if (event.immediatePropagationStopped) break;
-      }
-      return event;
-    }
-    appendChild(child) {
-      child.parentNode = this;
-      this.childNodes.push(child);
-      if (child.nodeType === 1) this.children.push(child);
-      return child;
-    }
-    contains(candidate) {
-      return candidate === this || this.childNodes.some((child) => child.contains?.(candidate));
-    }
-    closest(selector) {
-      let candidate = this;
-      while (candidate) {
-        const classes = String(candidate.className || "").split(/\s+/);
-        if (selector === ".lineText[data-line-id]" && classes.includes("lineText") && candidate.getAttribute?.("data-line-id")) return candidate;
-        if (selector === ".lineGutter[data-line-id]" && classes.includes("lineGutter") && candidate.getAttribute?.("data-line-id")) return candidate;
-        if (selector === ".docRow[data-line-id]" && classes.includes("docRow") && candidate.getAttribute?.("data-line-id")) return candidate;
-        candidate = candidate.parentNode;
-      }
-      return null;
-    }
-    querySelectorAll(selector) {
-      const result = [];
-      const visit = (candidate) => {
-        for (const child of candidate.childNodes || []) {
-          if (child.nodeType !== 1) continue;
-          const classes = String(child.className || "").split(/\s+/);
-          if (selector === ".lineText[data-line-id]" && classes.includes("lineText") && child.getAttribute("data-line-id")) result.push(child);
-          if (selector === ".lineGutter[data-line-id]" && classes.includes("lineGutter") && child.getAttribute("data-line-id")) result.push(child);
-          visit(child);
-        }
-      };
-      visit(this);
-      return result;
-    }
-    focus() { document.activeElement = this; }
-    select() {}
-  }
-
-  Object.defineProperty(Element.prototype, "textContent", {
-    get() { return this.childNodes.map((child) => child.textContent || "").join(""); },
-    set(value) {
-      this.children.length = 0;
-      this.childNodes.length = 0;
-      const textValue = String(value == null ? "" : value);
-      if (textValue.length > 0) this.appendChild(new TextNode(textValue));
+  const peDom = createPeTestDom({
+    onClassToggle(name, force) {
+      if (name === "isDirty" && force === true) dirtyMarks += 1;
     },
-  });
-
-  Object.defineProperty(Element.prototype, "innerHTML", {
-    get() { return ""; },
-    set() { this.children.length = 0; this.childNodes.length = 0; },
-  });
-
-  function textLength(node) {
-    return String(node && node.textContent || "").length;
-  }
-
-  function absoluteOffset(root, container, offset) {
-    let total = 0;
-    let found = false;
-    const visit = (node) => {
-      if (!node || found) return;
-      if (node === container) {
-        if (node.nodeType === 3) {
-          total += Math.max(0, Math.min(Number(offset) || 0, textLength(node)));
-        } else {
-          const limit = Math.max(0, Math.min(Number(offset) || 0, (node.childNodes || []).length));
-          for (let index = 0; index < limit; index += 1) total += textLength(node.childNodes[index]);
-        }
-        found = true;
-        return;
-      }
-      if (node.nodeType === 3) {
-        total += textLength(node);
-        return;
-      }
-      for (const child of node.childNodes || []) visit(child);
-    };
-    visit(root);
-    return found ? total : null;
-  }
-
-  function pointForOffset(root, offset) {
-    let remaining = Math.max(0, Math.min(Number(offset) || 0, textLength(root)));
-    let lastText = null;
-    const visit = (node) => {
-      for (const child of node.childNodes || []) {
-        if (child.nodeType === 3) {
-          lastText = child;
-          const length = textLength(child);
-          if (remaining <= length) return { container: child, offset: remaining };
-          remaining -= length;
-          continue;
-        }
-        const nested = visit(child);
-        if (nested) return nested;
-      }
-      return null;
-    };
-    const point = visit(root);
-    if (point) return point;
-    if (lastText) return { container: lastText, offset: textLength(lastText) };
-    return { container: root, offset: 0 };
-  }
-
-  class Range {
-    constructor() {
-      this.startContainer = null;
-      this.endContainer = null;
-      this.startOffset = 0;
-      this.endOffset = 0;
-      this.collapsed = true;
-      this.selectedRoot = null;
-    }
-    cloneRange() {
-      const clone = new Range();
-      clone.startContainer = this.startContainer;
-      clone.endContainer = this.endContainer;
-      clone.startOffset = this.startOffset;
-      clone.endOffset = this.endOffset;
-      clone.collapsed = this.collapsed;
-      clone.selectedRoot = this.selectedRoot;
-      return clone;
-    }
-    selectNodeContents(target) {
-      this.selectedRoot = target;
-      this.startContainer = target;
-      this.startOffset = 0;
-      this.endContainer = target;
-      this.endOffset = (target.childNodes || []).length;
-      this.collapsed = this.startContainer === this.endContainer && this.startOffset === this.endOffset;
-    }
-    setStart(container, offset) {
-      this.startContainer = container;
-      this.startOffset = Number(offset) || 0;
-      this.collapsed = this.startContainer === this.endContainer && this.startOffset === this.endOffset;
-    }
-    setEnd(container, offset) {
-      this.endContainer = container;
-      this.endOffset = Number(offset) || 0;
-      this.collapsed = this.startContainer === this.endContainer && this.startOffset === this.endOffset;
-    }
-    collapse(toStart) {
-      if (toStart) {
-        this.endContainer = this.startContainer;
-        this.endOffset = this.startOffset;
-      } else {
-        this.startContainer = this.endContainer;
-        this.startOffset = this.endOffset;
-      }
-      this.collapsed = true;
-    }
-    toString() {
-      if (!this.selectedRoot) return "";
-      const text = String(this.selectedRoot.textContent || "");
-      const start = absoluteOffset(this.selectedRoot, this.startContainer, this.startOffset);
-      const end = absoluteOffset(this.selectedRoot, this.endContainer, this.endOffset);
-      if (start === null || end === null) return "";
-      return text.slice(Math.min(start, end), Math.max(start, end));
-    }
-    getBoundingClientRect() {
-      let root = this.startContainer;
+    rangeRect(range, dom) {
+      let root = range.startContainer;
       while (root) {
         const classes = String(root.className || "").split(/\s+/);
         if (root.nodeType === 1 && classes.includes("lineText") && root.getAttribute?.("data-line-id")) break;
         root = root.parentNode;
       }
       if (!root) return { top: 0, bottom: 0, height: 0 };
-      const offset = absoluteOffset(root, this.startContainer, this.startOffset);
+      const offset = dom.absoluteOffset(root, range.startContainer, range.startOffset);
       const top = visualRows.get(`${root.getAttribute("data-line-id")}:${offset}`);
       if (!Number.isFinite(top)) return { top: 0, bottom: 0, height: 0 };
       return { top, bottom: top + 16, height: 16 };
-    }
-    getClientRects() {
-      const rect = this.getBoundingClientRect();
-      return rect.height > 0 ? [rect] : [];
-    }
-  }
-
-  const selection = {
-    get rangeCount() { return ranges.length; },
-    getRangeAt(index) { return ranges[index]; },
-    removeAllRanges() { ranges = []; },
-    addRange(range) { ranges = [range]; },
-  };
+    },
+  });
+  const { Element, Range, selection, absoluteOffset, pointForOffset } = peDom;
 
   document = {
     activeElement: null,
@@ -296,6 +62,7 @@ function createHarness(text) {
     getElementById(id) { return controls.get(id) || null; },
     addEventListener() {},
   };
+  peDom.bindDocument(document);
 
   for (const id of [
     "titleInput", "outlinePane", "saveState", "saveBtn", "saveCloseBtn", "unsavedDialog",
