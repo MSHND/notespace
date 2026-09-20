@@ -405,6 +405,25 @@
       refreshRowsByIds(oldBoundaryIds.concat([targetId]));
       focusLine(branch[0].id); return true;
     }
+    function joinPlainLineAtStart(index, target, caretOffset) {
+      if (readOnly || index <= 0 || index >= lines.length || caretOffset !== 0 || !target) return false;
+      var current = lines[index], previous = lines[index - 1];
+      if (!current || !previous || current.content === "" || lineElement(current.id) !== target) return false;
+      var currentMarker = typeof content.parseMarker === "function" ? content.parseMarker(current.content) : null;
+      var previousMarker = typeof content.parseMarker === "function" ? content.parseMarker(previous.content) : null;
+      if (!currentMarker || currentMarker.kind !== "plain" || !previousMarker || previousMarker.kind !== "plain") return false;
+      if ((Number(current.depth) || 0) !== (Number(previous.depth) || 0)) return false;
+      if (hasChildren(index) || subtreeEnd(index) !== index + 1 || subtreeEnd(index - 1) !== index) return false;
+      var previousRow = rowForId(previous.id), currentRow = rowForId(current.id);
+      if (!previousRow || !currentRow || rowParts(currentRow).text !== target) return false;
+      var joinOffset = String(previous.content || "").length, removedId = current.id;
+      previous.content = String(previous.content || "") + String(current.content || "");
+      lines.splice(index, 1); collapsed.delete(removedId); markMutation();
+      updateRowPresentation(previousRow, index - 1, true); detachVisibleRow(removedId);
+      refreshRowsAt([index - 2, index]); selectedId = previous.id;
+      if (!focusLineAtOffset(previous.id, joinOffset)) focusLine(previous.id, true);
+      return true;
+    }
     function insertAfter(index, caretOffset) {
       var id = lines[index].id, currentRow = rowForId(id); if (!currentRow) return "";
       var marker = content.smartContinuation(lines[index].content);
@@ -483,7 +502,11 @@
     pane.addEventListener("keydown", function (ev) {
       var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return;
       var index=syncLineElement(text); if(index<0)return; selectedId=lines[index].id;
-      if(ev.key==="Backspace"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey&&lines[index].content===""&&lines.length>1&&lineElement(lines[index].id)===text){if(removeEmptyLine(index))ev.preventDefault();return;}
+      if(ev.key==="Backspace"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){
+        if(lines[index].content===""&&lines.length>1&&lineElement(lines[index].id)===text){if(removeEmptyLine(index))ev.preventDefault();return;}
+        if(!ev.shiftKey&&!ev.isComposing&&ev.keyCode!==229){var backspaceCaretOffset=collapsedCaretOffset(text);if(backspaceCaretOffset===0&&joinPlainLineAtStart(index,text,backspaceCaretOffset))ev.preventDefault();}
+        return;
+      }
       if(ev.key==="Enter"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){var caretOffset=collapsedCaretOffset(text);ev.preventDefault();insertAfter(index,caretOffset);return;}
       if(ev.key==="Tab"){ev.preventDefault();indentBranch(index,ev.shiftKey?-1:1);return;}
       if((ev.metaKey||ev.ctrlKey)&&!ev.shiftKey&&!ev.altKey&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){ev.preventDefault();moveBranch(index,ev.key==="ArrowUp"?"up":"down");return;}

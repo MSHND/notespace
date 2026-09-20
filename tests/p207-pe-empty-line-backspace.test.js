@@ -252,8 +252,10 @@ test("read-only PE Backspace cannot mutate or intercept the empty line", () => {
 
 test("Backspace boundary is narrow and existing Enter, Tab and move routes remain intact", () => {
   const runtimeSource = source("js/pocket-node-popout-runtime.js");
-  assert.match(runtimeSource, /ev\.key==="Backspace"&&!ev\.altKey&&!ev\.metaKey&&!ev\.ctrlKey&&lines\[index\]\.content===""&&lines\.length>1&&lineElement\(lines\[index\]\.id\)===text/);
-  assert.match(runtimeSource, /if\(ev\.key==="Enter"&&!ev\.altKey&&!ev\.metaKey&&!ev\.ctrlKey\)\{ev\.preventDefault\(\);insertAfter\(index\);return;\}/);
+  assert.match(runtimeSource, /if\(ev\.key==="Backspace"&&!ev\.altKey&&!ev\.metaKey&&!ev\.ctrlKey\)\{/);
+  assert.match(runtimeSource, /lines\[index\]\.content===""&&lines\.length>1&&lineElement\(lines\[index\]\.id\)===text/);
+  assert.match(runtimeSource, /joinPlainLineAtStart\(index,text,backspaceCaretOffset\)/);
+  assert.match(runtimeSource, /if\(ev\.key==="Enter"&&!ev\.altKey&&!ev\.metaKey&&!ev\.ctrlKey\)\{var caretOffset=collapsedCaretOffset\(text\);ev\.preventDefault\(\);insertAfter\(index,caretOffset\);return;\}/);
   assert.match(runtimeSource, /if\(ev\.key==="Tab"\)\{ev\.preventDefault\(\);indentBranch\(index,ev\.shiftKey\?-1:1\);return;\}/);
   assert.match(runtimeSource, /if\(\(ev\.metaKey\|\|ev\.ctrlKey\)&&!ev\.shiftKey&&!ev\.altKey&&\(ev\.key==="ArrowUp"\|\|ev\.key==="ArrowDown"\)\)\{ev\.preventDefault\(\);moveBranch\(index,ev\.key==="ArrowUp"\?"up":"down"\);return;\}/);
   assert.equal((runtimeSource.match(/ev\.key==="Backspace"/g) || []).length, 1);
