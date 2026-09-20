@@ -195,56 +195,6 @@
     return true;
   }
 
-  function dialogActions(doc) {
-    return ["unsavedSaveBtn", "unsavedDiscardBtn", "unsavedCancelBtn"]
-      .map((id) => doc?.getElementById?.(id) || null)
-      .filter((button) => button && button.disabled !== true && button.hidden !== true);
-  }
-
-  function nextDialogActionIndex(currentIndex, direction, count) {
-    const size = Math.max(0, Number(count) || 0);
-    if (!size) return -1;
-    const step = direction < 0 ? -1 : 1;
-    if (!Number.isInteger(currentIndex) || currentIndex < 0 || currentIndex >= size) {
-      return step < 0 ? size - 1 : 0;
-    }
-    return (currentIndex + step + size) % size;
-  }
-
-  function dialogIsOpen(doc) {
-    const dialog = doc?.getElementById?.("unsavedDialog");
-    return !!dialog && dialog.hidden !== true;
-  }
-
-  function handleDirtyDialogKeydown(ev, doc) {
-    if (!ev || !dialogIsOpen(doc)) return false;
-    const actions = dialogActions(doc);
-    if (!actions.length) return false;
-    if (ev.key === "ArrowUp" || ev.key === "ArrowDown") {
-      const current = actions.indexOf(doc.activeElement);
-      const next = nextDialogActionIndex(current, ev.key === "ArrowUp" ? -1 : 1, actions.length);
-      ev.preventDefault?.();
-      ev.stopImmediatePropagation?.();
-      try { actions[next].focus({ preventScroll: true }); } catch (_error) { actions[next].focus?.(); }
-      return true;
-    }
-    if (ev.key === "Enter" && actions.includes(doc.activeElement)) {
-      ev.preventDefault?.();
-      ev.stopImmediatePropagation?.();
-      doc.activeElement.click?.();
-      return true;
-    }
-    if (ev.key === "Escape") {
-      const keepEditing = doc.getElementById("unsavedCancelBtn");
-      if (!keepEditing) return false;
-      ev.preventDefault?.();
-      ev.stopImmediatePropagation?.();
-      keepEditing.click?.();
-      return true;
-    }
-    return false;
-  }
-
   function rowDepth(row) {
     const value = Number(row?.getAttribute?.("data-depth"));
     return Number.isFinite(value) && value >= 0 ? value : 0;
@@ -336,8 +286,7 @@
     const doc = asDocument(docCandidate || global.document);
     if (!doc || doc.__pocketP210PolishInstalled === true) return false;
     const pane = doc.getElementById("outlinePane");
-    const dialog = doc.getElementById("unsavedDialog");
-    if (!pane || !dialog) return false;
+    if (!pane) return false;
     doc.__pocketP210PolishInstalled = true;
 
     installOpeningFocus(doc, payloadFromDocument(doc));
@@ -361,7 +310,6 @@
     pane.addEventListener?.("input", scheduleComfort);
     pane.addEventListener?.("focusin", scheduleComfort);
     doc.addEventListener?.("keydown", (ev) => {
-      if (handleDirtyDialogKeydown(ev, doc)) return;
       if (handleTitleBodyTab(ev, doc, payload)) return;
       handlePlainLeft(ev, doc);
     }, true);
@@ -375,8 +323,6 @@
     installOpeningFocus,
     comfortScrollDelta,
     keepActiveLineComfortable,
-    nextDialogActionIndex,
-    handleDirtyDialogKeydown,
     handleTitleBodyTab,
     parentRowIndex,
     handlePlainLeft,

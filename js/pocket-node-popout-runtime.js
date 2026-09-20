@@ -440,6 +440,28 @@
     function focusEditor() { if (returnFocus && typeof returnFocus.focus === "function") returnFocus.focus({ preventScroll: true }); else focusLine(selectedId); returnFocus = null; }
     function keepEditing() { cancelPendingOpen(); hideUnsavedDialog(); focusEditor(); }
     function showUnsavedDialog() { if (readOnly) return false; returnFocus = document.activeElement; unsavedDialog.hidden = false; unsavedSaveBtn.focus({ preventScroll: true }); return true; }
+    function dialogActions() { return [unsavedSaveBtn,unsavedDiscardBtn,unsavedCancelBtn].filter(function(button){return button&&button.disabled!==true&&button.hidden!==true;}); }
+    function focusAdjacentDialogAction(direction) {
+      var actions=dialogActions(); if(!actions.length)return false;
+      var current=actions.indexOf(document.activeElement), step=direction<0?-1:1;
+      var next=current<0?(step<0?actions.length-1:0):(current+step+actions.length)%actions.length;
+      actions[next].focus({preventScroll:true}); return true;
+    }
+    function handleUnsavedDialogKeydown(ev) {
+      if(!ev||unsavedDialog.hidden)return false;
+      if(ev.key==="ArrowUp"||ev.key==="ArrowDown"){
+        if(!focusAdjacentDialogAction(ev.key==="ArrowUp"?-1:1))return false;
+        ev.preventDefault(); ev.stopImmediatePropagation?.(); return true;
+      }
+      var actions=dialogActions();
+      if(ev.key==="Enter"&&actions.includes(document.activeElement)){
+        var action=document.activeElement; ev.preventDefault(); ev.stopImmediatePropagation?.(); action.click(); return true;
+      }
+      if(ev.key==="Escape"){
+        ev.preventDefault(); ev.stopImmediatePropagation?.(); unsavedCancelBtn.click(); return true;
+      }
+      return false;
+    }
     function matchesSession(a, b) { return a === ownerToken && b === popupToken; }
     window.PocketNodePopoutSession = Object.freeze({ getIdentity: function () { return { ownerToken, popupToken }; }, matches: matchesSession, hasUnsavedChanges: function () { return !readOnly && dirty; }, requestUnsavedProtection: function (a,b) { return matchesSession(a,b) && dirty && showUnsavedDialog(); }, requestOwnedClose: function (a,b) { if (!matchesSession(a,b) || (!readOnly && dirty)) return false; allowedToClose = true; window.close(); return true; } });
     function discardAndClose() { allowedToClose = true; dirty = false; if (completeOwnedClose()) return; window.close(); }
@@ -475,7 +497,7 @@
     pane.addEventListener("dragover", function(ev){if(dragSourceId)ev.preventDefault();});
     pane.addEventListener("drop", function(ev){if(!dragSourceId)return;var row=ev.target?.closest?.(".docRow[data-line-id]");var target=row?.getAttribute?.("data-line-id")||"";ev.preventDefault();if(target)moveBranchBefore(dragSourceId,target);dragSourceId="";});
     saveBtn.addEventListener("click",function(){save(false);}); saveCloseBtn.addEventListener("click",function(){save(true);}); document.getElementById("closeBtn")?.addEventListener("click",closeSafely); unsavedSaveBtn.addEventListener("click",function(){save(true);}); unsavedDiscardBtn.addEventListener("click",discardAndClose); unsavedCancelBtn.addEventListener("click",keepEditing);
-    document.addEventListener("keydown",function(ev){if((ev.metaKey||ev.ctrlKey)&&(ev.key==="s"||ev.key==="S")){ev.preventDefault();save(false);return;} if(ev.key==="Escape"){ev.preventDefault();if(!unsavedDialog.hidden){keepEditing();return;}closeSafely();}});
+    document.addEventListener("keydown",function(ev){if(handleUnsavedDialogKeydown(ev))return;if((ev.metaKey||ev.ctrlKey)&&(ev.key==="s"||ev.key==="S")){ev.preventDefault();save(false);return;} if(ev.key==="Escape"){ev.preventDefault();closeSafely();}});
     if(typeof window.addEventListener==="function")window.addEventListener("beforeunload",function(ev){if(readOnly||!dirty||allowedToClose)return;ev.preventDefault();ev.returnValue="";});
     applyReadOnlyState();
     return true;

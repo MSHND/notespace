@@ -124,59 +124,12 @@ test("P210 C comfort scroll is bounded and zero while the caret is comfortably v
   assert.equal(polish.comfortScrollDelta(pane, { top: 490, bottom: 510 }, 30), 40);
 });
 
-function fakeButton(id) {
-  return {
-    id,
-    hidden: false,
-    disabled: false,
-    focusCount: 0,
-    clickCount: 0,
-    focus() { this.focusCount += 1; },
-    click() { this.clickCount += 1; },
-  };
-}
-
-test("P210 D dirty-close arrows move among existing commands; Enter/Escape invoke those exact buttons", () => {
-  const polish = loadPePolish();
-  const save = fakeButton("unsavedSaveBtn");
-  const discard = fakeButton("unsavedDiscardBtn");
-  const keep = fakeButton("unsavedCancelBtn");
-  const dialog = { hidden: false };
-  const controls = new Map([
-    ["unsavedDialog", dialog],
-    ["unsavedSaveBtn", save],
-    ["unsavedDiscardBtn", discard],
-    ["unsavedCancelBtn", keep],
-  ]);
-  const doc = {
-    activeElement: save,
-    getElementById(id) { return controls.get(id) || null; },
-  };
-  function event(key) {
-    return {
-      key,
-      prevented: 0,
-      stopped: 0,
-      preventDefault() { this.prevented += 1; },
-      stopImmediatePropagation() { this.stopped += 1; },
-    };
-  }
-
-  let ev = event("ArrowDown");
-  assert.equal(polish.handleDirtyDialogKeydown(ev, doc), true);
-  assert.equal(discard.focusCount, 1);
-  doc.activeElement = discard;
-  ev = event("Enter");
-  assert.equal(polish.handleDirtyDialogKeydown(ev, doc), true);
-  assert.equal(discard.clickCount, 1);
-  doc.activeElement = save;
-  ev = event("ArrowUp");
-  assert.equal(polish.handleDirtyDialogKeydown(ev, doc), true);
-  assert.equal(keep.focusCount, 1);
-  ev = event("Escape");
-  assert.equal(polish.handleDirtyDialogKeydown(ev, doc), true);
-  assert.equal(keep.clickCount, 1);
-  assert.equal(save.clickCount, 0, "polish never substitutes its own Save command");
+test("P210 D dirty-close semantic keyboard ownership stays out of PE polish", () => {
+  const runtime = source("js/pocket-node-popout-runtime.js");
+  const polish = source("js/pocket-node-popout-polish.js");
+  assert.match(runtime, /function handleUnsavedDialogKeydown\(/);
+  assert.match(runtime, /function dialogActions\(/);
+  assert.doesNotMatch(polish, /handleDirtyDialogKeydown|nextDialogActionIndex|unsavedDialog|unsavedSaveBtn|unsavedDiscardBtn|unsavedCancelBtn/);
 });
 
 function row(depth) {
