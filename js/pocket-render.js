@@ -130,6 +130,67 @@ function buildPocketFileGate() {
 
 let rowActionMenuEl = null;
 
+// Derived Main presentation index. Full renderTree() owns its lifecycle;
+// semantic truth remains in state.nodes.
+const mainMountedNodeRegistry = new Map();
+const mainMountedNodeRegistryAmbiguousIds = new Set();
+
+function clearMainMountedNodeRegistry() {
+  mainMountedNodeRegistry.clear();
+  mainMountedNodeRegistryAmbiguousIds.clear();
+}
+
+function registerMainMountedNode(nodeId, branch, row) {
+  const id = cleanText(nodeId, 80);
+  if (!id || !(branch instanceof HTMLElement) || !(row instanceof HTMLElement)) return false;
+  if (mainMountedNodeRegistryAmbiguousIds.has(id)) return false;
+  if (mainMountedNodeRegistry.has(id)) {
+    mainMountedNodeRegistry.delete(id);
+    mainMountedNodeRegistryAmbiguousIds.add(id);
+    return false;
+  }
+  mainMountedNodeRegistry.set(id, { branch, row });
+  return true;
+}
+
+function currentMainMountedNodeEntry(nodeId) {
+  const id = cleanText(nodeId, 80);
+  if (!id || mainMountedNodeRegistryAmbiguousIds.has(id) || !(el.treeRoot instanceof HTMLElement)) return null;
+  const entry = mainMountedNodeRegistry.get(id) || null;
+  if (!entry || !(entry.branch instanceof HTMLElement) || !(entry.row instanceof HTMLElement)) return null;
+  if (entry.row.getAttribute("data-node-id") !== id) return null;
+  if (entry.row.parentNode !== entry.branch) return null;
+  if (!el.treeRoot.contains(entry.branch)) return null;
+  return entry;
+}
+
+function getMountedMainRowForNodeId(nodeId) {
+  return currentMainMountedNodeEntry(nodeId)?.row || null;
+}
+
+function projectMainSameParentReorder(movingNodeId, adjacentTargetNodeId, direction) {
+  const moveDirection = Number(direction) < 0 ? -1 : (Number(direction) > 0 ? 1 : 0);
+  if (!moveDirection) return false;
+  if (typeof canShowPocketTree === "function" && !canShowPocketTree()) return false;
+  if (cleanText(el.search?.value, 120)) return false;
+
+  const moving = currentMainMountedNodeEntry(movingNodeId);
+  const target = currentMainMountedNodeEntry(adjacentTargetNodeId);
+  if (!moving || !target || moving.branch === target.branch) return false;
+
+  const parentList = moving.branch.parentNode;
+  if (!(parentList instanceof HTMLElement) || target.branch.parentNode !== parentList) return false;
+  if (moveDirection < 0) {
+    if (target.branch.nextSibling !== moving.branch) return false;
+  } else if (moving.branch.nextSibling !== target.branch) {
+    return false;
+  }
+
+  if (moveDirection < 0) parentList.insertBefore(moving.branch, target.branch);
+  else parentList.insertBefore(moving.branch, target.branch.nextSibling);
+  return true;
+}
+
 function closeRowActionMenu() {
   if (rowActionMenuEl instanceof HTMLElement) rowActionMenuEl.remove();
   rowActionMenuEl = null;
@@ -290,6 +351,7 @@ function treeContentIndicatorForNode(node) {
 }
 
 function renderTree() {
+  clearMainMountedNodeRegistry();
   if (typeof canShowPocketTree === "function" && !canShowPocketTree()) {
     if (el.treeRoot instanceof HTMLElement) {
       el.treeRoot.innerHTML = "";
@@ -496,6 +558,7 @@ function renderTree() {
     });
 
     li.appendChild(row);
+    registerMainMountedNode(node.id, li, row);
 
     if (hasKids && !isCollapsed) {
       const ul = document.createElement("ul");
