@@ -329,6 +329,7 @@ function moveNodeWithinSiblings(nodeId, direction) {
     return;
   }
   const moving = siblings[index];
+  const adjacentTargetId = cleanText(siblings[targetIndex]?.id, 80);
   lastMoveUndoSnapshot = attachP151MoveUndoWitness(createTreeUndoSnapshot(direction < 0 ? "move_up" : "move_down"), node.id, parentId, index);
   lastTreeUndoKind = "move";
   siblings.splice(index, 1);
@@ -350,7 +351,13 @@ function moveNodeWithinSiblings(nodeId, direction) {
   }
   bindP151MoveUndoWitness(lastMoveUndoSnapshot, reorderOperation?.seq, forwardSemanticCaptured);
   if (typeof refreshSaveState === "function") refreshSaveState();
-  renderTree();
+  let projected = false;
+  if (typeof projectMainSameParentReorder === "function") {
+    try {
+      projected = projectMainSameParentReorder(node.id, adjacentTargetId, direction) === true;
+    } catch {}
+  }
+  if (!projected) renderTree();
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
   setStatus(`${direction < 0 ? "Moved up" : "Moved down"}.`, "ok", {
@@ -593,8 +600,13 @@ function refocusTreeNavigation(preferredNodeId = "") {
   const id = cleanText(preferredNodeId, 80) || cleanText(state.selectedId, 80);
   requestAnimationFrame(() => {
     if (id && el.treeRoot instanceof HTMLElement) {
-      const escaped = typeof CSS?.escape === "function" ? CSS.escape(id) : id.replace(/"/g, '\\"');
-      const row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
+      let row = typeof getMountedMainRowForNodeId === "function"
+        ? getMountedMainRowForNodeId(id)
+        : null;
+      if (!(row instanceof HTMLElement)) {
+        const escaped = typeof CSS?.escape === "function" ? CSS.escape(id) : id.replace(/"/g, '\\"');
+        row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
+      }
       if (row instanceof HTMLElement) {
         scrollRowComfortably(row);
       }
