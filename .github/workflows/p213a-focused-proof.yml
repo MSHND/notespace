@@ -1,0 +1,21 @@
+name: P213a focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p213a-proof
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: >-
+          node --test
+          tests/p213a-pe-enter-split.test.js
+          tests/p210v-pe-local-projection.test.js
+          tests/p209-pe-vertical-caret-travel.test.js
+          tests/p214-pe-terminal-boundary-scroll.test.js
