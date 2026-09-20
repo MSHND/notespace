@@ -411,7 +411,7 @@ test("P232 source guard keeps one polish Right owner, delegates expansion, and l
 
   assert.equal((polish.match(/function handlePlainRight\(/g) || []).length, 1);
   assert.equal((polish.match(/ev\.key !== "ArrowRight"/g) || []).length, 1);
-  assert.equal((polish.match(/handlePlainRight\(ev, doc, payload\)/g) || []).length, 1);
+  assert.equal((polish.match(/^\s*handlePlainRight\(ev, doc, payload\);$/gm) || []).length, 1);
 
   const rightStart = polish.indexOf("function handlePlainRight(");
   const rightEnd = polish.indexOf("function install(", rightStart);

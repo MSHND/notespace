@@ -308,7 +308,7 @@
     ev.preventDefault?.();
     ev.stopImmediatePropagation?.();
     parentText.click?.();
-    placeCaretInElement(doc, parentText, false);
+    placeCaretInElement(doc, parentText, true);
     softCenterPeRow(pane, parentRow);
     return true;
   }
