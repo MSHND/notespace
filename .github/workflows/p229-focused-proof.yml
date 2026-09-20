@@ -1,0 +1,20 @@
+name: P229 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p229-proof
+
+jobs:
+  p229-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Targeted Main Shift Tab proof
+        run: node --test tests/p229-main-shift-tab-outdent.test.js
+      - name: Broader Pocket check
+        run: npm run check
