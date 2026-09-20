@@ -1,0 +1,20 @@
+name: P232 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p232-proof
+
+jobs:
+  p232-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Targeted PE plain Right proof
+        run: node --test tests/p232-pe-plain-right.test.js
+      - name: Broader Pocket check
+        run: npm run check
