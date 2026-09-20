@@ -405,17 +405,30 @@
       refreshRowsByIds(oldBoundaryIds.concat([targetId]));
       focusLine(branch[0].id); return true;
     }
-    function insertAfter(index) {
+    function insertAfter(index, caretOffset) {
       var id = lines[index].id, currentRow = rowForId(id); if (!currentRow) return "";
       var marker = content.smartContinuation(lines[index].content);
       if (marker.exitList) {
         lines[index].content = ""; markMutation(); refreshRowAt(index, true); focusLine(id); return id;
       }
-      var next = createLine(marker.content, lines[index].depth);
+      var currentContent = String(lines[index].content || "");
+      var parsedMarker = typeof content.parseMarker === "function" ? content.parseMarker(currentContent) : null;
+      var splitPlain = !!(parsedMarker && parsedMarker.kind === "plain" && !hasChildren(index)
+        && Number.isInteger(caretOffset) && caretOffset >= 0 && caretOffset <= currentContent.length);
+      var nextContent = marker.content;
+      if (splitPlain) {
+        lines[index].content = currentContent.slice(0, caretOffset);
+        nextContent = currentContent.slice(caretOffset);
+      }
+      var next = createLine(nextContent, lines[index].depth);
       lines.splice(index + 1, 0, next); markMutation();
       var row = createVisibleRow(index + 1); if (!row || !insertRowAfter(row, currentRow)) return "";
+      if (splitPlain) refreshRowAt(index, true);
       refreshRowsAt([index, index + 1, index + 2]);
-      focusLine(next.id); return next.id;
+      if (splitPlain) {
+        if (!focusLineAtOffset(next.id, 0)) focusLine(next.id);
+      } else focusLine(next.id);
+      return next.id;
     }
     function applyReadOnlyState() { if (!readOnly) return; titleInput.readOnly = true; saveBtn.disabled = true; saveCloseBtn.disabled = true; setDirty(false); }
     function buildPayload() { return { id: payload.id, title: titleInput.value, text: buildText(), body: buildText(), updatedAt: new Date().toISOString(), fileSessionId: payload.fileSessionId, sourceFileName: payload.sourceFileName, sourcePipSession: payload.sourcePipSession, sourceOwnerKind: payload.sourceOwnerKind, sourceVaultSessionId: payload.sourceVaultSessionId, originalUpdatedAt: payload.originalUpdatedAt }; }
@@ -449,7 +462,7 @@
       var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return;
       var index=syncLineElement(text); if(index<0)return; selectedId=lines[index].id;
       if(ev.key==="Backspace"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey&&lines[index].content===""&&lines.length>1&&lineElement(lines[index].id)===text){if(removeEmptyLine(index))ev.preventDefault();return;}
-      if(ev.key==="Enter"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){ev.preventDefault();insertAfter(index);return;}
+      if(ev.key==="Enter"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){var caretOffset=collapsedCaretOffset(text);ev.preventDefault();insertAfter(index,caretOffset);return;}
       if(ev.key==="Tab"){ev.preventDefault();indentBranch(index,ev.shiftKey?-1:1);return;}
       if((ev.metaKey||ev.ctrlKey)&&!ev.shiftKey&&!ev.altKey&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){ev.preventDefault();moveBranch(index,ev.key==="ArrowUp"?"up":"down");return;}
       if(!ev.altKey&&!ev.metaKey&&!ev.ctrlKey&&!ev.shiftKey&&!ev.isComposing&&ev.keyCode!==229&&(ev.key==="ArrowUp"||ev.key==="ArrowDown")){
