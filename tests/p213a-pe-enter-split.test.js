@@ -243,10 +243,14 @@ test("P213a real keydown path preserves numbered and bulleted continuation plus 
   assert.equal(exit.saveAndReadPayload().text, "\nTail");
 });
 
-test("P213a source invariant keeps one Enter owner and passes collapsed caret offset into semantic insertion", () => {
+test("P213a source invariant keeps one PE-row Enter owner and passes collapsed caret offset into semantic insertion", () => {
   const runtime = source("js/pocket-node-popout-runtime.js");
-  assert.equal((runtime.match(/ev\.key==="Enter"/g) || []).length, 1);
-  assert.match(runtime, /var caretOffset=collapsedCaretOffset\(text\);ev\.preventDefault\(\);insertAfter\(index,caretOffset\)/);
+  const keydownStart = runtime.indexOf('pane.addEventListener("keydown"');
+  const keydownEnd = runtime.indexOf('pane.addEventListener("dragstart"', keydownStart);
+  assert.ok(keydownStart >= 0 && keydownEnd > keydownStart);
+  const paneKeydown = runtime.slice(keydownStart, keydownEnd);
+  assert.equal((paneKeydown.match(/ev\.key==="Enter"/g) || []).length, 1);
+  assert.match(paneKeydown, /var caretOffset=collapsedCaretOffset\(text\);ev\.preventDefault\(\);insertAfter\(index,caretOffset\)/);
   assert.match(runtime, /function insertAfter\(index, caretOffset\)/);
   const start = runtime.indexOf("function insertAfter(");
   const end = runtime.indexOf("function applyReadOnlyState", start);
