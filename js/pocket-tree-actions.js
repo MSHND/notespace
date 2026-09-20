@@ -1155,20 +1155,6 @@ function handleTreeKeydown(ev) {
     !ev.metaKey
     && !ev.ctrlKey
     && !ev.altKey
-    && ev.shiftKey
-    && ev.key === "Tab"
-  ) {
-    ev.preventDefault();
-    if (el.search instanceof HTMLInputElement) {
-      el.search.focus({ preventScroll: true });
-      el.search.select();
-    }
-    return;
-  }
-  if (
-    !ev.metaKey
-    && !ev.ctrlKey
-    && !ev.altKey
     && !ev.shiftKey
     && ev.key === "F2"
   ) {
