@@ -1,0 +1,23 @@
+name: P220 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p220-proof
+
+jobs:
+  p220-focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: >
+          node --test
+          tests/p220-dirty-close-composed.test.js
+          tests/p210-friction-pack.test.js
+          tests/pe-persistence-contract.test.js
+          tests/p213a-pe-enter-split.test.js
+          tests/p214-pe-terminal-boundary-scroll.test.js
+          tests/p209-pe-vertical-caret-travel.test.js
