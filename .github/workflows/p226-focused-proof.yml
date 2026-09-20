@@ -1,0 +1,20 @@
+name: P226 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p226-proof
+
+jobs:
+  p226-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Targeted PE Home End proof
+        run: node --test tests/p226-pe-home-end.test.js tests/p214-pe-terminal-boundary-scroll.test.js tests/p210-friction-pack.test.js
+      - name: Broader Pocket check
+        run: npm run check
