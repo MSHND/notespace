@@ -248,5 +248,8 @@ test("P213a source invariant keeps one Enter owner and passes collapsed caret of
   assert.equal((runtime.match(/ev\.key==="Enter"/g) || []).length, 1);
   assert.match(runtime, /var caretOffset=collapsedCaretOffset\(text\);ev\.preventDefault\(\);insertAfter\(index,caretOffset\)/);
   assert.match(runtime, /function insertAfter\(index, caretOffset\)/);
-  assert.doesNotMatch(runtime, /pane\.innerHTML\s*=\s*""[\s\S]*function insertAfter/);
+  const start = runtime.indexOf("function insertAfter(");
+  const end = runtime.indexOf("function applyReadOnlyState", start);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(runtime.slice(start, end), /pane\.innerHTML/);
 });
