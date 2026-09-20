@@ -427,6 +427,12 @@ function createHarness({ unrelatedCount = 0, collapsed = [] } = {}) {
     vm.runInContext(source(file), context, { filename: file });
   }
 
+  // Keep the real history/tree semantic owners, but replace chrome-only refresh/status
+  // work exactly as the historical focused semantic harnesses do.
+  context.refreshSaveState = () => { counters.refreshSaveState += 1; };
+  context.refreshMeta = () => {};
+  context.setStatus = (...args) => { counters.status += 1; statuses.push(args); };
+
   const fullMaterialise = context.renderTree;
   context.renderTree = function countedRenderTree() {
     counters.fullRender += 1;
