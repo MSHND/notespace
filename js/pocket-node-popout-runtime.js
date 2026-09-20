@@ -287,6 +287,21 @@
         el.focus({ preventScroll: true }); selection.removeAllRanges(); selection.addRange(range); return true;
       } catch (_error) { return false; }
     }
+    function moveToVisibleDocumentEdge(edge) {
+      if (readOnly || (edge !== "start" && edge !== "end") || typeof content.visibleIndexes !== "function") return false;
+      var visible = content.visibleIndexes(lines, collapsed);
+      if (!Array.isArray(visible) || visible.length === 0) return false;
+      var targetIndex = edge === "start" ? visible[0] : visible[visible.length - 1];
+      if (!Number.isInteger(targetIndex) || targetIndex < 0 || targetIndex >= lines.length) return false;
+      var targetLine = lines[targetIndex], targetElement = targetLine ? lineElement(targetLine.id) : null;
+      if (!targetLine || !targetElement) return false;
+      var offset = edge === "start" ? 0 : String(targetElement.textContent || "").length;
+      if (!focusLineAtOffset(targetLine.id, offset)) return false;
+      selectedId = targetLine.id;
+      var maximum = Math.max(0, (Number(pane.scrollHeight) || 0) - (Number(pane.clientHeight) || 0));
+      pane.scrollTop = edge === "start" ? 0 : maximum;
+      return true;
+    }
     function schedulePlainVerticalCaretBridge(sourceId, sourceElement, direction, offset, rowY) {
       requestAnimationFrame(function () {
         if (!sourceElement || document.activeElement !== sourceElement || lineElement(sourceId) !== sourceElement) return;
@@ -502,6 +517,13 @@
     pane.addEventListener("keydown", function (ev) {
       var text=ev.target?.closest?.(".lineText[data-line-id]"); if (!text || readOnly) return;
       var index=syncLineElement(text); if(index<0)return; selectedId=lines[index].id;
+      if(!ev.altKey&&!ev.metaKey&&!ev.ctrlKey&&!ev.shiftKey&&!ev.isComposing&&ev.keyCode!==229&&(ev.key==="Home"||ev.key==="End")){
+        if(typeof ev.getModifierState==="function"&&ev.getModifierState("Fn"))return;
+        if(document.activeElement!==text)return;
+        ev.preventDefault();
+        moveToVisibleDocumentEdge(ev.key==="Home"?"start":"end");
+        return;
+      }
       if(ev.key==="Backspace"&&!ev.altKey&&!ev.metaKey&&!ev.ctrlKey){
         if(lines[index].content===""&&lines.length>1&&lineElement(lines[index].id)===text){if(removeEmptyLine(index))ev.preventDefault();return;}
         if(!ev.shiftKey&&!ev.isComposing&&ev.keyCode!==229){var backspaceCaretOffset=collapsedCaretOffset(text);if(backspaceCaretOffset===0&&joinPlainLineAtStart(index,text,backspaceCaretOffset))ev.preventDefault();}
