@@ -1,0 +1,20 @@
+name: P223 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p223-proof
+
+jobs:
+  p223-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Targeted PE Backspace inverse proof
+        run: node --test tests/p207-pe-empty-line-backspace.test.js tests/p213a-pe-enter-split.test.js tests/p223-pe-backspace-join.test.js
+      - name: Broader Pocket check
+        run: npm run check
