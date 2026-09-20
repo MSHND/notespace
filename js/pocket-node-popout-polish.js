@@ -212,6 +212,14 @@
     return -1;
   }
 
+  function firstVisibleDirectChildRow(rows, currentIndex) {
+    if (!Array.isArray(rows) || currentIndex < 0 || currentIndex >= rows.length - 1) return null;
+    const current = rows[currentIndex];
+    const next = rows[currentIndex + 1];
+    const currentDepth = rowDepth(current);
+    return rowDepth(next) === currentDepth + 1 ? next : null;
+  }
+
   function caretIsAtStart(doc, editable) {
     const selection = selectionFor(doc);
     if (!selection || selection.rangeCount !== 1 || typeof selection.getRangeAt !== "function") return false;
@@ -227,6 +235,29 @@
     } catch (_error) {
       return false;
     }
+  }
+
+  function caretIsAtEnd(doc, editable) {
+    const selection = selectionFor(doc);
+    if (!selection || selection.rangeCount !== 1 || typeof selection.getRangeAt !== "function") return false;
+    let range;
+    try { range = selection.getRangeAt(0); } catch (_error) { return false; }
+    if (!range || range.collapsed !== true || !range.endContainer) return false;
+    if (!(range.endContainer === editable || editable.contains?.(range.endContainer))) return false;
+    try {
+      const after = range.cloneRange();
+      after.selectNodeContents(editable);
+      after.setStart(range.endContainer, range.endOffset);
+      return after.toString().length === 0;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function editableRowOwnsFocus(doc, element) {
+    if (!element || doc?.activeElement !== element) return false;
+    const declared = String(element.getAttribute?.("contenteditable") ?? element.contentEditable ?? "").toLowerCase();
+    return element.isContentEditable === true || declared === "true";
   }
 
   function softCenterPeRow(pane, row) {
@@ -282,6 +313,41 @@
     return true;
   }
 
+  function handlePlainRight(ev, doc, payload) {
+    if (!ev || ev.key !== "ArrowRight" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey || ev.isComposing || ev.keyCode === 229) return false;
+    if (payload?.readOnly === true) return false;
+    const target = ev.target?.closest?.(".lineText[data-line-id]") || null;
+    if (!editableRowOwnsFocus(doc, target) || !caretIsAtEnd(doc, target) || !canPlaceCollapsedCaret(doc)) return false;
+    const pane = doc.getElementById("outlinePane");
+    const row = target.closest?.(".docRow[data-line-id]") || null;
+    if (!pane || !row) return false;
+
+    const gutter = row.querySelector?.(".lineGutter[data-line-id]") || null;
+    const glyph = String(gutter?.textContent || "").trim();
+    if (glyph === "▸") {
+      if (typeof gutter?.click !== "function") return false;
+      ev.preventDefault?.();
+      ev.stopImmediatePropagation?.();
+      gutter.click();
+      placeCaretInElement(doc, target, true);
+      return true;
+    }
+    if (glyph !== "▾") return false;
+
+    const rows = Array.from(pane.querySelectorAll?.(".docRow[data-line-id]") || []);
+    const currentIndex = rows.indexOf(row);
+    const childRow = firstVisibleDirectChildRow(rows, currentIndex);
+    const childText = childRow?.querySelector?.(".lineText[data-line-id]") || null;
+    if (!childText || typeof childText.click !== "function") return false;
+
+    ev.preventDefault?.();
+    ev.stopImmediatePropagation?.();
+    childText.click();
+    placeCaretInElement(doc, childText, false);
+    softCenterPeRow(pane, childRow);
+    return true;
+  }
+
   function install(docCandidate) {
     const doc = asDocument(docCandidate || global.document);
     if (!doc || doc.__pocketP210PolishInstalled === true) return false;
@@ -311,7 +377,8 @@
     pane.addEventListener?.("focusin", scheduleComfort);
     doc.addEventListener?.("keydown", (ev) => {
       if (handleTitleBodyTab(ev, doc, payload)) return;
-      handlePlainLeft(ev, doc);
+      if (handlePlainLeft(ev, doc)) return;
+      handlePlainRight(ev, doc, payload);
     }, true);
     return true;
   }
@@ -325,7 +392,9 @@
     keepActiveLineComfortable,
     handleTitleBodyTab,
     parentRowIndex,
+    firstVisibleDirectChildRow,
     handlePlainLeft,
+    handlePlainRight,
     softCenterPeRow,
   });
 
