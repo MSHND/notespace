@@ -192,10 +192,10 @@ test("P229 actual Main Shift+Tab path reaches existing outdent owner exactly onc
     node("unrelated-child", "unrelated", 1001),
   ];
   const h = runtime(initial, "selected");
-  const beforeUnrelated = plain([
-    byId(h.context, "unrelated"),
-    byId(h.context, "unrelated-child"),
-  ]);
+  const unrelatedBefore = {
+    root: plain(byId(h.context, "unrelated")),
+    child: plain(byId(h.context, "unrelated-child")),
+  };
 
   const event = key(h.treeTarget, "Tab", { shiftKey: true });
   h.context.handleTreeKeydown(event);
@@ -204,10 +204,11 @@ test("P229 actual Main Shift+Tab path reaches existing outdent owner exactly onc
   assert.equal(byId(h.context, "selected").parentId, "grand");
   assert.equal(byId(h.context, "descendant").parentId, "selected");
   assert.equal(byId(h.context, "parent-peer").parentId, "parent");
-  assert.deepEqual(plain([
-    byId(h.context, "unrelated"),
-    byId(h.context, "unrelated-child"),
-  ]), beforeUnrelated);
+  assert.equal(byId(h.context, "unrelated").parentId, unrelatedBefore.root.parentId);
+  assert.equal(byId(h.context, "unrelated").label, unrelatedBefore.root.label);
+  assert.equal(byId(h.context, "unrelated").updatedAt, unrelatedBefore.root.updatedAt);
+  assert.deepEqual(plain(byId(h.context, "unrelated-child")), unrelatedBefore.child);
+  assert.deepEqual(h.context.sortNodesForParent("grand").map((entry) => entry.id), ["parent", "selected", "unrelated"]);
   assert.equal(h.context.state.selectedId, "selected");
   assert.equal(h.context.__lastRefocus, "selected");
   assert.equal(h.search.focusCount, 0);
@@ -232,10 +233,9 @@ test("P229 actual Main Shift+Tab path reaches existing outdent owner exactly onc
   h.context.undoLastMoveAction();
   assert.equal(byId(h.context, "selected").parentId, "parent");
   assert.equal(byId(h.context, "descendant").parentId, "selected");
-  assert.deepEqual(plain([
-    byId(h.context, "unrelated"),
-    byId(h.context, "unrelated-child"),
-  ]), beforeUnrelated);
+  assert.deepEqual(plain(byId(h.context, "unrelated")), unrelatedBefore.root);
+  assert.deepEqual(plain(byId(h.context, "unrelated-child")), unrelatedBefore.child);
+  assert.deepEqual(h.context.sortNodesForParent("grand").map((entry) => entry.id), ["parent", "unrelated"]);
 });
 
 test("P229 plain Tab still reaches existing indent owner exactly once", () => {
