@@ -147,6 +147,19 @@ function runtime(nodes, selectedId) {
   context.globalThis = context;
   vm.createContext(context);
   for (const file of [SHADOW, HISTORY, ACTIONS]) vm.runInContext(source(file), context, { filename: file });
+
+  // The loaded production scripts own these names. Rebind only presentation/status
+  // dependencies so the real structural owners can run without the full app shell.
+  context.refreshSaveState = () => { counts.refreshSaveState += 1; };
+  context.refreshMeta = () => {};
+  context.renderTree = () => { counts.renderTree += 1; };
+  context.persistPipSnapshot = () => { counts.persistPipSnapshot += 1; };
+  context.refocusTreeNavigation = (id) => { counts.refocus += 1; context.__lastRefocus = id; };
+  context.softlyEnsureSelectionVisible = () => {};
+  context.setStatus = (message, kind, options) => { counts.status.push({ message, kind, options: !!options }); };
+  context.renameSelected = () => { counts.rename += 1; };
+  context.toggleFocusHere = () => { counts.focusHere += 1; };
+
   return { context, counts, search, treeTarget };
 }
 
@@ -308,9 +321,8 @@ test("P229 source guard leaves one Main structural Tab owner and no Shift+Tab se
   const handler = actions.slice(start);
 
   assert.doesNotMatch(handler, /ev\.shiftKey[\s\S]{0,120}ev\.key === "Tab"[\s\S]{0,240}el\.search\.(?:focus|select)/);
-  assert.equal((handler.match(/if \(ev\.key !== "Tab"\) return;/g) || []).length, 1);
-  assert.equal((handler.match(/if \(ev\.shiftKey\) outdentNodeById\(state\.selectedId\);/g) || []).length, 1);
-  assert.equal((handler.match(/else indentNodeById\(state\.selectedId\);/g) || []).length, 1);
+  const structuralTabOwner = /if \(ev\.key !== "Tab"\) return;\s*ev\.preventDefault\(\);\s*if \(ev\.shiftKey\) outdentNodeById\(state\.selectedId\);\s*else indentNodeById\(state\.selectedId\);/g;
+  assert.equal((handler.match(structuralTabOwner) || []).length, 1);
 
   const peRuntime = source("js/pocket-node-popout-runtime.js");
   assert.match(peRuntime, /if\(ev\.key==="Tab"\)\{ev\.preventDefault\(\);indentBranch\(index,ev\.shiftKey\?-1:1\);return;\}/);
