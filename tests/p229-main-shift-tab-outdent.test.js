@@ -42,6 +42,7 @@ function runtime(nodes, selectedId) {
     refocus: 0,
     rename: 0,
     focusHere: 0,
+    visibleDelta: [],
     status: [],
   };
 
@@ -159,6 +160,7 @@ function runtime(nodes, selectedId) {
   context.setStatus = (message, kind, options) => { counts.status.push({ message, kind, options: !!options }); };
   context.renameSelected = () => { counts.rename += 1; };
   context.toggleFocusHere = () => { counts.focusHere += 1; };
+  context.moveSelectionByVisibleDelta = (delta) => { counts.visibleDelta.push(delta); return true; };
 
   return { context, counts, search, treeTarget };
 }
@@ -311,6 +313,13 @@ test("P229 preserves F2, Shift+F and modified-arrow routes", () => {
     assert.equal(event.defaultPrevented, true);
     assert.deepEqual(h.context.sortNodesForParent("root").map((entry) => entry.id), ["b", "a"]);
     assert.equal(h.context.state.ops.filter((entry) => entry.type === "move_up").length, 1);
+  }
+  {
+    const h = runtime([node("a", "root", 1001), node("b", "root", 1002)], "a");
+    const event = key(h.treeTarget, "ArrowDown");
+    h.context.handleTreeKeydown(event);
+    assert.equal(event.defaultPrevented, true);
+    assert.deepEqual(h.counts.visibleDelta, [1]);
   }
 });
 
