@@ -4,6 +4,7 @@
 
   const STYLE_ID = "pocketMultiSelectStyles";
   let installed = false;
+  const ordinaryRowClickMultiClearEvents = new WeakSet();
 
   function cleanId(value) {
     if (typeof cleanText === "function") return cleanText(value, 80);
@@ -195,7 +196,8 @@
     const multiKey = !!(ev.metaKey || ev.ctrlKey);
     const rangeKey = !!ev.shiftKey;
     if (!multiKey && !rangeKey) {
-      clearMultiSelection({ silent: true });
+      const clearedMultiSelection = clearMultiSelection({ silent: true });
+      if (clearedMultiSelection) ordinaryRowClickMultiClearEvents.add(ev);
       state.multiSelectAnchorId = id;
       return;
     }
@@ -471,6 +473,12 @@
     document.addEventListener("keydown", handleEscape, true);
     refreshSelectionUi();
   }
+
+  global.consumePocketOrdinaryRowClickMultiClear = function consumePocketOrdinaryRowClickMultiClear(ev) {
+    if (!ev || !ordinaryRowClickMultiClearEvents.has(ev)) return false;
+    ordinaryRowClickMultiClearEvents.delete(ev);
+    return true;
+  };
 
   global.getSelectedNodeIdsForBulk = getSelectedNodeIdsForBulk;
   global.getMultiSelectedCount = getMultiSelectedCount;
