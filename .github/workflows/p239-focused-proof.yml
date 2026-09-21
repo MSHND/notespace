@@ -1,0 +1,17 @@
+name: P239 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p239-proof
+
+jobs:
+  p239-focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --test tests/p239-pe-save-close-intrinsic-width.test.js
+      - run: npm run check
