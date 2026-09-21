@@ -558,12 +558,33 @@ function renderTree() {
       row.appendChild(detailBadge);
     }
 
-    row.addEventListener("click", () => {
+    row.addEventListener("click", (ev) => {
       const copyOnClick = shouldCopyOnSingleClick(node, hasKids);
+      const previousId = cleanText(state.selectedId, 80);
+      const multiSelectionCleared = typeof consumePocketOrdinaryRowClickMultiClear === "function"
+        && consumePocketOrdinaryRowClickMultiClear(ev) === true;
+      const plainDesktopClick = !ev.altKey
+        && !ev.metaKey
+        && !ev.ctrlKey
+        && !ev.shiftKey
+        && !document.body?.classList?.contains?.("phoneMode");
+
       state.selectedId = node.id;
       row.focus({ preventScroll: true });
       refreshMeta();
-      renderTree();
+
+      let settledLocally = false;
+      if (plainDesktopClick && !multiSelectionCleared) {
+        if (previousId === node.id) {
+          settledLocally = true;
+        } else if (typeof projectMainPrimarySelection === "function") {
+          try {
+            settledLocally = projectMainPrimarySelection(previousId, node.id) === true;
+          } catch {}
+        }
+      }
+      if (!settledLocally) renderTree();
+
       focusRowByNodeId(node.id);
       if (copyOnClick) scheduleCopyClick(node.id);
       else cancelPendingCopyClick();
