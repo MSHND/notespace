@@ -622,3 +622,114 @@ test("P243 source ownership stays bounded and out-of-scope owners remain untouch
   }
   assert.doesNotMatch(render + actions + smooth, /visibleOrderIndex|visibleNodeOrderIndex/);
 });
+
+
+test("P243a actual composed selectNodeById presentation work is fixed-bounded from tiny to 1000+ visible rows", () => {
+  function run(unrelatedCount) {
+    const h = makeHarness({ unrelatedCount, loadSmoothing: true });
+    h.context.expandPathToNode = () => {};
+
+    const aRow = h.row("A");
+    const aBranch = h.branch("A");
+    const bRow = h.row("B");
+    const bBranch = h.branch("B");
+    const cRow = h.row("C");
+    const cBranch = h.branch("C");
+    const largeIdentity = unrelatedCount > 0
+      ? [
+          ["U0", h.row("U0"), h.branch("U0")],
+          [`U${Math.floor(unrelatedCount / 2)}`, h.row(`U${Math.floor(unrelatedCount / 2)}`), h.branch(`U${Math.floor(unrelatedCount / 2)}`)],
+          [`U${unrelatedCount - 1}`, h.row(`U${unrelatedCount - 1}`), h.branch(`U${unrelatedCount - 1}`)],
+        ]
+      : [];
+
+    const collapsedSizeBefore = h.context.state.collapsed.size;
+    h.reset();
+    const result = h.context.selectNodeById("B", { expandPath: true });
+    h.stop();
+    const collapsedSizeAfter = h.context.state.collapsed.size;
+
+    assert.equal(result, true);
+    assert.equal(h.context.state.selectedId, "B");
+    assert.equal(collapsedSizeAfter, collapsedSizeBefore);
+    assert.equal(h.counters.projectorCalls, 1);
+    assert.equal(h.counters.refreshMeta, 1);
+    assert.equal(h.counters.saveWorkspace, 1);
+    assert.equal(h.counters.render, 0);
+    assert.equal(h.counters.create, 0);
+    assert.equal(h.counters.remove, 0);
+    assert.equal(h.counters.reparent, 0);
+    assert.equal(h.counters.query, 0, "composed repaint/focus must perform zero tree queries");
+    assert.equal(h.counters.querySelected, 0);
+    assert.equal(h.counters.queryVisible, 0);
+    assert.equal(h.counters.queryVisibleRows, 0);
+    assert.equal(h.counters.selectedRemove, 1);
+    assert.equal(h.counters.selectedAdd, 1);
+    assert.equal(h.counters.discoveryCalls, 0);
+    assert.equal(h.counters.discoveryVisited, 0);
+    assert.equal(h.document.activeElement, bRow, "active list-smoothing focus owner remains usable");
+
+    assert.equal(h.row("A"), aRow);
+    assert.equal(h.branch("A"), aBranch);
+    assert.equal(h.row("B"), bRow);
+    assert.equal(h.branch("B"), bBranch);
+    assert.equal(h.row("C"), cRow);
+    assert.equal(h.branch("C"), cBranch);
+    assert.equal(aRow.classList.contains("selected"), false);
+    assert.equal(bRow.classList.contains("selected"), true);
+
+    for (const [id, row, branch] of largeIdentity) {
+      assert.equal(h.row(id), row, `${id} row identity survives`);
+      assert.equal(h.branch(id), branch, `${id} branch identity survives`);
+    }
+
+    return {
+      create: h.counters.create,
+      remove: h.counters.remove,
+      reparent: h.counters.reparent,
+      query: h.counters.query,
+      querySelected: h.counters.querySelected,
+      queryVisible: h.counters.queryVisible,
+      queryVisibleRows: h.counters.queryVisibleRows,
+      selectedAdd: h.counters.selectedAdd,
+      selectedRemove: h.counters.selectedRemove,
+      render: h.counters.render,
+      refreshMeta: h.counters.refreshMeta,
+      focus: h.counters.focus,
+      scroll: h.counters.scroll,
+      saveWorkspace: h.counters.saveWorkspace,
+      discoveryCalls: h.counters.discoveryCalls,
+      discoveryVisited: h.counters.discoveryVisited,
+      projectorCalls: h.counters.projectorCalls,
+    };
+  }
+
+  const tiny = run(0);
+  const large = run(1001);
+
+  assert.deepEqual(large, tiny, "composed presentation work must remain fixed-bounded as unrelated mounted rows grow");
+
+  assert.deepEqual(tiny, {
+    create: 0,
+    remove: 0,
+    reparent: 0,
+    query: 0,
+    querySelected: 0,
+    queryVisible: 0,
+    queryVisibleRows: 0,
+    selectedAdd: 1,
+    selectedRemove: 1,
+    render: 0,
+    refreshMeta: 1,
+    focus: 1,
+    scroll: 0,
+    saveWorkspace: 1,
+    discoveryCalls: 0,
+    discoveryVisited: 0,
+    projectorCalls: 1,
+  });
+
+  // This is a presentation-locality proof only. selectNodeById's state.nodes
+  // semantic validation may still be O(n), and keyboard target discovery remains
+  // separately O(n) exactly as proved/acknowledged by the existing P243 tests.
+});
