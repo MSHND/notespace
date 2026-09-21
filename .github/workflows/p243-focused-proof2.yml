@@ -1,0 +1,18 @@
+name: P243 focused proof 2
+
+on:
+  push:
+    branches:
+      - candidate/p243-proof2
+
+jobs:
+  p243-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test tests/p243-main-known-target-selection-projection.test.js
+      - run: npm run check
