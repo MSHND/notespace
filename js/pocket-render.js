@@ -168,6 +168,38 @@ function getMountedMainRowForNodeId(nodeId) {
   return currentMainMountedNodeEntry(nodeId)?.row || null;
 }
 
+function projectMainPrimarySelection(previousNodeId, nextNodeId) {
+  const previousId = cleanText(previousNodeId, 80);
+  const nextId = cleanText(nextNodeId, 80);
+  if (!previousId || !nextId || previousId === nextId) return false;
+  if (typeof canShowPocketTree === "function" && !canShowPocketTree()) return false;
+  if (cleanText(state.selectedId, 80) !== nextId) return false;
+  if (cleanText(el.search?.value, 120)) return false;
+  if (cleanText(state.focusRootId, 80)) return false;
+  if (cleanText(state.inlineEdit?.id, 80)) return false;
+  if (state.rowMiniMenuOpen) return false;
+  if (document.body?.classList?.contains?.("phoneMode")) return false;
+
+  const multiSelected = state.multiSelectedIds;
+  if (multiSelected instanceof Set) {
+    if (multiSelected.size > 0) return false;
+  } else if (Array.isArray(multiSelected)) {
+    if (multiSelected.length > 0) return false;
+  } else if (multiSelected != null) {
+    return false;
+  }
+
+  const previous = currentMainMountedNodeEntry(previousId);
+  const next = currentMainMountedNodeEntry(nextId);
+  if (!previous || !next || previous.row === next.row) return false;
+  if (!previous.row.classList.contains("selected")) return false;
+  if (next.row.classList.contains("selected")) return false;
+
+  previous.row.classList.remove("selected");
+  next.row.classList.add("selected");
+  return true;
+}
+
 function projectMainSameParentReorder(movingNodeId, adjacentTargetNodeId, direction) {
   const moveDirection = Number(direction) < 0 ? -1 : (Number(direction) > 0 ? 1 : 0);
   if (!moveDirection) return false;
