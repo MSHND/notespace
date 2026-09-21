@@ -48,6 +48,7 @@ function makeHarness({ unrelatedCount = 0, selectedId = "A", copyIds = [] } = {}
   const sequence = [];
   let documentRef = null;
   let treeRoot = null;
+  let treeWrap = null;
 
   function classTokens(element) {
     return String(element?.className || "").split(/\s+/).filter(Boolean);
