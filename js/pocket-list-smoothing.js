@@ -16,6 +16,10 @@
   function findRow(nodeId) {
     const id = safeClean(nodeId, 80);
     if (!id || !(el.treeRoot instanceof HTMLElement)) return null;
+    if (typeof getMountedMainRowForNodeId === "function") {
+      const mounted = getMountedMainRowForNodeId(id);
+      if (mounted instanceof HTMLElement) return mounted;
+    }
     const escaped = typeof CSS?.escape === "function" ? CSS.escape(id) : id.replace(/"/g, '\\"');
     const row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
     return row instanceof HTMLElement ? row : null;
@@ -89,16 +93,22 @@
   function paintSelectionOnly(nextId) {
     const id = safeClean(nextId, 80);
     if (!id || !state.nodes.some((node) => node.id === id)) return false;
-    const row = findRow(id);
-    if (!(row instanceof HTMLElement)) return false;
+    const mountedBefore = findRow(id);
+    if (!(mountedBefore instanceof HTMLElement)) return false;
 
-    const previous = el.treeRoot instanceof HTMLElement
-      ? el.treeRoot.querySelectorAll(".row.selected")
-      : [];
-    previous.forEach((item) => item.classList.remove("selected"));
-
+    const previousId = safeClean(state.selectedId, 80);
     state.selectedId = id;
-    row.classList.add("selected");
+
+    let projected = false;
+    if (previousId && previousId !== id && typeof projectMainPrimarySelection === "function") {
+      try {
+        projected = projectMainPrimarySelection(previousId, id) === true;
+      } catch {}
+    }
+    if (!projected) renderTree();
+
+    const row = projected ? mountedBefore : findRow(id);
+    if (!(row instanceof HTMLElement)) return false;
     row.focus({ preventScroll: true });
     refreshMeta();
     calmScrollRowIntoView(row);
