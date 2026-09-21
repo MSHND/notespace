@@ -22,6 +22,8 @@ function makeHarness({ unrelatedCount = 0, loadActions = true, loadSmoothing = f
     reparent: 0,
     query: 0,
     querySelected: 0,
+    queryVisible: 0,
+    queryVisibleRows: 0,
     selectedAdd: 0,
     selectedRemove: 0,
     render: 0,
@@ -127,9 +129,11 @@ function makeHarness({ unrelatedCount = 0, loadActions = true, loadSmoothing = f
       return this.childNodes.some((child) => child.contains(candidate));
     }
     querySelectorAll(selector) {
-      if (active && this === treeRoot) {
+      const countedRootQuery = active && this === treeRoot;
+      if (countedRootQuery) {
         counters.query += 1;
         if (selector === ".row.selected") counters.querySelected += 1;
+        if (selector === ".row[data-node-id]") counters.queryVisible += 1;
       }
       const found = [];
       const visit = (parent) => {
@@ -139,6 +143,7 @@ function makeHarness({ unrelatedCount = 0, loadActions = true, loadSmoothing = f
         }
       };
       visit(this);
+      if (countedRootQuery && selector === ".row[data-node-id]") counters.queryVisibleRows += found.length;
       return found;
     }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
@@ -288,6 +293,8 @@ function makeHarness({ unrelatedCount = 0, loadActions = true, loadSmoothing = f
       reparent: counters.reparent,
       query: counters.query,
       querySelected: counters.querySelected,
+      queryVisible: counters.queryVisible,
+      queryVisibleRows: counters.queryVisibleRows,
       selectedAdd: counters.selectedAdd,
       selectedRemove: counters.selectedRemove,
       render: counters.render,
@@ -352,6 +359,8 @@ test("P243 renderer projector is presentation-only and fixed-bounded", () => {
       reparent: c.reparent,
       query: c.query,
       querySelected: c.querySelected,
+      queryVisible: c.queryVisible,
+      queryVisibleRows: c.queryVisibleRows,
       selectedAdd: c.selectedAdd,
       selectedRemove: c.selectedRemove,
       render: c.render,
@@ -361,6 +370,7 @@ test("P243 renderer projector is presentation-only and fixed-bounded", () => {
       saveWorkspace: c.saveWorkspace,
     }, {
       create: 0, remove: 0, reparent: 0, query: 0, querySelected: 0,
+      queryVisible: 0, queryVisibleRows: 0,
       selectedAdd: 1, selectedRemove: 1, render: 0, refreshMeta: 0,
       focus: 0, scroll: 0, saveWorkspace: 0,
     });
@@ -408,7 +418,7 @@ test("P243 direct projector guards fail closed before any class mutation", () =>
 });
 
 test("P243 selectNodeById composes local projection only when expandPath keeps collapsed size unchanged", () => {
-  const h = makeHarness();
+  const h = makeHarness({ loadSmoothing: true });
   h.context.expandPathToNode = () => {};
   h.reset();
   assert.equal(h.context.selectNodeById("B", { expandPath: true }), true);
@@ -422,7 +432,7 @@ test("P243 selectNodeById composes local projection only when expandPath keeps c
   assert.equal(h.counters.refreshMeta, 1);
   assert.equal(h.counters.saveWorkspace, 1);
 
-  const fallback = makeHarness();
+  const fallback = makeHarness({ loadSmoothing: true });
   fallback.context.state.collapsed.add("B");
   fallback.context.expandPathToNode = (id) => { fallback.context.state.collapsed.delete(id); };
   const prev = fallback.row("A");
@@ -464,9 +474,9 @@ test("P243 active list smoothing keeps discovery O(n) but repaint/focus registry
     assert.equal(h.counters.projectorCalls, 1);
     assert.equal(h.counters.render, 0);
     assert.equal(h.counters.querySelected, 0);
-    assert.equal(h.counters.query, 0, "mounted target/focus lookups must not tree-query");
-    assert.equal(h.counters.discoveryCalls, 1);
-    assert.equal(h.counters.discoveryVisited, unrelatedCount + 3);
+    assert.equal(h.counters.query, 1, "the only tree query is unchanged visible-target discovery");
+    assert.equal(h.counters.queryVisible, 1);
+    assert.equal(h.counters.queryVisibleRows, unrelatedCount + 3);
     assert.equal(h.counters.refreshMeta, 1);
     assert.ok(h.counters.focus >= 1);
     return h.counts();
@@ -478,8 +488,9 @@ test("P243 active list smoothing keeps discovery O(n) but repaint/focus registry
   assert.equal(tiny.selectedRemove, large.selectedRemove);
   assert.equal(tiny.render, large.render);
   assert.equal(tiny.query, large.query);
+  assert.equal(tiny.queryVisible, large.queryVisible);
   assert.equal(tiny.projectorCalls, large.projectorCalls);
-  assert.ok(large.discoveryVisited > tiny.discoveryVisited, "target discovery intentionally remains proportional to visible rows");
+  assert.ok(large.queryVisibleRows > tiny.queryVisibleRows, "target discovery intentionally remains proportional to visible rows");
 });
 
 test("P243 list-smoothing guards fall back to authoritative render without partial projector mutation", () => {
