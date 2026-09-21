@@ -782,10 +782,20 @@ function selectNodeById(nodeId, options = {}) {
   const id = cleanText(nodeId, 80);
   if (!id) return false;
   if (!state.nodes.some((n) => n.id === id)) return false;
+  const previousId = cleanText(state.selectedId, 80);
+  const collapsedSizeBefore = state.collapsed instanceof Set ? state.collapsed.size : null;
   state.selectedId = id;
   if (options.expandPath) expandPathToNode(id);
+  const collapsedSizeAfter = state.collapsed instanceof Set ? state.collapsed.size : null;
+  const collapsedStateUnchanged = collapsedSizeBefore !== null && collapsedSizeAfter === collapsedSizeBefore;
   refreshMeta();
-  renderTree();
+  let projected = false;
+  if (collapsedStateUnchanged && typeof projectMainPrimarySelection === "function") {
+    try {
+      projected = projectMainPrimarySelection(previousId, id) === true;
+    } catch {}
+  }
+  if (!projected) renderTree();
   focusRowByNodeId(id, { block: "nearest" });
   saveWorkspaceState();
   return true;
