@@ -4003,12 +4003,12 @@ test("successful picked and newly created truth-file targets establish new edito
   let createdWrites = 0;
   let createdText = "";
   const createdHandle = {
-    name: "created.json",
+    name: "created.pocket",
     async isSameEntry(other) { return other === this; },
     async queryPermission() { return "granted"; },
     async getFile() {
       return {
-        name: "created.json",
+        name: "created.pocket",
         async text() { return createdText; },
       };
     },
@@ -4030,7 +4030,7 @@ test("successful picked and newly created truth-file targets establish new edito
   assert.equal(await context.createNewPocketFile(), true);
   const createdIdentity = plain(context.capturePocketEditorSourceIdentity());
   assert.ok(createdIdentity.fileSessionId > result.sourceIdentity.fileSessionId);
-  assert.equal(createdIdentity.sourceFileName, "created.json");
+  assert.equal(createdIdentity.sourceFileName, "created.pocket");
   assert.equal(createdWrites, 1);
   assert.equal(pickerCalls, 2);
 });
@@ -4170,7 +4170,7 @@ test("P094 external PE runtime accepts independent Notes, Outline, both, structu
 
 
 
-test("P193k6 New Pocket save picker is untyped while Open remains typed and cancellation is one-shot", async () => {
+test("P193k6/P255 New Pocket save picker owns .pocket while Open fallback remains typed JSON and cancellation is one-shot", async () => {
   const creating = createFullContractContext();
   resetState(creating, [syntheticNode("p193k6_create")]);
   let savePickerCalls = 0;
@@ -4185,8 +4185,11 @@ test("P193k6 New Pocket save picker is untyped while Open remains typed and canc
 
   assert.equal(await creating.createNewPocketFile(), false);
   assert.equal(savePickerCalls, 1);
-  assert.deepEqual(savePickerOptions, { suggestedName: "pocket-data.json" });
-  assert.equal(Object.prototype.hasOwnProperty.call(savePickerOptions, "types"), false);
+  assert.deepEqual(savePickerOptions, {
+    suggestedName: "Pocket.pocket",
+    types: [{ description: "Pocket file", accept: { "application/json": [".pocket"] } }],
+    excludeAcceptAllOption: true,
+  });
 
   const opening = createFullContractContext();
   resetState(opening, [syntheticNode("p193k6_open")]);
