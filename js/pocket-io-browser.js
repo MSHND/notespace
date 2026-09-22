@@ -115,6 +115,14 @@ function jsonFilePickerOptions() {
   };
 }
 
+function newPocketFilePickerOptions() {
+  return {
+    suggestedName: "Pocket.pocket",
+    types: [{ description: "Pocket file", accept: { "application/json": [".pocket"] } }],
+    excludeAcceptAllOption: true,
+  };
+}
+
 function pocketFileState() {
   if (!state.pocketFile || typeof state.pocketFile !== "object") {
     state.pocketFile = {
@@ -1233,6 +1241,8 @@ async function writeTruthFile(payload, options = {}) {
 
 function buildFirstUsePocketNodes(updatedAt = nowIso()) {
   const thingsOnMyMindId = makeId("node");
+  const copyId = makeId("node");
+  const copyInstructions = "Put reusable text under Copy. Each leaf item is ready to copy. From the Main tree, start typing any part of an item's title or body text; Pocket will narrow to matching items and select the first actual match. Press Enter to copy the selected item. If it has body text, Pocket copies that text; otherwise it copies the title. Right-click an item and choose Edit to view or change its reusable text.";
   return [
     {
       id: thingsOnMyMindId,
@@ -1265,6 +1275,24 @@ function buildFirstUsePocketNodes(updatedAt = nowIso()) {
       source: "manual",
       order: 1002,
       updatedAt,
+    },
+    {
+      id: copyId,
+      parentId: "root",
+      label: "Copy",
+      source: "manual",
+      order: 1003,
+      updatedAt,
+      copyContext: true,
+    },
+    {
+      id: makeId("node"),
+      parentId: copyId,
+      label: "Instructions — right-click and Edit to view",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+      details: copyInstructions,
     },
   ];
 }
@@ -1360,14 +1388,17 @@ async function createNewPocketFile() {
   const sourceSession = capturePocketFileSaveSession();
   let preparedAdoptionLease = null;
   try {
-    const handle = await window.showSaveFilePicker({
-      suggestedName: "pocket-data.json",
-    });
+    const handle = await window.showSaveFilePicker(newPocketFilePickerOptions());
     if (!handle) {
       setStatus("Create cancelled.", "warn");
       return false;
     }
     if (!isPocketFileSaveSessionCurrent(sourceSession)) return false;
+    const pickedName = cleanText(handle.name, 120);
+    if (!/\.pocket$/i.test(pickedName)) {
+      setStatus("Pocket could not create a valid Pocket file here. Try New again.", "warn", { durationMs: 7200 });
+      return false;
+    }
     const relationship = await comparePocketFileHandles(handle, sourceSession.handle);
     if (!isPocketFileSaveSessionCurrent(sourceSession)) return false;
     if (sourceSession.handle && (!relationship.verified || relationship.same)) {
@@ -1381,7 +1412,7 @@ async function createNewPocketFile() {
       return false;
     }
     const payload = payloadForNewPocketFile();
-    const name = cleanText(handle.name || "pocket-data.json", 120);
+    const name = pickedName;
     const norm = normaliseInput(payload);
     const sourceInfo = {
       schema: norm.schema,
