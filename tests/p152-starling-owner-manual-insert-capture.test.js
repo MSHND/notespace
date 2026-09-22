@@ -20,8 +20,7 @@ function runtime(nodes = [node("a")]) {
     nowIso() { return "2026-09-02T01:00:00.000Z"; }, cleanText(value, maximum = Number.MAX_SAFE_INTEGER) { return String(value || "").trim().slice(0, maximum); }, makeId() { nextId += 1; return `new-${nextId}`; },
     compareSiblingOrder(left, right) { return (Number(left.order) || 0) - (Number(right.order) || 0) || String(left.label || "").localeCompare(String(right.label || "")); },
     nodeMap() { return new Map(context.state.nodes.map((entry) => [entry.id, entry])); }, childrenMap() { const result = new Map(); for (const entry of context.state.nodes) { const parent = entry.parentId || "root"; if (!result.has(parent)) result.set(parent, []); result.get(parent).push(entry); } for (const entries of result.values()) entries.sort(context.compareSiblingOrder); return result; }, maxSiblingOrder(parentId) { return Math.max(1000, ...context.state.nodes.filter((entry) => (entry.parentId || "root") === (parentId || "root")).map((entry) => Number(entry.order) || 0)); },
-    isManagedSystemBucketNode() { return false; }, isCompletedSystemBucketNode() { return false; }, requirePocketFileForChanges() { return true; }, clearInlineEditState() { context.state.inlineEdit = { id: "", isNew: false }; }, expandPathToNode() {}, refreshSaveState() {}, refreshMeta() {}, renderTree() {}, persistPipSnapshot() {}, refocusTreeNavigation() {}, focusRowByNodeId() {}, softlyEnsureSelectionVisible() {}, requestAnimationFrame(callback) { callback?.(); return 1; }, flashTouchedRow() {}, setStatus() {}, saveLastSaveSnapshot() {}, saveLocalSafetySnapshot() { return true; },
-    parseCaptureSlashPathBatch() { return { matched: false, ok: true }; }, findChildByLabel() { return null; }, ensurePathNode() { return null; },
+    isManagedSystemBucketNode() { return false; }, isCompletedSystemBucketNode() { return false; }, requirePocketFileForChanges() { return true; }, clearInlineEditState() { context.state.inlineEdit = { id: "", isNew: false }; }, expandPathToNode() {}, refreshSaveState() {}, refreshMeta() {}, renderTree() {}, persistPipSnapshot() {}, refocusTreeNavigation() {}, focusRowByNodeId() {}, softlyEnsureSelectionVisible() {}, requestAnimationFrame(callback) { callback?.(); return 1; }, flashTouchedRow() {}, setStatus() {}, saveLastSaveSnapshot() {}, saveLocalSafetySnapshot() { return true; }, findChildByLabel() { return null; }, ensurePathNode() { return null; },
     PocketDeviceChanges: { cloneJsonCompatible(value) { try { return { ok: true, value: plain(value) }; } catch { return { ok: false }; } }, coerceDocument(value) { return { ok: true, document: plain({ nodes: value.nodes || [], tombstones: value.tombstones || [], rootExtras: value.rootExtras || {}, dataExtras: value.dataExtras || {} }) }; }, describeDocumentTransition() { return { ok: true, records: [] }; } },
     __storage: storage,
   };
@@ -111,7 +110,6 @@ test("P152 keeps provisional cancellation, blank cleanup, slash import and exist
   assert.equal(context.commitInlineEdit(slash, "/ignored/path").kind, "path-import");
   assert.deepEqual(captured(context, 99), []);
   context.state.inlineEdit = { id: "a", isNew: false, originalLabel: "a" };
-  context.parseCaptureSlashPathBatch = () => ({ matched: false, ok: true });
   assert.equal(context.commitInlineEdit("a", "Renamed").ok, true);
   const rename = context.state.ops.at(-1);
   assert.deepEqual(captured(context, rename.seq).map((entry) => entry.type), ["payload"]);
