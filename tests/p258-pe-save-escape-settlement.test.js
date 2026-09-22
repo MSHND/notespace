@@ -268,7 +268,7 @@ function createRuntime() {
   function success() { return { ok: true, exported: true, applied: true }; }
 
   return {
-    context, controls, line, pane, dialog, alerts, saveCalls, pendingSaves, counts,
+    context, window, controls, line, pane, dialog, alerts, saveCalls, pendingSaves, counts,
     mutate, saveShortcut, escape, settle, success, documentKey,
   };
 }
@@ -276,7 +276,7 @@ function createRuntime() {
 test("P258 covered Ctrl+S then immediate Escape attaches close to the same one in-flight save", async () => {
   const app = createRuntime();
   app.mutate("Generation N");
-  assert.equal(app.context.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(app.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
 
   const saveEvent = app.saveShortcut();
   assert.equal(saveEvent.defaultPrevented, true);
@@ -295,7 +295,7 @@ test("P258 covered Ctrl+S then immediate Escape attaches close to the same one i
 
   assert.equal(app.counts.completeClose, 1);
   assert.equal(app.counts.close, 1);
-  assert.equal(app.context.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(app.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
 });
 
 test("P258 newer edit before Escape uses normal dirty protection and old save cannot close it", async () => {
@@ -314,7 +314,7 @@ test("P258 newer edit before Escape uses normal dirty protection and old save ca
 
   assert.equal(app.counts.close, 0);
   assert.equal(app.counts.completeClose, 0);
-  assert.equal(app.context.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(app.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
   assert.equal(app.controls.get("saveState").textContent, "earlier changes saved — newer edits remain");
 });
 
@@ -331,7 +331,7 @@ test("P258 edit after Escape queues close invalidates the queued close before ol
 
   assert.equal(app.counts.close, 0);
   assert.equal(app.counts.completeClose, 0);
-  assert.equal(app.context.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(app.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
 
   app.escape();
   assert.equal(app.dialog.hidden, false);
@@ -351,7 +351,7 @@ test("P258 failed in-flight save after Escape stays open/dirty, preserves feedba
   await app.settle();
 
   assert.equal(app.counts.close, 0);
-  assert.equal(app.context.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(app.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
   assert.equal(app.controls.get("saveState").textContent, "Pocket changed elsewhere — not saved");
   assert.deepEqual(app.alerts, ["This Pocket changed elsewhere. Your changes are still here."]);
 
@@ -381,7 +381,7 @@ test("P258 unsaved-dialog Escape still cancels dialog and keeps dirty editor ope
   app.escape();
   assert.equal(app.dialog.hidden, true);
   assert.equal(app.counts.close, 0);
-  assert.equal(app.context.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(app.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
 });
 
 test("P258 existing Save & Close still waits for success and generation mismatch still refuses close", async () => {
@@ -394,7 +394,7 @@ test("P258 existing Save & Close still waits for success and generation mismatch
   await success.settle();
   assert.equal(success.counts.completeClose, 1);
   assert.equal(success.counts.close, 1);
-  assert.equal(success.context.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
+  assert.equal(success.window.PocketNodePopoutSession.hasUnsavedChanges(), false);
 
   const mismatch = createRuntime();
   mismatch.mutate("Generation N");
@@ -404,7 +404,7 @@ test("P258 existing Save & Close still waits for success and generation mismatch
   await mismatch.settle();
   assert.equal(mismatch.counts.close, 0);
   assert.equal(mismatch.counts.completeClose, 0);
-  assert.equal(mismatch.context.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
+  assert.equal(mismatch.window.PocketNodePopoutSession.hasUnsavedChanges(), true);
 });
 
 test("P258 close settlement is generation-owned, not a new timer/poll/save owner", () => {
