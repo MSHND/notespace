@@ -183,98 +183,56 @@ function key(target, keyName, modifiers = {}) {
 
 function byId(context, id) { return context.state.nodes.find((entry) => entry.id === id); }
 
-test("P229 actual Main Shift+Tab path reaches existing outdent owner exactly once and preserves branch structure", () => {
+test("P229 ordinary Main Shift+Tab has no Pocket structural ownership", () => {
   const initial = [
     node("grand", "root", 1001),
     node("parent", "grand", 1001),
     node("selected", "parent", 1001),
     node("descendant", "selected", 1001),
-    node("parent-peer", "parent", 1002),
-    node("unrelated", "grand", 1002),
-    node("unrelated-child", "unrelated", 1001),
   ];
   const h = runtime(initial, "selected");
-  const unrelatedBefore = {
-    root: plain(byId(h.context, "unrelated")),
-    child: plain(byId(h.context, "unrelated-child")),
-  };
-
+  const before = plain(h.context.state.nodes);
   const event = key(h.treeTarget, "Tab", { shiftKey: true });
+
   h.context.handleTreeKeydown(event);
 
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(byId(h.context, "selected").parentId, "grand");
-  assert.equal(byId(h.context, "descendant").parentId, "selected");
-  assert.equal(byId(h.context, "parent-peer").parentId, "parent");
-  assert.equal(byId(h.context, "unrelated").parentId, unrelatedBefore.root.parentId);
-  assert.equal(byId(h.context, "unrelated").label, unrelatedBefore.root.label);
-  assert.equal(byId(h.context, "unrelated").updatedAt, unrelatedBefore.root.updatedAt);
-  assert.deepEqual(plain(byId(h.context, "unrelated-child")), unrelatedBefore.child);
-  assert.deepEqual(h.context.sortNodesForParent("grand").map((entry) => entry.id), ["parent", "selected", "unrelated"]);
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.context.state.ops.length, 0);
+  assert.equal(h.counts.refreshSaveState, 0);
   assert.equal(h.context.state.selectedId, "selected");
-  assert.equal(h.context.__lastRefocus, "selected");
-  assert.equal(h.search.focusCount, 0);
-  assert.equal(h.search.selectCount, 0);
-
-  const outdentOps = h.context.state.ops.filter((entry) => entry.type === "outdent");
-  assert.equal(outdentOps.length, 1, "one Shift+Tab must cause exactly one outdent operation");
-  assert.equal(h.counts.refreshSaveState, 1);
-  assert.equal(h.context.lastTreeUndoKind, "move");
-  assert.equal(h.context.lastMoveUndoSnapshot?.kind, "outdent");
-
-  const seq = outdentOps[0].seq;
-  const captured = plain(h.context.freezePocketStarlingOwnerWorkingSetThrough(seq).operations);
-  assert.equal(captured.length, 2);
-  assert.equal(captured[0].type, "payload");
-  assert.equal(captured[0].input.nodeId, "selected");
-  assert.deepEqual(captured[1], {
-    type: "move",
-    input: { nodeId: "selected", fromIndex: 0, newParentId: "grand", toIndex: 1 },
-  });
-
-  h.context.undoLastMoveAction();
-  assert.equal(byId(h.context, "selected").parentId, "parent");
-  assert.equal(byId(h.context, "descendant").parentId, "selected");
-  assert.deepEqual(plain(byId(h.context, "unrelated")), unrelatedBefore.root);
-  assert.deepEqual(plain(byId(h.context, "unrelated-child")), unrelatedBefore.child);
-  assert.deepEqual(h.context.sortNodesForParent("grand").map((entry) => entry.id), ["parent", "unrelated"]);
 });
 
-test("P229 plain Tab still reaches existing indent owner exactly once", () => {
-  const h = runtime([
+test("P229 ordinary Main plain Tab has no Pocket structural ownership", () => {
+  const initial = [
     node("first", "root", 1001),
     node("selected", "root", 1002),
     node("descendant", "selected", 1001),
-    node("other", "root", 1003),
-  ], "selected");
-
-  const event = key(h.treeTarget, "Tab");
-  h.context.handleTreeKeydown(event);
-
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(byId(h.context, "selected").parentId, "first");
-  assert.equal(byId(h.context, "descendant").parentId, "selected");
-  assert.equal(byId(h.context, "other").parentId, "root");
-  assert.equal(h.context.state.ops.filter((entry) => entry.type === "indent").length, 1);
-  assert.equal(h.context.state.selectedId, "selected");
-  assert.equal(h.context.__lastRefocus, "selected");
-  assert.equal(h.counts.refreshSaveState, 1);
-});
-
-test("P229 top-level Shift+Tab retains existing fail-safe without structural corruption", () => {
-  const initial = [node("selected", "root", 1001), node("other", "root", 1002)];
+  ];
   const h = runtime(initial, "selected");
-  const event = key(h.treeTarget, "Tab", { shiftKey: true });
+  const before = plain(h.context.state.nodes);
+  const event = key(h.treeTarget, "Tab");
 
   h.context.handleTreeKeydown(event);
 
-  assert.equal(event.defaultPrevented, true);
-  assert.deepEqual(plain(h.context.state.nodes), initial);
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(plain(h.context.state.nodes), before);
   assert.equal(h.context.state.ops.length, 0);
   assert.equal(h.counts.refreshSaveState, 0);
-  assert.match(h.counts.status.at(-1)?.message || "", /already at the top level/i);
-  assert.equal(h.search.focusCount, 0);
-  assert.equal(h.search.selectCount, 0);
+  assert.equal(h.context.state.selectedId, "selected");
+});
+
+test("P229 Main Tab with no selection remains native and silent", () => {
+  const h = runtime([node("a"), node("b")], "");
+  const before = plain(h.context.state.nodes);
+  const event = key(h.treeTarget, "Tab");
+
+  h.context.handleTreeKeydown(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.context.state.ops.length, 0);
+  assert.equal(h.counts.status.length, 0);
 });
 
 test("P229 search/input-owned Shift+Tab remains outside Main structural ownership", () => {
@@ -323,15 +281,15 @@ test("P229 preserves F2, Shift+F and modified-arrow routes", () => {
   }
 });
 
-test("P229 source guard leaves one Main structural Tab owner and no Shift+Tab search-focus competitor", () => {
+test("P229 source guard leaves no ordinary Main structural Tab owner and preserves PE Tab", () => {
   const actions = source(ACTIONS);
   const start = actions.indexOf("function handleTreeKeydown(ev)");
   assert.ok(start >= 0);
   const handler = actions.slice(start);
 
-  assert.doesNotMatch(handler, /ev\.shiftKey[\s\S]{0,120}ev\.key === "Tab"[\s\S]{0,240}el\.search\.(?:focus|select)/);
-  const structuralTabOwner = /if \(ev\.key !== "Tab"\) return;\s*ev\.preventDefault\(\);\s*if \(ev\.shiftKey\) outdentNodeById\(state\.selectedId\);\s*else indentNodeById\(state\.selectedId\);/g;
-  assert.equal((handler.match(structuralTabOwner) || []).length, 1);
+  assert.doesNotMatch(handler, /ev\.key !== "Tab"[\s\S]{0,160}(?:indentNodeById|outdentNodeById)/);
+  assert.doesNotMatch(handler, /ev\.key === "Tab"[\s\S]{0,160}(?:indentNodeById|outdentNodeById)/);
+  assert.doesNotMatch(handler, /ev\.preventDefault\(\)[\s\S]{0,120}ev\.shiftKey[\s\S]{0,120}outdentNodeById/);
 
   const peRuntime = source("js/pocket-node-popout-runtime.js");
   assert.match(peRuntime, /if\(ev\.key==="Tab"\)\{ev\.preventDefault\(\);indentBranch\(index,ev\.shiftKey\?-1:1\);return;\}/);
