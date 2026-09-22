@@ -1062,7 +1062,6 @@ function queuePathImport(rawText, options = {}) {
   }
   if (importTargetNode) {
     state.selectedId = importTargetNode.id;
-    state.focusRootId = importTargetNode.id;
     state.collapsed.delete(importTargetNode.id);
     expandPathToNode(importTargetNode.id);
   }
@@ -1179,7 +1178,6 @@ function commitPathImport(pending) {
   if (!focusNode) focusNode = lastNode || anchorHead || null;
   if (focusNode) {
     state.selectedId = focusNode.id;
-    state.focusRootId = focusNode.id;
     state.collapsed.delete(focusNode.id);
     expandPathToNode(focusNode.id);
   }
