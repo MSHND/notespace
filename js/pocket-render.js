@@ -382,7 +382,7 @@ function treeContentIndicatorForNode(node) {
   return { visible: true, title: first || "Has content" };
 }
 
-function renderTree() {
+function renderTree(options = {}) {
   clearMainMountedNodeRegistry();
   if (typeof canShowPocketTree === "function" && !canShowPocketTree()) {
     if (el.treeRoot instanceof HTMLElement) {
@@ -441,8 +441,12 @@ function renderTree() {
     return 38 + ((d - 3) * 7);
   }
 
+  const actualMatchIds = [];
+
   function build(node, depth) {
-    if (!matches(node) && !hasVisibleDesc(node.id)) return null;
+    const nodeMatches = matches(node);
+    if (!nodeMatches && !hasVisibleDesc(node.id)) return null;
+    if (filtering && nodeMatches) actualMatchIds.push(node.id);
     const li = document.createElement("li");
     li.className = "treeNode";
 
@@ -642,7 +646,10 @@ function renderTree() {
     el.treeRoot.appendChild(buildEmptyState(query, focusRoot));
   }
   refreshTreeLabelOverflowTitles();
-  repairVisibleSelectionAfterRender();
+  repairVisibleSelectionAfterRender({
+    repairFilteredSelection: options.repairFilteredSelection === true && filtering,
+    actualMatchIds,
+  });
   requestAnimationFrame(() => refreshTreeLabelOverflowTitles());
 
   if (state.inlineEdit.id) {
