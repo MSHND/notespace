@@ -2,7 +2,7 @@
 
 const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"), { webcrypto } = require("node:crypto"), { semanticBase } = require("./helpers/starling-semantic-test.js");
 const ROOT = path.resolve(__dirname, ".."), SHADOW = "js/pocket-starling-owner-working-set-shadow.js", HISTORY = "js/pocket-history-status.js", ACTIONS = "js/pocket-tree-actions.js", IMPORT = "js/pocket-import.js";
-const LOGICAL_SCRIPTS = ["js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", IMPORT, "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js", "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js", "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js", "js/pocket-sync-crypto.js", "js/pocket-starling-logical-edit-shadow.js", "js/pocket-starling-semantic-authority-shadow.js"];
+const LOGICAL_SCRIPTS = ["js/pocket-state.js", "js/pocket-data.js", "js/pocket-outline-persistence-policy.js", "js/pocket-node-content.js", "js/pocket-editor-metadata.js", "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", IMPORT, "js/pocket-starling-shadow.js", "js/pocket-starling-sequence-shadow.js", "js/pocket-starling-placement-shadow.js", "js/pocket-starling-bridge-shadow.js", "js/pocket-starling-root-shadow.js", "js/pocket-starling-object-seal-shadow.js", "js/pocket-sync-crypto.js", "js/pocket-starling-logical-edit-shadow.js", "js/pocket-starling-semantic-authority-shadow.js"];
 
 function source(file) { return fs.readFileSync(path.join(ROOT, file), "utf8"); }
 function plain(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
@@ -85,12 +85,19 @@ test("P157 leaves existing path components silent while capturing only a missing
   assert.equal(context.ensurePathNode(["A", "B", "C", "D"]).id, leaf.id); assert.equal(context.state.ops.length, beforeOps); assert.equal(context.state.nodes.length, beforeNodes); assert.deepEqual(captured(context, 99), operations);
 });
 
-test("P157 covers the real slash-path commit route without duplicate manual Insert, Delete, or Restore semantics", () => {
+test("P157 keeps ordinary Main slash text outside explicit path-import ownership after P261", () => {
   const context = runtime([node("existing", "root", 10)]);
   context.insertSiblingBelow("existing");
-  const provisionalId = context.state.inlineEdit.id, result = context.commitInlineEdit(provisionalId, "/A/B\n/A/C"), adds = addPathOperations(context), aggregate = context.state.ops.find((entry) => entry.type === "import_paths_inline"), operations = captured(context, aggregate.seq);
-  assert.equal(result.kind, "path-import"); assert.equal(context.state.nodes.some((entry) => entry.id === provisionalId), false); assert.equal(adds.length, 3); assert.equal(aggregate.created, 3);
-  assert.deepEqual(operations.map((entry) => entry.type), ["insert", "insert", "insert"]); assert.deepEqual(operations.map((entry) => entry.input.payload.label), ["A", "B", "C"]); assert.equal(captured(context, aggregate.seq).some((entry) => ["delete", "restore"].includes(entry.type)), false); assert.equal(captured(context, aggregate.seq).filter((entry) => entry.input?.nodeId === provisionalId).length, 0);
+  const provisionalId = context.state.inlineEdit.id;
+  const result = context.commitInlineEdit(provisionalId, "/A/B");
+  const add = context.state.ops.at(-1);
+  assert.equal(result.kind, "add");
+  assert.equal(context.nodeMap().get(provisionalId).label, "/A/B");
+  assert.equal(add.type, "add_below");
+  assert.equal(add.label, "/A/B");
+  assert.equal(addPathOperations(context).length, 0);
+  assert.equal(context.state.ops.some((entry) => entry.type === "import_paths_inline"), false);
+  assert.equal(context.state.focusRootId, "");
 });
 
 test("P157 covers the real path-import commit route while keeping its aggregate bookkeeping semantically silent", () => {
