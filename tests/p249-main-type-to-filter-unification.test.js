@@ -976,3 +976,9 @@ test("P249 source retirement leaves legacy typeJump shape inert but no active Ma
   const clearFilter = actions.slice(clearStart, clearEnd);
   assert.doesNotMatch(clearFilter, /restoreRememberedSelectionAfterFilter|saveWorkspaceState/);
 });
+
+module.exports = {
+  makeHarness,
+  setLabels,
+  plain,
+};
