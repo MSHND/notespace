@@ -1,0 +1,20 @@
+name: P255 focused proof 4
+
+on:
+  push:
+    branches:
+      - candidate/p255-proof4
+
+jobs:
+  p255-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 180s node --test tests/p255-new-pocket-first-use.test.js tests/p199-local-file-stale-overwrite.test.js tests/p206d-pocket-file-opening-compatibility.test.js
+      - run: timeout 180s node --test --test-name-pattern='P061|successful picked and newly created truth-file targets|P193k6/P255' tests/pe-persistence-contract.test.js
+      - run: timeout 240s node --test tests/p019-vault-ownership.test.js
+      - run: timeout 180s npm run check
