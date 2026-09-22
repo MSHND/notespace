@@ -573,13 +573,10 @@ function repairVisibleSelectionAfterRender(options = {}) {
 
   const selectedId = cleanText(state.selectedId, 80);
   const repairFilteredSelection = options?.repairFilteredSelection === true;
-  const suppliedActualMatchIds = repairFilteredSelection && Array.isArray(options?.actualMatchIds)
+  const actualMatchIds = repairFilteredSelection && Array.isArray(options?.actualMatchIds)
     ? options.actualMatchIds
       .map((id) => cleanText(id, 80))
       .filter(Boolean)
-    : [];
-  const actualMatchIds = repairFilteredSelection
-    ? suppliedActualMatchIds.filter((id, index) => visibleIds.includes(id) && suppliedActualMatchIds.indexOf(id) === index)
     : [];
 
   if (repairFilteredSelection) {
