@@ -230,18 +230,17 @@ test("P210 E Main plain Left centres only on a real child-to-parent selection ch
   assert.equal(h.comfortableCalls.length, 1, "ordinary visibility path remains intact");
 });
 
-test("P210 F type-ahead preserves selection semantics and changes only viewport timing to direct travel", () => {
+test("P210 F legacy type-jump timing is inert after Main typing moves to Filter", () => {
   const h = loadMainScrollHarness();
   h.state.selectedId = "child";
   h.state.typeJump.lastAt = Date.now();
   h.context.focusRowByNodeId("child");
-  assert.equal(h.scrollCalls.length, 1);
-  assert.equal(h.scrollCalls[0].behavior, "auto");
+  assert.equal(h.scrollCalls.length, 0, "legacy typeJump timing must not trigger special centring");
   assert.equal(h.state.selectedId, "child");
-  assert.equal(h.comfortableCalls.length, 0);
+  assert.equal(h.comfortableCalls.length, 1, "ordinary visibility owner remains active");
   const treeActions = source("js/pocket-tree-actions.js");
-  assert.match(treeActions, /function jumpSelectionByTypedChar\(/);
-  assert.doesNotMatch(source("js/pocket-scroll-polish.js"), /jumpSelectionByTypedChar\s*=|typeJump\.buffer\s*=|state\.selectedId\s*=/);
+  assert.match(treeActions, /function jumpSelectionByTypedChar\(/, "legacy helper may remain inert");
+  assert.doesNotMatch(source("js/pocket-scroll-polish.js"), /typeJump\.lastAt|isRecentTypeJumpFor|state\.selectedId\s*=/);
 });
 
 test("P210 preserves P209 native vertical caret owner and avoids duplicate Up/Down handling in the polish layer", () => {
