@@ -498,9 +498,20 @@ function makeHarness({ unrelatedCount = 0, selectedId = "A", copyIds = [] } = {}
     isCommandPaletteOpen() { return false; },
     isPocketVaultRecoveryFlowOpen() { return false; },
     isPocketDeviceChangesDecisionOpen() { return false; },
-    openRowMiniMenuForSelected() {
+    openRowMiniMenu() {
       if (counters.active) counters.menuOpen += 1;
       return true;
+    },
+    expandPathToNode(id) {
+      const map = context.nodeMap();
+      let current = map.get(String(id || "")) || null;
+      let guard = 0;
+      while (current && guard++ < 1000) {
+        context.state.collapsed.delete(current.id);
+        const parentId = current.parentId || "root";
+        if (parentId === "root") break;
+        current = map.get(parentId) || null;
+      }
     },
     findCopyContextRootId(id) {
       return copySet.has(id) ? id : "";
@@ -734,7 +745,7 @@ test("P249 Main typing feeds the existing Filter owner and keeps Main keyboard f
 
   assert.equal(h.context.state.selectedId, "B", "existing filter render repairs selection to first visible match");
   assert.deepEqual(h.context.getVisibleNodeIdsInRenderOrder(), ["B", "C"]);
-  assert.equal(h.document.activeElement, h.row("B"), "Main owns keyboard again after filter render");
+  assert.equal(h.document.activeElement, h.treeWrap, "Main/tree navigation owns keyboard again after filter render");
   assert.deepEqual(plain(h.context.state.nodes), nodesBefore);
   assert.equal(h.counters.saveWorkspace, 0);
 });
@@ -760,7 +771,7 @@ test("P249 consecutive Main text extends one Filter query without type-jump timi
 
   assert.deepEqual(h.context.getVisibleNodeIdsInRenderOrder(), ["B"]);
   assert.equal(h.context.state.selectedId, "B");
-  assert.equal(h.document.activeElement, h.row("B"));
+  assert.equal(h.document.activeElement, h.treeWrap);
 });
 
 test("P249 immediate ArrowDown settles filter before navigating filtered visible order", () => {
@@ -830,7 +841,7 @@ test("P249 Escape clears Filter and preserves the CURRENT selected filtered node
   assert.equal(h.search.value, "");
   assert.equal(h.context.state.selectedId, "C", "Escape must not rewind to pre-filter A");
   assert.deepEqual(h.context.getVisibleNodeIdsInRenderOrder(), ["A", "B", "C"]);
-  assert.equal(h.document.activeElement, h.row("C"));
+  assert.equal(h.document.activeElement, h.treeWrap);
   assert.equal(h.pendingTimerCount(), 0);
   assert.equal(h.counters.saveWorkspace, 0);
 });
@@ -852,7 +863,7 @@ test("P249 no-match Escape keeps the unchanged current selectedId", () => {
   assert.equal(h.search.value, "");
   assert.equal(h.context.state.selectedId, "A");
   assert.deepEqual(h.context.getVisibleNodeIdsInRenderOrder(), ["A", "B", "C"]);
-  assert.equal(h.document.activeElement, h.row("A"));
+  assert.equal(h.document.activeElement, h.treeWrap);
   assert.equal(h.pendingTimerCount(), 0);
 });
 
@@ -879,7 +890,7 @@ test("P249 Backspace edits the implicit Filter query and empty restores full tre
   assert.equal(h.pendingTimerCount(), 0);
   assert.equal(h.context.state.selectedId, "B");
   assert.deepEqual(h.context.getVisibleNodeIdsInRenderOrder(), ["A", "B", "C"]);
-  assert.equal(h.document.activeElement, h.row("B"));
+  assert.equal(h.document.activeElement, h.treeWrap);
   assert.equal(h.counters.saveWorkspace, 0);
 });
 
@@ -898,7 +909,7 @@ test("P249 filtered Main Left keeps tree semantics instead of Filter caret seman
   h.reset();
   h.keydown("B", "b");
   h.runPendingTimers();
-  assert.equal(h.document.activeElement, h.row("B"));
+  assert.equal(h.document.activeElement, h.treeWrap);
 
   h.keydown("B", "ArrowLeft");
   h.stop();
