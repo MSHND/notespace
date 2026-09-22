@@ -1,0 +1,18 @@
+name: P255 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p255-proof
+
+jobs:
+  p255-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 150s node --test tests/p255-new-pocket-first-use.test.js tests/p199-local-file-stale-overwrite.test.js tests/p206d-pocket-file-opening-compatibility.test.js
+      - run: timeout 150s npm run check
