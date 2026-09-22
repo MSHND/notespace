@@ -842,6 +842,9 @@ function bind() {
     }
     if (key === "c") {
       if (isEditableTarget || target === el.search) return;
+      if (typeof window.settlePocketPendingFilterRender === "function") {
+        window.settlePocketPendingFilterRender({ preserveScroll: false });
+      }
       const selectedId = cleanText(state.selectedId, 80);
       if (!selectedId) return;
       const selectedNode = nodeMap().get(selectedId) || null;
