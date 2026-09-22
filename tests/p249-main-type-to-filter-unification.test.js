@@ -949,19 +949,19 @@ test("P249 source retirement leaves legacy typeJump shape inert but no active Ma
   const handlerStart = actions.indexOf("function handleTreeKeydown(ev)");
   const handler = actions.slice(handlerStart);
   assert.ok(handlerStart >= 0);
-  assert.doesNotMatch(handler, /jumpSelectionByTypedChar\\s*\\(/);
+  assert.doesNotMatch(handler, /jumpSelectionByTypedChar\s*\(/);
   assert.match(handler, /applyPocketFilterQueryValue/);
   assert.match(handler, /settlePocketPendingFilterRender/);
   assert.match(handler, /isMainImplicitFilterBackspace/);
 
-  assert.match(actions, /function jumpSelectionByTypedChar\\(/, "legacy helper may remain for compatibility/history");
-  assert.doesNotMatch(smooth, /typeJump\\.lastAt|isRecentTypeJumpFor/);
-  assert.doesNotMatch(scroll, /typeJump\\.lastAt|isRecentTypeJumpFor/);
-  assert.match(smooth, /global\\.applyPocketFilterQueryValue = applyFilterQueryValue/);
-  assert.match(smooth, /global\\.settlePocketPendingFilterRender = settlePendingFilterRender/);
-  assert.match(actions, /const targetId = hasNodeId\\(state\\.selectedId\\)/);
-  assert.doesNotMatch(
-    actions.slice(actions.indexOf("function clearFilterAndReturnHome"), actions.indexOf("\\nfunction ", actions.indexOf("function clearFilterAndReturnHome") + 20)),
-    /restoreRememberedSelectionAfterFilter|saveWorkspaceState/
-  );
+  assert.match(actions, /function jumpSelectionByTypedChar\(/, "legacy helper may remain for compatibility/history");
+  assert.doesNotMatch(smooth, /typeJump\.lastAt|isRecentTypeJumpFor/);
+  assert.doesNotMatch(scroll, /typeJump\.lastAt|isRecentTypeJumpFor/);
+  assert.match(smooth, /global\.applyPocketFilterQueryValue = applyFilterQueryValue/);
+  assert.match(smooth, /global\.settlePocketPendingFilterRender = settlePendingFilterRender/);
+  assert.match(actions, /const targetId = hasNodeId\(state\.selectedId\)/);
+  const clearStart = actions.indexOf("function clearFilterAndReturnHome");
+  const clearEnd = actions.indexOf("\nfunction ", clearStart + 20);
+  const clearFilter = actions.slice(clearStart, clearEnd);
+  assert.doesNotMatch(clearFilter, /restoreRememberedSelectionAfterFilter|saveWorkspaceState/);
 });
