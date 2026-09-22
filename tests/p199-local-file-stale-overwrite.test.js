@@ -158,7 +158,7 @@ test("P199 fingerprints content rather than metadata and blocks same-size or mal
 test("P199 establishes only valid New and picked baselines, restores them on rollback, and rejects stale completion", async () => {
   const harness = loadBrowserHarness();
   const newPhysical = { text: "", lastModified: 0 };
-  const newHandle = sharedHandle(newPhysical, "new.json");
+  const newHandle = sharedHandle(newPhysical, "new.pocket");
   const created = harness.createIntegrationContext({ pickSaveHandle: () => newHandle });
   created.__p199State = () => require("node:vm").runInContext("state", created);
 
