@@ -515,9 +515,20 @@ function renderTree(options = {}) {
           finishCommit();
           return;
         }
-        if (ev.key === "Tab") {
+        if (
+          ev.key === "Tab"
+          && !ev.shiftKey
+          && !ev.metaKey
+          && !ev.ctrlKey
+          && !ev.altKey
+          && state.inlineEdit.id === node.id
+          && state.inlineEdit.isNew === true
+        ) {
           ev.preventDefault();
-          finishCommitWith(input.value, { postAction: ev.shiftKey ? "outdent" : "indent" });
+          const result = finishCommit();
+          if (result?.ok && result.kind === "add" && result.id === node.id) {
+            insertSiblingBelow(result.id);
+          }
           return;
         }
         if (ev.key === "Escape") {
