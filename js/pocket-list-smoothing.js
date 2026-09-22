@@ -152,7 +152,7 @@
 
   function runFilterRender(request, options = {}) {
     if (!request) return false;
-    renderTree();
+    renderTree({ repairFilteredSelection: request.hasFilter === true });
 
     const preserveScroll = options.preserveScroll !== false && request.keepMainFocus !== true;
     if (preserveScroll && request.scroller instanceof HTMLElement && request.hasFilter) {
