@@ -1,0 +1,19 @@
+name: P261a focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p261a-proof
+
+jobs:
+  p261a-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: timeout 240s node --test tests/p261a-import-focus-ownership.test.js tests/p261-main-literal-slash-entry.test.js tests/p157-starling-owner-path-import-insert-capture.test.js tests/p150-starling-owner-payload-capture.test.js tests/p152-starling-owner-manual-insert-capture.test.js tests/p153-starling-owner-manual-insert-undo-cancel.test.js tests/p019-vault-ownership.test.js tests/p076-production-browser-boundary.test.js tests/p210-browser-lexical-scope.test.js
+      - run: timeout 180s npm run check
