@@ -107,17 +107,37 @@ test("P153 leaves a post-action P151 movement frontier and its Insert semantic m
   assert.equal(context.nodeMap().has(id), false); assert.deepEqual(captured(context, undo.seq), beforeUndo); assert.equal(captured(context, undo.seq).some((entry) => entry.type === "delete" || entry.type === "restore"), false);
 });
 
-test("P153 leaves provisional, slash and existing rename boundaries without a cancellation witness", () => {
+test("P153 treats literal slash add as an ordinary cancellable Insert while rename stays outside Insert witness", () => {
   const context = runtime();
-  context.insertSiblingBelow("a"); const provisional = context.state.inlineEdit.id;
-  assert.equal(Object.hasOwn(context.lastEditUndoSnapshot, "p153InsertUndoWitness"), false); context.cancelInlineEdit(provisional); assert.deepEqual(captured(context, 99), []);
-  context.insertSiblingBelow("a"); const slash = context.state.inlineEdit.id;
-  context.parseCaptureSlashPathBatch = () => ({ matched: true, ok: true, entries: [] });
-  assert.equal(context.commitInlineEdit(slash, "/ignored/path").kind, "path-import"); assert.deepEqual(captured(context, 99), []);
+  context.insertSiblingBelow("a");
+  const provisional = context.state.inlineEdit.id;
+  assert.equal(Object.hasOwn(context.lastEditUndoSnapshot, "p153InsertUndoWitness"), false);
+  context.cancelInlineEdit(provisional);
+  assert.deepEqual(captured(context, 99), []);
+
+  context.insertSiblingBelow("a");
+  const slash = context.state.inlineEdit.id;
+  const result = context.commitInlineEdit(slash, "/ignored/path");
+  assert.equal(result.kind, "add");
+  assert.equal(context.nodeMap().get(slash).label, "/ignored/path");
+  const add = context.state.ops.at(-1);
+  assert.equal(add.type, "add_below");
+  assert.deepEqual(plain(context.lastEditUndoSnapshot.p153InsertUndoWitness), {
+    nodeId: slash,
+    operationSequence: add.seq,
+    forwardSemanticCaptured: true,
+  });
+  assert.deepEqual(captured(context, add.seq).map((entry) => entry.type), ["insert"]);
+  context.undoLastEditAction();
+  assert.equal(context.nodeMap().has(slash), false);
+  assert.deepEqual(captured(context, context.state.ops.at(-1).seq), []);
+
   const renamed = runtime();
   renamed.state.selectedId = "a";
   renamed.state.inlineEdit = { id: "a", isNew: false, originalLabel: "a" };
-  assert.equal(renamed.commitInlineEdit("a", "Renamed").ok, true); assert.equal(Object.hasOwn(renamed.lastEditUndoSnapshot || {}, "p153InsertUndoWitness"), false); renamed.undoLastEditAction();
+  assert.equal(renamed.commitInlineEdit("a", "Image / Word / Spreadsheet").ok, true);
+  assert.equal(Object.hasOwn(renamed.lastEditUndoSnapshot || {}, "p153InsertUndoWitness"), false);
+  renamed.undoLastEditAction();
   assert.deepEqual(captured(renamed, renamed.state.ops.at(-1).seq).map((entry) => entry.type), ["payload", "payload"]);
 });
 
