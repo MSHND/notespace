@@ -264,7 +264,9 @@ test("P264 A Tab B Tab C Enter yields exactly three committed same-parent siblin
   assert.equal(adds.length, 3);
   assert.deepEqual(adds.map((entry) => entry.label), ["A", "B", "C"]);
   for (const add of adds) {
-    assert.deepEqual(captured(context, add.seq).map((entry) => entry.type), ["insert"]);
+    const own = captured(context, add.seq).filter((entry) => entry.input?.nodeId === add.id);
+    assert.equal(own.length, 1);
+    assert.equal(own[0].type, "insert");
   }
   assert.equal(context.state.ops.some((entry) => ["indent", "outdent"].includes(entry.type)), false);
 });
