@@ -508,15 +508,6 @@ function renderTree(options = {}) {
       };
       input.addEventListener("click", (ev) => ev.stopPropagation());
       input.addEventListener("dblclick", (ev) => ev.stopPropagation());
-      input.addEventListener("paste", (ev) => {
-        const pasted = String(ev.clipboardData?.getData("text/plain") || "");
-        if (!pasted) return;
-        const parsed = parseCaptureSlashPathBatch(pasted);
-        const looksLikeBatch = parsed.matched && parsed.ok && pasted.includes("\n");
-        if (!looksLikeBatch) return;
-        ev.preventDefault();
-        finishCommitWith(pasted);
-      });
       input.addEventListener("keydown", (ev) => {
         ev.stopPropagation();
         if (ev.key === "Enter") {
