@@ -1116,84 +1116,6 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   const map = nodeMap();
   const node = map.get(nodeId);
   const edit = { ...state.inlineEdit };
-  const slashBatch = parseCaptureSlashPathBatch(rawValue);
-  if (slashBatch.matched) {
-    if (!slashBatch.ok) {
-      setStatus(slashBatch.message || "Use /path/item format, one per line.", "warn");
-      return { ok: false, reason: "invalid-path-batch" };
-    }
-    if (vaultSwitchCommit && !vaultSwitchInlineCommitIsCurrent(options)) {
-      return { ok: false, reason: "owner-switch-not-current" };
-    }
-    // Safety snapshot before bulk inline import, so Restore last can recover quickly.
-    const safetyPayload = {
-      ...(state.rootExtras || {}),
-      schema: "portal.export.v1",
-      exportedAt: nowIso(),
-      writtenAt: nowIso(),
-      mainThoughtTree: state.nodes,
-      mainThoughtTreeTombstones: state.tombstones,
-      data: {
-        ...(state.dataExtras || {}),
-        mainThoughtTree: state.nodes,
-        mainThoughtTreeTombstones: state.tombstones,
-      },
-    };
-    saveLastSaveSnapshot(safetyPayload);
-    clearInlineEditState();
-    if (edit.isNew && node && !state.nodes.some((entry) => (entry.parentId || "root") === node.id)) {
-      state.nodes = state.nodes.filter((entry) => entry.id !== node.id);
-      renumberChildren(edit.parentId || "root");
-    }
-    const beforeIds = new Set(state.nodes.map((entry) => entry.id));
-    let focusNode = null;
-    for (const entry of slashBatch.entries) {
-      const parts = Array.isArray(entry?.parts)
-        ? entry.parts.map((part) => cleanText(part, 120)).filter(Boolean)
-        : [];
-      if (parts.length < 2) continue;
-      const created = ensurePathNode(parts);
-      if (!focusNode && parts.length > 0) {
-        focusNode = findChildByLabel("root", parts[0]) || created || null;
-      }
-    }
-    const createdIds = state.nodes
-      .map((entry) => entry.id)
-      .filter((id) => !beforeIds.has(id));
-    if (createdIds.length > 0) {
-      recordOp({
-        type: "import_paths_inline",
-        pathCount: Array.isArray(slashBatch.entries) ? slashBatch.entries.length : 0,
-        created: createdIds.length,
-      });
-    }
-    if (focusNode) {
-      state.selectedId = focusNode.id;
-      state.focusRootId = focusNode.id;
-      state.collapsed.delete(focusNode.id);
-      expandPathToNode(focusNode.id);
-    }
-    if (el.search instanceof HTMLInputElement && cleanText(el.search.value, 120)) {
-      el.search.value = "";
-    }
-    refreshMeta();
-    renderTree();
-    persistPipSnapshot();
-    if (focusNode) focusRowByNodeId(focusNode.id, { block: "nearest" });
-    const importedCount = Array.isArray(slashBatch.entries) ? slashBatch.entries.length : 0;
-    if (createdIds.length > 0) {
-      setStatus(`Imported ${importedCount} path line${importedCount === 1 ? "" : "s"} (${createdIds.length} new nodes).`, "ok");
-    } else {
-      setStatus(`Imported ${importedCount} path line${importedCount === 1 ? "" : "s"} (no new nodes).`, "ok");
-    }
-    return {
-      ok: true,
-      reason: "",
-      kind: "path-import",
-      changed: createdIds.length > 0,
-      createdIds,
-    };
-  }
   if (vaultSwitchCommit && !vaultSwitchInlineCommitIsCurrent(options)) {
     return { ok: false, reason: "owner-switch-not-current" };
   }
@@ -1276,17 +1198,11 @@ function inlineDraftInputBelongsToNode(input, nodeId) {
 
 function validateCapturedInlineDraftValue(rawValue) {
   const value = String(rawValue ?? "");
-  const slashBatch = parseCaptureSlashPathBatch(value);
-  if (slashBatch.matched) {
-    return slashBatch.ok
-      ? { ok: true, value, slashBatch: true }
-      : { ok: false, reason: "invalid-value" };
-  }
   if (!cleanText(value, 220)) return { ok: false, reason: "blank-title" };
   if (cleanText(value, 221).length > 220) {
     return { ok: false, reason: "title-too-long" };
   }
-  return { ok: true, value, slashBatch: false };
+  return { ok: true, value };
 }
 
 function captureActiveInlineEditForOwnerSwitch() {
@@ -1315,7 +1231,6 @@ function captureActiveInlineEditForOwnerSwitch() {
     isNew: draft.edit.isNew === true,
     originalLabel: String(draft.edit.originalLabel || ""),
     rawValue: checked.value,
-    slashBatch: checked.slashBatch,
     storedLabel: String(draft.node.label || ""),
     operationHighWater: typeof getPocketHighestOperationSequence === "function"
       ? getPocketHighestOperationSequence()
@@ -1340,7 +1255,7 @@ function commitActiveInlineEditForOwnerSwitch(capturedDraft, options = {}) {
       ? { ok: false, active: true, reason: "inline-edit-changed" }
       : { ok: true, active: false, committed: false };
   }
-  if (!state.inlineEdit?.id && !captured.slashBatch) {
+  if (!state.inlineEdit?.id) {
     const committedNode = nodeMap().get(captured.id) || null;
     const expectedLabel = cleanText(captured.rawValue, 220);
     const expectedType = captured.isNew
