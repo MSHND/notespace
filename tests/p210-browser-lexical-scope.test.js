@@ -107,5 +107,5 @@ test("P210 E/F Main travel polish sees Pocket's top-level lexical state", () => 
   stateValue.selectedId = "child";
   stateValue.typeJump.lastAt = Date.now();
   context.focusRowByNodeId("child");
-  assert.equal(scrollCalls.at(-1).behavior, "auto");
+  assert.equal(scrollCalls.length, 0, "legacy typeJump timing no longer owns scroll presentation");
 });
