@@ -94,25 +94,40 @@ test("P152 captures a real child commit with exact payload data and an isolated 
   assert.equal(captured(context, add.seq)[0].input.payload.label, "Child");
 });
 
-test("P152 keeps provisional cancellation, blank cleanup, slash import and existing rename outside Insert capture", () => {
+test("P152 keeps cancellation/blank cleanup while literal slash add and rename use ordinary capture", () => {
   const context = runtime([node("a")]);
   context.insertSiblingBelow("a");
   const cancelled = context.state.inlineEdit.id;
   context.cancelInlineEdit(cancelled);
   assert.deepEqual(captured(context, 99), []);
+
   context.insertChildUnder("a");
   const blank = context.state.inlineEdit.id;
   assert.equal(context.commitInlineEdit(blank, "   ").reason, "blank-title");
   assert.deepEqual(captured(context, 99), []);
+
   context.insertSiblingBelow("a");
   const slash = context.state.inlineEdit.id;
-  context.parseCaptureSlashPathBatch = () => ({ matched: true, ok: true, entries: [] });
-  assert.equal(context.commitInlineEdit(slash, "/ignored/path").kind, "path-import");
-  assert.deepEqual(captured(context, 99), []);
+  const added = context.commitInlineEdit(slash, "/ignored/path");
+  assert.equal(added.kind, "add");
+  assert.equal(added.label, "/ignored/path");
+  assert.equal(context.nodeMap().get(slash).label, "/ignored/path");
+  assert.equal(context.state.focusRootId, "");
+  const slashAdd = context.state.ops.at(-1);
+  assert.equal(slashAdd.type, "add_below");
+  assert.equal(slashAdd.label, "/ignored/path");
+  assert.deepEqual(captured(context, slashAdd.seq).map((entry) => entry.type), ["insert"]);
+
+  context.state.focusRootId = "a";
   context.state.inlineEdit = { id: "a", isNew: false, originalLabel: "a" };
-  assert.equal(context.commitInlineEdit("a", "Renamed").ok, true);
+  const renamed = context.commitInlineEdit("a", "Image / Word / Spreadsheet");
+  assert.equal(renamed.kind, "rename");
+  assert.equal(context.nodeMap().get("a").label, "Image / Word / Spreadsheet");
+  assert.equal(context.state.focusRootId, "a");
   const rename = context.state.ops.at(-1);
-  assert.deepEqual(captured(context, rename.seq).map((entry) => entry.type), ["payload"]);
+  assert.equal(rename.type, "rename");
+  assert.equal(rename.to, "Image / Word / Spreadsheet");
+  assert.deepEqual(captured(context, rename.seq).map((entry) => entry.type), ["insert", "payload"]);
 });
 
 test("P152 preserves add undo bookkeeping while P153 cancels the uncovered Insert semantics", () => {
