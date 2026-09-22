@@ -566,15 +566,39 @@ function getVisibleNodeIdsInRenderOrder() {
     .filter(Boolean);
 }
 
-function repairVisibleSelectionAfterRender() {
+function repairVisibleSelectionAfterRender(options = {}) {
   if (state.inlineEdit.id || isDetailsEditorOpen()) return;
   const visibleIds = getVisibleNodeIdsInRenderOrder();
   if (visibleIds.length === 0) return;
+
   const selectedId = cleanText(state.selectedId, 80);
-  if (selectedId && visibleIds.includes(selectedId)) return;
-  const nextId = visibleIds[0];
+  const repairFilteredSelection = options?.repairFilteredSelection === true;
+  const suppliedActualMatchIds = repairFilteredSelection && Array.isArray(options?.actualMatchIds)
+    ? options.actualMatchIds
+      .map((id) => cleanText(id, 80))
+      .filter(Boolean)
+    : [];
+  const actualMatchIds = repairFilteredSelection
+    ? suppliedActualMatchIds.filter((id, index) => visibleIds.includes(id) && suppliedActualMatchIds.indexOf(id) === index)
+    : [];
+
+  if (repairFilteredSelection) {
+    if (actualMatchIds.length === 0) return;
+    if (selectedId && actualMatchIds.includes(selectedId)) return;
+  } else if (selectedId && visibleIds.includes(selectedId)) {
+    return;
+  }
+
+  const nextId = repairFilteredSelection ? actualMatchIds[0] : visibleIds[0];
+  if (!nextId || nextId === selectedId) return;
   state.selectedId = nextId;
+
   if (el.treeRoot instanceof HTMLElement) {
+    if (selectedId) {
+      const previousEscaped = typeof CSS?.escape === "function" ? CSS.escape(selectedId) : selectedId.replace(/"/g, '\\"');
+      const previousRow = el.treeRoot.querySelector(`.row[data-node-id="${previousEscaped}"]`);
+      if (previousRow instanceof HTMLElement) previousRow.classList.remove("selected");
+    }
     const escaped = typeof CSS?.escape === "function" ? CSS.escape(nextId) : nextId.replace(/"/g, '\\"');
     const row = el.treeRoot.querySelector(`.row[data-node-id="${escaped}"]`);
     if (row instanceof HTMLElement) row.classList.add("selected");
