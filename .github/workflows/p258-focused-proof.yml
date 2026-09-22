@@ -1,0 +1,18 @@
+name: P258 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p258-proof
+
+jobs:
+  p258-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 180s node --test tests/p258-pe-save-escape-settlement.test.js tests/p199e-pe-stale-file-conflict.test.js tests/p220-dirty-close-composed.test.js tests/p210-friction-pack.test.js
+      - run: timeout 180s npm run check
