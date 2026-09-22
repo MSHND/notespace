@@ -154,7 +154,7 @@
     if (!request) return false;
     renderTree();
 
-    const preserveScroll = options.preserveScroll !== false;
+    const preserveScroll = options.preserveScroll !== false && request.keepMainFocus !== true;
     if (preserveScroll && request.scroller instanceof HTMLElement && request.hasFilter) {
       requestAnimationFrame(() => {
         request.scroller.scrollTop = Math.max(
@@ -163,7 +163,9 @@
         );
       });
     }
-    if (!request.hasFilter) refocusTreeNavigation(state.selectedId, { instant: true });
+    if (request.keepMainFocus === true || !request.hasFilter) {
+      refocusTreeNavigation(state.selectedId, { instant: true });
+    }
     return true;
   }
 
@@ -191,6 +193,7 @@
       scroller,
       previousTop: scroller ? scroller.scrollTop : 0,
       hasFilter,
+      keepMainFocus: options.keepMainFocus === true,
     };
     if (filterRenderTimer) clearTimeout(filterRenderTimer);
     filterRenderTimer = null;
