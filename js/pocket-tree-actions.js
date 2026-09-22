@@ -1525,12 +1525,4 @@ function handleTreeKeydown(ev) {
     routeTreeEnterForSelectedNode();
     return;
   }
-  if (!state.selectedId) {
-    setStatus("Select an item first.", "warn");
-    return;
-  }
-  if (ev.key !== "Tab") return;
-  ev.preventDefault();
-  if (ev.shiftKey) outdentNodeById(state.selectedId);
-  else indentNodeById(state.selectedId);
 }
