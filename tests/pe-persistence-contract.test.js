@@ -3729,13 +3729,15 @@ test("queued truth write reports file-session-changed and never writes the newly
   assert.equal(state.ops.length, 0);
 });
 
-test("P061 fresh new-Pocket truth contains exactly four ordinary starter nodes", () => {
+test("P061/P255 fresh new-Pocket truth preserves the original starter and adds Copy guidance", () => {
   const context = createFullContractContext();
   const writtenAt = "2026-08-14T03:04:05.000Z";
   const payload = context.buildEmptyPocketPayload(writtenAt);
   const nodes = plain(payload.mainThoughtTree);
   const byLabel = new Map(nodes.map((node) => [node.label, node]));
   const mind = byLabel.get("Things on my mind");
+  const copy = byLabel.get("Copy");
+  const instructions = byLabel.get("Instructions — right-click and Edit to view");
 
   assert.equal(payload.schema, "portal.export.v1");
   assert.equal(payload.exportedAt, writtenAt);
@@ -3748,13 +3750,30 @@ test("P061 fresh new-Pocket truth contains exactly four ordinary starter nodes",
     "Something I want to think about",
     "Something I don’t want to forget",
     "Things I might do",
+    "Copy",
+    "Instructions — right-click and Edit to view",
   ]);
-  assert.equal(new Set(nodes.map((node) => node.id)).size, 4);
+  assert.equal(new Set(nodes.map((node) => node.id)).size, 6);
   assert.equal(nodes.every((node) => /^node_[a-z0-9]+_[a-z0-9]+$/.test(node.id)), true);
-  assert.deepEqual(nodes.map((node) => node.parentId), ["root", mind.id, mind.id, "root"]);
-  assert.deepEqual(nodes.map((node) => node.order), [1001, 1001, 1002, 1002]);
-  for (const node of nodes) {
+  assert.deepEqual(nodes.map((node) => node.parentId), [
+    "root", mind.id, mind.id, "root", "root", copy.id,
+  ]);
+  assert.deepEqual(nodes.map((node) => node.order), [1001, 1001, 1002, 1002, 1003, 1001]);
+  assert.equal(copy.copyContext, true);
+  assert.match(instructions.details, /start typing any part of an item's title or body text/);
+  assert.match(instructions.details, /Press Enter to copy the selected item/);
+  assert.match(instructions.details, /body text.*otherwise it copies the title/);
+  assert.match(instructions.details, /Right-click an item and choose Edit/);
+  for (const node of nodes.slice(0, 4)) {
     assert.deepEqual(Object.keys(node).sort(), ["id", "label", "order", "parentId", "source", "updatedAt"]);
+  }
+  assert.deepEqual(Object.keys(copy).sort(), [
+    "copyContext", "id", "label", "order", "parentId", "source", "updatedAt",
+  ]);
+  assert.deepEqual(Object.keys(instructions).sort(), [
+    "details", "id", "label", "order", "parentId", "source", "updatedAt",
+  ]);
+  for (const node of nodes) {
     assert.equal(node.source, "manual");
     assert.equal(node.updatedAt, writtenAt);
   }
@@ -3855,7 +3874,7 @@ test("P061 creation keeps the old owner intact on cancel, write failure, or adop
     session: failed.capturePocketFileSaveSession(),
   };
   const failedHandle = {
-    name: "failed-new.json",
+    name: "failed-new.pocket",
     async isSameEntry(other) { return other === this; },
     async createWritable() {
       return {
@@ -3879,7 +3898,7 @@ test("P061 creation keeps the old owner intact on cancel, write failure, or adop
     session: adoptionFailed.capturePocketFileSaveSession(),
   };
   const adoptionFailedHandle = {
-    name: "adoption-failed-new.json",
+    name: "adoption-failed-new.pocket",
     async isSameEntry(other) { return other === this; },
     async createWritable() {
       return {
@@ -3901,7 +3920,7 @@ test("P061 creation keeps the old owner intact on cancel, write failure, or adop
   let writtenPayload = null;
   let writeCount = 0;
   const successfulHandle = {
-    name: "first-use.json",
+    name: "first-use.pocket",
     async isSameEntry(other) { return other === this; },
     async createWritable() {
       return {
@@ -3916,10 +3935,10 @@ test("P061 creation keeps the old owner intact on cancel, write failure, or adop
   successful.showSaveFilePicker = async () => successfulHandle;
   assert.equal(await successful.createNewPocketFile(), true);
   assert.equal(writeCount, 1);
-  assert.equal(writtenPayload.mainThoughtTree.length, 4);
+  assert.equal(writtenPayload.mainThoughtTree.length, 6);
   assert.deepEqual(plain(successfulState.nodes), plain(writtenPayload.mainThoughtTree));
   assert.deepEqual(plain(successfulState.ops), []);
-  assert.equal(successfulState.documentBaseline.payload.nodes.length, 4);
+  assert.equal(successfulState.documentBaseline.payload.nodes.length, 6);
   assert.strictEqual(successful.capturePocketFileSaveSession().handle, successfulHandle);
 });
 
