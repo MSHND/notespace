@@ -830,7 +830,7 @@ test("P236 source ownership keeps full render global, projector renderer-owned, 
 
   assert.match(render, /const mainMountedNodeRegistry = new Map\(\);/);
   assert.match(render, /function projectMainSameParentReorder\(/);
-  assert.match(render, /function renderTree\(\)[\s\S]*?el\.treeRoot\.innerHTML = "";/);
+  assert.match(render, /function renderTree\(options = \{\}\)[\s\S]*?el\.treeRoot\.innerHTML = "";/);
 
   const projectorStart = render.indexOf("function projectMainSameParentReorder(");
   const projectorEnd = render.indexOf("\nfunction ", projectorStart + 20);
