@@ -98,8 +98,10 @@ test("P153 cannot cancel when forward Insert capture failed", () => {
   assert.equal(context.state.ops.at(-1).type, "undo_add"); assert.deepEqual(captured(context, context.state.ops.at(-1).seq), []);
 });
 
-test("P153 leaves a post-action P151 movement frontier and its Insert semantic material untouched", () => {
-  const context = runtime(), { id, add } = commitSibling(context, "Child", { postAction: "indent" }), movement = context.state.ops.at(-1);
+test("P153 leaves an explicit P151 movement frontier and its Insert semantic material untouched", () => {
+  const context = runtime(), { id, add } = commitSibling(context, "Child");
+  context.indentNodeById(id);
+  const movement = context.state.ops.at(-1);
   assert.ok(movement.seq > add.seq); assert.equal(context.state.operationHighWater, movement.seq);
   const beforeUndo = captured(context, movement.seq);
   context.undoLastEditAction();
