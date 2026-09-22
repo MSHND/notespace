@@ -59,7 +59,6 @@ function runtime(options = {}) {
   context.window = context; context.globalThis = context; vm.createContext(context);
   for (const file of [files.shadow, files.history, files.details, files.handoff, files.popout]) vm.runInContext(source(file), context, { filename: file });
   context.refreshMeta = () => {}; context.renderTree = () => {}; context.persistPipSnapshot = () => {}; context.refocusTreeNavigation = () => {}; context.focusRowByNodeId = () => {}; context.setStatus = () => {}; context.PocketDetailDirtyState = { refresh() {} };
-  context.parseCaptureSlashPathBatch = () => ({ matched: false, ok: true });
   return context;
 }
 
