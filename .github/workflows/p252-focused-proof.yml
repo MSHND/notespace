@@ -1,0 +1,18 @@
+name: P252 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p252-proof
+
+jobs:
+  p252-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 120s node --test tests/p252-filter-first-actual-match.test.js tests/p249-main-type-to-filter-unification.test.js tests/p243-main-known-target-selection-projection.test.js tests/p246-main-row-click-selection-locality.test.js tests/p210-friction-pack.test.js tests/p210-browser-lexical-scope.test.js
+      - run: timeout 120s npm run check
