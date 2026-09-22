@@ -148,11 +148,12 @@ test("P152 preserves add undo bookkeeping while P153 cancels the uncovered Inser
   failing.PocketStarlingOwnerWorkingSetShadow = factory;
 });
 
-test("P152 composes actual committed Insert then P151 post-action movement through genuine P139", async () => {
+test("P152 composes actual committed Insert then explicit P151 structural movement through genuine P139", async () => {
   const before = [node("parent", "root", 1001, { details: "Parent" })], context = runtime(before);
   context.insertSiblingBelow("parent");
   const insertedId = context.state.inlineEdit.id;
-  assert.equal(context.commitInlineEdit(insertedId, "Child", { postAction: "indent" }).ok, true);
+  assert.equal(context.commitInlineEdit(insertedId, "Child").ok, true);
+  context.indentNodeById(insertedId);
   const move = context.state.ops.at(-1), operations = captured(context, move.seq);
   assert.deepEqual(operations.map((entry) => entry.type), ["insert", "payload", "move"]);
   assert.equal(operations[0].input.nodeId, insertedId); assert.equal(operations[2].input.nodeId, insertedId);
