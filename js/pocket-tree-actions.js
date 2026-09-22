@@ -649,7 +649,11 @@ function clearFilterForCopyLoop() {
   if (!(el.search instanceof HTMLInputElement)) return false;
   const hadFilter = cleanText(el.search.value, 120).length > 0;
   if (!hadFilter) return false;
+  if (typeof window.cancelPocketPendingFilterRender === "function") {
+    window.cancelPocketPendingFilterRender();
+  }
   el.search.value = "";
+  clearFilterMemory();
   resetTypeJump();
   return true;
 }
@@ -709,10 +713,19 @@ function clearFilterAndReturnHome(statusText = "Filter cleared.") {
   if (!(el.search instanceof HTMLInputElement)) return false;
   const hadFilter = cleanText(el.search.value, 120).length > 0;
   if (!hadFilter) return false;
-  const fallbackId = cleanText(state.selectedId, 80);
+
+  if (typeof window.cancelPocketPendingFilterRender === "function") {
+    window.cancelPocketPendingFilterRender();
+  }
+
+  const targetId = hasNodeId(state.selectedId) ? cleanText(state.selectedId, 80) : "";
   el.search.value = "";
+  clearFilterMemory();
   resetTypeJump();
-  const targetId = restoreRememberedSelectionAfterFilter(fallbackId);
+  if (targetId) {
+    state.selectedId = targetId;
+    expandPathToNode(targetId);
+  }
   refreshMeta();
   renderTree();
   refocusTreeNavigation(targetId || state.selectedId);
@@ -720,7 +733,6 @@ function clearFilterAndReturnHome(statusText = "Filter cleared.") {
     if (targetId) flashTouchedRow(targetId);
     else softlyEnsureSelectionVisible();
   });
-  saveWorkspaceState();
   if (statusText) setStatus(statusText, "ok");
   return true;
 }
@@ -1083,6 +1095,41 @@ function routeTreeEnterForSelectedNode() {
   return true;
 }
 
+function currentMainFilterQueryRaw() {
+  if (!(el.search instanceof HTMLInputElement)) return "";
+  return String(el.search.value || "").slice(0, 120);
+}
+
+function isMainImplicitFilterCharacter(ev) {
+  if (!ev || state.moveMode || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
+  const key = String(ev.key || "");
+  if (key.length !== 1 || !/\S/.test(key)) return false;
+  const lowerKey = key.toLowerCase();
+  if ([".", "=", "+", "-", "/", "?"].includes(key)) return false;
+  if (ev.shiftKey && lowerKey === "f") return false;
+  return true;
+}
+
+function isMainImplicitFilterBackspace(ev) {
+  if (!ev || state.moveMode || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return false;
+  if (ev.key !== "Backspace") return false;
+  return cleanText(currentMainFilterQueryRaw(), 120).length > 0;
+}
+
+function settlePendingFilterBeforeMainCommand(ev) {
+  if (cleanText(currentMainFilterQueryRaw(), 120).length === 0) return false;
+  if (
+    !ev.metaKey
+    && !ev.ctrlKey
+    && !ev.altKey
+    && !ev.shiftKey
+    && ev.key === "Escape"
+  ) return false;
+  if (isMainImplicitFilterBackspace(ev) || isMainImplicitFilterCharacter(ev)) return false;
+  if (typeof window.settlePocketPendingFilterRender !== "function") return false;
+  return window.settlePocketPendingFilterRender({ preserveScroll: false }) === true;
+}
+
 function handleTreeKeydown(ev) {
   if (isDetailsEditorOpen()) return;
   if (state.inlineEdit.id) return;
@@ -1122,6 +1169,7 @@ function handleTreeKeydown(ev) {
     return;
   }
   const lowerKey = String(ev.key || "").toLowerCase();
+  settlePendingFilterBeforeMainCommand(ev);
   if (
     !ev.metaKey
     && !ev.ctrlKey
@@ -1217,16 +1265,27 @@ function handleTreeKeydown(ev) {
     deleteSelected();
     return;
   }
-  if (
-    !ev.metaKey
-    && !ev.ctrlKey
-    && !ev.altKey
-    && !ev.shiftKey
-    && ev.key.length === 1
-    && /\S/.test(ev.key)
-  ) {
+  if (isMainImplicitFilterBackspace(ev)) {
     ev.preventDefault();
-    jumpSelectionByTypedChar(ev.key);
+    const characters = Array.from(currentMainFilterQueryRaw());
+    characters.pop();
+    const nextValue = characters.join("");
+    if (typeof window.applyPocketFilterQueryValue === "function") {
+      window.applyPocketFilterQueryValue(nextValue, {
+        keepMainFocus: true,
+        immediate: cleanText(nextValue, 120).length === 0,
+        preserveScroll: false,
+      });
+    }
+    return;
+  }
+  if (isMainImplicitFilterCharacter(ev)) {
+    ev.preventDefault();
+    if (typeof window.applyPocketFilterQueryValue === "function") {
+      window.applyPocketFilterQueryValue(currentMainFilterQueryRaw() + String(ev.key || ""), {
+        keepMainFocus: true,
+      });
+    }
     return;
   }
   if (
@@ -1439,6 +1498,9 @@ function handleTreeKeydown(ev) {
     && ev.key === "Enter"
   ) {
     ev.preventDefault();
+    if (typeof window.settlePocketPendingFilterRender === "function") {
+      window.settlePocketPendingFilterRender({ preserveScroll: false });
+    }
     routeTreeEnterForSelectedNode();
     return;
   }
