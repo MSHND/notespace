@@ -1112,7 +1112,6 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   if (!state.inlineEdit.id || state.inlineEdit.id !== nodeId) {
     return { ok: false, reason: "inline-edit-not-current" };
   }
-  const postAction = cleanText(options.postAction, 20).toLowerCase();
   const map = nodeMap();
   const node = map.get(nodeId);
   const edit = { ...state.inlineEdit };
@@ -1176,8 +1175,6 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   persistPipSnapshot();
   refocusTreeNavigation(node.id);
   requestAnimationFrame(() => flashTouchedRow(node.id));
-  if (postAction === "indent") indentNodeById(node.id);
-  if (postAction === "outdent") outdentNodeById(node.id);
   return {
     ok: true,
     reason: "",
