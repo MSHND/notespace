@@ -3023,7 +3023,7 @@ test("Create New from a dirty Vault requires Cancel, Discard, or successful encr
   await t.test("Cancel keeps the dirty Vault", async () => {
     const { context, vaultHandle } = await contextWithDirtyVault();
     const before = currentOwnerSnapshot(context);
-    const jsonCandidate = createSyntheticHandle("cancel-new.json");
+    const jsonCandidate = createSyntheticHandle("cancel-new.pocket");
     context.__savePickerQueue.push(jsonCandidate);
     const creating = context.createNewPocketFile();
     assert.equal(
@@ -3037,9 +3037,9 @@ test("Create New from a dirty Vault requires Cancel, Discard, or successful encr
     assert.equal(jsonCandidate.writes.length, 0);
   });
 
-  await t.test("Discard creates and adopts only the chosen JSON file", async () => {
+  await t.test("Discard creates and adopts only the chosen Pocket file", async () => {
     const { context, vaultHandle } = await contextWithDirtyVault();
-    const jsonCandidate = createSyntheticHandle("discard-new.json");
+    const jsonCandidate = createSyntheticHandle("discard-new.pocket");
     context.__savePickerQueue.push(jsonCandidate);
     const creating = context.createNewPocketFile();
     assert.equal(
@@ -3055,9 +3055,9 @@ test("Create New from a dirty Vault requires Cancel, Discard, or successful encr
     assert.equal(jsonCandidate.writes.length, 1);
   });
 
-  await t.test("Save persists the Vault before creating the chosen JSON file", async () => {
+  await t.test("Save persists the Vault before creating the chosen Pocket file", async () => {
     const { context, vaultHandle } = await contextWithDirtyVault();
-    const jsonCandidate = createSyntheticHandle("save-new.json");
+    const jsonCandidate = createSyntheticHandle("save-new.pocket");
     context.__savePickerQueue.push(jsonCandidate);
     const creating = context.createNewPocketFile();
     assert.equal(
@@ -3076,7 +3076,7 @@ test("Create New from a dirty Vault requires Cancel, Discard, or successful encr
   await t.test("failed encrypted Save blocks Create New", async () => {
     const { context, vaultHandle } = await contextWithDirtyVault({ failSave: true });
     const before = currentOwnerSnapshot(context);
-    const jsonCandidate = createSyntheticHandle("blocked-new.json");
+    const jsonCandidate = createSyntheticHandle("blocked-new.pocket");
     context.__savePickerQueue.push(jsonCandidate);
     const creating = context.createNewPocketFile();
     assert.equal(
@@ -5667,7 +5667,7 @@ test("Create New rechecks source identity after delayed handle comparison and be
   const comparison = deferred();
   let comparisonStarted = false;
   const { context, vaultHandle } = await contextWithDirtyVault();
-  const candidate = createSyntheticHandle("stale-create-new.json", {
+  const candidate = createSyntheticHandle("stale-create-new.pocket", {
     isSameEntry: async () => {
       comparisonStarted = true;
       return comparison.promise;
