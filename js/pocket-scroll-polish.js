@@ -62,15 +62,6 @@
     return true;
   }
 
-  function isRecentTypeJumpFor(id) {
-    const currentState = runtimeState();
-    const typeJump = currentState && currentState.typeJump ? currentState.typeJump : null;
-    if (!typeJump) return false;
-    const lastAt = Number(typeJump.lastAt || 0);
-    if (!lastAt || Date.now() - lastAt > 220) return false;
-    return cleanId(currentState.selectedId) === cleanId(id);
-  }
-
   function editableTarget(target) {
     if (!(target instanceof HTMLElement)) return false;
     const tag = String(target.tagName || "").toLowerCase();
@@ -115,10 +106,6 @@
       row.focus({ preventScroll: true });
       if (consumePlainLeftParentCentre(id) || options.center === true) {
         softCenterRow(row);
-        return;
-      }
-      if (isRecentTypeJumpFor(id)) {
-        softCenterRow(row, { instant: true });
         return;
       }
       if (typeof scrollRowComfortably === "function") {
