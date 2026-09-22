@@ -74,14 +74,6 @@
     return true;
   }
 
-  function isRecentTypeJumpFor(id) {
-    const typeJump = state && state.typeJump ? state.typeJump : null;
-    if (!typeJump) return false;
-    const lastAt = Number(typeJump.lastAt || 0);
-    if (!lastAt || Date.now() - lastAt > 260) return false;
-    return safeClean(state.selectedId, 80) === safeClean(id, 80);
-  }
-
   function getVisibleIds() {
     if (typeof getVisibleNodeIdsInRenderOrder === "function") return getVisibleNodeIdsInRenderOrder();
     if (!(el.treeRoot instanceof HTMLElement)) return [];
@@ -126,7 +118,7 @@
       const row = findRow(id);
       if (!(row instanceof HTMLElement)) return;
       row.focus({ preventScroll: true });
-      if (options.center === true || isRecentTypeJumpFor(id)) {
+      if (options.center === true) {
         softCenterRow(row);
         return;
       }
@@ -156,32 +148,84 @@
     return ok;
   };
 
-  function handleFilterInputSmoothly(ev) {
-    if (ev.target !== el.search) return;
-    ev.stopImmediatePropagation();
+  let pendingFilterRender = null;
 
+  function runFilterRender(request, options = {}) {
+    if (!request) return false;
+    renderTree();
+
+    const preserveScroll = options.preserveScroll !== false;
+    if (preserveScroll && request.scroller instanceof HTMLElement && request.hasFilter) {
+      requestAnimationFrame(() => {
+        request.scroller.scrollTop = Math.max(
+          0,
+          Math.min(request.previousTop, request.scroller.scrollHeight - request.scroller.clientHeight)
+        );
+      });
+    }
+    if (!request.hasFilter) refocusTreeNavigation(state.selectedId, { instant: true });
+    return true;
+  }
+
+  function cancelPendingFilterRender() {
+    if (filterRenderTimer) clearTimeout(filterRenderTimer);
+    filterRenderTimer = null;
+    const hadPending = !!pendingFilterRender;
+    pendingFilterRender = null;
+    return hadPending;
+  }
+
+  function settlePendingFilterRender(options = {}) {
+    if (!pendingFilterRender) return false;
+    if (filterRenderTimer) clearTimeout(filterRenderTimer);
+    filterRenderTimer = null;
+    const request = pendingFilterRender;
+    pendingFilterRender = null;
+    return runFilterRender(request, options);
+  }
+
+  function scheduleFilterRender(value, options = {}) {
+    const hasFilter = safeClean(value, 120).length > 0;
     const scroller = getTreeScroller();
-    const previousTop = scroller ? scroller.scrollTop : 0;
-    const value = safeClean(el.search.value, 120);
-    const hasFilter = value.length > 0;
+    pendingFilterRender = {
+      scroller,
+      previousTop: scroller ? scroller.scrollTop : 0,
+      hasFilter,
+    };
+    if (filterRenderTimer) clearTimeout(filterRenderTimer);
+    filterRenderTimer = null;
+
+    if (options.immediate === true) {
+      return settlePendingFilterRender({ preserveScroll: options.preserveScroll !== false });
+    }
+
+    const delay = hasFilter ? 54 : 0;
+    filterRenderTimer = window.setTimeout(() => {
+      filterRenderTimer = null;
+      const request = pendingFilterRender;
+      pendingFilterRender = null;
+      runFilterRender(request, { preserveScroll: true });
+    }, delay);
+    return true;
+  }
+
+  function applyFilterQueryValue(rawValue, options = {}) {
+    if (!(el.search instanceof HTMLInputElement)) return false;
+    const value = String(rawValue ?? "").slice(0, 120);
+    el.search.value = value;
+    const hasFilter = safeClean(value, 120).length > 0;
 
     if (hasFilter) rememberFilterOrigin();
     else clearFilterMemory();
     resetTypeJump();
 
-    if (filterRenderTimer) clearTimeout(filterRenderTimer);
-    const delay = hasFilter ? 54 : 0;
-    filterRenderTimer = window.setTimeout(() => {
-      filterRenderTimer = null;
-      renderTree();
+    return scheduleFilterRender(value, options);
+  }
 
-      if (scroller instanceof HTMLElement && hasFilter) {
-        requestAnimationFrame(() => {
-          scroller.scrollTop = Math.max(0, Math.min(previousTop, scroller.scrollHeight - scroller.clientHeight));
-        });
-      }
-      if (!hasFilter) refocusTreeNavigation(state.selectedId, { instant: true });
-    }, delay);
+  function handleFilterInputSmoothly(ev) {
+    if (ev.target !== el.search) return;
+    ev.stopImmediatePropagation();
+    applyFilterQueryValue(el.search.value);
   }
 
   function init() {
@@ -190,7 +234,17 @@
     }
   }
 
-  global.PocketListSmoothing = Object.freeze({ calmScrollRowIntoView, softCenterRow, paintSelectionOnly });
+  global.applyPocketFilterQueryValue = applyFilterQueryValue;
+  global.settlePocketPendingFilterRender = settlePendingFilterRender;
+  global.cancelPocketPendingFilterRender = cancelPendingFilterRender;
+  global.PocketListSmoothing = Object.freeze({
+    calmScrollRowIntoView,
+    softCenterRow,
+    paintSelectionOnly,
+    applyFilterQueryValue,
+    settlePendingFilterRender,
+    cancelPendingFilterRender,
+  });
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init, { once: true });
   else init();
 })(window);
