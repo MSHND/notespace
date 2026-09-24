@@ -482,6 +482,28 @@ function openSelectedItemDetailsFromControls() {
   return false;
 }
 
+function handleWindowFocusToTree() {
+  const pickerOwner = window.PocketNativeFilePickerActivity;
+  if (pickerOwner && typeof pickerOwner.isActive === "function" && pickerOwner.isActive()) return;
+  if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
+      && window.isPocketVaultRecoveryFlowOpen()) return;
+  if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
+      && window.isPocketDeviceChangesDecisionOpen()) return;
+  if (isDetailsEditorOpen()) return;
+  // When the popout/browser regains focus after the user has scrolled,
+  // do not pull the list back to the previously selected row.
+  // The next actual click/keyboard action will choose where focus belongs.
+  requestAnimationFrame(() => {
+    const currentPickerOwner = window.PocketNativeFilePickerActivity;
+    if (currentPickerOwner
+        && typeof currentPickerOwner.isActive === "function"
+        && currentPickerOwner.isActive()) return;
+    if (el.treeWrap instanceof HTMLElement) {
+      el.treeWrap.focus({ preventScroll: true });
+    }
+  });
+}
+
 function bind() {
   el.controlsOverlay?.addEventListener("click", (ev) => {
     if (ev.target === el.controlsOverlay) {
@@ -874,21 +896,6 @@ function bind() {
   };
   window.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
   document.addEventListener("keydown", handleGlobalShortcuts, { capture: true });
-  const handleWindowFocusToTree = () => {
-    if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
-        && window.isPocketVaultRecoveryFlowOpen()) return;
-    if (typeof window.isPocketDeviceChangesDecisionOpen === "function"
-        && window.isPocketDeviceChangesDecisionOpen()) return;
-    if (isDetailsEditorOpen()) return;
-    // When the popout/browser regains focus after the user has scrolled,
-    // do not pull the list back to the previously selected row.
-    // The next actual click/keyboard action will choose where focus belongs.
-    requestAnimationFrame(() => {
-      if (el.treeWrap instanceof HTMLElement) {
-        el.treeWrap.focus({ preventScroll: true });
-      }
-    });
-  };
   window.addEventListener("focus", handleWindowFocusToTree);
   window.addEventListener("beforeunload", handlePocketLiteBeforeUnload);
 }
