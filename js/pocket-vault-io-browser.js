@@ -1304,7 +1304,9 @@
     const sourceSession = currentSaveSession();
     let handle;
     try {
-      handle = await global.showSaveFilePicker(vaultPickerOptions("save"));
+      handle = await runNativeFilePicker(
+        () => global.showSaveFilePicker(vaultPickerOptions("save"))
+      );
     } catch (error) {
       if (!isAbort(error)) say("Could not open the encrypted Vault picker.", "warn", 6200);
       return false;
