@@ -26,6 +26,12 @@
     "begin-attention-unclassified-rejected": "recovery-begin-rejected",
   });
 
+  function runNativeFilePicker(task) {
+    const owner = global.PocketNativeFilePickerActivity;
+    if (owner && typeof owner.run === "function") return owner.run(task);
+    return task();
+  }
+
   function frozen(value) {
     return Object.freeze(value);
   }
@@ -173,13 +179,13 @@
         return frozen({ ok: true, destination: frozen({ kind: "browser-download" }) });
       }
       try {
-        const destination = await select.call(environment, {
+        const destination = await runNativeFilePicker(() => select.call(environment, {
           suggestedName: RECOVERY_FILENAME,
           types: [{
             description: "Pocket recovery copy",
             accept: { "application/json": [".json"] },
           }],
-        });
+        }));
         return destination ? frozen({ ok: true, destination }) : frozen({ ok: false });
       } catch (_error) {
         return frozen({ ok: false });
@@ -219,13 +225,13 @@
         });
       }
       try {
-        const handles = await select.call(environment, {
+        const handles = await runNativeFilePicker(() => select.call(environment, {
           multiple: false,
           types: [{
             description: "Pocket recovery copy",
             accept: { "application/json": [".json"] },
           }],
-        });
+        }));
         if (!Array.isArray(handles) || handles.length !== 1
             || !handles[0] || typeof handles[0].getFile !== "function") return null;
         const file = await handles[0].getFile();
