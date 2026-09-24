@@ -1,5 +1,11 @@
 /* Popout URL, browser save/download, stale export guard, status actions. */
 
+function runPocketNativeFilePicker(task) {
+  const owner = window.PocketNativeFilePickerActivity;
+  if (owner && typeof owner.run === "function") return owner.run(task);
+  return task();
+}
+
 function buildPipUrl() {
   const u = new URL(window.location.href);
   u.searchParams.set("pip", "1");
@@ -1069,10 +1075,10 @@ async function openPocketFile() {
     return false;
   }
   try {
-    const handles = await window.showOpenFilePicker({
+    const handles = await runPocketNativeFilePicker(() => window.showOpenFilePicker({
       ...jsonFilePickerOptions(),
       multiple: false,
-    });
+    }));
     const handle = Array.isArray(handles) ? handles[0] : null;
     if (!handle) {
       setStatus("Open cancelled.", "warn");
@@ -1158,10 +1164,10 @@ async function writeTruthFile(payload, options = {}) {
   const pickHandle = async () => {
     const picker = resolveSavePicker();
     if (!picker) return null;
-    return picker({
+    return runPocketNativeFilePicker(() => picker({
       ...jsonFilePickerOptions(),
       suggestedName: "pocket-data.json",
-    });
+    }));
   };
 
   try {
@@ -1388,7 +1394,9 @@ async function createNewPocketFile() {
   const sourceSession = capturePocketFileSaveSession();
   let preparedAdoptionLease = null;
   try {
-    const handle = await window.showSaveFilePicker(newPocketFilePickerOptions());
+    const handle = await runPocketNativeFilePicker(
+      () => window.showSaveFilePicker(newPocketFilePickerOptions())
+    );
     if (!handle) {
       setStatus("Create cancelled.", "warn");
       return false;
