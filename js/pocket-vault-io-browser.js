@@ -43,6 +43,12 @@
       : String(value || "").trim().slice(0, max);
   }
 
+  function runNativeFilePicker(task) {
+    const owner = global.PocketNativeFilePickerActivity;
+    if (owner && typeof owner.run === "function") return owner.run(task);
+    return task();
+  }
+
   function isAbort(error) {
     return !!error && (error.name === "AbortError" || /abort/i.test(String(error.message || "")));
   }
@@ -945,7 +951,9 @@
     const sourceSession = currentSaveSession();
     let handle;
     try {
-      const handles = await global.showOpenFilePicker(vaultPickerOptions("open"));
+      const handles = await runNativeFilePicker(
+        () => global.showOpenFilePicker(vaultPickerOptions("open"))
+      );
       handle = Array.isArray(handles) ? handles[0] : null;
     } catch (error) {
       if (!isAbort(error)) say("Could not open the encrypted Vault picker.", "warn", 6200);
@@ -1007,7 +1015,9 @@
     }
     let handle;
     try {
-      handle = await global.showSaveFilePicker(vaultPickerOptions("save"));
+      handle = await runNativeFilePicker(
+        () => global.showSaveFilePicker(vaultPickerOptions("save"))
+      );
     } catch (error) {
       return {
         ok: false,
@@ -1137,10 +1147,10 @@
     }
     let handle;
     try {
-      handle = await global.showSaveFilePicker({
+      handle = await runNativeFilePicker(() => global.showSaveFilePicker({
         ...jsonExportPickerOptions(),
         suggestedName: "pocket-recovered.json",
-      });
+      }));
     } catch (error) {
       return {
         ok: false,
@@ -1412,10 +1422,10 @@
     }
     let handle;
     try {
-      handle = await global.showSaveFilePicker({
+      handle = await runNativeFilePicker(() => global.showSaveFilePicker({
         ...jsonExportPickerOptions(),
         suggestedName: "pocket-data.json",
-      });
+      }));
     } catch (error) {
       if (!isAbort(error)) say("Could not open the plain JSON destination picker.", "warn", 6200);
       return false;
@@ -1499,7 +1509,9 @@
     }
     let handle;
     try {
-      handle = await global.showSaveFilePicker(jsonExportPickerOptions());
+      handle = await runNativeFilePicker(
+        () => global.showSaveFilePicker(jsonExportPickerOptions())
+      );
     } catch (error) {
       if (!isAbort(error)) say("Could not open the JSON export picker.", "warn", 6200);
       return false;
