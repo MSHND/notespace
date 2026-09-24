@@ -11,6 +11,7 @@ const SHELL_FILES = [
   "./file-permission.css",
   "./vault.css",
   "./manifest.json",
+  "./js/pocket-native-file-picker-activity.js",
   "./js/pocket-state.js",
   "./js/pocket-data.js",
   "./js/pocket-outline-persistence-policy.js",
