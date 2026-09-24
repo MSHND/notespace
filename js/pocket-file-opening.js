@@ -16,6 +16,12 @@
       : String(value || "").trim().slice(0, max);
   }
 
+  function runNativeFilePicker(task) {
+    const owner = global.PocketNativeFilePickerActivity;
+    if (owner && typeof owner.run === "function") return owner.run(task);
+    return task();
+  }
+
   function isAbort(error) {
     return !!error && (
       error.name === "AbortError"
@@ -107,7 +113,9 @@
     }
     let handle;
     try {
-      const handles = await global.showOpenFilePicker(pickerOptions());
+      const handles = await runNativeFilePicker(
+        () => global.showOpenFilePicker(pickerOptions())
+      );
       handle = Array.isArray(handles) ? handles[0] : null;
     } catch (error) {
       return {
