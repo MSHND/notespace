@@ -12,7 +12,6 @@ const HARNESS_TEST = path.join(__dirname, "device-changes-resolution.test.js");
 const IO_PATH = "js/pocket-io-browser.js";
 const OPENING_PATH = "js/pocket-file-opening.js";
 
-const INSTRUCTIONS = "Put reusable text under Copy. Each leaf item is ready to copy. From the Main tree, start typing any part of an item's title or body text; Pocket will narrow to matching items and select the first actual match. Press Enter to copy the selected item. If it has body text, Pocket copies that text; otherwise it copies the title. Right-click an item and choose Edit to view or change its reusable text.";
 
 function source(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
@@ -182,50 +181,86 @@ test("P255 returned .POCKET suffix is accepted case-insensitively", async () => 
   assert.equal(context.capturePocketFileSaveSession().displayName, "Caps.POCKET");
 });
 
-test("P255 genuine starter preserves old roots and adds deterministic explicit Copy instructions", async () => {
+test("P255/P257g genuine starter preserves old roots and uses ordinary nested Copy guidance", async () => {
   const { createIntegrationContext } = loadBrowserHarness();
   const handle = syntheticHandle("Starter.pocket");
   const context = createIntegrationContext({ pickSaveHandle: () => handle });
 
   assert.equal(await context.createNewPocketFile(), true);
   const nodes = starterNodes(context);
+  const byLabel = new Map(nodes.map((entry) => [entry.label, entry]));
   const roots = nodes
     .filter((entry) => entry.parentId === "root")
     .sort((left, right) => left.order - right.order);
+
   assert.deepEqual(roots.map((entry) => entry.label), [
     "Things on my mind",
     "Things I might do",
     "Copy",
   ]);
 
-  const copyRoot = roots[2];
+  const copyRoot = byLabel.get("Copy");
+  const how = byLabel.get("How Copy works");
+  const put = byLabel.get("Put things here you want to reuse");
+  const type = byLabel.get("Type what you remember to find one");
+  const looks = byLabel.get("Pocket looks in the title and notes");
+  const press = byLabel.get("Press Enter to copy it");
+  const notes = byLabel.get("If it has notes, Pocket copies the notes; otherwise it copies the title");
+  const ideas = byLabel.get("A few ideas");
+  const email = byLabel.get("Email sign-offs");
+  const addresses = byLabel.get("Addresses and contact details");
+  const replies = byLabel.get("Replies you send often");
+
   assert.equal(copyRoot.copyContext, true);
   assert.notEqual(copyRoot.id, "m1");
-
-  const instructions = nodes.find((entry) => entry.parentId === copyRoot.id);
-  assert.ok(instructions);
-  assert.equal(instructions.label, "Instructions — right-click and Edit to view");
-  assert.equal(instructions.order, 1001);
-  assert.equal(context.currentPocketNodeContentText(instructions), INSTRUCTIONS);
+  assert.equal(how.parentId, copyRoot.id);
+  assert.equal(ideas.parentId, copyRoot.id);
+  assert.equal(put.parentId, how.id);
+  assert.equal(type.parentId, how.id);
+  assert.equal(press.parentId, how.id);
+  assert.equal(looks.parentId, type.id);
+  assert.equal(notes.parentId, press.id);
+  assert.equal(email.parentId, ideas.id);
+  assert.equal(addresses.parentId, ideas.id);
+  assert.equal(replies.parentId, ideas.id);
+  assert.deepEqual(
+    [how, ideas].map((entry) => entry.order),
+    [1001, 1002]
+  );
+  assert.deepEqual(
+    [put, type, press].map((entry) => entry.order),
+    [1001, 1002, 1003]
+  );
+  assert.deepEqual(
+    [email, addresses, replies].map((entry) => entry.order),
+    [1001, 1002, 1003]
+  );
+  assert.equal(nodes.some((entry) => entry.label === "How Copy works"), false);
+  assert.equal(nodes.some((entry) => entry.label === "A few ideas"), false);
+  assert.equal(nodes.some((entry) => Object.prototype.hasOwnProperty.call(entry, "details")), false);
 
   assert.equal(
     context.isCopyContextMarkerNode({ ...copyRoot, label: "Renamed context" }),
     true,
     "explicit copyContext must be sufficient without the Copy label fallback"
   );
-  assert.equal(context.isUnderCopyTemplates(instructions.id), true);
-  assert.deepEqual(plain(context.copyContextPayloadForNode(instructions)), {
-    text: INSTRUCTIONS,
-    kind: "content",
-    preserveLines: true,
-    max: context.PocketNodeContent.LIMITS.canonicalBytes,
-  });
+  for (const entry of [put, looks, notes, email, addresses, replies]) {
+    assert.equal(context.isUnderCopyTemplates(entry.id), true, entry.label);
+    assert.deepEqual(plain(context.copyContextPayloadForNode(entry)), {
+      text: entry.label,
+      kind: "label",
+      preserveLines: false,
+      max: 220,
+    });
+  }
 
+  assert.equal(stateOf(context).ops.length, 0, "fresh starter must remain a saved baseline");
   const written = JSON.parse(handle.read());
-  const writtenCopy = written.mainThoughtTree.find((entry) => entry.id === copyRoot.id);
-  const writtenInstructions = written.mainThoughtTree.find((entry) => entry.id === instructions.id);
-  assert.equal(writtenCopy.copyContext, true);
-  assert.equal(writtenInstructions.details, INSTRUCTIONS);
+  assert.equal(written.mainThoughtTree.filter((entry) => entry.label === "Copy").length, 1);
+  assert.equal(
+    written.mainThoughtTree.some((entry) => entry.label === "Instructions — right-click and Edit to view"),
+    false
+  );
 });
 
 test("P255 recovery-derived New payload is preserved without injecting starter Copy nodes", async () => {
