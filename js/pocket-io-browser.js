@@ -1248,7 +1248,10 @@ async function writeTruthFile(payload, options = {}) {
 function buildFirstUsePocketNodes(updatedAt = nowIso()) {
   const thingsOnMyMindId = makeId("node");
   const copyId = makeId("node");
-  const copyInstructions = "Put reusable text under Copy. Each leaf item is ready to copy. From the Main tree, start typing any part of an item's title or body text; Pocket will narrow to matching items and select the first actual match. Press Enter to copy the selected item. If it has body text, Pocket copies that text; otherwise it copies the title. Right-click an item and choose Edit to view or change its reusable text.";
+  const howCopyWorksId = makeId("node");
+  const typeWhatYouRememberId = makeId("node");
+  const pressEnterId = makeId("node");
+  const ideasId = makeId("node");
   return [
     {
       id: thingsOnMyMindId,
@@ -1292,13 +1295,84 @@ function buildFirstUsePocketNodes(updatedAt = nowIso()) {
       copyContext: true,
     },
     {
-      id: makeId("node"),
+      id: howCopyWorksId,
       parentId: copyId,
-      label: "Instructions — right-click and Edit to view",
+      label: "How Copy works",
       source: "manual",
       order: 1001,
       updatedAt,
-      details: copyInstructions,
+    },
+    {
+      id: makeId("node"),
+      parentId: howCopyWorksId,
+      label: "Put things here you want to reuse",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+    },
+    {
+      id: typeWhatYouRememberId,
+      parentId: howCopyWorksId,
+      label: "Type what you remember to find one",
+      source: "manual",
+      order: 1002,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: typeWhatYouRememberId,
+      label: "Pocket looks in the title and notes",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+    },
+    {
+      id: pressEnterId,
+      parentId: howCopyWorksId,
+      label: "Press Enter to copy it",
+      source: "manual",
+      order: 1003,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: pressEnterId,
+      label: "If it has notes, Pocket copies the notes; otherwise it copies the title",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+    },
+    {
+      id: ideasId,
+      parentId: copyId,
+      label: "A few ideas",
+      source: "manual",
+      order: 1002,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: ideasId,
+      label: "Email sign-offs",
+      source: "manual",
+      order: 1001,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: ideasId,
+      label: "Addresses and contact details",
+      source: "manual",
+      order: 1002,
+      updatedAt,
+    },
+    {
+      id: makeId("node"),
+      parentId: ideasId,
+      label: "Replies you send often",
+      source: "manual",
+      order: 1003,
+      updatedAt,
     },
   ];
 }
