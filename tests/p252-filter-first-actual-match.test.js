@@ -196,7 +196,7 @@ test("P252 keeps renderTree as the sole Filter matcher and passes only ordered m
   const smooth = source(SMOOTH);
 
   assert.match(render, /function matches\(node\)/);
-  assert.match(render, /const haystack = nodeSearchText\(node\)/);
+  assert.match(render, /return orderedFilterWordPrefixMatch\(query, nodeSearchText\(node\)\)/);
   assert.match(render, /if \(filtering && nodeMatches\) actualMatchIds\.push\(node\.id\)/);
   assert.match(render, /repairVisibleSelectionAfterRender\(\{[\s\S]*actualMatchIds/);
 
