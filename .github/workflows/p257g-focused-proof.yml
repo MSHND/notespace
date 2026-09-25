@@ -1,0 +1,19 @@
+name: P257g focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p257g-proof
+
+jobs:
+  p257g-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 300s node --test tests/p257g-human-nested-copy-starter.test.js tests/p255-new-pocket-first-use.test.js tests/p257d-native-file-picker-focus-ownership.test.js tests/p206d-pocket-file-opening-compatibility.test.js tests/device-changes-resolution.test.js
+      - run: timeout 180s node --test --test-name-pattern="P061/P255/P257g fresh|P061 retained recovery truth|P061 creation keeps" tests/pe-persistence-contract.test.js
+      - run: timeout 180s npm run check
