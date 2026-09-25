@@ -3729,7 +3729,7 @@ test("queued truth write reports file-session-changed and never writes the newly
   assert.equal(state.ops.length, 0);
 });
 
-test("P061/P255 fresh new-Pocket truth preserves the original starter and adds Copy guidance", () => {
+test("P061/P255/P257g fresh new-Pocket truth preserves the original starter and adds nested Copy guidance", () => {
   const context = createFullContractContext();
   const writtenAt = "2026-08-14T03:04:05.000Z";
   const payload = context.buildEmptyPocketPayload(writtenAt);
@@ -3737,7 +3737,10 @@ test("P061/P255 fresh new-Pocket truth preserves the original starter and adds C
   const byLabel = new Map(nodes.map((node) => [node.label, node]));
   const mind = byLabel.get("Things on my mind");
   const copy = byLabel.get("Copy");
-  const instructions = byLabel.get("Instructions — right-click and Edit to view");
+  const how = byLabel.get("How Copy works");
+  const type = byLabel.get("Type what you remember to find one");
+  const press = byLabel.get("Press Enter to copy it");
+  const ideas = byLabel.get("A few ideas");
 
   assert.equal(payload.schema, "portal.export.v1");
   assert.equal(payload.exportedAt, writtenAt);
@@ -3745,38 +3748,63 @@ test("P061/P255 fresh new-Pocket truth preserves the original starter and adds C
   assert.deepEqual(plain(payload.data.mainThoughtTree), nodes);
   assert.deepEqual(plain(payload.mainThoughtTreeTombstones), []);
   assert.deepEqual(plain(payload.data.mainThoughtTreeTombstones), []);
+
   assert.deepEqual(nodes.map((node) => node.label), [
     "Things on my mind",
     "Something I want to think about",
     "Something I don’t want to forget",
     "Things I might do",
     "Copy",
-    "Instructions — right-click and Edit to view",
+    "How Copy works",
+    "Put things here you want to reuse",
+    "Type what you remember to find one",
+    "Pocket looks in the title and notes",
+    "Press Enter to copy it",
+    "If it has notes, Pocket copies the notes; otherwise it copies the title",
+    "A few ideas",
+    "Email sign-offs",
+    "Addresses and contact details",
+    "Replies you send often",
   ]);
-  assert.equal(new Set(nodes.map((node) => node.id)).size, 6);
+
+  assert.equal(new Set(nodes.map((node) => node.id)).size, 15);
   assert.equal(nodes.every((node) => /^node_[a-z0-9]+_[a-z0-9]+$/.test(node.id)), true);
   assert.deepEqual(nodes.map((node) => node.parentId), [
-    "root", mind.id, mind.id, "root", "root", copy.id,
+    "root",
+    mind.id,
+    mind.id,
+    "root",
+    "root",
+    copy.id,
+    how.id,
+    how.id,
+    type.id,
+    how.id,
+    press.id,
+    copy.id,
+    ideas.id,
+    ideas.id,
+    ideas.id,
   ]);
-  assert.deepEqual(nodes.map((node) => node.order), [1001, 1001, 1002, 1002, 1003, 1001]);
+  assert.deepEqual(nodes.map((node) => node.order), [
+    1001, 1001, 1002, 1002, 1003,
+    1001, 1001, 1002, 1001, 1003,
+    1001, 1002, 1001, 1002, 1003,
+  ]);
+
   assert.equal(copy.copyContext, true);
-  assert.match(instructions.details, /start typing any part of an item's title or body text/);
-  assert.match(instructions.details, /Press Enter to copy the selected item/);
-  assert.match(instructions.details, /body text.*otherwise it copies the title/);
-  assert.match(instructions.details, /Right-click an item and choose Edit/);
-  for (const node of nodes.slice(0, 4)) {
-    assert.deepEqual(Object.keys(node).sort(), ["id", "label", "order", "parentId", "source", "updatedAt"]);
-  }
-  assert.deepEqual(Object.keys(copy).sort(), [
-    "copyContext", "id", "label", "order", "parentId", "source", "updatedAt",
-  ]);
-  assert.deepEqual(Object.keys(instructions).sort(), [
-    "details", "id", "label", "order", "parentId", "source", "updatedAt",
-  ]);
+  assert.equal(nodes.some((node) => node.label === "Instructions — right-click and Edit to view"), false);
+  assert.equal(nodes.some((node) => Object.prototype.hasOwnProperty.call(node, "details")), false);
+
   for (const node of nodes) {
+    const expectedKeys = node === copy
+      ? ["copyContext", "id", "label", "order", "parentId", "source", "updatedAt"]
+      : ["id", "label", "order", "parentId", "source", "updatedAt"];
+    assert.deepEqual(Object.keys(node).sort(), expectedKeys);
     assert.equal(node.source, "manual");
     assert.equal(node.updatedAt, writtenAt);
   }
+
   const normalised = context.normaliseInput(payload);
   assert.equal(normalised.schema, "portal.export.v1");
   assert.deepEqual(plain(normalised.nodes), nodes);
