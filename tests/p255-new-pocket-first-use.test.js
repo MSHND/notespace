@@ -235,8 +235,7 @@ test("P255/P257g genuine starter preserves old roots and uses ordinary nested Co
     [email, addresses, replies].map((entry) => entry.order),
     [1001, 1002, 1003]
   );
-  assert.equal(nodes.some((entry) => entry.label === "How Copy works"), false);
-  assert.equal(nodes.some((entry) => entry.label === "A few ideas"), false);
+  assert.equal(nodes.some((entry) => entry.label === "Instructions — right-click and Edit to view"), false);
   assert.equal(nodes.some((entry) => Object.prototype.hasOwnProperty.call(entry, "details")), false);
 
   assert.equal(
@@ -281,6 +280,8 @@ test("P255 recovery-derived New payload is preserved without injecting starter C
   const nodes = starterNodes(context);
   assert.deepEqual(nodes.map((entry) => entry.label), ["Recovered only"]);
   assert.equal(nodes.some((entry) => entry.label === "Copy"), false);
+  assert.equal(nodes.some((entry) => entry.label === "How Copy works"), false);
+  assert.equal(nodes.some((entry) => entry.label === "A few ideas"), false);
   assert.equal(nodes.some((entry) => entry.label === "Instructions — right-click and Edit to view"), false);
 
   const written = JSON.parse(handle.read());
