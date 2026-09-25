@@ -1,0 +1,18 @@
+name: P267 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p267-proof
+
+jobs:
+  p267-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 300s node --test tests/p267-filter-ordered-word-fragment-matcher.test.js tests/p249-main-type-to-filter-unification.test.js tests/p252-filter-first-actual-match.test.js
+      - run: timeout 180s npm run check
