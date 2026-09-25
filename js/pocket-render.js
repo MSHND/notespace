@@ -382,6 +382,30 @@ function treeContentIndicatorForNode(node) {
   return { visible: true, title: first || "Has content" };
 }
 
+function filterWordRuns(value) {
+  return String(value || "").toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+}
+
+function orderedFilterWordPrefixMatch(query, candidate) {
+  const fragments = filterWordRuns(query);
+  if (!fragments.length) return true;
+  const words = filterWordRuns(candidate);
+  let wordIndex = 0;
+  for (const fragment of fragments) {
+    let matched = false;
+    while (wordIndex < words.length) {
+      const word = words[wordIndex];
+      wordIndex += 1;
+      if (word.startsWith(fragment)) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) return false;
+  }
+  return true;
+}
+
 function renderTree(options = {}) {
   clearMainMountedNodeRegistry();
   if (typeof canShowPocketTree === "function" && !canShowPocketTree()) {
@@ -392,9 +416,9 @@ function renderTree(options = {}) {
     if (typeof refreshTreeLabelOverflowTitles === "function") refreshTreeLabelOverflowTitles();
     return;
   }
-  const query = cleanText(el.search.value, 120).toLowerCase();
-  const tokens = query.split(/\s+/).filter(Boolean);
-  const filtering = tokens.length > 0;
+  const query = cleanText(el.search.value, 120);
+  const queryWords = filterWordRuns(query);
+  const filtering = queryWords.length > 0;
   const byId = nodeMap();
   const byParent = childrenMap();
   if (state.focusRootId && !byId.has(state.focusRootId)) {
@@ -420,8 +444,7 @@ function renderTree(options = {}) {
 
   function matches(node) {
     if (!filtering) return true;
-    const haystack = nodeSearchText(node);
-    return tokens.every((t) => haystack.includes(t));
+    return orderedFilterWordPrefixMatch(query, nodeSearchText(node));
   }
 
   function hasVisibleDesc(nodeId) {
