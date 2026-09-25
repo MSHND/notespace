@@ -3963,10 +3963,10 @@ test("P061 creation keeps the old owner intact on cancel, write failure, or adop
   successful.showSaveFilePicker = async () => successfulHandle;
   assert.equal(await successful.createNewPocketFile(), true);
   assert.equal(writeCount, 1);
-  assert.equal(writtenPayload.mainThoughtTree.length, 6);
+  assert.equal(writtenPayload.mainThoughtTree.length, 15);
   assert.deepEqual(plain(successfulState.nodes), plain(writtenPayload.mainThoughtTree));
   assert.deepEqual(plain(successfulState.ops), []);
-  assert.equal(successfulState.documentBaseline.payload.nodes.length, 6);
+  assert.equal(successfulState.documentBaseline.payload.nodes.length, 15);
   assert.strictEqual(successful.capturePocketFileSaveSession().handle, successfulHandle);
 });
 
