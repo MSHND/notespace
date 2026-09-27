@@ -29,8 +29,9 @@ test("P053 exposes only an injectable installer and does no work while no integr
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(UI_PATH, "utf8"), context, { filename: "pocket-sync-ui.js" });
-  assert.deepEqual(Object.keys(context.PocketSyncUi), ["install", "refresh"]);
+  assert.deepEqual(Object.keys(context.PocketSyncUi), ["install", "refresh", "canOpenExisting"]);
   assert.equal(Object.isFrozen(context.PocketSyncUi), true);
+  assert.equal(context.PocketSyncUi.canOpenExisting(), false);
   assert.equal(context.PocketSyncUi.install(null), false);
 });
 
