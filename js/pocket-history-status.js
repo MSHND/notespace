@@ -588,6 +588,78 @@ function createTreeUndoSnapshot(kind = "") {
   };
 }
 
+function captureNewInlineProvisionalContinuity() {
+  return {
+    tree: createTreeUndoSnapshot("provisional-new"),
+    captureRhythm: cloneForUndo(state.captureRhythm || {
+      parentId: "",
+      lastAddedId: "",
+      expiresAt: 0,
+    }),
+    operationHighWater: Number(state.operationHighWater) || 0,
+    operationSequences: (Array.isArray(state.ops) ? state.ops : [])
+      .map((operation) => validPocketOperationSequence(operation?.seq)),
+    lastMoveUndoSnapshot,
+    lastEditUndoSnapshot,
+    lastDeleteUndoSnapshot,
+    lastTreeUndoKind,
+  };
+}
+
+function newInlineProvisionalOperationContinuityIsCurrent(continuity) {
+  if (!continuity || !Array.isArray(continuity.operationSequences)) return false;
+  if ((Number(state.operationHighWater) || 0) !== continuity.operationHighWater) return false;
+  const currentSequences = (Array.isArray(state.ops) ? state.ops : [])
+    .map((operation) => validPocketOperationSequence(operation?.seq));
+  if (currentSequences.length !== continuity.operationSequences.length) return false;
+  return currentSequences.every((sequence, index) => sequence === continuity.operationSequences[index]);
+}
+
+function discardNewInlineProvisional(nodeId, options = {}) {
+  const id = cleanText(nodeId, 80);
+  const edit = state.inlineEdit || {};
+  if (!id || edit.id !== id || edit.isNew !== true) {
+    return { ok: false, active: !!edit.id, reason: "not-active-new-provisional" };
+  }
+  const continuity = edit.provisionalContinuity;
+  const snapshot = continuity?.tree;
+  const node = nodeMap().get(id) || null;
+  if (!snapshot || !Array.isArray(snapshot.nodes) || !node) {
+    return { ok: false, active: true, reason: "provisional-continuity-missing" };
+  }
+  if (cleanText(node.label, 220)) {
+    return { ok: false, active: true, reason: "provisional-not-blank" };
+  }
+  if (!newInlineProvisionalOperationContinuityIsCurrent(continuity)) {
+    return { ok: false, active: true, reason: "provisional-operation-frontier-changed" };
+  }
+  if (typeof options.isCurrent === "function" && options.isCurrent() !== true) {
+    return { ok: false, active: true, reason: "owner-switch-not-current" };
+  }
+
+  state.nodes = cloneForUndo(snapshot.nodes);
+  state.tombstones = cloneForUndo(snapshot.tombstones || []);
+  state.selectedId = cleanText(snapshot.selectedId, 80);
+  state.focusRootId = cleanText(snapshot.focusRootId, 80);
+  state.collapsed = new Set(Array.isArray(snapshot.collapsed) ? snapshot.collapsed : []);
+  state.captureRhythm = cloneForUndo(continuity.captureRhythm || {
+    parentId: "",
+    lastAddedId: "",
+    expiresAt: 0,
+  });
+  lastMoveUndoSnapshot = continuity.lastMoveUndoSnapshot || null;
+  lastEditUndoSnapshot = continuity.lastEditUndoSnapshot || null;
+  lastDeleteUndoSnapshot = continuity.lastDeleteUndoSnapshot || null;
+  lastTreeUndoKind = cleanText(continuity.lastTreeUndoKind, 20);
+  clearInlineEditState();
+  refreshMeta();
+  renderTree();
+  persistPipSnapshot();
+  refocusTreeNavigation(state.selectedId);
+  if (options.statusText) setStatus(options.statusText, options.statusKind || "warn");
+  return { ok: true, active: false, discarded: true, committed: false, id };
+}
+
 function restoreTreeUndoSnapshot(snapshot, acceptedRestoreOperation = null) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   if (!snapshot || !Array.isArray(snapshot.nodes)) return false;
@@ -1063,6 +1135,7 @@ function beginInlineEdit(nodeId, options = {}) {
     originalLabel: typeof options.originalLabel === "string" ? options.originalLabel : node.label,
     afterId: cleanText(options.afterId, 80),
     parentId: cleanText(options.parentId, 80) || (node.parentId || "root"),
+    provisionalContinuity: options.isNew === true ? (options.provisionalContinuity || null) : null,
     autoFocus: true,
   };
   expandPathToNode(node.id);
@@ -1074,14 +1147,17 @@ function beginInlineEdit(nodeId, options = {}) {
 function cancelInlineEdit(nodeId) {
   if (!state.inlineEdit.id || state.inlineEdit.id !== nodeId) return;
   const edit = { ...state.inlineEdit };
-  clearInlineEditState();
   if (edit.isNew) {
-    clearCaptureRhythm();
-    deleteNodeById(nodeId, { confirm: false, provisionalCleanup: true });
-    setStatus("New item cancelled.", "warn");
-    refocusTreeNavigation();
+    const discarded = discardNewInlineProvisional(nodeId, {
+      statusText: "New item cancelled.",
+      statusKind: "warn",
+    });
+    if (!discarded.ok) {
+      setStatus("Could not safely cancel the new item.", "warn");
+    }
     return;
   }
+  clearInlineEditState();
   refreshMeta();
   renderTree();
   persistPipSnapshot();
@@ -1118,8 +1194,8 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   if (vaultSwitchCommit && !vaultSwitchInlineCommitIsCurrent(options)) {
     return { ok: false, reason: "owner-switch-not-current" };
   }
-  clearInlineEditState();
   if (!node) {
+    clearInlineEditState();
     refreshMeta();
     renderTree();
     persistPipSnapshot();
@@ -1129,11 +1205,18 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
   const next = cleanText(rawValue, 220);
   if (!next) {
     if (edit.isNew) {
-      deleteNodeById(nodeId, { confirm: false, provisionalCleanup: true });
-      setStatus("Blank item removed.", "warn");
-      refocusTreeNavigation();
-      return { ok: false, reason: "blank-title" };
+      const discarded = discardNewInlineProvisional(nodeId, {
+        isCurrent: vaultSwitchCommit
+          ? () => vaultSwitchInlineCommitIsCurrent(options)
+          : undefined,
+        statusText: "Blank item removed.",
+        statusKind: "warn",
+      });
+      return discarded.ok
+        ? { ok: false, active: false, discarded: true, reason: "blank-title" }
+        : { ok: false, active: true, reason: discarded.reason || "blank-title" };
     }
+    clearInlineEditState();
     refreshMeta();
     renderTree();
     persistPipSnapshot();
@@ -1141,6 +1224,7 @@ function commitInlineEdit(nodeId, rawValue, options = {}) {
     refocusTreeNavigation(nodeId);
     return { ok: false, reason: "blank-title" };
   }
+  clearInlineEditState();
   const prev = node.label;
   if (!edit.isNew && next !== prev) {
     lastEditUndoSnapshot = createTreeUndoSnapshot("rename");
@@ -1217,17 +1301,14 @@ function captureActiveInlineEditForOwnerSwitch() {
   if (!inlineDraftInputBelongsToNode(draft.input, draft.id)) {
     return { ok: false, active: true, id: draft.id, reason: "missing-input", input: draft.input || null };
   }
+  const isNew = draft.edit.isNew === true;
   const checked = validateCapturedInlineDraftValue(draft.value);
-  if (!checked.ok) {
-    return { ...checked, active: true, id: draft.id, input: draft.input };
-  }
-  return {
-    ok: true,
+  const captured = {
     active: true,
     id: draft.id,
-    isNew: draft.edit.isNew === true,
+    isNew,
     originalLabel: String(draft.edit.originalLabel || ""),
-    rawValue: checked.value,
+    rawValue: checked.ok ? checked.value : String(draft.value ?? ""),
     storedLabel: String(draft.node.label || ""),
     operationHighWater: typeof getPocketHighestOperationSequence === "function"
       ? getPocketHighestOperationSequence()
@@ -1236,6 +1317,34 @@ function captureActiveInlineEditForOwnerSwitch() {
     nodeRef: draft.node,
     input: draft.input,
   };
+  if (!checked.ok) return { ...captured, ...checked };
+  return { ...captured, ok: true };
+}
+
+function discardActiveNewInlineEditForOwnerSwitch(capturedDraft, options = {}) {
+  const captured = capturedDraft || captureActiveInlineEditForOwnerSwitch();
+  if (!captured || captured.active !== true || captured.isNew !== true || captured.reason !== "blank-title") {
+    return { ok: false, active: captured?.active === true, reason: captured?.reason || "not-blank-new-provisional" };
+  }
+  const contextIsCurrent = typeof options.isCurrent === "function"
+    ? options.isCurrent
+    : () => true;
+  if (!contextIsCurrent()) {
+    return { ok: false, active: true, reason: "owner-switch-not-current", input: captured.input || null };
+  }
+  const draft = inspectActiveInlineTitleDraft();
+  if (!draft.active
+      || draft.id !== captured.id
+      || state.inlineEdit !== captured.editRef
+      || draft.node !== captured.nodeRef
+      || draft.edit.isNew !== true
+      || !inlineDraftInputBelongsToNode(draft.input, captured.id)
+      || cleanText(draft.value, 220)) {
+    return { ok: false, active: true, reason: "inline-edit-changed", input: draft.input || captured.input || null };
+  }
+  const discarded = discardNewInlineProvisional(captured.id, { isCurrent: contextIsCurrent });
+  if (!discarded.ok) return discarded;
+  return { ok: true, active: false, committed: false, discarded: true, id: captured.id };
 }
 
 function commitActiveInlineEditForOwnerSwitch(capturedDraft, options = {}) {
