@@ -304,6 +304,6 @@ test("P274 reuses existing Sync eligibility and storage owners without device/br
   assert.doesNotMatch(decisionSurface, /navigator\.|userAgent|platform|iPad|iPhone|Safari|Chrome|DuckDuckGo|Android|Macintosh/i);
 
   assert.ok(index.indexOf("js/pocket-doorway-capabilities.js") < index.indexOf("js/pocket-render.js"));
-  assert.match(sw, /pocket-shell-v12/);
+  assert.match(sw, /pocket-shell-v11/);
   assert.match(sw, /\.\/js\/pocket-doorway-capabilities\.js/);
 });
