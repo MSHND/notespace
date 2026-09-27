@@ -2,6 +2,7 @@
 (function initialisePocketSyncUi(global) {
   "use strict";
   let refreshInstalled = () => {};
+  let canOpenExistingInstalled = () => false;
   const RECOVERY_COPY = Object.freeze({
     "recovery-required": "A recovery copy is needed to open this synced Pocket on this device.",
     "recovery-package-invalid": "Recovery copy could not be used. Your current Pocket is unchanged.",
@@ -118,6 +119,7 @@
       if (["json", "vault"].includes(session.ownerKind)) return true;
       try { return global.hasPocketUnsavedChanges?.() === false; } catch (_error) { return false; }
     }
+    canOpenExistingInstalled = () => eligibleOpen(owner());
     function dirtyLocal(session) {
       if (!session || !["json", "vault"].includes(session.ownerKind)) return false;
       try { return global.hasPocketUnsavedChanges?.() === true; } catch (_error) { return true; }
@@ -395,8 +397,15 @@
     global.addEventListener?.("pocket-owner-state-changed", refresh);
     refreshInstalled = refresh;
     refresh();
+    if (global.canShowPocketTree?.() === false && typeof global.renderTree === "function") {
+      global.renderTree();
+    }
     return true;
   }
 
-  global.PocketSyncUi = Object.freeze({ install, refresh: () => refreshInstalled() });
+  global.PocketSyncUi = Object.freeze({
+    install,
+    refresh: () => refreshInstalled(),
+    canOpenExisting: () => canOpenExistingInstalled() === true,
+  });
 })(typeof window !== "undefined" ? window : globalThis);
