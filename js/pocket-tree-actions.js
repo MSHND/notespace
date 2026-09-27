@@ -1302,6 +1302,19 @@ function handleTreeKeydown(ev) {
     deleteSelected();
     return;
   }
+  if (
+    !state.moveMode
+    && !ev.metaKey
+    && !ev.ctrlKey
+    && !ev.altKey
+    && !ev.shiftKey
+    && ev.key === "Backspace"
+    && cleanText(currentMainFilterQueryRaw(), 120).length === 0
+  ) {
+    ev.preventDefault();
+    deleteSelected();
+    return;
+  }
   if (isMainImplicitFilterBackspace(ev)) {
     ev.preventDefault();
     const characters = Array.from(currentMainFilterQueryRaw());
