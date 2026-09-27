@@ -204,6 +204,14 @@ function runtime(nodes = [
   for (const file of [SHADOW, HISTORY, ACTIONS]) {
     vm.runInContext(source(file), context, { filename: file });
   }
+  context.refreshSaveState = () => {};
+  context.refreshMeta = () => {};
+  context.renderTree = () => {};
+  context.persistPipSnapshot = () => {};
+  context.refocusTreeNavigation = () => {};
+  context.focusRowByNodeId = () => {};
+  context.softlyEnsureSelectionVisible = () => {};
+  context.setStatus = () => {};
 
   context.inspectActiveInlineTitleDraft = () => {
     const edit = context.state.inlineEdit || {};
