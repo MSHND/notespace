@@ -536,6 +536,23 @@ checkExists("docs/PIPEWORK_RULE.md");
 checkPeMigrationInventory();
 checkPeOutlinePreservation();
 
+
+const { spawnSync } = require("child_process");
+const p272fProof = spawnSync(
+  process.execPath,
+  ["--test", "tests/p272f-main-filter-backspace-composition.test.js"],
+  { cwd: root, encoding: "utf8", timeout: 20000 }
+);
+if (p272fProof.stdout) process.stdout.write(p272fProof.stdout);
+if (p272fProof.stderr) process.stderr.write(p272fProof.stderr);
+if (p272fProof.error) {
+  fail("P272f composed Main Backspace proof", p272fProof.error.code === "ETIMEDOUT" ? "timed out" : p272fProof.error.message);
+} else if (p272fProof.status !== 0) {
+  fail("P272f composed Main Backspace proof", "node:test failed");
+} else {
+  ok("P272f composed Main Backspace proof", "passed");
+}
+
 if (failures) {
   console.log(`Pocket check failed: ${failures}`);
   process.exit(1);
