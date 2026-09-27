@@ -43,6 +43,13 @@ function insertSiblingBelow(nodeId) {
     return;
   }
   const parentId = node.parentId || "root";
+  const provisionalContinuity = typeof captureNewInlineProvisionalContinuity === "function"
+    ? captureNewInlineProvisionalContinuity()
+    : null;
+  if (!provisionalContinuity) {
+    setStatus("Could not safely start a new item.", "warn");
+    return;
+  }
   const newNode = {
     id: makeId("node"),
     parentId,
@@ -60,6 +67,7 @@ function insertSiblingBelow(nodeId) {
     originalLabel: "",
     afterId: node.id,
     parentId,
+    provisionalContinuity,
   });
   setStatus("Caught. Type, then Enter.", "ok");
 }
@@ -77,6 +85,13 @@ function insertChildUnder(nodeId) {
     return;
   }
   const parentId = node.id;
+  const provisionalContinuity = typeof captureNewInlineProvisionalContinuity === "function"
+    ? captureNewInlineProvisionalContinuity()
+    : null;
+  if (!provisionalContinuity) {
+    setStatus("Could not safely start a new item.", "warn");
+    return;
+  }
   const newNode = {
     id: makeId("node"),
     parentId,
@@ -94,6 +109,7 @@ function insertChildUnder(nodeId) {
     originalLabel: "",
     afterId: "",
     parentId,
+    provisionalContinuity,
   });
   setStatus("Caught. Type, then Enter.", "ok");
 }
