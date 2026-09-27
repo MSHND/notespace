@@ -116,7 +116,12 @@
     } catch (_error) {
       return { ok: false, active: true, reason: "inline-draft-capture-failed" };
     }
-    if (!captured || captured.ok !== true) {
+    const blankNewProvisional = !!captured
+      && captured.ok !== true
+      && captured.active === true
+      && captured.isNew === true
+      && captured.reason === "blank-title";
+    if (!captured || (captured.ok !== true && !blankNewProvisional)) {
       return captured && typeof captured === "object"
         ? { ...captured, ok: false, active: captured.active !== false }
         : { ok: false, active: true, reason: "inline-draft-invalid" };
@@ -134,6 +139,27 @@
         && global.isPocketFileSaveSessionCurrent(expectedSession) === true;
     };
     if (!sessionIsCurrent()) return { ok: false, active: true, reason: "stale-owner-session" };
+
+    if (blankNewProvisional) {
+      if (typeof global.discardActiveNewInlineEditForOwnerSwitch !== "function") {
+        return { ok: false, active: true, reason: "inline-draft-discard-unavailable" };
+      }
+      let discarded;
+      try {
+        discarded = global.discardActiveNewInlineEditForOwnerSwitch(captured, {
+          isCurrent: sessionIsCurrent,
+        });
+      } catch (_error) {
+        return { ok: false, active: true, reason: "inline-draft-discard-failed" };
+      }
+      if (!discarded || discarded.ok !== true) {
+        return discarded && typeof discarded === "object"
+          ? { ...discarded, ok: false, active: discarded.active !== false }
+          : { ok: false, active: true, reason: "inline-draft-discard-failed" };
+      }
+      if (!sessionIsCurrent()) return { ok: false, active: false, reason: "stale-owner-session" };
+      return { ...discarded, ok: true, active: false, committed: false, discarded: true };
+    }
 
     let committed;
     try {
