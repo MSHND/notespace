@@ -247,20 +247,45 @@ function openPocketDoorway() {
   closeCommandPalette({ restoreFocus: false });
   closeStorageMenu({ restoreFocus: false });
   window.PocketSyncUi?.refresh?.();
-  const syncedAvailable = el.btnOpenSynced instanceof HTMLButtonElement
-    && !el.btnOpenSynced.hidden
-    && !el.btnOpenSynced.disabled;
-  if (!syncedAvailable) {
-    if (typeof openPocketFile === "function") void openPocketFile();
-    return typeof openPocketFile === "function";
+
+  const capabilities = window.PocketDoorwayCapabilities?.read?.() || Object.freeze({
+    localOpen: false,
+    localNew: false,
+    syncedOpen: false,
+    anyOpen: false,
+    anyAction: false,
+  });
+
+  if (el.cmdOpenFile instanceof HTMLButtonElement) {
+    el.cmdOpenFile.hidden = !capabilities.localOpen;
+    el.cmdOpenFile.disabled = !capabilities.localOpen;
   }
-  if (!(el.pocketOpenOverlay instanceof HTMLElement)) return false;
   if (el.cmdOpenSyncedPocket instanceof HTMLButtonElement) {
-    el.cmdOpenSyncedPocket.hidden = false;
-    el.cmdOpenSyncedPocket.disabled = false;
+    el.cmdOpenSyncedPocket.hidden = !capabilities.syncedOpen;
+    el.cmdOpenSyncedPocket.disabled = !capabilities.syncedOpen;
   }
+
+  if (!capabilities.anyOpen) return false;
+
+  if (!capabilities.localOpen && capabilities.syncedOpen) {
+    el.btnOpenSynced?.click?.();
+    return true;
+  }
+
+  if (capabilities.localOpen && !capabilities.syncedOpen) {
+    if (typeof openPocketFile === "function") {
+      void openPocketFile();
+      return true;
+    }
+    return false;
+  }
+
+  if (!(el.pocketOpenOverlay instanceof HTMLElement)) return false;
   el.pocketOpenOverlay.hidden = false;
-  requestAnimationFrame(() => el.cmdOpenFile?.focus?.({ preventScroll: true }));
+  requestAnimationFrame(() => {
+    const first = el.pocketOpenOverlay?.querySelector(".commandBtn:not([disabled]):not([hidden])");
+    if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+  });
   return true;
 }
 
