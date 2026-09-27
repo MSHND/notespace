@@ -536,6 +536,34 @@ checkExists("docs/PIPEWORK_RULE.md");
 checkPeMigrationInventory();
 checkPeOutlinePreservation();
 
+
+const { spawnSync } = require("node:child_process");
+const p274ProofFiles = [
+  "tests/p274-capability-aware-pocket-doorway.test.js",
+  "tests/p053-sync-ui.test.js",
+  "tests/p019-vault-ownership.test.js",
+  "tests/p062-pocket-shell.test.js",
+  "tests/p076-production-browser-boundary.test.js",
+  "tests/p210-friction-pack.test.js",
+];
+const p274Proof = spawnSync(
+  process.execPath,
+  ["--test", ...p274ProofFiles],
+  { cwd: root, encoding: "utf8", timeout: 60000 }
+);
+if (p274Proof.stdout) process.stdout.write(p274Proof.stdout);
+if (p274Proof.stderr) process.stderr.write(p274Proof.stderr);
+if (p274Proof.error) {
+  fail(
+    "P274 bounded doorway proof",
+    p274Proof.error.code === "ETIMEDOUT" ? "timed out after 60s" : p274Proof.error.message
+  );
+} else if (p274Proof.status !== 0) {
+  fail("P274 bounded doorway proof", "node:test failed");
+} else {
+  ok("P274 bounded doorway proof", "passed");
+}
+
 if (failures) {
   console.log(`Pocket check failed: ${failures}`);
   process.exit(1);
