@@ -65,10 +65,18 @@ function buildPocketFileGateState() {
   const recovery = typeof readLocalSafetySnapshot === "function" ? readLocalSafetySnapshot() : null;
   const gateMode = cleanText(session.gateMode, 20);
   const blocked = gateMode === "blocked";
+  const capabilities = window.PocketDoorwayCapabilities?.read?.() || Object.freeze({
+    localOpen: false,
+    localNew: false,
+    syncedOpen: false,
+    anyOpen: false,
+    anyAction: false,
+  });
   return {
     blocked,
     recovery: !!recovery,
     recentName: cleanText(session.recentName, 120),
+    capabilities,
   };
 }
 
@@ -88,9 +96,17 @@ function buildPocketFileGate() {
 
   const text = document.createElement("div");
   text.className = "emptyStateText";
-  text.textContent = gate.blocked
+  const capabilities = gate.capabilities;
+  const availableText = capabilities.anyOpen && capabilities.localNew
     ? "Open an existing Pocket, or start a new one."
-    : (gate.recovery ? "Pocket found changes that may not have been saved." : "Open an existing Pocket, or start a new one.");
+    : (capabilities.anyOpen
+      ? "Open an existing Pocket to continue."
+      : (capabilities.localNew
+        ? "Start a new Pocket to continue."
+        : "Pocket cannot open or create a persistent local file here, and Synced Pocket is not available."));
+  text.textContent = gate.recovery
+    ? "Pocket found changes that may not have been saved."
+    : availableText;
 
   const actions = document.createElement("div");
   actions.className = "emptyStateActions";
@@ -107,13 +123,17 @@ function buildPocketFileGate() {
     });
     actions.appendChild(btn);
   };
-  addAction("Open", () => {
-    if (typeof openPocketDoorway === "function") openPocketDoorway();
-    else if (typeof openPocketFile === "function") void openPocketFile();
-  });
-  addAction("New", () => {
-    if (typeof createNewPocketFile === "function") void createNewPocketFile();
-  });
+  if (capabilities.anyOpen) {
+    addAction("Open", () => {
+      if (typeof openPocketDoorway === "function") openPocketDoorway();
+      else if (capabilities.localOpen && typeof openPocketFile === "function") void openPocketFile();
+    });
+  }
+  if (capabilities.localNew) {
+    addAction("New", () => {
+      if (typeof createNewPocketFile === "function") void createNewPocketFile();
+    });
+  }
 
   card.appendChild(title);
   card.appendChild(text);
@@ -123,7 +143,7 @@ function buildPocketFileGate() {
     hint.textContent = `Last used: ${gate.recentName}`;
     card.appendChild(hint);
   }
-  card.appendChild(actions);
+  if (actions.childNodes.length > 0) card.appendChild(actions);
   li.appendChild(card);
   return li;
 }
