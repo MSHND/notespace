@@ -1333,7 +1333,7 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       }
     }
 
-    async function authenticatePasskey(input, onAuthenticated) {
+    async function authenticatePasskey(input, onAuthenticated = undefined) {
       const request = validateBeginAuthenticationRequest(input);
       if (onAuthenticated !== undefined && typeof onAuthenticated !== "function") {
         throw accountError("account-client-invalid");
