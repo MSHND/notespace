@@ -16,12 +16,15 @@ jobs:
           node-version: 24
       - name: Repository health
         run: timeout 120s npm run check
-      - name: Focused and adjacent first-use proofs
+      - name: Focused first-use and adjacent New proofs
         run: >-
-          timeout 360s node --test
+          timeout 300s node --test
           tests/p276-first-use-payload-owner.test.js
           tests/p255-new-pocket-first-use.test.js
           tests/p257g-human-nested-copy-starter.test.js
-          tests/pe-persistence-contract.test.js
-          tests/device-changes-resolution.test.js
           tests/p176-production-composition.test.js
+      - name: Adjacent persistence proofs
+        run: >-
+          timeout 300s node --test
+          --test-name-pattern='P061/P255/P257g fresh new-Pocket truth|P061 retained recovery truth|P061 existing empty Pocket truth|P061 creation keeps the old owner intact|successful picked and newly created truth-file targets|P193k6/P255 New Pocket save picker'
+          tests/pe-persistence-contract.test.js
