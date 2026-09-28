@@ -1,0 +1,27 @@
+name: P276 proof
+
+on:
+  push:
+    branches:
+      - candidate/p276-proof
+
+jobs:
+  p276-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Repository health
+        run: timeout 120s npm run check
+      - name: Focused and adjacent first-use proofs
+        run: >-
+          timeout 360s node --test
+          tests/p276-first-use-payload-owner.test.js
+          tests/p255-new-pocket-first-use.test.js
+          tests/p257g-human-nested-copy-starter.test.js
+          tests/pe-persistence-contract.test.js
+          tests/device-changes-resolution.test.js
+          tests/p176-production-composition.test.js
