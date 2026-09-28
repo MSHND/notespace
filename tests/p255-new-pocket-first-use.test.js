@@ -298,7 +298,7 @@ test("P255 keeps existing .json/.pocket/.vault opening compatibility and JSON-on
 
   const writeTruthSection = io.slice(
     io.indexOf("async function writeTruthFile"),
-    io.indexOf("function buildFirstUsePocketNodes")
+    io.indexOf("function isPocketPayloadShape")
   );
   assert.match(writeTruthSection, /jsonFilePickerOptions\(\)/);
   assert.doesNotMatch(writeTruthSection, /newPocketFilePickerOptions\(\)/);
