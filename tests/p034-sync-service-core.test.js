@@ -245,7 +245,10 @@ async function register(harness, options = {}) {
   const id = options.credentialId || credentialId();
   const sessionId = options.sessionId || null;
   const begin = await harness.core.beginRegistration(call(
-    beginRegistrationBody(operationId, { deviceId: options.deviceId || "device-opaque" }),
+    beginRegistrationBody(operationId, {
+      accountIntent: options.accountIntent || "create-or-add-credential",
+      deviceId: options.deviceId || "device-opaque",
+    }),
     sessionId
   ));
   const finish = await harness.core.finishRegistration(call({
@@ -575,6 +578,179 @@ test("adding a credential reuses account PRF input and rotates the session atomi
   );
   assert.deepEqual(harness.driver.snapshot(), before);
   assert.equal(harness.driver.snapshot().sessions[second.sessionId].status, "active");
+});
+
+
+test("P279 explicit create-new-account without a prior session creates one fresh unbound account and replays exactly", async () => {
+  const harness = createHarness();
+  const registration = await register(harness, {
+    operationId: "register-explicit-new",
+    accountIntent: "create-new-account",
+    credentialId: credentialId(151),
+    deviceId: "device-explicit-new",
+  });
+  const snapshot = harness.driver.snapshot();
+  assert.deepEqual(Object.keys(snapshot.accounts), [registration.accountId]);
+  assert.deepEqual(Object.keys(snapshot.credentials), [registration.credentialId]);
+  assert.equal(snapshot.accounts[registration.accountId].syncedPocketId, null);
+  assert.deepEqual(snapshot.accounts[registration.accountId].credentialIds, [registration.credentialId]);
+  assert.equal(snapshot.sessions[registration.sessionId].accountId, registration.accountId);
+  assert.equal(snapshot.sessions[registration.sessionId].status, "active");
+  assert.equal(snapshot.ceremonies["register-explicit-new"].accountIntent, "create-new-account");
+  assert.equal(snapshot.ceremonies["register-explicit-new"].mode, "create-new-account");
+
+  const replay = await harness.core.finishRegistration(call({
+    apiVersion: 1,
+    operationId: "register-explicit-new",
+    ceremonyId: registration.begin.body.ceremonyId,
+    deviceId: "device-explicit-new",
+    credential: registrationCredential(registration.credentialId),
+  }));
+  assert.deepEqual(plain(replay), plain(registration.finish));
+  assert.equal(harness.verifierCalls.registration, 1);
+  assert.deepEqual(harness.driver.snapshot(), snapshot);
+});
+
+test("P279 explicit create-new-account with a valid session creates B, preserves account A, and replaces only A's session", async () => {
+  const harness = createHarness();
+  const first = await register(harness, {
+    operationId: "register-account-a",
+    credentialId: credentialId(161),
+    deviceId: "device-a",
+  });
+  await harness.core.conditionalUpload(call(uploadBody("bind-account-a", {
+    syncedPocketId: "pocket-account-a",
+  }), first.sessionId));
+
+  const beforeBegin = harness.driver.snapshot();
+  const accountABefore = plain(beforeBegin.accounts[first.accountId]);
+  const credentialABefore = plain(beforeBegin.credentials[first.credentialId]);
+  const sessionABefore = plain(beforeBegin.sessions[first.sessionId]);
+
+  const request = beginRegistrationBody("register-account-b", {
+    accountIntent: "create-new-account",
+    deviceId: "device-b",
+  });
+  const begin = await harness.core.beginRegistration(call(request, first.sessionId));
+  const beginReplay = await harness.core.beginRegistration(call(request, first.sessionId));
+  assert.deepEqual(plain(beginReplay), plain(begin));
+  await assert.rejects(
+    harness.core.beginRegistration(call(beginRegistrationBody("register-account-b", {
+      accountIntent: "create-or-add-credential",
+      deviceId: "device-b",
+    }), first.sessionId)),
+    errorCode("service-operation-reuse")
+  );
+
+  const afterBegin = harness.driver.snapshot();
+  assert.deepEqual(plain(afterBegin.accounts[first.accountId]), accountABefore);
+  assert.deepEqual(plain(afterBegin.credentials[first.credentialId]), credentialABefore);
+  assert.deepEqual(plain(afterBegin.sessions[first.sessionId]), sessionABefore);
+  assert.equal(Object.keys(afterBegin.accounts).length, 1);
+  assert.equal(Object.keys(afterBegin.credentials).length, 1);
+
+  const ceremony = afterBegin.ceremonies["register-account-b"];
+  assert.equal(ceremony.accountIntent, "create-new-account");
+  assert.equal(ceremony.mode, "create-new-account");
+  assert.equal(ceremony.priorSessionId, first.sessionId);
+  assert.notEqual(ceremony.accountId, first.accountId);
+  assert.notEqual(ceremony.prfEvaluationInput, accountABefore.prfEvaluationInput);
+  assert.equal(begin.body.publicKeyCreationOptions.user.name, ceremony.accountId);
+  assert.deepEqual(begin.body.publicKeyCreationOptions.excludeCredentials, []);
+
+  const secondCredentialId = credentialId(171);
+  const finishRequest = {
+    apiVersion: 1,
+    operationId: "register-account-b",
+    ceremonyId: begin.body.ceremonyId,
+    deviceId: "device-b",
+    credential: registrationCredential(secondCredentialId),
+  };
+  const finish = await harness.core.finishRegistration(call(finishRequest, first.sessionId));
+  const afterFinish = harness.driver.snapshot();
+  const accountB = afterFinish.accounts[finish.body.accountId];
+
+  assert.notEqual(finish.body.accountId, first.accountId);
+  assert.deepEqual(plain(afterFinish.accounts[first.accountId]), accountABefore);
+  assert.deepEqual(plain(afterFinish.credentials[first.credentialId]), credentialABefore);
+  assert.equal(accountB.accountId, ceremony.accountId);
+  assert.equal(accountB.prfEvaluationInput, ceremony.prfEvaluationInput);
+  assert.notEqual(accountB.prfEvaluationInput, accountABefore.prfEvaluationInput);
+  assert.deepEqual(accountB.credentialIds, [secondCredentialId]);
+  assert.equal(accountB.syncedPocketId, null);
+  assert.equal(accountB.storeVersion, 1);
+  assert.equal(afterFinish.credentials[secondCredentialId].accountId, accountB.accountId);
+  assert.equal(afterFinish.sessions[first.sessionId].status, "revoked");
+  assert.equal(afterFinish.sessions[first.sessionId].replacedBy, finish.session.sessionId);
+  assert.equal(finish.session.replaceSessionId, first.sessionId);
+  assert.equal(afterFinish.sessions[finish.session.sessionId].accountId, accountB.accountId);
+  assert.equal(afterFinish.sessions[finish.session.sessionId].status, "active");
+
+  const snapshotAfterFinish = harness.driver.snapshot();
+  const replay = await harness.core.finishRegistration(call(finishRequest, first.sessionId));
+  assert.deepEqual(plain(replay), plain(finish));
+  assert.equal(harness.verifierCalls.registration, 2);
+  assert.deepEqual(harness.driver.snapshot(), snapshotAfterFinish);
+});
+
+test("P279 explicit create-new-account failure and expiry preserve the prior account and active session", async () => {
+  {
+    const harness = createHarness();
+    const first = await register(harness, {
+      operationId: "failure-account-a",
+      credentialId: credentialId(181),
+      deviceId: "failure-device-a",
+    });
+    const begin = await harness.core.beginRegistration(call(beginRegistrationBody(
+      "failure-account-b",
+      { accountIntent: "create-new-account", deviceId: "failure-device-b" }
+    ), first.sessionId));
+    const afterBegin = harness.driver.snapshot();
+    assert.equal(Object.keys(afterBegin.accounts).length, 1);
+    assert.equal(Object.keys(afterBegin.credentials).length, 1);
+    assert.equal(afterBegin.sessions[first.sessionId].status, "active");
+
+    harness.driver.failAt("during-commit");
+    await assert.rejects(
+      harness.core.finishRegistration(call({
+        apiVersion: 1,
+        operationId: "failure-account-b",
+        ceremonyId: begin.body.ceremonyId,
+        deviceId: "failure-device-b",
+        credential: registrationCredential(credentialId(191)),
+      }, first.sessionId)),
+      errorCode("service-storage-failed")
+    );
+    assert.deepEqual(harness.driver.snapshot(), afterBegin);
+    assert.equal(harness.driver.snapshot().sessions[first.sessionId].status, "active");
+  }
+
+  {
+    const harness = createHarness();
+    const first = await register(harness, {
+      operationId: "expiry-account-a",
+      credentialId: credentialId(201),
+      deviceId: "expiry-device-a",
+    });
+    const begin = await harness.core.beginRegistration(call(beginRegistrationBody(
+      "expiry-account-b",
+      { accountIntent: "create-new-account", deviceId: "expiry-device-b" }
+    ), first.sessionId));
+    const afterBegin = harness.driver.snapshot();
+    harness.setTime(Date.parse(begin.body.expiresAt));
+    await assert.rejects(
+      harness.core.finishRegistration(call({
+        apiVersion: 1,
+        operationId: "expiry-account-b",
+        ceremonyId: begin.body.ceremonyId,
+        deviceId: "expiry-device-b",
+        credential: registrationCredential(credentialId(211)),
+      }, first.sessionId)),
+      errorCode("service-ceremony-expired")
+    );
+    assert.deepEqual(harness.driver.snapshot(), afterBegin);
+    assert.equal(harness.driver.snapshot().sessions[first.sessionId].status, "active");
+  }
 });
 
 test("authentication resolves non-enumerating locator/session paths and builds P031-valid options", async () => {
