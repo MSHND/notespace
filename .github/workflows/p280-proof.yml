@@ -1,0 +1,33 @@
+name: P280 proof
+
+on:
+  push:
+    branches:
+      - candidate/p280-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p280-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: P280 focused conductor and P278 account-client proof
+        run: timeout --signal=TERM --kill-after=10s 240s node --test tests/p280-first-create-existing-account.test.js tests/p031-sync-account-client.test.js
+      - name: Existing additional-device Open guards
+        run: >-
+          timeout --signal=TERM --kill-after=10s 180s node --test
+          --test-name-pattern='P052 remains dormant|P052i1 rejects a bootstrap account mismatch|P052a opens a real P029 content record|P052b maps a wrong real P029 PRF unlock'
+          tests/p052-additional-device.test.js
+      - name: Existing browser-runtime account failure guards
+        run: >-
+          timeout --signal=TERM --kill-after=10s 120s node --test
+          --test-name-pattern='P045 loading and runtime construction are inert|P045 maps browser passkey cancellation safely and does not adopt|P045 keeps unavailable, unsupported and browser-security passkey failures local and unadopted'
+          tests/p045-browser-sync-runtime.test.js
