@@ -2371,25 +2371,41 @@ function createServiceCore(input) {
         if (Date.parse(existing.expiresAt) <= at) {
           throw serviceError("service-ceremony-expired", 410);
         }
+        const intent = storedRegistrationIntent(existing);
+        if (intent !== request.accountIntent) {
+          throw serviceError("service-state-invalid", 500);
+        }
         if (context.sessionId !== null) {
           const authorised = await authoriseSession(transaction, context.sessionId, at);
-          if (authorised.account.accountId !== existing.accountId) {
+          if (intent === "create-or-add-credential"
+              && authorised.account.accountId !== existing.accountId) {
+            throw serviceError("service-state-invalid", 500);
+          }
+          if (intent === "create-new-account"
+              && authorised.session.sessionId !== existing.priorSessionId) {
             throw serviceError("service-state-invalid", 500);
           }
         }
         return frozen({ status: 200, body: existing.beginBody, session: null });
       }
 
+      const createNewAccount = request.accountIntent === "create-new-account";
       let account = null;
       let credentials = Object.freeze([]);
       if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
-        account = authorised.account;
-        credentials = authorised.credentials;
+        if (!createNewAccount) {
+          account = authorised.account;
+          credentials = authorised.credentials;
+        }
       }
-      const accountId = account ? account.accountId : randomToken();
-      const prfEvaluationInput = account ? account.prfEvaluationInput : randomToken();
-      if (!account) await ensureGeneratedKeyAvailable(transaction, COLLECTIONS.accounts, accountId);
+      const accountId = createNewAccount || account === null ? randomToken() : account.accountId;
+      const prfEvaluationInput = createNewAccount || account === null
+        ? randomToken()
+        : account.prfEvaluationInput;
+      if (createNewAccount || account === null) {
+        await ensureGeneratedKeyAvailable(transaction, COLLECTIONS.accounts, accountId);
+      }
       const ceremonyId = randomToken();
       const challenge = randomToken();
       const userId = randomToken();
@@ -2419,7 +2435,8 @@ function createServiceCore(input) {
         schemaVersion: 1,
         storeVersion: 1,
         ceremonyType: "registration",
-        mode: "account-bound",
+        mode: createNewAccount ? "create-new-account" : "account-bound",
+        accountIntent: request.accountIntent,
         operationId: request.operationId,
         ceremonyId,
         requestDigest: digest,
@@ -2637,17 +2654,28 @@ function createServiceCore(input) {
         return frozen({ replay: await completedReplay(transaction, ceremony, digest, at) });
       }
       ensurePendingCeremony(ceremony, "registration", request, context, digest, at);
+      const accountIntent = storedRegistrationIntent(ceremony);
       let account = null;
       let priorSession = null;
       if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
-        account = authorised.account;
         priorSession = authorised.session;
-        if (account.accountId !== ceremony.accountId) {
-          throw serviceError("service-authorisation-failed", 403);
+        if (accountIntent === "create-or-add-credential") {
+          account = authorised.account;
+          if (account.accountId !== ceremony.accountId) {
+            throw serviceError("service-authorisation-failed", 403);
+          }
         }
       }
-      return frozen({ ceremony, account, priorSession, replay: null });
+      if (accountIntent === "create-new-account") {
+        const collision = await readRecord(
+          transaction,
+          COLLECTIONS.accounts,
+          ceremony.accountId
+        );
+        if (collision !== null) throw serviceError("service-random-collision", 409);
+      }
+      return frozen({ ceremony, accountIntent, account, priorSession, replay: null });
     });
     if (prepared.replay) return prepared.replay;
 
@@ -2675,7 +2703,9 @@ function createServiceCore(input) {
         return completedReplay(transaction, ceremony, digest, commitAt);
       }
       ensurePendingCeremony(ceremony, "registration", request, context, digest, commitAt);
-      if (ceremony.storeVersion !== prepared.ceremony.storeVersion) {
+      const accountIntent = storedRegistrationIntent(ceremony);
+      if (accountIntent !== prepared.accountIntent
+          || ceremony.storeVersion !== prepared.ceremony.storeVersion) {
         throw serviceError("service-transaction-conflict", 409, { retryable: true });
       }
 
@@ -2683,16 +2713,23 @@ function createServiceCore(input) {
       let priorSession = null;
       if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, commitAt);
-        account = authorised.account;
         priorSession = authorised.session;
-        if (account.accountId !== ceremony.accountId
-            || !prepared.account
-            || account.storeVersion !== prepared.account.storeVersion
-            || !prepared.priorSession
-            || priorSession.storeVersion !== prepared.priorSession.storeVersion) {
+        if (!prepared.priorSession
+            || priorSession.storeVersion !== prepared.priorSession.storeVersion
+            || priorSession.accountId !== prepared.priorSession.accountId) {
           throw serviceError("service-transaction-conflict", 409, { retryable: true });
         }
-      } else {
+        if (accountIntent === "create-or-add-credential") {
+          account = authorised.account;
+          if (account.accountId !== ceremony.accountId
+              || !prepared.account
+              || account.storeVersion !== prepared.account.storeVersion) {
+            throw serviceError("service-transaction-conflict", 409, { retryable: true });
+          }
+        }
+      }
+
+      if (accountIntent === "create-new-account" || context.sessionId === null) {
         const collision = await readRecord(
           transaction,
           COLLECTIONS.accounts,
