@@ -693,6 +693,47 @@ test("P279 explicit create-new-account with a valid session creates B, preserves
   assert.deepEqual(harness.driver.snapshot(), snapshotAfterFinish);
 });
 
+test("P279 create-new-account verification failure preserves the prior account and active session", async () => {
+  let rejectRegistration = false;
+  const harness = createHarness({
+    verifyRegistration(input) {
+      if (rejectRegistration) throw new Error("synthetic registration verification failure");
+      return {
+        credentialId: input.credential.id,
+        publicKey: b64(bytes(64, 81)),
+        publicKeyAlgorithm: -7,
+        signCount: 0,
+        transports: ["internal"],
+        backupEligible: true,
+        backedUp: false,
+      };
+    },
+  });
+  const first = await register(harness, {
+    operationId: "verify-account-a",
+    credentialId: credentialId(221),
+    deviceId: "verify-device-a",
+  });
+  const begin = await harness.core.beginRegistration(call(beginRegistrationBody(
+    "verify-account-b",
+    { accountIntent: "create-new-account", deviceId: "verify-device-b" }
+  ), first.sessionId));
+  const afterBegin = harness.driver.snapshot();
+  rejectRegistration = true;
+  await assert.rejects(
+    harness.core.finishRegistration(call({
+      apiVersion: 1,
+      operationId: "verify-account-b",
+      ceremonyId: begin.body.ceremonyId,
+      deviceId: "verify-device-b",
+      credential: registrationCredential(credentialId(231)),
+    }, first.sessionId)),
+    errorCode("service-webauthn-failed")
+  );
+  assert.deepEqual(harness.driver.snapshot(), afterBegin);
+  assert.equal(harness.driver.snapshot().sessions[first.sessionId].status, "active");
+});
+
 test("P279 explicit create-new-account failure and expiry preserve the prior account and active session", async () => {
   {
     const harness = createHarness();
