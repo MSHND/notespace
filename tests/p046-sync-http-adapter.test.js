@@ -182,6 +182,23 @@ test("P046 exports only a frozen provider-neutral HTTP adapter surface", () => {
   assert.throws(() => createHttpAdapter({ core, trustedOrigin: "http://sync.pocket.example", serviceRoot: SERVICE_ROOT }), /http-adapter-invalid/);
 });
 
+test("P279 explicit new-account intent uses the existing strict registration HTTP route", async () => {
+  const { adapter } = createCoreHarness();
+  const response = await adapter.handle(request("beginRegistration", {
+    apiVersion: 1,
+    operationId: "register-new-account",
+    accountIntent: "create-new-account",
+    deviceId: "device-new-account",
+  }));
+  const body = await responseBody(response);
+  assert.equal(response.status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.operationId, "register-new-account");
+  assert.equal(body.publicKeyCreationOptions.excludeCredentials.length, 0);
+  assert.equal(ROUTES.beginRegistration, "/account/passkeys/registration/begin");
+  assert.equal(Object.values(ROUTES).some((route) => /new-account/.test(route)), false);
+});
+
 test("P046 maps real browser JSON transport through core, cookie session, and encrypted upload", async () => {
   const { adapter } = createCoreHarness();
   const browser = loadBrowserClient();
