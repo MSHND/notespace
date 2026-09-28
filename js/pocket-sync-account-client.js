@@ -1333,8 +1333,11 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       }
     }
 
-    async function authenticatePasskey(input) {
+    async function authenticatePasskey(input, onAuthenticated) {
       const request = validateBeginAuthenticationRequest(input);
+      if (onAuthenticated !== undefined && typeof onAuthenticated !== "function") {
+        throw accountError("account-client-invalid");
+      }
       const beginRaw = await callService(service, "beginAuthentication", request);
       const begin = validateBeginAuthenticationResponse(
         beginRaw,
@@ -1372,12 +1375,24 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
           prfEvaluationInput: begin.prfEvaluationInput,
           bootstrap: begin.bootstrap === true,
         });
+        const authenticated = Object.freeze(Object.assign(
+          {},
+          buildSuccess(finish, serialised.prf),
+          { bootstrap: begin.bootstrap === true }
+        ));
+        if (onAuthenticated) await onAuthenticated(authenticated);
         completed = true;
-        return Object.freeze(Object.assign({}, buildSuccess(finish, serialised.prf), {
-          bootstrap: begin.bootstrap === true,
+        if (!onAuthenticated || !serialised.prf.outputBytes) return authenticated;
+        return Object.freeze(Object.assign({}, authenticated, {
+          prf: Object.freeze({
+            status: "handled",
+            evaluationInput: serialised.prf.evaluationInput,
+          }),
         }));
       } finally {
-        if (!completed && serialised?.prf?.outputBytes) serialised.prf.outputBytes.fill(0);
+        if (serialised?.prf?.outputBytes && (!completed || onAuthenticated)) {
+          serialised.prf.outputBytes.fill(0);
+        }
       }
     }
 
