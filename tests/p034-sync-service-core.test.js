@@ -596,7 +596,6 @@ test("P279 explicit create-new-account without a prior session creates one fresh
   assert.deepEqual(snapshot.accounts[registration.accountId].credentialIds, [registration.credentialId]);
   assert.equal(snapshot.sessions[registration.sessionId].accountId, registration.accountId);
   assert.equal(snapshot.sessions[registration.sessionId].status, "active");
-  assert.equal(snapshot.ceremonies["register-explicit-new"].accountIntent, "create-new-account");
   assert.equal(snapshot.ceremonies["register-explicit-new"].mode, "create-new-account");
 
   const replay = await harness.core.finishRegistration(call({
@@ -650,7 +649,6 @@ test("P279 explicit create-new-account with a valid session creates B, preserves
   assert.equal(Object.keys(afterBegin.credentials).length, 1);
 
   const ceremony = afterBegin.ceremonies["register-account-b"];
-  assert.equal(ceremony.accountIntent, "create-new-account");
   assert.equal(ceremony.mode, "create-new-account");
   assert.equal(ceremony.priorSessionId, first.sessionId);
   assert.notEqual(ceremony.accountId, first.accountId);
@@ -1583,7 +1581,7 @@ test("strict schemas preserve exact service record fields", async () => {
       "schemaVersion", "sessionId", "status", "storeVersion",
     ],
     ceremonies: [
-      "accountId", "accountIntent", "beginBody", "ceremonyId", "ceremonyType", "challenge",
+      "accountId", "beginBody", "ceremonyId", "ceremonyType", "challenge",
       "completedResult", "deviceId", "expiresAt", "finishDigest", "kind", "mode", "operationId",
       "prfEvaluationInput", "priorSessionId", "requestDigest", "schemaVersion", "storeVersion",
     ],
