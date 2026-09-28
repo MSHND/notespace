@@ -784,6 +784,7 @@ test("P278 no-consumer authentication preserves available raw PRF compatibility"
     },
     now: () => NOW,
   });
+  assert.equal(client.authenticatePasskey.length, 1);
   const result = await client.authenticatePasskey({
     apiVersion: 1,
     operationId: "authentication-operation",
