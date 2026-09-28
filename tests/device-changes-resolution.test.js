@@ -548,6 +548,7 @@ function createIntegrationContext(options = {}) {
     "js/pocket-editor-metadata.js",
     "js/pocket-pe-import-preserve.js",
     "js/pocket-storage.js",
+    "js/pocket-first-use-document.js",
     "js/pocket-import.js",
     "js/pocket-editor-copy.js",
     "js/pocket-history-status.js",

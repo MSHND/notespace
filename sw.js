@@ -17,6 +17,7 @@ const SHELL_FILES = [
   "./js/pocket-outline-persistence-policy.js",
   "./js/pocket-node-content.js",
   "./js/pocket-storage.js",
+  "./js/pocket-first-use-document.js",
   "./js/pocket-import.js",
   "./js/pocket-editor-copy.js",
   "./js/pocket-starling-owner-working-set-shadow.js",

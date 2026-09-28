@@ -19,6 +19,7 @@ const CORE_INDEX_SCRIPTS = [
   "js/pocket-editor-metadata.js",
   "js/pocket-pe-import-preserve.js",
   "js/pocket-storage.js",
+  "js/pocket-first-use-document.js",
   "js/pocket-import.js",
 ];
 const FULL_CONTRACT_SCRIPTS = CORE_INDEX_SCRIPTS.concat([
@@ -3732,7 +3733,7 @@ test("queued truth write reports file-session-changed and never writes the newly
 test("P061/P255/P257g fresh new-Pocket truth preserves the original starter and adds nested Copy guidance", () => {
   const context = createFullContractContext();
   const writtenAt = "2026-08-14T03:04:05.000Z";
-  const payload = context.buildEmptyPocketPayload(writtenAt);
+  const payload = context.PocketFirstUseDocument.buildFreshPayload(writtenAt);
   const nodes = plain(payload.mainThoughtTree);
   const byLabel = new Map(nodes.map((node) => [node.label, node]));
   const mind = byLabel.get("Things on my mind");
@@ -3856,7 +3857,7 @@ test("P061 existing empty Pocket truth stays empty and keeps the normal owned-em
   assert.deepEqual(plain(reopened.nodes), []);
 
   const deletedContext = createFullContractContext();
-  const starter = deletedContext.buildEmptyPocketPayload("2026-08-13T01:00:00.000Z");
+  const starter = deletedContext.PocketFirstUseDocument.buildFreshPayload("2026-08-13T01:00:00.000Z");
   const starterNormalised = deletedContext.normaliseInput(starter);
   deletedContext.applyLoadedState(starterNormalised, {
     schema: starterNormalised.schema,
