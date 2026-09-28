@@ -838,7 +838,7 @@ function validateStoredRecord(collection, input, key) {
     case COLLECTIONS.ceremonies: {
       if (input.kind !== "pocket.sync.service-ceremony"
           || !["registration", "authentication"].includes(input.ceremonyType)
-          || !["account-bound", "discoverable"].includes(input.mode)
+          || !["account-bound", "create-new-account", "discoverable"].includes(input.mode)
           || input.operationId !== key
           || !DIGEST_PATTERN.test(input.requestDigest)) {
         throw serviceError("service-state-invalid", 500);
@@ -849,6 +849,9 @@ function validateStoredRecord(collection, input, key) {
         if (input.ceremonyType !== "authentication" || input.accountId !== null
             || input.priorSessionId !== null) throw serviceError("service-state-invalid", 500);
       } else {
+        if (input.mode === "create-new-account" && input.ceremonyType !== "registration") {
+          throw serviceError("service-state-invalid", 500);
+        }
         identifier(input.accountId, "service-state-invalid");
       }
       if (input.priorSessionId !== null) identifier(input.priorSessionId, "service-state-invalid");
@@ -1359,8 +1362,12 @@ function registrationIntent(value, code = "service-request-invalid") {
 }
 
 function storedRegistrationIntent(ceremony) {
-  if (ceremony?.accountIntent === undefined) return "create-or-add-credential";
-  return registrationIntent(ceremony.accountIntent, "service-state-invalid");
+  if (ceremony?.ceremonyType !== "registration") {
+    throw serviceError("service-state-invalid", 500);
+  }
+  if (ceremony.mode === "account-bound") return "create-or-add-credential";
+  if (ceremony.mode === "create-new-account") return "create-new-account";
+  throw serviceError("service-state-invalid", 500);
 }
 
 function validateBeginRegistrationRequest(input) {
@@ -2436,7 +2443,6 @@ function createServiceCore(input) {
         storeVersion: 1,
         ceremonyType: "registration",
         mode: createNewAccount ? "create-new-account" : "account-bound",
-        accountIntent: request.accountIntent,
         operationId: request.operationId,
         ceremonyId,
         requestDigest: digest,
