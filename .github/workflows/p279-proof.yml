@@ -1,0 +1,46 @@
+name: P279 proof
+
+on:
+  push:
+    branches:
+      - candidate/p279-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p279-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Focused account service and transport proof
+        run: timeout --signal=TERM --kill-after=10s 300s node --test tests/p031-sync-account-client.test.js tests/p032-sync-remote-client.test.js tests/p034-sync-service-core.test.js tests/p046-sync-http-adapter.test.js
+      - name: P279 static boundary proof
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const activation = fs.readFileSync('js/pocket-sync-activation.js', 'utf8');
+          const syncUi = fs.readFileSync('js/pocket-sync-ui.js', 'utf8');
+          const runtime = fs.readFileSync('js/pocket-sync-browser-runtime.js', 'utf8');
+          const doorway = fs.readFileSync('js/pocket-doorway-capabilities.js', 'utf8');
+          const remote = fs.readFileSync('js/pocket-sync-remote-client.js', 'utf8');
+          const adapter = fs.readFileSync('sync-service/pocket-sync-http-adapter.js', 'utf8');
+          if (!activation.includes('accountIntent: "create-or-add-credential"')) {
+            throw new Error('source activation no longer uses create-or-add-credential');
+          }
+          if (activation.includes('"create-new-account"')) {
+            throw new Error('source activation migrated to create-new-account');
+          }
+          for (const [name, source] of [['PocketSyncUi', syncUi], ['browser runtime', runtime], ['doorway', doorway]]) {
+            if (source.includes('"create-new-account"')) throw new Error(name + ' exposes P279 intent');
+          }
+          if (remote.includes('/account/passkeys/registration/new') || adapter.includes('/account/passkeys/registration/new')) {
+            throw new Error('parallel new-account HTTP endpoint introduced');
+          }
+          NODE
