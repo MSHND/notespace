@@ -291,21 +291,72 @@ test("PRF evaluation input is canonical base64url and exactly 32 bytes", () => {
 
 test("registration and authentication requests have exact stable shapes", () => {
   const { api } = loadClient();
-  const registration = api.validateBeginRegistrationRequest({
-    apiVersion: 1,
-    operationId: "register-operation",
-    accountIntent: "create-or-add-credential",
-    deviceId: "device-opaque",
-  });
-  assert.deepEqual(Object.keys(registration), ["apiVersion", "operationId", "accountIntent", "deviceId"]);
+  for (const accountIntent of ["create-or-add-credential", "create-new-account"]) {
+    const registration = api.validateBeginRegistrationRequest({
+      apiVersion: 1,
+      operationId: "register-operation",
+      accountIntent,
+      deviceId: "device-opaque",
+    });
+    assert.deepEqual(Object.keys(registration), ["apiVersion", "operationId", "accountIntent", "deviceId"]);
+    assert.equal(registration.accountIntent, accountIntent);
+    assert.equal(Object.isFrozen(registration), true);
+    assert.throws(
+      () => api.validateBeginRegistrationRequest({ ...registration, extra: true }),
+      (e) => e.code === "registration-request-invalid"
+    );
+  }
+  assert.throws(
+    () => api.validateBeginRegistrationRequest({
+      apiVersion: 1,
+      operationId: "register-operation",
+      accountIntent: "something-else",
+      deviceId: "device-opaque",
+    }),
+    (e) => e.code === "registration-request-invalid"
+  );
   const authentication = api.validateBeginAuthenticationRequest({
     apiVersion: 1,
     operationId: "authentication-operation",
     accountLocator: "account-opaque",
   });
   assert.deepEqual(Object.keys(authentication), ["apiVersion", "operationId", "accountLocator"]);
-  assert.throws(() => api.validateBeginRegistrationRequest({ ...registration, extra: true }), (e) => e.code === "registration-request-invalid");
   assert.throws(() => api.validateBeginAuthenticationRequest({ ...authentication, password: "no" }), (e) => e.code === "authentication-request-invalid");
+});
+
+test("P279 registerPasskey preserves explicit create-new-account through the existing begin service boundary", async () => {
+  const { api } = loadClient();
+  let beginInput = null;
+  let finishCalls = 0;
+  const accountService = service({
+    async beginRegistration(input) {
+      beginInput = input;
+      return beginRegistration({ operationId: input.operationId });
+    },
+    async finishRegistration() {
+      finishCalls += 1;
+      return finishRegistration();
+    },
+  });
+  const client = api.createClient({
+    accountService,
+    webAuthn: {
+      async createCredential() { return nativeRegistrationCredential(); },
+      async getCredential() { throw new Error("unexpected"); },
+    },
+    now: () => NOW,
+  });
+  const result = await client.registerPasskey({
+    apiVersion: 1,
+    operationId: "register-operation",
+    accountIntent: "create-new-account",
+    deviceId: "device-opaque",
+  });
+  assert.equal(beginInput.accountIntent, "create-new-account");
+  assert.deepEqual(Object.keys(beginInput), ["apiVersion", "operationId", "accountIntent", "deviceId"]);
+  assert.equal(finishCalls, 1);
+  assert.equal(result.ok, true);
+  result.prf.outputBytes.fill(0);
 });
 
 test("server options require RP, user, challenge, UV, resident key, attestation and one PRF input", () => {
