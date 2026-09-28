@@ -446,6 +446,43 @@ test("request security context rejects before body, store, randomness or verifie
   assert.deepEqual(harness.verifierCalls, { registration: 0, authentication: 0 });
 });
 
+test("P279 service registration request accepts exactly the two account intents and rejects unknown or extra values", async () => {
+  for (const accountIntent of ["create-or-add-credential", "create-new-account"]) {
+    const harness = createHarness();
+    const begin = await harness.core.beginRegistration(call(beginRegistrationBody(
+      `intent-${accountIntent}`,
+      { accountIntent }
+    )));
+    assert.equal(begin.status, 200);
+    assert.equal(begin.body.operationId, `intent-${accountIntent}`);
+  }
+
+  {
+    const harness = createHarness();
+    const before = harness.driver.snapshot();
+    await assert.rejects(
+      harness.core.beginRegistration(call(beginRegistrationBody("intent-unknown", {
+        accountIntent: "something-else",
+      }))),
+      errorCode("service-request-invalid")
+    );
+    assert.deepEqual(harness.driver.snapshot(), before);
+  }
+
+  {
+    const harness = createHarness();
+    const before = harness.driver.snapshot();
+    await assert.rejects(
+      harness.core.beginRegistration(call({
+        ...beginRegistrationBody("intent-extra"),
+        extra: true,
+      })),
+      errorCode("service-request-invalid")
+    );
+    assert.deepEqual(harness.driver.snapshot(), before);
+  }
+});
+
 test("registration begin persists only one reusable pending ceremony with P031-valid options", async () => {
   const browser = loadBrowserContracts();
   const harness = createHarness();
