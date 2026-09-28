@@ -1542,7 +1542,7 @@ test("strict schemas preserve exact service record fields", async () => {
       "schemaVersion", "sessionId", "status", "storeVersion",
     ],
     ceremonies: [
-      "accountId", "beginBody", "ceremonyId", "ceremonyType", "challenge",
+      "accountId", "accountIntent", "beginBody", "ceremonyId", "ceremonyType", "challenge",
       "completedResult", "deviceId", "expiresAt", "finishDigest", "kind", "mode", "operationId",
       "prfEvaluationInput", "priorSessionId", "requestDigest", "schemaVersion", "storeVersion",
     ],
