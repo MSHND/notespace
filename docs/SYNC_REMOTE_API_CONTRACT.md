@@ -73,6 +73,17 @@ Request:
 }
 ```
 
+`accountIntent` accepts exactly two values:
+
+- `create-or-add-credential` — preserves the existing v1 behaviour. With no valid account session, registration targets a fresh account. With a valid account session, registration targets that same account and adds the new credential there; the existing session-rotation semantics remain unchanged.
+- `create-new-account` — always targets a genuinely fresh account identity, even when a valid account session already exists. The valid prior session is context for later session replacement only; the new credential is not appended to the currently authenticated account, and that prior account record remains unchanged.
+
+For `create-new-account`, only the prior session may be replaced/revoked, and only after the fresh account/credential commit succeeds atomically. Failed, cancelled, expired or otherwise uncommitted registration creates no new account and does not revoke the prior session.
+
+The two intents use the same existing `/account/passkeys/registration/begin` and `/account/passkeys/registration/finish` endpoints. There is no parallel `/registration/new` route. `create-new-account` is explicit caller intent; it must never be inferred from a failed or cancelled Open/authentication attempt.
+
+Current source-handover activation still uses `create-or-add-credential`. No current production caller uses `create-new-account`, P279 exposes no user-facing New command, and this registration contract does not itself create a Synced Pocket.
+
 Response:
 
 ```json
