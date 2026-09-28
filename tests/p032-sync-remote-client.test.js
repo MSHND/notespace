@@ -502,6 +502,36 @@ test("begin registration validates before one exact transport call and validates
   }), (error) => error.code === "passkey-ceremony-mismatch");
 });
 
+test("P279 create-new-account uses the existing beginRegistration transport route unchanged", async () => {
+  const { api } = loadProduction();
+  const calls = [];
+  const service = api.createAccountService({
+    transport: validTransport((route, body) => {
+      calls.push([route, body]);
+      return {
+        status: 200,
+        body: fixtures.beginRegistration({ operationId: body.operationId }),
+      };
+    }),
+    now: () => fixtures.NOW,
+  });
+  const result = await service.beginRegistration({
+    apiVersion: 1,
+    operationId: "register-new-account",
+    accountIntent: "create-new-account",
+    deviceId: "device-new-account",
+  });
+  assert.equal(result.operationId, "register-new-account");
+  assert.deepEqual(calls.map(([route]) => route), ["beginRegistration"]);
+  assert.deepEqual(plain(calls[0][1]), {
+    apiVersion: 1,
+    operationId: "register-new-account",
+    accountIntent: "create-new-account",
+    deviceId: "device-new-account",
+  });
+  assert.equal(api.ROUTES?.createNewAccount, undefined);
+});
+
 test("finish registration binds route, request, operation, ceremony, and credential without a cache", async () => {
   const { api, account } = loadProduction();
   const credential = account.serializeRegistrationCredential(
