@@ -1351,6 +1351,18 @@ function validateDiscoverableAuthenticationOptions(input, code = "service-state-
   return frozen(options);
 }
 
+function registrationIntent(value, code = "service-request-invalid") {
+  if (!["create-or-add-credential", "create-new-account"].includes(value)) {
+    throw serviceError(code, code === "service-state-invalid" ? 500 : 400);
+  }
+  return value;
+}
+
+function storedRegistrationIntent(ceremony) {
+  if (ceremony?.accountIntent === undefined) return "create-or-add-credential";
+  return registrationIntent(ceremony.accountIntent, "service-state-invalid");
+}
+
 function validateBeginRegistrationRequest(input) {
   const value = exactObject(input, [
     "apiVersion",
@@ -1358,14 +1370,13 @@ function validateBeginRegistrationRequest(input) {
     "accountIntent",
     "deviceId",
   ], ["apiVersion", "operationId", "accountIntent", "deviceId"]);
-  if (value.apiVersion !== POLICY.apiVersion
-      || value.accountIntent !== "create-or-add-credential") {
+  if (value.apiVersion !== POLICY.apiVersion) {
     throw serviceError("service-request-invalid");
   }
   return frozen({
     apiVersion: 1,
     operationId: identifier(value.operationId),
-    accountIntent: "create-or-add-credential",
+    accountIntent: registrationIntent(value.accountIntent),
     deviceId: identifier(value.deviceId),
   });
 }
