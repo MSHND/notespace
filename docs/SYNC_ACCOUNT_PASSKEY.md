@@ -17,7 +17,16 @@ The injected account service has exactly four asynchronous methods:
 - `beginAuthentication(request)`; and
 - `finishAuthentication(request)`.
 
-Every operation uses `apiVersion: 1`, an opaque operation ID, an opaque short-lived ceremony ID and an explicit expiry. Registration begins with the intent `create-or-add-credential` and an opaque device ID. Authentication may carry an opaque account locator. Unknown fields, mismatched operation/ceremony/credential identities, changed PRF input and unsupported versions fail closed.
+Every operation uses `apiVersion: 1`, an opaque operation ID, an opaque short-lived ceremony ID and an explicit expiry. Registration requires one of exactly two explicit intents plus an opaque device ID: `create-or-add-credential` or `create-new-account`. Authentication may carry an opaque account locator. Unknown fields, unknown registration intents, mismatched operation/ceremony/credential identities, changed PRF input and unsupported versions fail closed.
+
+The two registration intents are deliberately distinct:
+
+- `create-or-add-credential` preserves the existing v1 behaviour. With no valid account session it creates a fresh account. With a valid account session it registers the new credential on that same account and keeps the existing session-rotation semantics.
+- `create-new-account` always targets a genuinely fresh account identity. A valid existing session is prior-session context only: the new credential is never appended to the currently authenticated account, that prior account data remains unchanged, and only the prior session may be replaced/revoked after the new account is successfully committed. Failed, cancelled or expired registration does not create the new account or revoke the prior session.
+
+Both intents use the same existing registration begin/finish service methods and HTTP endpoints; there is no parallel new-account registration endpoint. `create-new-account` is explicit caller intent and must never be inferred from a failed or cancelled Open/authentication attempt.
+
+Current source-handover activation still uses `create-or-add-credential`. No current production caller uses `create-new-account`, P279 does not expose a user-facing New command, and account registration alone does not create a Synced Pocket.
 
 The client performs no retry. Service exceptions become the stable display-safe reason `account-service-failed`; raw service messages are not exposed.
 
