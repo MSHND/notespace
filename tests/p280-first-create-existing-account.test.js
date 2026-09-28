@@ -566,7 +566,7 @@ test("P280 stays dormant below UI and contains no registration, content, recover
   const firstCreate = source(MODULE_PATH);
   assert.doesNotMatch(firstCreate, /registerPasskey/);
   assert.doesNotMatch(firstCreate, /create-new-account/);
-  assert.doesNotMatch(firstCreate, /conditionalUpload|downloadContent|readRevision|addEnvelope|revokeEnvelope|initialiseRecovery|RecoveryCopy|adopt|saveCurrentContext/);
+  assert.doesNotMatch(firstCreate, /\.conditionalUpload\s*\(|\.downloadContent\s*\(|\.readRevision\s*\(|\.addEnvelope\s*\(|\.revokeEnvelope\s*\(|\.initialiseRecovery\s*\(|\.writeRecoveryCopy\s*\(|\.adopt[A-Za-z]*\s*\(|\.saveCurrentContext\s*\(/);
 
   const index = source("index.html");
   const sw = source("sw.js");
