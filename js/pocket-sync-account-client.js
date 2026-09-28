@@ -845,13 +845,13 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       "deviceId",
     ], ["apiVersion", "operationId", "accountIntent", "deviceId"], code);
     if (request.apiVersion !== POLICY.apiVersion
-        || request.accountIntent !== "create-or-add-credential") {
+        || !["create-or-add-credential", "create-new-account"].includes(request.accountIntent)) {
       throw accountError(code);
     }
     return freezeTree({
       apiVersion: POLICY.apiVersion,
       operationId: identifier(request.operationId, code),
-      accountIntent: "create-or-add-credential",
+      accountIntent: request.accountIntent,
       deviceId: identifier(request.deviceId, code),
     });
   }
