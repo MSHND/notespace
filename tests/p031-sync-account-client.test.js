@@ -773,3 +773,265 @@ test("P193g invalid authentication options fail before browser get and fabricate
   );
   assert.equal(getCalls, 0);
 });
+
+test("P278 no-consumer authentication preserves available raw PRF compatibility", async () => {
+  const { api } = loadClient();
+  const client = api.createClient({
+    accountService: service(),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { return nativeAuthenticationCredential(); },
+    },
+    now: () => NOW,
+  });
+  const result = await client.authenticatePasskey({
+    apiVersion: 1,
+    operationId: "authentication-operation",
+    accountLocator: "account-opaque",
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.accountAuthenticated, true);
+  assert.equal(result.contentUnlocked, false);
+  assert.equal(result.accountId, "account-opaque");
+  assert.equal(result.credentialId, CREDENTIAL_ID);
+  assert.equal(result.credentialVersion, 1);
+  assert.equal(result.accountPolicyVersion, 1);
+  assert.equal(result.bootstrap, false);
+  assert.equal(result.prf.status, "available");
+  assert.equal(result.prf.evaluationInput, PRF_INPUT);
+  assert.deepEqual(Array.from(result.prf.outputBytes), Array.from(PRF_OUTPUT));
+  result.prf.outputBytes.fill(0);
+});
+
+test("P278 existing no-consumer failure path still zeroes serialised raw PRF", async () => {
+  const trackedPrfCopies = [];
+  class TrackingUint8Array extends Uint8Array {
+    constructor(...args) {
+      super(...args);
+      if (this.byteLength === PRF_OUTPUT.byteLength
+          && Array.from(this).every((value, index) => value === PRF_OUTPUT[index])) {
+        trackedPrfCopies.push(this);
+      }
+    }
+  }
+  const { api } = loadClient({ Uint8Array: TrackingUint8Array });
+  const client = api.createClient({
+    accountService: service({
+      async finishAuthentication() { throw new Error("private service failure"); },
+    }),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { return nativeAuthenticationCredential(); },
+    },
+    now: () => NOW,
+  });
+  await assert.rejects(
+    client.authenticatePasskey({ apiVersion: 1, operationId: "authentication-operation" }),
+    (error) => error.code === "account-service-failed"
+  );
+  assert.equal(trackedPrfCopies.length, 1);
+  assert.deepEqual(Array.from(trackedPrfCopies[0]), new Array(32).fill(0));
+});
+
+test("P278 authentication consumer sees raw PRF only after validated finish and returns handled metadata", async () => {
+  const { api } = loadClient();
+  let finishSucceeded = false;
+  let consumerCalls = 0;
+  let rawReference = null;
+  const client = api.createClient({
+    accountService: service({
+      async finishAuthentication() {
+        finishSucceeded = true;
+        return finishAuthentication();
+      },
+    }),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { return nativeAuthenticationCredential(); },
+    },
+    now: () => NOW,
+  });
+  const result = await client.authenticatePasskey({
+    apiVersion: 1,
+    operationId: "authentication-operation",
+    accountLocator: "account-opaque",
+  }, async (authenticated) => {
+    consumerCalls += 1;
+    assert.equal(finishSucceeded, true);
+    assert.equal(authenticated.ok, true);
+    assert.equal(authenticated.accountAuthenticated, true);
+    assert.equal(authenticated.contentUnlocked, false);
+    assert.equal(authenticated.accountId, "account-opaque");
+    assert.equal(authenticated.credentialId, CREDENTIAL_ID);
+    assert.equal(authenticated.credentialVersion, 1);
+    assert.equal(authenticated.accountPolicyVersion, 1);
+    assert.equal(authenticated.bootstrap, false);
+    assert.equal(authenticated.prf.status, "available");
+    assert.equal(authenticated.prf.evaluationInput, PRF_INPUT);
+    assert.deepEqual(Array.from(authenticated.prf.outputBytes), Array.from(PRF_OUTPUT));
+    rawReference = authenticated.prf.outputBytes;
+    await Promise.resolve();
+    assert.deepEqual(Array.from(rawReference), Array.from(PRF_OUTPUT));
+    return { mustNotEscape: "private-consumer-return" };
+  });
+  assert.equal(consumerCalls, 1);
+  assert.deepEqual(Array.from(rawReference), new Array(32).fill(0));
+  assert.deepEqual(JSON.parse(JSON.stringify(result.prf)), {
+    status: "handled",
+    evaluationInput: PRF_INPUT,
+  });
+  assert.equal(Object.prototype.hasOwnProperty.call(result.prf, "outputBytes"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "mustNotEscape"), false);
+  assert.equal(JSON.stringify(result).includes("private-consumer-return"), false);
+});
+
+test("P278 authentication consumer rejection propagates but always zeroes raw PRF", async () => {
+  const { api } = loadClient();
+  const consumerFailure = new Error("synthetic-private-consumer-failure");
+  let rawReference = null;
+  const client = api.createClient({
+    accountService: service(),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { return nativeAuthenticationCredential(); },
+    },
+    now: () => NOW,
+  });
+  await assert.rejects(
+    client.authenticatePasskey({
+      apiVersion: 1,
+      operationId: "authentication-operation",
+    }, async (authenticated) => {
+      rawReference = authenticated.prf.outputBytes;
+      assert.deepEqual(Array.from(rawReference), Array.from(PRF_OUTPUT));
+      await Promise.resolve();
+      throw consumerFailure;
+    }),
+    (error) => error === consumerFailure
+  );
+  assert.deepEqual(Array.from(rawReference), new Array(32).fill(0));
+});
+
+test("P278 authentication consumer preserves unavailable PRF metadata without fabricating handled material", async () => {
+  const { api } = loadClient();
+  let consumerCalls = 0;
+  const client = api.createClient({
+    accountService: service(),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() {
+        return nativeAuthenticationCredential({ prf: {} });
+      },
+    },
+    now: () => NOW,
+  });
+  const result = await client.authenticatePasskey({
+    apiVersion: 1,
+    operationId: "authentication-operation",
+  }, async (authenticated) => {
+    consumerCalls += 1;
+    assert.equal(authenticated.prf.status, "unavailable");
+    assert.equal(authenticated.prf.evaluationInput, PRF_INPUT);
+    assert.equal(Object.prototype.hasOwnProperty.call(authenticated.prf, "outputBytes"), false);
+  });
+  assert.equal(consumerCalls, 1);
+  assert.equal(result.prf.status, "unavailable");
+  assert.equal(result.prf.evaluationInput, PRF_INPUT);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.prf, "outputBytes"), false);
+});
+
+test("P278 invalid authentication consumer fails before any account ceremony call", async () => {
+  const { api } = loadClient();
+  let beginCalls = 0;
+  const client = api.createClient({
+    accountService: service({
+      async beginAuthentication() {
+        beginCalls += 1;
+        return beginAuthentication();
+      },
+    }),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { throw new Error("unexpected"); },
+    },
+    now: () => NOW,
+  });
+  await assert.rejects(
+    client.authenticatePasskey(
+      { apiVersion: 1, operationId: "authentication-operation" },
+      { not: "a-function" }
+    ),
+    (error) => error.code === "account-client-invalid"
+  );
+  assert.equal(beginCalls, 0);
+});
+
+test("P278 bootstrap authentication keeps its existing no-PRF shape in consumer mode", async () => {
+  const { api } = loadClient();
+  const bootstrapBegin = {
+    apiVersion: 1,
+    ok: true,
+    operationId: "authentication-operation",
+    ceremonyId: "authentication-ceremony",
+    expiresAt: EXPIRES,
+    bootstrap: true,
+    publicKeyRequestOptions: {
+      challenge: CHALLENGE,
+      timeout: 120000,
+      rpId: "pocket.example",
+      userVerification: "required",
+    },
+  };
+  const bootstrapFinish = {
+    apiVersion: 1,
+    ok: true,
+    operationId: "authentication-operation",
+    ceremonyId: "authentication-ceremony",
+    accountId: "account-opaque",
+    credentialId: CREDENTIAL_ID,
+    credentialVersion: 1,
+    accountPolicyVersion: 1,
+    bootstrap: true,
+  };
+  let consumerCalls = 0;
+  const client = api.createClient({
+    accountService: service({
+      async beginAuthentication() { return bootstrapBegin; },
+      async finishAuthentication() { return bootstrapFinish; },
+    }),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { throw new Error("wrong authentication path"); },
+      async getDiscoverableCredential() {
+        return nativeAuthenticationCredential({});
+      },
+    },
+    now: () => NOW,
+  });
+  const result = await client.authenticatePasskey({
+    apiVersion: 1,
+    operationId: "authentication-operation",
+  }, async (authenticated) => {
+    consumerCalls += 1;
+    assert.equal(authenticated.bootstrap, true);
+    assert.equal(authenticated.prf.status, "not-requested");
+    assert.equal(authenticated.prf.evaluationInput, null);
+    assert.equal(Object.prototype.hasOwnProperty.call(authenticated.prf, "outputBytes"), false);
+  });
+  assert.equal(consumerCalls, 1);
+  assert.equal(result.bootstrap, true);
+  assert.equal(result.prf.status, "not-requested");
+  assert.equal(result.prf.evaluationInput, null);
+  assert.equal(Object.prototype.hasOwnProperty.call(result.prf, "outputBytes"), false);
+});
+
+test("P278 authentication consumer boundary introduces no secret persistence, logging, or UI/global state", () => {
+  const moduleSource = source(MODULE_PATH);
+  assert.doesNotMatch(moduleSource,
+    /localStorage|sessionStorage|indexedDB|document\.cookie|console\.|telemetry|postMessage|dispatchEvent/);
+  assert.doesNotMatch(moduleSource,
+    /global\.(?:prf|rawPrf|authenticationPrf|authenticatedAccount)\s*=/i);
+  assert.match(moduleSource, /if \(onAuthenticated\) await onAuthenticated\(authenticated\)/);
+  assert.match(moduleSource, /serialised\.prf\.outputBytes\.fill\(0\)/);
+});
+
