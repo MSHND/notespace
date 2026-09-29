@@ -13,6 +13,10 @@ device record for explicit, conditional Saves.
     "ownerKind", "activationId", "syncedPocketId", "deviceId",
     "confirmedRemoteRevision", "syncPending",
   ]);
+  const OWNERLESS_ACTIVATION_OWNER_FIELDS = Object.freeze([
+    ...ACTIVATION_OWNER_FIELDS,
+    "ownerlessReadiness",
+  ]);
   const ACTIVATION_DRAFT_FIELDS = Object.freeze([
     "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
     "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
@@ -128,52 +132,94 @@ device record for explicit, conditional Saves.
   }
 
   function activationOwner(input) {
-    const value = exactObject(input, ACTIVATION_OWNER_FIELDS, "activation-not-eligible");
+    const ownerless = isObject(input)
+      && Object.prototype.hasOwnProperty.call(input, "ownerlessReadiness");
+    const value = exactObject(
+      input,
+      ownerless ? OWNERLESS_ACTIVATION_OWNER_FIELDS : ACTIVATION_OWNER_FIELDS,
+      "activation-not-eligible"
+    );
     if (value.ownerKind !== "synced"
         || value.confirmedRemoteRevision !== 1
-        || value.syncPending !== false) {
+        || value.syncPending !== false
+        || (ownerless && !isObject(value.ownerlessReadiness))) {
       throw controllerError("activation-not-eligible");
     }
     return Object.freeze({
       activationId: identifier(value.activationId, "activation-not-eligible"),
       syncedPocketId: identifier(value.syncedPocketId, "activation-not-eligible"),
       deviceId: identifier(value.deviceId, "activation-not-eligible"),
+      ownerlessReadiness: ownerless ? freeze(value.ownerlessReadiness) : null,
     });
   }
 
-  function activationRecordIsReady(found, requested) {
+  function activationRecordIsReady(config, found, requested) {
     const record = found?.record;
     const draft = found?.draft;
-    if (!isObject(draft) || Object.keys(draft).length !== ACTIVATION_DRAFT_FIELDS.length
-        || !ACTIVATION_DRAFT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(draft, field))) {
-      return false;
-    }
-    if (!record || !draft || record.kind !== "pocket.sync.device-state"
+    if (!record || !isObject(draft) || record.kind !== "pocket.sync.device-state"
         || record.syncedPocketId !== requested.syncedPocketId
         || record.deviceId !== requested.deviceId
         || record.remote?.confirmedRevision !== 1
         || record.remote?.pending !== null || record.remote?.conflict !== null
         || draft.activationId !== requested.activationId
         || draft.syncedPocketId !== requested.syncedPocketId
-        || draft.deviceId !== requested.deviceId
-        || draft.stage !== "ready-for-adoption"
-        || draft.adopted !== false
-        || draft.sourceSaved !== true
-        || draft.recoveryCopyStored !== true
-        || draft.confirmedRemoteRevision !== 1
-        || draft.pendingOperation !== null
-        || draft.kind !== "pocket.sync.activation-draft"
-        || draft.schemaVersion !== 1
-        || !["json", "vault"].includes(draft.sourceOwnerKind)
-        || typeof draft.sourceContinuityId !== "string" || draft.sourceContinuityId.length < 1
-        || !Number.isSafeInteger(draft.keySetVersion) || draft.keySetVersion < 2
-        || draft.recoveryVersion !== 1 || typeof draft.accountLocator !== "string"
-        || draft.accountLocator.length < 1 || draft.recoveryRoot !== null
-        || draft.recoveryPackage !== null || draft.registrationContinuation !== null
-        || !isObject(draft.account) || !isObject(draft.content)
-        || draft.content.context?.syncedPocketId !== requested.syncedPocketId
-        || draft.content.context?.revision !== 1) return false;
-    return true;
+        || draft.deviceId !== requested.deviceId) {
+      return false;
+    }
+
+    if (draft.schemaVersion === 1) {
+      if (requested.ownerlessReadiness !== null
+          || Object.keys(draft).length !== ACTIVATION_DRAFT_FIELDS.length
+          || !ACTIVATION_DRAFT_FIELDS.every(
+            (field) => Object.prototype.hasOwnProperty.call(draft, field)
+          )
+          || draft.stage !== "ready-for-adoption"
+          || draft.adopted !== false
+          || draft.sourceSaved !== true
+          || draft.recoveryCopyStored !== true
+          || draft.confirmedRemoteRevision !== 1
+          || draft.pendingOperation !== null
+          || draft.kind !== "pocket.sync.activation-draft"
+          || !["json", "vault"].includes(draft.sourceOwnerKind)
+          || typeof draft.sourceContinuityId !== "string" || draft.sourceContinuityId.length < 1
+          || !Number.isSafeInteger(draft.keySetVersion) || draft.keySetVersion < 2
+          || draft.recoveryVersion !== 1 || typeof draft.accountLocator !== "string"
+          || draft.accountLocator.length < 1 || draft.recoveryRoot !== null
+          || draft.recoveryPackage !== null || draft.registrationContinuation !== null
+          || !isObject(draft.account) || !isObject(draft.content)
+          || draft.content.context?.syncedPocketId !== requested.syncedPocketId
+          || draft.content.context?.revision !== 1) return false;
+      return true;
+    }
+
+    const ownerlessContract = global.PocketSyncOwnerlessActivationDraft;
+    const securityContract = global.PocketSyncSecurityContract;
+    if (draft.schemaVersion !== 2 || requested.ownerlessReadiness === null
+        || !isObject(ownerlessContract)
+        || typeof ownerlessContract.classifyReadyForAdoption !== "function"
+        || !isObject(securityContract)
+        || typeof securityContract.validateOwnerlessActivationReadiness !== "function") {
+      return false;
+    }
+    let classified;
+    let readiness;
+    try {
+      classified = ownerlessContract.classifyReadyForAdoption(draft, {
+        securityContract,
+        crypto: config.crypto,
+      });
+      readiness = securityContract.validateOwnerlessActivationReadiness(
+        requested.ownerlessReadiness
+      );
+    } catch (_error) {
+      return false;
+    }
+    return !!classified
+      && classified.activationId === requested.activationId
+      && classified.syncedPocketId === requested.syncedPocketId
+      && classified.deviceId === requested.deviceId
+      && readiness?.ok === true
+      && readiness.ready === true;
   }
 
   function ownerSnapshot(owner) {
@@ -440,7 +486,7 @@ device record for explicit, conditional Saves.
       let found;
       try { found = await config.deviceStore.readActivation(requested.activationId); }
       catch (_error) { return result("activation-state-unavailable"); }
-      if (!activationRecordIsReady(found, requested)) return result("activation-not-eligible");
+      if (!activationRecordIsReady(config, found, requested)) return result("activation-not-eligible");
 
       let bundle;
       try {
