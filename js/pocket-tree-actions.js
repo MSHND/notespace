@@ -148,7 +148,7 @@ function deleteNodeById(nodeId, options = {}) {
         : "This cannot be undone except via Undo.";
       pendingDeleteConfirmNodeId = node.id;
       pendingDeleteConfirmExpiresAt = nowMs + TREE_DELETE_CONFIRM_WINDOW_MS;
-      setStatus(`${message} ${guidance} Press - or Delete again to confirm.`, "", {
+      setStatus(`Delete again to confirm · Esc cancels · ${message} ${guidance}`, "warn", {
         durationMs: TREE_DELETE_CONFIRM_WINDOW_MS,
       });
       refocusTreeNavigation(state.selectedId || node.id);
