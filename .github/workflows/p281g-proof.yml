@@ -1,0 +1,19 @@
+name: P281g proof
+
+on:
+  push:
+
+jobs:
+  p281g-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Focused P281g composed proof
+        run: timeout 180s node --test tests/p281g-delete-confirmation-card.test.js tests/p281-main-backspace-delete-safety.test.js tests/p281d-status-projection.test.js tests/p249-main-type-to-filter-unification.test.js
+      - name: Pocket check
+        run: npm run check
