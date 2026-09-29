@@ -780,49 +780,69 @@ without adding UI, a live synced owner, background work, or deployment state.
       return Object.assign({}, jsonClone(draft), changes);
     }
 
+    async function buildPasskeyPrfEnvelope(execution, credentialIdInput, prf) {
+      const credentialId = identifier(credentialIdInput, "activation-state-invalid");
+      if (!isObject(prf) || !["available", "unavailable"].includes(prf.status)) {
+        throw activationError("activation-state-invalid");
+      }
+      if (prf.status === "unavailable") {
+        if (Object.prototype.hasOwnProperty.call(prf, "outputBytes")) {
+          throw activationError("activation-state-invalid");
+        }
+        return Object.freeze({ prfEnvelope: null, prfStatus: "skipped" });
+      }
+      const output = prf.outputBytes;
+      if (!(output instanceof Uint8Array) || output.byteLength !== 32) {
+        throw activationError("activation-state-invalid");
+      }
+      const context = {
+        syncedPocketId: execution.draft.syncedPocketId,
+        envelopeId: execution.draft.ids.prfEnvelopeId,
+        envelopeKind: "passkey-prf",
+        envelopeVersion: 1,
+      };
+      const derived = await checked(
+        execution,
+        config.crypto.createDerivedWrappingKey(output, context)
+      );
+      const bundle = await checked(
+        execution,
+        config.crypto.openMasterKeyBundle(
+          execution.record.deviceEnvelope.record,
+          execution.record.deviceWrappingKey,
+          execution.record.deviceEnvelope.context,
+          [{ context, wrappingKey: derived.key }]
+        )
+      );
+      return Object.freeze({
+        prfEnvelope: envelopeInput(context, bundle.envelopes[0].record, {
+          credentialId,
+          kdf: derived.kdf,
+          kdfSalt: derived.kdfSalt,
+          derivationVersion: derived.derivationVersion,
+        }),
+        prfStatus: "available",
+      });
+    }
+
     async function preparePrfEnvelope(execution, credentialReady) {
       const continuation = jsonClone(credentialReady.continuation);
-      let prfEnvelope = null;
-      let prfStatus = "skipped";
       const output = credentialReady.prf?.outputBytes;
-      if (credentialReady.prf?.status === "available" && output instanceof Uint8Array) {
-        try {
-          const context = {
-            syncedPocketId: execution.draft.syncedPocketId,
-            envelopeId: execution.draft.ids.prfEnvelopeId,
-            envelopeKind: "passkey-prf",
-            envelopeVersion: 1,
-          };
-          const derived = await checked(
-            execution,
-            config.crypto.createDerivedWrappingKey(output, context)
-          );
-          const bundle = await checked(
-            execution,
-            config.crypto.openMasterKeyBundle(
-              execution.record.deviceEnvelope.record,
-              execution.record.deviceWrappingKey,
-              execution.record.deviceEnvelope.context,
-              [{ context, wrappingKey: derived.key }]
-            )
-          );
-          prfEnvelope = envelopeInput(context, bundle.envelopes[0].record, {
-            credentialId: continuation.credential.id,
-            kdf: derived.kdf,
-            kdfSalt: derived.kdfSalt,
-            derivationVersion: derived.derivationVersion,
-          });
-          prfStatus = "available";
-        } finally {
-          output.fill(0);
-        }
+      try {
+        const prepared = await buildPasskeyPrfEnvelope(
+          execution,
+          continuation.credential.id,
+          credentialReady.prf
+        );
+        await persistDraft(execution, changedDraft(execution.draft, {
+          registrationContinuation: continuation,
+          prfEnvelope: prepared.prfEnvelope,
+          prfStatus: prepared.prfStatus,
+          pendingOperation: "account-registration-finish",
+        }));
+      } finally {
+        if (output instanceof Uint8Array) output.fill(0);
       }
-      await persistDraft(execution, changedDraft(execution.draft, {
-        registrationContinuation: continuation,
-        prfEnvelope,
-        prfStatus,
-        pendingOperation: "account-registration-finish",
-      }));
     }
 
     function accountState(result) {
