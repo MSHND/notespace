@@ -1,0 +1,34 @@
+name: P284 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p284-proof
+
+jobs:
+  p284-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P284/P284a contract and discovery proof
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p284-ownerless-v2-draft-discovery.test.js
+      - name: Device-store compatibility
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p030-sync-device-store.test.js
+      - name: Existing-account first-create compatibility
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p280-first-create-existing-account.test.js
+      - name: Activation v1 dormancy compatibility
+        timeout-minutes: 3
+        run: timeout --signal=TERM --kill-after=10s 120s node --test --test-name-pattern="P039 module is one dormant, inert and exact frozen activation boundary" tests/p039-sync-activation.test.js
+      - name: Additional-device dormancy compatibility
+        timeout-minutes: 3
+        run: timeout --signal=TERM --kill-after=10s 120s node --test --test-name-pattern="P052 remains dormant until explicitly created" tests/p052-additional-device.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
