@@ -360,6 +360,24 @@ test("P281g first Delete arms one guard and renders explicit actions with zero m
   assert.deepEqual(buttons.map((button) => button.textContent), ["Confirm delete", "Cancel"]);
 });
 
+test("P281j leaf Delete card is only the target question plus the existing two actions", () => {
+  const h = makeHarness();
+  h.context.state.selectedId = "D";
+  const before = plain(h.context.state.nodes);
+
+  const event = h.keydown("Delete");
+
+  assert.equal(event.defaultPrevented, true);
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.context.pendingDeleteConfirmNodeId, "D");
+  assert.equal(h.titleToast.children[0].textContent, 'Delete "Sibling"?');
+  assert.doesNotMatch(h.titleToast.textContent, /cannot be undone|except via Undo|whole branch/i);
+
+  const buttons = h.actionButtons();
+  assert.equal(buttons.length, 2);
+  assert.deepEqual(buttons.map((button) => button.textContent), ["Confirm delete", "Cancel"]);
+});
+
 test("P281g Enter and Confirm delete converge on the same one-shot confirm semantic", () => {
   const keyboard = makeHarness();
   keyboard.keydown("Delete");
