@@ -128,6 +128,7 @@ function makeComposedHarness() {
     pendingPathImport: null,
     pendingDeleteConfirmNodeId: "",
     pendingDeleteConfirmExpiresAt: 0,
+    pendingDeleteConfirmProjectionToken: null,
     TREE_DELETE_CONFIRM_WINDOW_MS: 12000,
     lastDeleteUndoSnapshot: null,
     lastEditUndoSnapshot: null,
@@ -211,7 +212,7 @@ function makeComposedHarness() {
   const history = source(HISTORY);
   const realStatusFunctions = functionRange(history, "compactTopStatus", "formatSaveClockLabel");
   vm.runInContext(
-    `let titleToastTimer = null; let statusActionHandler = null;\n${realStatusFunctions}`,
+    `let titleToastTimer = null; let statusProjectionToken = null; let statusProjectionDismissHandler = null; let statusActionHandler = null;\n${realStatusFunctions}`,
     context,
     { filename: HISTORY }
   );
