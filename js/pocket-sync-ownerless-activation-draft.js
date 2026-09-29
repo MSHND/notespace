@@ -379,6 +379,30 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     return deepFreeze(jsonClone(draft));
   }
 
+  function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
+    let draft;
+    try {
+      draft = validate(input, configInput);
+    } catch (_error) {
+      throw contractError("ownerless-activation-completion-invalid");
+    }
+    if (draft.stage !== expectedStage || draft.adopted !== expectedAdopted) return null;
+    return Object.freeze({
+      state: expectedStage,
+      activationId: draft.activationId,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+    });
+  }
+
+  function classifyReadyForAdoption(input, configInput) {
+    return classifyCompletion(input, configInput, "ready-for-adoption", false);
+  }
+
+  function classifyAdopted(input, configInput) {
+    return classifyCompletion(input, configInput, "adopted", true);
+  }
+
   function classifyDiscoveryCandidate(input) {
     if (!isObject(input)) throw contractError("ownerless-activation-discovery-invalid");
     if (input.kind !== POLICY.kind) throw contractError("ownerless-activation-discovery-invalid");
@@ -402,6 +426,8 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
   global.PocketSyncOwnerlessActivationDraft = Object.freeze({
     POLICY,
     validate,
+    classifyReadyForAdoption,
+    classifyAdopted,
     classifyDiscoveryCandidate,
   });
 })(typeof window !== "undefined" ? window : globalThis);
