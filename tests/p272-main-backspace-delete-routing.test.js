@@ -110,14 +110,20 @@ test("P272 Backspace with a non-empty Filter remains Filter-edit only, including
   assert.equal(h.deletes(), 0, "the keypress removing the last Filter character must not become delete intent");
 });
 
-test("P272 a subsequent plain Backspace with an already-empty Filter routes to existing deleteSelected owner", () => {
+test("P281 a subsequent plain Backspace with an already-empty Filter is consumed and inert", () => {
   const h = makeHarness({ query: "" });
+  const selectedBefore = h.context.state.selectedId;
+  const armedBefore = h.context.pendingDeleteConfirmNodeId;
+  const expiresBefore = h.context.pendingDeleteConfirmExpiresAt;
 
   const event = h.keydown("Backspace");
 
   assert.equal(event.defaultPrevented, true);
   assert.equal(h.applied.length, 0);
-  assert.equal(h.deletes(), 1);
+  assert.equal(h.deletes(), 0);
+  assert.equal(h.context.state.selectedId, selectedBefore);
+  assert.equal(h.context.pendingDeleteConfirmNodeId, armedBefore);
+  assert.equal(h.context.pendingDeleteConfirmExpiresAt, expiresBefore);
 });
 
 test("P272 existing Delete / minus / Subtract routing remains the same deleteSelected owner", () => {
@@ -130,7 +136,7 @@ test("P272 existing Delete / minus / Subtract routing remains the same deleteSel
   }
 });
 
-test("P272 Backspace delete intent is blocked outside ordinary Main keyboard ownership", () => {
+test("P281 Backspace remains untouched outside ordinary Main keyboard ownership", () => {
   const cases = [
     { name: "Move mode", options: { moveMode: true } },
     { name: "inline editing", options: { inlineEditId: "A" } },
@@ -153,14 +159,15 @@ test("P272 Backspace delete intent is blocked outside ordinary Main keyboard own
   assert.equal(modified.deletes(), 0, "modified Backspace");
 });
 
-test("P272 source has no OS-specific delete routing and reuses deleteSelected", () => {
+test("P281 source has no OS-specific routing; Backspace is inert while deliberate delete keys retain deleteSelected", () => {
   const actions = source();
   const handlerStart = actions.indexOf("function handleTreeKeydown(ev)");
   assert.ok(handlerStart >= 0);
   const handler = actions.slice(handlerStart);
 
-  assert.doesNotMatch(handler, /navigator\.(platform|userAgent)|MacIntel|Macintosh|macOS/i);
-  assert.match(handler, /ev\.key === "Backspace"[\s\S]{0,240}deleteSelected\(\)/);
+  assert.doesNotMatch(handler, /navigator\.(platform|userAgent)|MacIntel|Macintosh|macOS|Windows/i);
+  assert.doesNotMatch(handler, /ev\.key === "Backspace"[\s\S]{0,240}deleteSelected\(\)/);
   assert.match(handler, /ev\.key === "-" \|\| ev\.key === "Subtract" \|\| ev\.key === "Delete"/);
+  assert.match(handler, /ev\.key === "Backspace"[\s\S]{0,240}ev\.preventDefault\(\);[\s\S]{0,80}return;/);
   assert.match(handler, /if \(isMainImplicitFilterBackspace\(ev\)\)/);
 });
