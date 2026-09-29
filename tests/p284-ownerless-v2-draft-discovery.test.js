@@ -210,10 +210,22 @@ function toV1(v2) {
   const value = clone(v2);
   delete value.activationMode;
   delete value.accountPath;
-  value.stage = "account-registered";
+  value.schemaVersion = 1;
+  value.stage = "device-staged";
   value.sourceOwnerKind = "json";
   value.sourceContinuityId = "json:source-p284";
   value.sourceSaved = true;
+  value.account = null;
+  value.pendingOperation = "account-registration";
+  value.registrationContinuation = null;
+  value.confirmedRemoteRevision = 0;
+  value.keySetVersion = 0;
+  value.recoveryVersion = 0;
+  value.accountLocator = null;
+  value.prfStatus = "pending";
+  value.prfEnvelope = null;
+  value.recoveryCopyStored = false;
+  value.adopted = false;
   return value;
 }
 
@@ -366,7 +378,7 @@ test("P284 preserves exact v1 semantics and v1 refuses ownerless/v2 lookalikes",
   assert.equal(classifier.classify(v1, {
     syncedPocketId: v1.syncedPocketId,
     deviceId: v1.deviceId,
-  }), "other-valid");
+  }), "exact-stranded");
   assert.equal(classifier.classify({ ...v1, sourceOwnerKind: "none" }, {
     syncedPocketId: v1.syncedPocketId,
     deviceId: v1.deviceId,
@@ -501,10 +513,14 @@ test("P284 ownerless finder fails closed on undecryptable or malformed relevant 
     activationId: "activation-p284-corrupt",
   }));
   const corruptedRecord = await storedRecordWithDraft(apis, v2);
-  corruptedRecord.activationDraft.record.ciphertext = corruptedRecord.activationDraft.record.ciphertext.replace(
-    /^./,
-    (character) => character === "A" ? "B" : "A"
-  );
+  const encryptedDraft = corruptedRecord.activationDraft.record;
+  corruptedRecord.activationDraft.record = {
+    ...encryptedDraft,
+    ciphertext: encryptedDraft.ciphertext.replace(
+      /^./,
+      (character) => character === "A" ? "B" : "A"
+    ),
+  };
   const corrupted = await openStore(apis, [corruptedRecord]);
   await assert.rejects(corrupted.store.findOwnerlessActivation(),
     (error) => error.code === "ownerless-activation-draft-invalid");
