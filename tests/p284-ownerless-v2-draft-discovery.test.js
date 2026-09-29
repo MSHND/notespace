@@ -338,7 +338,6 @@ test("P284 freezes one exact ownerless activation-v2 identity and field contract
       "recoveryOperationId", "recoveryLogicalChangeId",
     ],
     stages: {
-      "source-ready": 0,
       "local-material-ready": 1,
       "device-staged": 2,
       "account-ready": 3,
@@ -408,6 +407,7 @@ test("P284 ownerless v2 fails closed on field, identity, stage, source-lookalike
     { ...valid, activationMode: "source-handover" },
     { ...valid, accountPath: "other" },
     { ...valid, stage: "account-registered" },
+    { ...valid, stage: "source-ready" },
     { ...valid, sourceOwnerKind: "json" },
     { ...valid, account: { ...valid.account, outputBytes: [1, 2, 3] } },
     { ...valid, account: null },
@@ -416,6 +416,41 @@ test("P284 ownerless v2 fails closed on field, identity, stage, source-lookalike
     assert.throws(() => apis.ownerless.validate(value, config),
       (error) => error.code === "ownerless-activation-state-invalid");
   }
+});
+
+test("P284a permits existing-unbound local staging before account-ready with zero registration semantics", async () => {
+  const apis = loadProduction();
+  const config = ownerlessConfig(apis);
+  const staged = withoutUndefined(await ownerlessDraft(apis, {
+    stage: "device-staged",
+    account: null,
+    registrationContinuation: null,
+    pendingOperation: null,
+  }));
+  const checked = apis.ownerless.validate(staged, config);
+  assert.equal(checked.stage, "device-staged");
+  assert.equal(checked.account, null);
+  assert.equal(checked.registrationContinuation, null);
+  assert.equal(checked.pendingOperation, null);
+
+  for (const pendingOperation of ["account-registration", "account-registration-finish"]) {
+    assert.throws(() => apis.ownerless.validate({
+      ...staged,
+      pendingOperation,
+    }, config), (error) => error.code === "ownerless-activation-state-invalid");
+  }
+
+  assert.throws(() => apis.ownerless.validate({
+    ...staged,
+    registrationContinuation: registrationContinuation(staged),
+  }, config), (error) => error.code === "ownerless-activation-state-invalid");
+
+  const ready = withoutUndefined(await ownerlessDraft(apis));
+  assert.equal(apis.ownerless.validate(ready, config).account.accountId, "account-p284");
+  assert.throws(() => apis.ownerless.validate({
+    ...ready,
+    account: null,
+  }, config), (error) => error.code === "ownerless-activation-state-invalid");
 });
 
 test("P284 enforces existing-unbound vs new-account registration continuation semantics", async () => {
