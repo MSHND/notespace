@@ -422,6 +422,85 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     return validate(draft, configInput);
   }
 
+  function buildRegistrationStarted(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.accountPath !== "new-account"
+        || draft.stage !== "device-staged"
+        || draft.account !== null
+        || draft.registrationContinuation !== null
+        || ![null, "account-registration"].includes(draft.pendingOperation)) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "account-registration",
+    }), configInput);
+  }
+
+  function buildRegistrationPending(input, configInput) {
+    const value = exactObject(input, [
+      "draft", "registrationContinuation", "prfEnvelope", "prfStatus",
+    ], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.accountPath !== "new-account"
+        || draft.stage !== "device-staged"
+        || draft.account !== null
+        || ![null, "account-registration"].includes(draft.pendingOperation)
+        || draft.registrationContinuation !== null
+        || !["available", "skipped"].includes(value.prfStatus)) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      registrationContinuation: value.registrationContinuation,
+      prfEnvelope: value.prfEnvelope,
+      prfStatus: value.prfStatus,
+      pendingOperation: "account-registration-finish",
+    }), configInput);
+  }
+
+  function buildAccountReady(input, configInput) {
+    const value = exactObject(input, [
+      "draft", "account", "prfEnvelope", "prfStatus",
+    ], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "device-staged"
+        || draft.account !== null
+        || !["available", "skipped"].includes(value.prfStatus)) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    if (draft.accountPath === "existing-unbound") {
+      if (draft.registrationContinuation !== null || draft.pendingOperation !== null) {
+        throw contractError("ownerless-activation-builder-invalid");
+      }
+    } else if (draft.accountPath === "new-account") {
+      if (draft.registrationContinuation === null
+          || draft.pendingOperation !== "account-registration-finish") {
+        throw contractError("ownerless-activation-builder-invalid");
+      }
+      if (value.account?.prfEvaluationInput !== draft.registrationContinuation.prfEvaluationInput
+          || value.account?.credentialId !== draft.registrationContinuation.credential?.id) {
+        throw contractError("ownerless-activation-builder-invalid");
+      }
+    } else {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    if (value.prfStatus === "available") {
+      if (value.prfEnvelope?.credentialId !== value.account?.credentialId) {
+        throw contractError("ownerless-activation-builder-invalid");
+      }
+    } else if (value.prfEnvelope !== null) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "account-ready",
+      account: value.account,
+      registrationContinuation: null,
+      pendingOperation: null,
+      prfEnvelope: value.prfEnvelope,
+      prfStatus: value.prfStatus,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -470,6 +549,9 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     POLICY,
     validate,
     buildInitialDraft,
+    buildRegistrationStarted,
+    buildRegistrationPending,
+    buildAccountReady,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
