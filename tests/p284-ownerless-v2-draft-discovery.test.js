@@ -575,13 +575,13 @@ test("P284 ownerless finder fails closed on undecryptable or malformed relevant 
     (error) => error.code === "ownerless-activation-draft-invalid");
 });
 
-test("P284 leaves ownerless v2 dormant below production activation/runtime/UI composition", () => {
+test("P284 contract remains dormant below browser runtime/UI while P287 may explicitly consume it locally", () => {
   assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /PocketSyncOwnerlessActivationDraft|findOwnerlessActivation/);
-  assert.doesNotMatch(source(ACTIVATION),
     /PocketSyncOwnerlessActivationDraft|findOwnerlessActivation|ownerless-first-create/);
+  assert.match(source(ACTIVATION), /global\.PocketSyncOwnerlessActivationDraft/);
+  assert.doesNotMatch(source(ACTIVATION), /findOwnerlessActivation|PocketSyncFirstCreate/);
   assert.match(source(ACTIVATION), /draft\.schemaVersion !== 1/);
   assert.match(source(DEVICE_STORE), /findOwnerlessActivation/);
 });
