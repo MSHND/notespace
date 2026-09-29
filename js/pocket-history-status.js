@@ -879,17 +879,33 @@ function compactTopStatus(text, kind = "") {
   return msg;
 }
 
+function clearStatusActionButtons() {
+  if (!el.titleToast || typeof el.titleToast.querySelectorAll !== "function") return;
+  for (const button of el.titleToast.querySelectorAll("[data-pocket-status-action]")) {
+    button.__pocketStatusAction = null;
+    button.disabled = true;
+  }
+}
+
 function setStatus(text, kind = "", options = {}) {
   const opts = options && typeof options === "object" ? options : {};
   const action = opts.action && typeof opts.action === "object" ? opts.action : null;
   const actionLabel = cleanText(action && action.label, 20);
   const actionHandler = typeof (action && action.onClick) === "function" ? action.onClick : null;
-  statusActionHandler = actionLabel && actionHandler ? actionHandler : null;
+  const actions = Array.isArray(opts.actions)
+    ? opts.actions.slice(0, 2).map((candidate) => {
+      const label = cleanText(candidate && candidate.label, 24);
+      const handler = typeof (candidate && candidate.onClick) === "function" ? candidate.onClick : null;
+      return label && handler ? { label, handler } : null;
+    }).filter(Boolean)
+    : [];
+  statusActionHandler = actions.length === 0 && actionLabel && actionHandler ? actionHandler : null;
   if (!el.titleToast) return;
   if (titleToastTimer) {
     clearTimeout(titleToastTimer);
     titleToastTimer = null;
   }
+  clearStatusActionButtons();
   if (!text) {
     el.titleToast.textContent = "";
     el.titleToast.className = "topStatusToast";
@@ -898,23 +914,50 @@ function setStatus(text, kind = "", options = {}) {
     return;
   }
   const compact = compactTopStatus(text, kind);
-  el.titleToast.textContent = statusActionHandler ? `${compact} · ${actionLabel}` : compact;
-  el.titleToast.className = `topStatusToast${kind ? ` ${kind}` : ""}${statusActionHandler ? " action" : ""} show`;
-  if (statusActionHandler) {
-    el.titleToast.setAttribute("tabindex", "0");
-    el.titleToast.setAttribute("role", "button");
-  } else {
+  const canRenderActions = actions.length > 0
+    && typeof document !== "undefined"
+    && typeof document.createElement === "function"
+    && typeof el.titleToast.replaceChildren === "function"
+    && typeof el.titleToast.appendChild === "function";
+  if (canRenderActions) {
+    const message = document.createElement("span");
+    message.className = "topStatusMessage";
+    message.textContent = compact;
+    const actionWrap = document.createElement("span");
+    actionWrap.className = "topStatusActions";
+    for (const candidate of actions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "topStatusAction";
+      button.textContent = candidate.label;
+      button.setAttribute("data-pocket-status-action", "true");
+      button.__pocketStatusAction = candidate.handler;
+      actionWrap.appendChild(button);
+    }
+    el.titleToast.replaceChildren(message, actionWrap);
+    el.titleToast.className = `topStatusToast${kind ? ` ${kind}` : ""} actions show`;
     el.titleToast.removeAttribute("tabindex");
     el.titleToast.removeAttribute("role");
+  } else {
+    el.titleToast.textContent = statusActionHandler ? `${compact} · ${actionLabel}` : compact;
+    el.titleToast.className = `topStatusToast${kind ? ` ${kind}` : ""}${statusActionHandler ? " action" : ""} show`;
+    if (statusActionHandler) {
+      el.titleToast.setAttribute("tabindex", "0");
+      el.titleToast.setAttribute("role", "button");
+    } else {
+      el.titleToast.removeAttribute("tabindex");
+      el.titleToast.removeAttribute("role");
+    }
   }
   const requestedMs = Number(opts.durationMs);
   const defaultMs = kind === "warn" ? 4200 : 3200;
-  const actionMinMs = statusActionHandler ? 7000 : defaultMs;
+  const actionMinMs = (statusActionHandler || actions.length > 0) ? 7000 : defaultMs;
   const hideAfterMs = Number.isFinite(requestedMs) && requestedMs > 0
     ? Math.max(actionMinMs, requestedMs)
     : actionMinMs;
   titleToastTimer = window.setTimeout(() => {
     statusActionHandler = null;
+    clearStatusActionButtons();
     el.titleToast.removeAttribute("tabindex");
     el.titleToast.removeAttribute("role");
     el.titleToast.classList.remove("show");
