@@ -379,6 +379,15 @@ test("P284 preserves exact v1 semantics and v1 refuses ownerless/v2 lookalikes",
     syncedPocketId: v1.syncedPocketId,
     deviceId: v1.deviceId,
   }), "exact-stranded");
+  const vaultV1 = {
+    ...v1,
+    sourceOwnerKind: "vault",
+    sourceContinuityId: "vault:source-p284",
+  };
+  assert.equal(classifier.classify(vaultV1, {
+    syncedPocketId: vaultV1.syncedPocketId,
+    deviceId: vaultV1.deviceId,
+  }), "exact-stranded");
   assert.equal(classifier.classify({ ...v1, sourceOwnerKind: "none" }, {
     syncedPocketId: v1.syncedPocketId,
     deviceId: v1.deviceId,
