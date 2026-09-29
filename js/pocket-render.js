@@ -801,5 +801,5 @@ function deleteSelected() {
     setStatus("Select a node first.", "warn");
     return;
   }
-  deleteNodeById(state.selectedId, { confirm: false });
+  deleteNodeById(state.selectedId);
 }
