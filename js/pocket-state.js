@@ -94,6 +94,8 @@ const state = {
   },
 };
 let titleToastTimer = null;
+let statusProjectionToken = null;
+let statusProjectionDismissHandler = null;
 let saveChipTimer = null;
 let importRevealTimer = null;
 let moveModeIdleTimer = null;
@@ -108,6 +110,7 @@ let lastEditUndoSnapshot = null;
 let lastTreeUndoKind = "";
 let pendingDeleteConfirmNodeId = "";
 let pendingDeleteConfirmExpiresAt = 0;
+let pendingDeleteConfirmProjectionToken = null;
 const TREE_DELETE_CONFIRM_WINDOW_MS = 12000;
 const rowCopyToastTimers = new Map();
 const rowTouchFlashTimers = new Map();
