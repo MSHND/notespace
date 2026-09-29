@@ -146,12 +146,9 @@ function confirmPendingDeleteGuard() {
 
 function projectPendingDeleteGuard(node, childCount) {
   const message = childCount > 0
-    ? `Delete "${node.label}" and ${childCount} child item(s)?`
+    ? `Delete "${node.label}" and ${childCount} child item(s)? This removes the whole branch.`
     : `Delete "${node.label}"?`;
-  const guidance = childCount > 0
-    ? "This removes the whole branch."
-    : "This cannot be undone except via Undo.";
-  setStatus(`${message} ${guidance}`, "warn", {
+  setStatus(message, "warn", {
     durationMs: TREE_DELETE_CONFIRM_WINDOW_MS,
     actions: [
       { label: "Confirm delete", onClick: () => confirmPendingDeleteGuard() },
