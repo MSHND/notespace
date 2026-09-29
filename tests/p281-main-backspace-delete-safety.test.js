@@ -75,6 +75,7 @@ function makeHarness({ query = "", selectedId = "A" } = {}) {
     pendingPathImport: null,
     pendingDeleteConfirmNodeId: "",
     pendingDeleteConfirmExpiresAt: 0,
+    pendingDeleteConfirmProjectionToken: null,
     TREE_DELETE_CONFIRM_WINDOW_MS: 12000,
     lastDeleteUndoSnapshot: null,
     lastEditUndoSnapshot: null,
@@ -107,7 +108,9 @@ function makeHarness({ query = "", selectedId = "A" } = {}) {
     isPocketVaultRecoveryFlowOpen() { return false; },
     isPocketDeviceChangesDecisionOpen() { return false; },
     setStatus(message, tone, options) {
-      statuses.push({ message: String(message || ""), tone: String(tone || ""), options });
+      const projectionToken = {};
+      statuses.push({ message: String(message || ""), tone: String(tone || ""), options, projectionToken });
+      return projectionToken;
     },
     saveLastSaveSnapshot(payload) {
       counters.safetySnapshot += 1;
