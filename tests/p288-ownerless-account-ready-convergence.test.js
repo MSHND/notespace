@@ -369,7 +369,7 @@ test("P288 existing-unbound private bridge converges available and unavailable P
       harness,
       staged.activationId,
       "existing-unbound",
-      mode
+      mode === "available" ? "available" : "skipped"
     );
     assert.equal(draft.account.prfEvaluationInput, PRF_INPUT);
     assert.equal(JSON.stringify(result).includes("account-existing"), false);
@@ -465,7 +465,12 @@ test("P288 new-account uses exact create-new-account intent and persists continu
     if (mode === "available") {
       assert.deepEqual(Array.from(rawReference), new Array(32).fill(0));
     }
-    await assertCanonicalReady(harness, staged.activationId, "new-account", mode);
+    await assertCanonicalReady(
+      harness,
+      staged.activationId,
+      "new-account",
+      mode === "available" ? "available" : "skipped"
+    );
     assert.equal(harness.counters.content, 0);
     assert.equal(harness.counters.envelope, 0);
     assert.equal(harness.counters.recovery, 0);
@@ -542,14 +547,16 @@ test("P288 semantic target guard tolerates transient none identity and fails clo
   assert.equal(result.ok, true);
 
   let bridgeCalls = 0;
+  let stalePhase = false;
   const stale = createHarness({
     target(count) {
-      return count < 4
-        ? { ownerKind: "none", continuityId: `none-${count}` }
-        : { ownerKind: "json", continuityId: "json-owner" };
+      return stalePhase
+        ? { ownerKind: "json", continuityId: "json-owner" }
+        : { ownerKind: "none", continuityId: `none-${count}` };
     },
   });
   const staleStage = await stage(stale, "existing-unbound");
+  stalePhase = true;
   const staleResult = await stale.orchestrator.resume(
     stale.resumeDependencies(async (consumer) => {
       bridgeCalls += 1;
