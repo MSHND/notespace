@@ -831,6 +831,17 @@ function bind() {
       openCommandPalette();
       return;
     }
+    if (
+      key === "escape"
+      && typeof activePendingDeleteNodeId === "function"
+      && activePendingDeleteNodeId()
+      && typeof cancelPendingDeleteGuard === "function"
+    ) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cancelPendingDeleteGuard();
+      return;
+    }
     if (key === "escape") {
       const isInlineRenameInput = !!(target && (target.classList.contains("labelEdit") || target.closest(".labelEdit")));
       if (isInlineRenameInput) return;
