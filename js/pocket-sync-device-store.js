@@ -802,6 +802,49 @@ and a narrow atomic transaction boundary without activating a synced owner.
         : Object.freeze({ state: "match", recoveryAttemptId: match });
     }
 
+    async function findOwnerlessActivation() {
+      requireOpen();
+      const contract = global.PocketSyncOwnerlessActivationDraft;
+      if (!contract || typeof contract.classifyDiscoveryCandidate !== "function") {
+        throw deviceStoreError("ownerless-activation-contract-unavailable");
+      }
+      const records = await driver.transaction("readonly", async (transaction) => {
+        if (typeof transaction.getAll !== "function") {
+          throw deviceStoreError("device-store-driver-invalid");
+        }
+        const found = await transaction.getAll();
+        transaction.checkpoint("after-read-before-validation");
+        if (!Array.isArray(found)) throw deviceStoreError("device-store-read-invalid");
+        return found.map((record) => validateStoredRecord(record));
+      });
+      let match = null;
+      for (const record of records) {
+        if (record.kind !== FORMAT.recordKind || record.activationDraft === null) continue;
+        let draft;
+        try {
+          draft = await cryptoContract().openContent(
+            record.activationDraft.record,
+            record.deviceWrappingKey,
+            record.activationDraft.context
+          );
+        } catch (_error) {
+          throw deviceStoreError("ownerless-activation-draft-invalid");
+        }
+        let identity;
+        try {
+          identity = contract.classifyDiscoveryCandidate(draft);
+        } catch (_error) {
+          throw deviceStoreError("ownerless-activation-draft-invalid");
+        }
+        if (identity === null) continue;
+        if (match !== null) return Object.freeze({ state: "ambiguous" });
+        match = identity.activationId;
+      }
+      return match === null
+        ? Object.freeze({ state: "none" })
+        : Object.freeze({ state: "match", activationId: match });
+    }
+
     async function readAdditionalDeviceAttempt(attemptIdInput) {
       requireOpen();
       const attemptId = identifier(attemptIdInput, "additional-device-attempt-invalid");
@@ -1051,6 +1094,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
       readStoredRecord,
       readRecoveryAttempt,
       findRecoveryAttempt,
+      findOwnerlessActivation,
       readAdditionalDeviceAttempt,
       createPocket,
       replacePocket,
@@ -1283,6 +1327,7 @@ and a narrow atomic transaction boundary without activating a synced owner.
     readRecoveryAttempt: (recoveryAttemptId) => getDefaultStore()
       .readRecoveryAttempt(recoveryAttemptId),
     findRecoveryAttempt: (target) => getDefaultStore().findRecoveryAttempt(target),
+    findOwnerlessActivation: () => getDefaultStore().findOwnerlessActivation(),
     readAdditionalDeviceAttempt: (attemptId) => getDefaultStore()
       .readAdditionalDeviceAttempt(attemptId),
     createPocket: (record) => getDefaultStore().createPocket(record),
