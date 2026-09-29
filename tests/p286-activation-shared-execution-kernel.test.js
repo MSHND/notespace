@@ -103,21 +103,20 @@ test("P286 has one execution currentness seam and one execution draft-contract s
   assert.match(text, /draft\.schemaVersion !== 1/);
 });
 
-test("P286 extracts one shared local-material construction path but invokes it only from v1 activate", () => {
+test("P286 keeps one shared local-material construction path as later modes reuse it", () => {
   const text = source(MODULE);
   assert.match(text, /function buildV1InitialDraft\(input\)/);
   assert.match(text, /async function constructLocalMaterial\(execution, input\)/);
-  assert.equal([...text.matchAll(/constructLocalMaterial\(/g)].length, 2);
+  assert.equal([...text.matchAll(/async function constructLocalMaterial\(/g)].length, 1);
   assert.match(text, /draftBuilder: buildV1InitialDraft/);
   assert.match(text, /schemaVersion: 1/);
   assert.doesNotMatch(text, /schemaVersion:\s*2/);
-  assert.doesNotMatch(text, /PocketSyncOwnerlessActivationDraft|ownerless-first-create|findOwnerlessActivation|PocketSyncFirstCreate/);
-  assert.doesNotMatch(text, /prepareOwnerless|activateV2|resumeV2/);
+  assert.doesNotMatch(text, /function\s+(?:prepareOwnerless|activateV2|resumeV2|stageOwnerless)\s*\(/);
 });
 
-test("P286 leaves ownerless execution and runtime UI wiring dormant", () => {
+test("P286 shared-kernel evolution still leaves ownerless runtime and UI wiring dormant", () => {
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /findOwnerlessActivation|PocketSyncOwnerlessActivationDraft/);
+    /findOwnerlessActivation|PocketSyncOwnerlessActivationDraft|ownerless-first-create/);
   assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
