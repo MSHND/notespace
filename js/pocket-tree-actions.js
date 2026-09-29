@@ -1312,7 +1312,6 @@ function handleTreeKeydown(ev) {
     && cleanText(currentMainFilterQueryRaw(), 120).length === 0
   ) {
     ev.preventDefault();
-    deleteSelected();
     return;
   }
   if (isMainImplicitFilterBackspace(ev)) {
