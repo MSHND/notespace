@@ -22,10 +22,11 @@ function plain(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
-function functionRange(fileSource, startName, endName) {
+function functionRange(fileSource, startName, endName = "") {
   const start = fileSource.indexOf(`function ${startName}(`);
-  const end = fileSource.indexOf(`\nfunction ${endName}(`, start + 1);
   assert.ok(start >= 0, `${startName} must exist`);
+  if (!endName) return fileSource.slice(start);
+  const end = fileSource.indexOf(`\nfunction ${endName}(`, start + 1);
   assert.ok(end > start, `${endName} must follow ${startName}`);
   return fileSource.slice(start, end);
 }
@@ -218,7 +219,7 @@ function makeComposedHarness() {
   vm.runInContext(source(ACTIONS), context, { filename: ACTIONS });
 
   const render = source(RENDER);
-  const realDeleteSelected = functionRange(render, "deleteSelected", "openSelectedItemDetails");
+  const realDeleteSelected = functionRange(render, "deleteSelected");
   vm.runInContext(realDeleteSelected, context, { filename: RENDER });
 
   context.refocusTreeNavigation = function refocusTreeNavigationHarness() {
