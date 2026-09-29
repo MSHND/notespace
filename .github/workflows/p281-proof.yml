@@ -1,0 +1,56 @@
+name: P281 proof
+
+on:
+  push:
+    branches:
+      - candidate/p281-proof3
+
+permissions:
+  contents: read
+
+jobs:
+  p281-proof:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Focused Backspace and delete-owner safety proof
+        run: >-
+          timeout --signal=TERM --kill-after=10s 240s node --test
+          tests/p281-main-backspace-delete-safety.test.js
+          tests/p272-main-backspace-delete-routing.test.js
+      - name: Filter regression proof
+        run: >-
+          timeout --signal=TERM --kill-after=10s 240s node --test
+          tests/p249-main-type-to-filter-unification.test.js
+          tests/p267-filter-ordered-word-fragment-matcher.test.js
+      - name: Existing committed-delete regression proof
+        run: >-
+          timeout --signal=TERM --kill-after=10s 180s node --test
+          --test-name-pattern='P270 committed-node delete semantics remain semantic and unchanged|P270 source has one provisional discard owner and no provisional route through semantic delete'
+          tests/p270-main-save-blank-new-provisional-resolution.test.js
+      - name: Static P281 and multi-select ownership boundary
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const actions = fs.readFileSync('js/pocket-tree-actions.js','utf8');
+          const render = fs.readFileSync('js/pocket-render.js','utf8');
+          const multi = fs.readFileSync('js/pocket-multi-select.js','utf8');
+          const handler = actions.slice(actions.indexOf('function handleTreeKeydown(ev)'));
+          if (/navigator\.(platform|userAgent)|MacIntel|Macintosh|macOS|Windows/i.test(handler)) throw new Error('OS-specific routing introduced');
+          if (/ev\.key === "Backspace"[\s\S]{0,260}deleteSelected\(\)/.test(handler)) throw new Error('Backspace still reaches deleteSelected');
+          if (!/ev\.key === "-" \|\| ev\.key === "Subtract" \|\| ev\.key === "Delete"[\s\S]{0,180}deleteSelected\(\)/.test(handler)) throw new Error('deliberate delete routing changed');
+          const start = render.indexOf('function deleteSelected()');
+          const end = render.indexOf('\nfunction ', start + 20);
+          const selected = render.slice(start, end > start ? end : undefined);
+          if (!/deleteNodeById\(state\.selectedId\);/.test(selected)) throw new Error('deleteSelected does not use default guarded owner');
+          if (/confirm\s*:\s*false/.test(selected)) throw new Error('deleteSelected still bypasses guard');
+          if (!/global\.deleteSelected = function deleteSelectedWithMultiSelection\(\)/.test(multi)) throw new Error('multi-select delete wrapper missing');
+          if (!/if \(deleteMultiSelectionIfActive\(\)\) return;/.test(multi)) throw new Error('multi-select confirm owner no longer precedes single delete');
+          if (!/global\.confirm\(/.test(multi)) throw new Error('multi-select explicit confirmation owner missing');
+          NODE
