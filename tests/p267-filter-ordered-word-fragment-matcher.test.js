@@ -134,7 +134,7 @@ test("P267 Main typing still feeds the same Filter owner without focus transfer"
   h.reset();
   for (const ch of "ele") h.keydown("A", ch);
   assert.equal(h.search.value, "ele");
-  assert.equal(h.document.activeElement, h.row("A"), "typing does not move focus into Filter input");
+  assert.equal(h.document.activeElement, h.treeWrap, "typing keeps focus on stable Main owner, not Filter input");
 
   h.runPendingTimers();
   h.stop();
