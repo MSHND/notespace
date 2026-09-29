@@ -112,6 +112,22 @@
     "recoveryCopyStored",
     "syncedOwnerAdopted",
   ]);
+  const OWNERLESS_ACTIVATION_REQUIREMENTS = Object.freeze([
+    "targetCurrentOrReplaceable",
+    "canonicalPayloadPreparedLocally",
+    "masterKeyCreatedLocally",
+    "deviceRecordDurable",
+    "accountIdentityAuthenticatedAndPinned",
+    "accountEligibleForFirstCreation",
+    "initialRemoteCommitSucceeded",
+    "recoveryEnvelopeExists",
+    "recoveryCopyStored",
+    "syncedOwnerAdopted",
+  ]);
+  const OWNERLESS_ACTIVATION_READINESS_FIELDS = Object.freeze([
+    "activationPhase",
+    ...OWNERLESS_ACTIVATION_REQUIREMENTS,
+  ]);
   const REMOTE_METADATA_FIELDS = Object.freeze([
     "contractVersion",
     "accountId",
@@ -321,6 +337,30 @@
     if (preAdoption && value.syncedOwnerAdopted !== false) missing.push("syncedOwnerAdopted");
     return missing.length
       ? fail("activation-incomplete", { ready: false, missing })
+      : frozen({ ok: true, ready: true });
+  }
+
+  function validateOwnerlessActivationReadiness(input) {
+    const value = isObject(input) ? input : {};
+    const missing = [];
+    if (Object.keys(value).length !== OWNERLESS_ACTIVATION_READINESS_FIELDS.length
+        || OWNERLESS_ACTIVATION_READINESS_FIELDS.some(
+          (field) => !Object.prototype.hasOwnProperty.call(value, field)
+        )) {
+      return fail("ownerless-activation-incomplete", {
+        ready: false,
+        missing: ["ownerlessReadinessContract"],
+      });
+    }
+    if (value.activationPhase !== "pre-adoption") missing.push("activationPhase");
+    OWNERLESS_ACTIVATION_REQUIREMENTS
+      .filter((requirement) => requirement !== "syncedOwnerAdopted")
+      .forEach((requirement) => {
+        if (value[requirement] !== true) missing.push(requirement);
+      });
+    if (value.syncedOwnerAdopted !== false) missing.push("syncedOwnerAdopted");
+    return missing.length
+      ? fail("ownerless-activation-incomplete", { ready: false, missing })
       : frozen({ ok: true, ready: true });
   }
 
@@ -577,11 +617,13 @@
     ACCOUNT_AUTHENTICATION_POLICY,
     DEVICE_STORE_BOUNDARY,
     ACTIVATION_REQUIREMENTS,
+    OWNERLESS_ACTIVATION_REQUIREMENTS,
     validatePrfCeremonyResult,
     validatePublicPrfEvaluationInput,
     selectUnlockPath,
     validateRecoveryReadiness,
     validateActivationReadiness,
+    validateOwnerlessActivationReadiness,
     buildTrustedDeviceMetadata,
     buildRemoteSafeMetadata,
     buildContentRecordMetadata,
