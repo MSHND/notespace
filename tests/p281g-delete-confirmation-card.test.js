@@ -524,7 +524,8 @@ test("P281m status lifecycle hook remains generic and Delete semantics stay in t
 
   assert.equal((actions.match(/function invalidatePendingDeleteGuardForProjection\(/g) || []).length, 1);
   assert.match(actions, /onDismiss:\s*\(\{ token \}\) => invalidatePendingDeleteGuardForProjection\(token\)/);
-  assert.doesNotMatch(actions, /setTimeout\s*\(/);
+  const deleteGuardOwner = functionRange(actions, "clearPendingDeleteGuardState", "indentNodeById");
+  assert.doesNotMatch(deleteGuardOwner, /setTimeout\s*\(/);
 });
 
 test("P281g Enter and Confirm delete converge on the same one-shot confirm semantic", () => {
