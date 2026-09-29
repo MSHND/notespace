@@ -241,7 +241,7 @@ test("P281 implicit Filter Backspace edits query only, final character clears on
 });
 
 for (const key of ["Delete", "-", "Subtract"]) {
-  test(`P281 deliberate ${key} uses existing two-press guarded subtree delete owner`, () => {
+  test(`P281 deliberate ${key} uses existing guarded subtree delete owner with explicit confirmation`, () => {
     const h = makeHarness({ selectedId: "A" });
     const nodesBefore = plain(h.context.state.nodes);
     const tombstonesBefore = plain(h.context.state.tombstones);
@@ -258,11 +258,23 @@ for (const key of ["Delete", "-", "Subtract"]) {
     assert.ok(h.context.pendingDeleteConfirmExpiresAt > Date.now());
     assert.match(h.statuses.at(-1).message, /Delete "Parent" and 2 child item\(s\)\?/);
     assert.match(h.statuses.at(-1).message, /whole branch/i);
-    assert.match(h.statuses.at(-1).message, /again to confirm/i);
+    assert.doesNotMatch(h.statuses.at(-1).message, /again to confirm/i);
+    assert.deepEqual(
+      h.statuses.at(-1).options.actions.map((action) => action.label),
+      ["Confirm delete", "Cancel"]
+    );
 
-    const second = h.keydown(key);
-    assert.equal(second.defaultPrevented, true);
+    const repeatedDelete = h.keydown(key);
+    assert.equal(repeatedDelete.defaultPrevented, true);
     assert.equal(h.counters.deleteSelected, 2);
+    assert.deepEqual(plain(h.context.state.nodes), nodesBefore);
+    assert.deepEqual(plain(h.context.state.tombstones), tombstonesBefore);
+    assert.equal(h.context.state.operationHighWater, highWaterBefore);
+    assert.equal(h.counters.safetySnapshot, 0);
+    assert.equal(h.context.pendingDeleteConfirmNodeId, "A");
+
+    const confirmed = h.statuses.at(-1).options.actions[0].onClick();
+    assert.equal(confirmed, true);
     assert.deepEqual(h.context.state.nodes.map((node) => node.id), ["D"]);
     assert.deepEqual(h.context.state.tombstones.map((entry) => entry.id), ["A", "B", "C"]);
     assert.equal(h.context.state.operationHighWater, highWaterBefore + 1);
@@ -358,7 +370,9 @@ test("P281 static ownership has no Backspace delete path, keeps deliberate delet
   const ownerEnd = actions.indexOf("\nfunction ", ownerStart + 20);
   const deleteOwner = actions.slice(ownerStart, ownerEnd);
   assert.match(deleteOwner, /const opts = \{ confirm: true, \.\.\.options \}/);
-  assert.match(deleteOwner, /pendingDeleteConfirmNodeId === node\.id/);
+  assert.match(actions, /function confirmPendingDeleteGuard\(\)/);
+  assert.match(actions, /function cancelPendingDeleteGuard\(\)/);
+  assert.match(deleteOwner, /projectPendingDeleteGuard\(node, childCount\)/);
   assert.match(deleteOwner, /TREE_DELETE_CONFIRM_WINDOW_MS/);
   assert.match(deleteOwner, /saveLastSaveSnapshot\(safetyPayload\)/);
   assert.match(deleteOwner, /createTreeUndoSnapshot\("delete"\)/);
