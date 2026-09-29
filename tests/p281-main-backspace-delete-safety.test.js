@@ -260,7 +260,7 @@ for (const key of ["Delete", "-", "Subtract"]) {
     assert.match(h.statuses.at(-1).message, /whole branch/i);
     assert.doesNotMatch(h.statuses.at(-1).message, /again to confirm/i);
     assert.deepEqual(
-      h.statuses.at(-1).options.actions.map((action) => action.label),
+      plain(h.statuses.at(-1).options.actions.map((action) => action.label)),
       ["Confirm delete", "Cancel"]
     );
 
