@@ -412,6 +412,121 @@ test("P281j leaf Delete card is only the target question plus the existing two a
   assert.deepEqual(buttons.map((button) => button.textContent), ["Confirm delete", "Cancel"]);
 });
 
+test("P281m natural Möbius expiry invalidates its exact Delete arm and restores ordinary Enter", () => {
+  const h = makeHarness();
+  const before = plain(h.context.state.nodes);
+
+  h.keydown("Delete");
+  const expiryTimer = h.latestTimerId();
+
+  assert.equal(h.context.pendingDeleteConfirmNodeId, "A");
+  assert.ok(h.context.pendingDeleteConfirmProjectionToken);
+  assert.match(h.titleToast.className, /\bshow\b/);
+
+  assert.equal(h.runTimer(expiryTimer), true);
+
+  assert.equal(h.context.pendingDeleteConfirmNodeId, "");
+  assert.equal(h.context.pendingDeleteConfirmExpiresAt, 0);
+  assert.equal(h.context.pendingDeleteConfirmProjectionToken, null);
+  assert.doesNotMatch(h.titleToast.className, /\bshow\b/);
+  assert.deepEqual(plain(h.context.state.nodes), before);
+
+  const enter = h.keydown("Enter");
+  assert.equal(enter.defaultPrevented, true);
+  assert.equal(h.counters.routeEnter, 1);
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.counters.safetySnapshot, 0);
+});
+
+test("P281m unrelated replacement or explicit clear immediately invalidates the visible Delete arm", () => {
+  const replacement = makeHarness();
+  const beforeReplacement = plain(replacement.context.state.nodes);
+
+  replacement.keydown("Delete");
+  const armedToken = replacement.context.pendingDeleteConfirmProjectionToken;
+  assert.ok(armedToken);
+
+  replacement.context.setStatus("Unrelated status.", "ok");
+
+  assert.equal(replacement.context.pendingDeleteConfirmNodeId, "");
+  assert.equal(replacement.context.pendingDeleteConfirmProjectionToken, null);
+  assert.equal(replacement.titleToast.textContent, "Unrelated status.");
+  assert.deepEqual(plain(replacement.context.state.nodes), beforeReplacement);
+
+  const enterAfterReplacement = replacement.keydown("Enter");
+  assert.equal(enterAfterReplacement.defaultPrevented, true);
+  assert.equal(replacement.counters.routeEnter, 1);
+  assert.deepEqual(plain(replacement.context.state.nodes), beforeReplacement);
+
+  replacement.keydown("Delete");
+  assert.equal(replacement.context.pendingDeleteConfirmNodeId, "A");
+  assert.ok(replacement.context.pendingDeleteConfirmProjectionToken);
+  assert.notEqual(replacement.context.pendingDeleteConfirmProjectionToken, armedToken);
+  assert.match(replacement.titleToast.className, /\bshow\b/);
+
+  const cleared = makeHarness();
+  const beforeClear = plain(cleared.context.state.nodes);
+  cleared.keydown("Delete");
+  cleared.context.setStatus("");
+
+  assert.equal(cleared.context.pendingDeleteConfirmNodeId, "");
+  assert.equal(cleared.context.pendingDeleteConfirmProjectionToken, null);
+  assert.equal(cleared.titleToast.className, "topStatusToast");
+  const enterAfterClear = cleared.keydown("Enter");
+  assert.equal(enterAfterClear.defaultPrevented, true);
+  assert.equal(cleared.counters.routeEnter, 1);
+  assert.deepEqual(plain(cleared.context.state.nodes), beforeClear);
+});
+
+test("P281m repeated Delete refreshes the visible arm and stale old expiry cannot clear the fresh projection", () => {
+  const h = makeHarness();
+  const before = plain(h.context.state.nodes);
+
+  h.keydown("Delete");
+  const firstTimerId = h.latestTimerId();
+  const staleExpiry = h.timerCallback(firstTimerId);
+  const firstArmToken = h.context.pendingDeleteConfirmProjectionToken;
+
+  assert.equal(typeof staleExpiry, "function");
+  assert.ok(firstArmToken);
+
+  h.keydown("Delete");
+
+  const secondTimerId = h.latestTimerId();
+  const secondArmToken = h.context.pendingDeleteConfirmProjectionToken;
+  assert.ok(secondTimerId > firstTimerId);
+  assert.ok(secondArmToken);
+  assert.notEqual(secondArmToken, firstArmToken);
+  assert.equal(h.context.pendingDeleteConfirmNodeId, "A");
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.counters.safetySnapshot, 0);
+
+  staleExpiry();
+
+  assert.equal(h.context.pendingDeleteConfirmNodeId, "A");
+  assert.equal(h.context.pendingDeleteConfirmProjectionToken, secondArmToken);
+  assert.match(h.titleToast.className, /\bshow\b/);
+  assert.deepEqual(plain(h.context.state.nodes), before);
+
+  const enter = h.keydown("Enter");
+  assert.equal(enter.defaultPrevented, true);
+  assert.deepEqual(ids(h), ["D"]);
+  assert.equal(h.counters.safetySnapshot, 1);
+});
+
+test("P281m status lifecycle hook remains generic and Delete semantics stay in the one guard owner", () => {
+  const history = source(HISTORY);
+  const actions = source(ACTIONS);
+
+  assert.match(history, /opts\.onDismiss/);
+  assert.match(history, /finishStatusProjection\(/);
+  assert.doesNotMatch(history, /pendingDeleteConfirm|confirmPendingDelete|cancelPendingDelete/i);
+
+  assert.equal((actions.match(/function invalidatePendingDeleteGuardForProjection\(/g) || []).length, 1);
+  assert.match(actions, /onDismiss:\s*\(\{ token \}\) => invalidatePendingDeleteGuardForProjection\(token\)/);
+  assert.doesNotMatch(actions, /setTimeout\s*\(/);
+});
+
 test("P281g Enter and Confirm delete converge on the same one-shot confirm semantic", () => {
   const keyboard = makeHarness();
   keyboard.keydown("Delete");
