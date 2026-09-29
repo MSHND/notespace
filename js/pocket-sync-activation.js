@@ -900,6 +900,205 @@ without adding UI, a live synced owner, background work, or deployment state.
       return null;
     }
 
+    function ownerlessContractConfig() {
+      return {
+        securityContract: config.securityContract,
+        crypto: config.crypto,
+      };
+    }
+
+    function validateExistingOwnerlessAccountReady(input) {
+      const ready = exactObject(input, [
+        "accountPath", "accountId", "credentialId", "credentialVersion",
+        "accountPolicyVersion", "prf",
+      ], "ownerless-account-ready-failed");
+      if (ready.accountPath !== "existing-unbound"
+          || !Number.isSafeInteger(ready.credentialVersion) || ready.credentialVersion < 1
+          || !Number.isSafeInteger(ready.accountPolicyVersion) || ready.accountPolicyVersion < 1) {
+        throw activationError("ownerless-account-ready-failed");
+      }
+      identifier(ready.accountId, "ownerless-account-ready-failed");
+      identifier(ready.credentialId, "ownerless-account-ready-failed");
+      if (!isObject(ready.prf)
+          || !["available", "unavailable"].includes(ready.prf.status)
+          || byteLength(ready.prf.evaluationInput) !== 32) {
+        throw activationError("ownerless-account-ready-failed");
+      }
+      if (ready.prf.status === "available") {
+        exactObject(ready.prf, [
+          "status", "evaluationInput", "outputBytes",
+        ], "ownerless-account-ready-failed");
+        if (!(ready.prf.outputBytes instanceof Uint8Array)
+            || ready.prf.outputBytes.byteLength !== 32) {
+          throw activationError("ownerless-account-ready-failed");
+        }
+      } else {
+        exactObject(ready.prf, [
+          "status", "evaluationInput",
+        ], "ownerless-account-ready-failed");
+      }
+      return ready;
+    }
+
+    function ownerlessAccountIdentity(input, code = "ownerless-account-ready-failed") {
+      if (!isObject(input)
+          || !Number.isSafeInteger(input.credentialVersion) || input.credentialVersion < 1
+          || !Number.isSafeInteger(input.accountPolicyVersion) || input.accountPolicyVersion < 1
+          || byteLength(input.prfEvaluationInput) !== 32) {
+        throw activationError(code);
+      }
+      return {
+        accountId: identifier(input.accountId, code),
+        credentialId: identifier(input.credentialId, code),
+        credentialVersion: input.credentialVersion,
+        accountPolicyVersion: input.accountPolicyVersion,
+        prfEvaluationInput: input.prfEvaluationInput,
+      };
+    }
+
+    async function prepareOwnerlessNewAccountCredential(execution, ownerless, credentialReady) {
+      if (!isObject(credentialReady) || !isObject(credentialReady.continuation)
+          || !isObject(credentialReady.prf)
+          || credentialReady.prf.evaluationInput
+            !== credentialReady.continuation.prfEvaluationInput
+          || byteLength(credentialReady.prf.evaluationInput) !== 32) {
+        throw activationError("ownerless-account-ready-failed");
+      }
+      const continuation = jsonClone(credentialReady.continuation);
+      const output = credentialReady.prf.outputBytes;
+      try {
+        const prepared = await buildPasskeyPrfEnvelope(
+          execution,
+          continuation.credential?.id,
+          credentialReady.prf
+        );
+        const nextDraft = ownerless.buildRegistrationPending({
+          draft: execution.draft,
+          registrationContinuation: continuation,
+          prfEnvelope: prepared.prfEnvelope,
+          prfStatus: prepared.prfStatus,
+        }, ownerlessContractConfig());
+        await persistDraft(execution, nextDraft);
+      } finally {
+        if (output instanceof Uint8Array) output.fill(0);
+      }
+    }
+
+    async function completeExistingOwnerlessAccount(execution, ownerless) {
+      let callbackCalls = 0;
+      let prepared = null;
+      try {
+        await checked(execution, execution.dependencies.withExistingAccountReady(async (input) => {
+          callbackCalls += 1;
+          if (callbackCalls !== 1) throw activationError("ownerless-account-ready-failed");
+          await ensureCurrent(execution);
+          const ready = validateExistingOwnerlessAccountReady(input);
+          const prf = await buildPasskeyPrfEnvelope(
+            execution,
+            ready.credentialId,
+            ready.prf
+          );
+          await ensureCurrent(execution);
+          prepared = {
+            account: ownerlessAccountIdentity({
+              accountId: ready.accountId,
+              credentialId: ready.credentialId,
+              credentialVersion: ready.credentialVersion,
+              accountPolicyVersion: ready.accountPolicyVersion,
+              prfEvaluationInput: ready.prf.evaluationInput,
+            }),
+            prfEnvelope: prf.prfEnvelope,
+            prfStatus: prf.prfStatus,
+          };
+        }));
+      } catch (error) {
+        if (error?.code === "ownerless-target-stale") throw error;
+        return ownerlessFailure("ownerless-account-ready-failed", {
+          activationId: execution.draft.activationId,
+          locallyDurable: true,
+        });
+      }
+      if (callbackCalls !== 1 || prepared === null) {
+        return ownerlessFailure("ownerless-account-ready-failed", {
+          activationId: execution.draft.activationId,
+          locallyDurable: true,
+        });
+      }
+      const nextDraft = ownerless.buildAccountReady({
+        draft: execution.draft,
+        account: prepared.account,
+        prfEnvelope: prepared.prfEnvelope,
+        prfStatus: prepared.prfStatus,
+      }, ownerlessContractConfig());
+      await persistDraft(execution, nextDraft);
+      return ownerlessAccountReadyResult(execution.draft);
+    }
+
+    async function completeNewOwnerlessAccount(execution, ownerless) {
+      let result;
+      try {
+        if (execution.draft.registrationContinuation !== null) {
+          result = await checked(
+            execution,
+            config.accountClient.finishRegistration(execution.draft.registrationContinuation)
+          );
+        } else {
+          if (execution.draft.pendingOperation !== "account-registration") {
+            const started = ownerless.buildRegistrationStarted({
+              draft: execution.draft,
+            }, ownerlessContractConfig());
+            await persistDraft(execution, started);
+          }
+          result = await checked(execution, config.accountClient.registerPasskey({
+            apiVersion: 1,
+            operationId: execution.draft.ids.registrationOperationId,
+            accountIntent: "create-new-account",
+            deviceId: execution.draft.deviceId,
+          }, (ready) => prepareOwnerlessNewAccountCredential(execution, ownerless, ready)));
+        }
+      } catch (error) {
+        if (error?.code === "ownerless-target-stale") throw error;
+        return ownerlessFailure("ownerless-account-ready-failed", {
+          activationId: execution.draft.activationId,
+          locallyDurable: true,
+          resumable: execution.draft.registrationContinuation !== null,
+        });
+      }
+
+      if (execution.draft.registrationContinuation === null
+          || execution.draft.pendingOperation !== "account-registration-finish") {
+        return ownerlessFailure("ownerless-account-ready-failed", {
+          activationId: execution.draft.activationId,
+          locallyDurable: true,
+          resumable: false,
+        });
+      }
+      let account;
+      try {
+        const state = accountState(result);
+        account = ownerlessAccountIdentity(state);
+        if (account.prfEvaluationInput !== execution.draft.registrationContinuation.prfEvaluationInput
+            || account.credentialId !== execution.draft.registrationContinuation.credential.id) {
+          throw activationError("ownerless-account-ready-failed");
+        }
+      } catch (_error) {
+        return ownerlessFailure("ownerless-account-ready-failed", {
+          activationId: execution.draft.activationId,
+          locallyDurable: true,
+          resumable: true,
+        });
+      }
+
+      const nextDraft = ownerless.buildAccountReady({
+        draft: execution.draft,
+        account,
+        prfEnvelope: execution.draft.prfEnvelope,
+        prfStatus: execution.draft.prfStatus,
+      }, ownerlessContractConfig());
+      await persistDraft(execution, nextDraft);
+      return ownerlessAccountReadyResult(execution.draft);
+    }
+
     async function commitContent(execution) {
       if (stageAtLeast(execution.draft, "content-committed")) return null;
       if (execution.draft.pendingOperation === "content-conflict") {
