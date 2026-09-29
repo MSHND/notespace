@@ -1153,6 +1153,16 @@ function isMainImplicitFilterBackspace(ev) {
   return cleanText(currentMainFilterQueryRaw(), 120).length > 0;
 }
 
+function stabiliseMainImplicitFilterKeyboardOwner() {
+  if (!(el.treeWrap instanceof HTMLElement)) return false;
+  try {
+    el.treeWrap.focus({ preventScroll: true });
+  } catch {
+    el.treeWrap.focus();
+  }
+  return true;
+}
+
 function settlePendingFilterBeforeMainCommand(ev) {
   if (cleanText(currentMainFilterQueryRaw(), 120).length === 0) return false;
   if (
@@ -1316,6 +1326,7 @@ function handleTreeKeydown(ev) {
   }
   if (isMainImplicitFilterBackspace(ev)) {
     ev.preventDefault();
+    stabiliseMainImplicitFilterKeyboardOwner();
     const characters = Array.from(currentMainFilterQueryRaw());
     characters.pop();
     const nextValue = characters.join("");
@@ -1330,6 +1341,7 @@ function handleTreeKeydown(ev) {
   }
   if (isMainImplicitFilterCharacter(ev)) {
     ev.preventDefault();
+    stabiliseMainImplicitFilterKeyboardOwner();
     if (typeof window.applyPocketFilterQueryValue === "function") {
       window.applyPocketFilterQueryValue(currentMainFilterQueryRaw() + String(ev.key || ""), {
         keepMainFocus: true,
