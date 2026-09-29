@@ -325,8 +325,8 @@ test("P281d first guarded Delete stays non-mutating, keeps readable confirm/canc
 
   assert.match(h.titleToast.className, /\bwarn\b/);
   assert.match(h.titleToast.className, /\bshow\b/);
-  assert.match(h.titleToast.textContent, /Delete again to confirm/i);
-  assert.match(h.titleToast.textContent, /Esc cancels/i);
+  assert.match(h.titleToast.textContent, /Delete "/i);
+  assert.doesNotMatch(h.titleToast.textContent, /again to confirm/i);
   assert.ok(h.titleToast.textContent.length <= 86, "compact warning must remain bounded");
 
   const escape = h.keydown("Escape");
