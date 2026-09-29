@@ -2056,6 +2056,25 @@ async function loadFromFile(file, options = {}) {
 }
 
 function triggerStatusAction(event) {
+  const target = event && event.target instanceof HTMLElement ? event.target : null;
+  const explicitAction = target && typeof target.closest === "function"
+    ? target.closest("[data-pocket-status-action]")
+    : null;
+  if (explicitAction) {
+    event.preventDefault();
+    event.stopPropagation();
+    const action = explicitAction.__pocketStatusAction;
+    explicitAction.__pocketStatusAction = null;
+    explicitAction.disabled = true;
+    if (typeof action !== "function") return false;
+    try {
+      action();
+    } catch (err) {
+      console.error("[pocket-lite] status action failed:", err);
+      setStatus("Could not complete action.", "warn");
+    }
+    return true;
+  }
   if (!statusActionHandler) return false;
   event.preventDefault();
   event.stopPropagation();
