@@ -1,0 +1,26 @@
+name: P280a focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p280a-proof
+
+jobs:
+  p280a-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+        timeout-minutes: 3
+      - name: Prove P278 P279 P280 compatibility
+        run: timeout 5m node --test tests/p031-sync-account-client.test.js tests/p032-sync-remote-client.test.js tests/p034-sync-service-core.test.js tests/p046-sync-http-adapter.test.js tests/p280-first-create-existing-account.test.js
+        timeout-minutes: 6
+      - name: Pocket check
+        run: timeout 3m npm run check
+        timeout-minutes: 4
