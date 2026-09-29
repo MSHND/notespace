@@ -379,6 +379,49 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     return deepFreeze(jsonClone(draft));
   }
 
+  function buildInitialDraft(input, configInput) {
+    const value = exactObject(input, [
+      "accountPath", "activationId", "syncedPocketId", "deviceId", "ids",
+      "content", "deviceEnvelope", "recoveryEnvelope", "recoveryVerifier",
+      "recoveryAuthorisation", "recoveryRoot", "createdAt",
+    ], "ownerless-activation-builder-invalid");
+    if (!ACCOUNT_PATHS.includes(value.accountPath)) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    const draft = {
+      kind: POLICY.kind,
+      schemaVersion: POLICY.schemaVersion,
+      activationMode: POLICY.activationMode,
+      accountPath: value.accountPath,
+      activationId: value.activationId,
+      stage: "device-staged",
+      syncedPocketId: value.syncedPocketId,
+      deviceId: value.deviceId,
+      ids: value.ids,
+      content: value.content,
+      deviceEnvelope: value.deviceEnvelope,
+      prfEnvelope: null,
+      prfStatus: "pending",
+      recoveryEnvelope: value.recoveryEnvelope,
+      recoveryVerifier: value.recoveryVerifier,
+      recoveryAuthorisation: value.recoveryAuthorisation,
+      recoveryRoot: value.recoveryRoot,
+      recoveryPackage: null,
+      registrationContinuation: null,
+      account: null,
+      confirmedRemoteRevision: 0,
+      keySetVersion: 0,
+      recoveryVersion: 0,
+      accountLocator: null,
+      pendingOperation: null,
+      recoveryCopyStored: false,
+      adopted: false,
+      createdAt: value.createdAt,
+      updatedAt: value.createdAt,
+    };
+    return validate(draft, configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -426,6 +469,7 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
   global.PocketSyncOwnerlessActivationDraft = Object.freeze({
     POLICY,
     validate,
+    buildInitialDraft,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
