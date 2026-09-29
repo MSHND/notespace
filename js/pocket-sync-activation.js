@@ -1822,11 +1822,42 @@ without adding UI, a live synced owner, background work, or deployment state.
         if (execution.draft.activationId !== options.activationId
             || execution.draft.schemaVersion !== 2
             || execution.draft.activationMode !== "ownerless-first-create"
-            || execution.draft.stage !== "device-staged") {
+            || execution.draft.stage !== "device-staged"
+            || execution.draft.account !== null) {
           return ownerlessFailure("ownerless-activation-state-invalid", {
             activationId: options.activationId,
           });
         }
+
+        if (execution.draft.accountPath === "existing-unbound") {
+          if (execution.draft.registrationContinuation !== null
+              || execution.draft.pendingOperation !== null
+              || execution.draft.prfStatus !== "pending"
+              || execution.draft.prfEnvelope !== null) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+        } else if (execution.draft.accountPath === "new-account") {
+          const hasContinuation = execution.draft.registrationContinuation !== null;
+          const validFresh = !hasContinuation
+            && [null, "account-registration"].includes(execution.draft.pendingOperation)
+            && execution.draft.prfStatus === "pending"
+            && execution.draft.prfEnvelope === null;
+          const validPendingFinish = hasContinuation
+            && execution.draft.pendingOperation === "account-registration-finish"
+            && ["available", "skipped"].includes(execution.draft.prfStatus);
+          if (!validFresh && !validPendingFinish) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+        } else {
+          return ownerlessFailure("ownerless-activation-state-invalid", {
+            activationId: options.activationId,
+          });
+        }
+
         await ensureCurrent(execution);
 
         if (execution.draft.accountPath === "existing-unbound") {
