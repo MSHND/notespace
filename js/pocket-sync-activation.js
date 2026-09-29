@@ -1784,7 +1784,83 @@ without adding UI, a live synced owner, background work, or deployment state.
       }
     }
 
+    async function resumeOwnerless(dependenciesInput, optionsInput) {
+      let dependencies;
+      let options;
+      try {
+        dependencies = validateOwnerlessResumeDependencies(dependenciesInput);
+        options = validateOwnerlessResumeOptions(optionsInput);
+      } catch (_error) {
+        return ownerlessFailure("invalid-ownerless-resume-input");
+      }
+
+      const ownerless = global.PocketSyncOwnerlessActivationDraft;
+      if (!isObject(ownerless)
+          || typeof ownerless.validate !== "function"
+          || typeof ownerless.buildRegistrationStarted !== "function"
+          || typeof ownerless.buildRegistrationPending !== "function"
+          || typeof ownerless.buildAccountReady !== "function") {
+        return ownerlessFailure("ownerless-contract-unavailable");
+      }
+
+      const execution = bindOwnerlessCurrentGuard(createExecution(dependencies));
+      execution.draftContract = (input) => ownerless.validate(
+        input,
+        ownerlessContractConfig()
+      );
+
+      try {
+        await ensureCurrent(execution);
+        await checked(execution, config.deviceStore.open());
+        const found = await checked(
+          execution,
+          config.deviceStore.readActivation(options.activationId)
+        );
+        if (!found) return ownerlessFailure("ownerless-activation-state-invalid");
+        execution.record = found.record;
+        execution.draft = execution.draftContract(found.draft);
+        if (execution.draft.activationId !== options.activationId
+            || execution.draft.schemaVersion !== 2
+            || execution.draft.activationMode !== "ownerless-first-create"
+            || execution.draft.stage !== "device-staged") {
+          return ownerlessFailure("ownerless-activation-state-invalid", {
+            activationId: options.activationId,
+          });
+        }
+        await ensureCurrent(execution);
+
+        if (execution.draft.accountPath === "existing-unbound") {
+          return await completeExistingOwnerlessAccount(execution, ownerless);
+        }
+        if (execution.draft.accountPath === "new-account") {
+          return await completeNewOwnerlessAccount(execution, ownerless);
+        }
+        return ownerlessFailure("ownerless-activation-state-invalid", {
+          activationId: options.activationId,
+        });
+      } catch (error) {
+        if (error?.code === "ownerless-target-stale") {
+          return ownerlessFailure("ownerless-target-stale", {
+            activationId: execution.draft?.activationId || options.activationId,
+            locallyDurable: execution.record !== null,
+          });
+        }
+        return ownerlessFailure(
+          error?.code === "ownerless-account-ready-failed"
+            ? "ownerless-account-ready-failed"
+            : "ownerless-activation-state-invalid",
+          {
+            activationId: execution.draft?.activationId || options.activationId,
+            locallyDurable: execution.record !== null,
+          }
+        );
+      }
+    }
+
     async function resume(dependenciesInput, optionsInput) {
+      if (isExplicitOwnerlessOptions(optionsInput)) {
+        return resumeOwnerless(dependenciesInput, optionsInput);
+      }
       let dependencies;
       let options;
       try {
