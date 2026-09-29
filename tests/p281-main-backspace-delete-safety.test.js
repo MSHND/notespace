@@ -157,6 +157,11 @@ function makeHarness({ query = "", selectedId = "A" } = {}) {
   vm.createContext(context);
   vm.runInContext(source(ACTIONS), context, { filename: ACTIONS });
 
+  context.refocusTreeNavigation = function refocusTreeNavigationHarness() {
+    counters.refocus += 1;
+  };
+  context.softlyEnsureSelectionVisible = function softlyEnsureSelectionVisibleHarness() {};
+
   context.deleteSelected = function guardedDeleteSelectedHarness() {
     counters.deleteSelected += 1;
     return context.deleteNodeById(context.state.selectedId);
