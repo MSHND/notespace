@@ -29,8 +29,11 @@ without adding UI, a live synced owner, background work, or deployment state.
     "saveLocalSource", "freezePayload", "prepareRecoveryCopyDestination",
     "buildRecoveryPackage", "writeRecoveryCopy", "adoptSyncedOwner",
   ]);
-  const OWNERLESS_DEPENDENCY_FIELDS = Object.freeze([
+  const OWNERLESS_ACTIVATE_DEPENDENCY_FIELDS = Object.freeze([
     "captureTarget", "isTargetReplaceable",
+  ]);
+  const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object.freeze([
+    "captureTarget", "isTargetReplaceable", "withExistingAccountReady",
   ]);
   const IDENTIFIER_FIELDS = Object.freeze([
     "deviceEnvelopeId", "prfEnvelopeId", "recoveryEnvelopeId",
@@ -150,6 +153,19 @@ without adding UI, a live synced owner, background work, or deployment state.
     });
   }
 
+  function ownerlessAccountReadyResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-account-ready",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "account-ready",
+      locallyDurable: true,
+    });
+  }
+
   function byteLength(value) {
     if (typeof value !== "string"
         || value.length === 0
@@ -226,14 +242,28 @@ without adding UI, a live synced owner, background work, or deployment state.
     return dependencies;
   }
 
-  function validateOwnerlessDependencies(input) {
+  function validateOwnerlessActivateDependencies(input) {
     const dependencies = exactObject(
       input,
-      OWNERLESS_DEPENDENCY_FIELDS,
+      OWNERLESS_ACTIVATE_DEPENDENCY_FIELDS,
       "ownerless-activation-dependencies-invalid"
     );
-    if (OWNERLESS_DEPENDENCY_FIELDS.some((field) => typeof dependencies[field] !== "function")) {
+    if (OWNERLESS_ACTIVATE_DEPENDENCY_FIELDS
+      .some((field) => typeof dependencies[field] !== "function")) {
       throw activationError("ownerless-activation-dependencies-invalid");
+    }
+    return dependencies;
+  }
+
+  function validateOwnerlessResumeDependencies(input) {
+    const dependencies = exactObject(
+      input,
+      OWNERLESS_RESUME_DEPENDENCY_FIELDS,
+      "ownerless-resume-dependencies-invalid"
+    );
+    if (OWNERLESS_RESUME_DEPENDENCY_FIELDS
+      .some((field) => typeof dependencies[field] !== "function")) {
+      throw activationError("ownerless-resume-dependencies-invalid");
     }
     return dependencies;
   }
@@ -264,6 +294,19 @@ without adding UI, a live synced owner, background work, or deployment state.
       accountPath: value.accountPath,
       syncedPocketId: identifier(value.syncedPocketId, "ownerless-activation-input-invalid"),
       deviceId: identifier(value.deviceId, "ownerless-activation-input-invalid"),
+    });
+  }
+
+  function validateOwnerlessResumeOptions(input) {
+    const value = exactObject(input, [
+      "activationMode", "activationId",
+    ], "ownerless-resume-input-invalid");
+    if (value.activationMode !== "ownerless-first-create") {
+      throw activationError("ownerless-resume-input-invalid");
+    }
+    return Object.freeze({
+      activationMode: value.activationMode,
+      activationId: identifier(value.activationId, "ownerless-resume-input-invalid"),
     });
   }
 
@@ -1382,7 +1425,7 @@ without adding UI, a live synced owner, background work, or deployment state.
       let dependencies;
       let options;
       try {
-        dependencies = validateOwnerlessDependencies(dependenciesInput);
+        dependencies = validateOwnerlessActivateDependencies(dependenciesInput);
         options = validateOwnerlessActivateOptions(optionsInput);
       } catch (_error) {
         return ownerlessFailure("invalid-ownerless-activation-input");
