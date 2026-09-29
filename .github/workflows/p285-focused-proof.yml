@@ -1,0 +1,40 @@
+name: P285 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p285-proof
+
+jobs:
+  p285-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P285 ownerless readiness and recognition
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p285-ownerless-v2-completion-recognition.test.js
+      - name: P284 ownerless contract and discovery compatibility
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p284-ownerless-v2-draft-discovery.test.js
+      - name: P280 existing-account first-create compatibility
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p280-first-create-existing-account.test.js
+      - name: P040 v1 adoption behaviour compatibility
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test --test-name-pattern="successful adoption|genuine pre-adoption|owner-adapter failure|post-adoption persistence|adopted draft corruption|non-adopted resume" tests/p040-owner-adoption-finalisation.test.js
+      - name: P042 synced owner-controller compatibility
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s node --test tests/p042-synced-owner-controller.test.js
+      - name: P039 v1 activation dormancy guard
+        timeout-minutes: 3
+        run: timeout --signal=TERM --kill-after=10s 120s node --test --test-name-pattern="P039 module is one dormant, inert and exact frozen activation boundary" tests/p039-sync-activation.test.js
+      - name: P052 completed-record and dormancy guards
+        timeout-minutes: 5
+        run: timeout --signal=TERM --kill-after=10s 240s node --test --test-name-pattern="P052 remains dormant|P085" tests/p052-additional-device.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
