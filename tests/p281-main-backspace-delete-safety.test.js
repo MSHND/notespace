@@ -140,6 +140,10 @@ function makeHarness({ query = "", selectedId = "A" } = {}) {
     undoLastDeleteAction() {},
     clearFilterAndReturnHome() { return false; },
     clearFocusAndReturnHome() { return false; },
+    requestAnimationFrame(callback) {
+      if (typeof callback === "function") callback();
+      return 1;
+    },
   };
   context.window = context;
   context.globalThis = context;
