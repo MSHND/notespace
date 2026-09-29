@@ -887,6 +887,28 @@ function clearStatusActionButtons() {
   }
 }
 
+function finishStatusProjection(projectionToken, reason = "dismissed", hide = true) {
+  if (!projectionToken || projectionToken !== statusProjectionToken) return false;
+  const onDismiss = statusProjectionDismissHandler;
+  statusProjectionToken = null;
+  statusProjectionDismissHandler = null;
+  statusActionHandler = null;
+  clearStatusActionButtons();
+  if (el.titleToast) {
+    el.titleToast.removeAttribute("tabindex");
+    el.titleToast.removeAttribute("role");
+    if (hide) el.titleToast.classList.remove("show");
+  }
+  if (typeof onDismiss === "function") {
+    try {
+      onDismiss({ token: projectionToken, reason });
+    } catch (err) {
+      console.error("[pocket-lite] status dismissal callback failed:", err);
+    }
+  }
+  return true;
+}
+
 function setStatus(text, kind = "", options = {}) {
   const opts = options && typeof options === "object" ? options : {};
   const action = opts.action && typeof opts.action === "object" ? opts.action : null;
@@ -899,20 +921,31 @@ function setStatus(text, kind = "", options = {}) {
       return label && handler ? { label, handler } : null;
     }).filter(Boolean)
     : [];
-  statusActionHandler = actions.length === 0 && actionLabel && actionHandler ? actionHandler : null;
-  if (!el.titleToast) return;
+  const onDismiss = typeof opts.onDismiss === "function" ? opts.onDismiss : null;
+
   if (titleToastTimer) {
     clearTimeout(titleToastTimer);
     titleToastTimer = null;
   }
-  clearStatusActionButtons();
+  const previousProjectionToken = statusProjectionToken;
+  if (previousProjectionToken) {
+    finishStatusProjection(previousProjectionToken, text ? "replaced" : "cleared", false);
+  }
+
+  if (!el.titleToast) return null;
   if (!text) {
     el.titleToast.textContent = "";
     el.titleToast.className = "topStatusToast";
     el.titleToast.removeAttribute("tabindex");
     el.titleToast.removeAttribute("role");
-    return;
+    return null;
   }
+
+  const projectionToken = {};
+  statusProjectionToken = projectionToken;
+  statusProjectionDismissHandler = onDismiss;
+  statusActionHandler = actions.length === 0 && actionLabel && actionHandler ? actionHandler : null;
+
   const compact = compactTopStatus(text, kind);
   const canRenderActions = actions.length > 0
     && typeof document !== "undefined"
@@ -956,12 +989,11 @@ function setStatus(text, kind = "", options = {}) {
     ? Math.max(actionMinMs, requestedMs)
     : actionMinMs;
   titleToastTimer = window.setTimeout(() => {
-    statusActionHandler = null;
-    clearStatusActionButtons();
-    el.titleToast.removeAttribute("tabindex");
-    el.titleToast.removeAttribute("role");
-    el.titleToast.classList.remove("show");
+    if (projectionToken !== statusProjectionToken) return;
+    titleToastTimer = null;
+    finishStatusProjection(projectionToken, "expired", true);
   }, hideAfterMs);
+  return projectionToken;
 }
 
 function formatSaveClockLabel(date = new Date()) {
