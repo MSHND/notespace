@@ -530,10 +530,31 @@ without adding UI, a live synced owner, background work, or deployment state.
       throw activationError("activation-device-store-invalid");
     }
 
+    function createExecution(dependencies) {
+      return {
+        dependencies,
+        sourceSession: null,
+        currentGuard: null,
+        draftContract: (input) => validateDraft(input, config),
+        destination: null,
+        record: null,
+        draft: null,
+      };
+    }
+
+    function bindSourceCurrentGuard(execution, sourceSession) {
+      execution.sourceSession = sourceSession;
+      execution.currentGuard = () => execution.dependencies.isSourceSessionCurrent(sourceSession);
+      return execution;
+    }
+
     async function ensureCurrent(execution) {
       let current;
-      try { current = execution.dependencies.isSourceSessionCurrent(execution.sourceSession); }
-      catch (_error) { current = false; }
+      try {
+        current = typeof execution.currentGuard === "function"
+          ? execution.currentGuard()
+          : false;
+      } catch (_error) { current = false; }
       if (current !== true) throw activationError("source-session-changed");
     }
 
@@ -559,9 +580,9 @@ without adding UI, a live synced owner, background work, or deployment state.
     async function persistDraft(execution, nextDraftInput, changes) {
       const current = execution.record;
       const nextRevision = current ? current.storeRevision + 1 : 1;
-      const nextDraft = validateDraft(Object.assign({}, nextDraftInput, {
+      const nextDraft = execution.draftContract(Object.assign({}, nextDraftInput, {
         updatedAt: validateTimestamp(config.now),
-      }), config);
+      }));
       const draftContext = {
         syncedPocketId: nextDraft.syncedPocketId,
         revision: nextRevision,
@@ -610,11 +631,11 @@ without adding UI, a live synced owner, background work, or deployment state.
         throw activationError("activation-state-invalid");
       }
       const nextRevision = current.storeRevision + 1;
-      const nextDraft = validateDraft(Object.assign({}, jsonClone(execution.draft), {
+      const nextDraft = execution.draftContract(Object.assign({}, jsonClone(execution.draft), {
         stage: "adopted",
         adopted: true,
         updatedAt: validateTimestamp(config.now),
-      }), config);
+      }));
       const draftContext = {
         syncedPocketId: nextDraft.syncedPocketId,
         revision: nextRevision,
@@ -1132,6 +1153,165 @@ without adding UI, a live synced owner, background work, or deployment state.
       return adopt(execution);
     }
 
+    function buildV1InitialDraft(input) {
+      return {
+        kind: "pocket.sync.activation-draft",
+        schemaVersion: 1,
+        activationId: input.activationId,
+        stage: "device-staged",
+        sourceOwnerKind: input.continuity.ownerKind,
+        sourceContinuityId: input.continuity.continuityId,
+        syncedPocketId: input.options.syncedPocketId,
+        deviceId: input.options.deviceId,
+        ids: input.ids,
+        content: input.content,
+        deviceEnvelope: input.deviceEnvelope,
+        prfEnvelope: null,
+        prfStatus: "pending",
+        recoveryEnvelope: input.recoveryEnvelope,
+        recoveryVerifier: input.recoveryVerifier,
+        recoveryAuthorisation: input.recoveryAuthorisation,
+        recoveryRoot: input.recoveryRoot,
+        recoveryPackage: null,
+        registrationContinuation: null,
+        account: null,
+        confirmedRemoteRevision: 0,
+        keySetVersion: 0,
+        recoveryVersion: 0,
+        accountLocator: null,
+        pendingOperation: null,
+        sourceSaved: true,
+        recoveryCopyStored: false,
+        adopted: false,
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+      };
+    }
+
+    async function constructLocalMaterial(execution, input) {
+      const activationId = freshId(config);
+      const ids = {};
+      IDENTIFIER_FIELDS.forEach((field) => { ids[field] = freshId(config); });
+      const recoveryRootBytes = freshBytes(config.randomBytes, 32);
+      const createdAt = validateTimestamp(config.now);
+      try {
+        execution.deviceWrappingKey = await checked(
+          execution,
+          config.crypto.generateDeviceWrappingKey()
+        );
+        const recoveryContext = {
+          syncedPocketId: input.options.syncedPocketId,
+          envelopeId: ids.recoveryEnvelopeId,
+          envelopeKind: "recovery",
+          envelopeVersion: 1,
+        };
+        const recoveryDerived = await checked(
+          execution,
+          config.crypto.createDerivedWrappingKey(recoveryRootBytes, recoveryContext)
+        );
+        const authorisation = await checked(
+          execution,
+          config.crypto.createRecoveryAuthorisationKeyPair()
+        );
+        execution.recoveryAuthorisation = authorisation.recoveryAuthorisation;
+        const deviceContext = {
+          syncedPocketId: input.options.syncedPocketId,
+          envelopeId: ids.deviceEnvelopeId,
+          envelopeKind: "device",
+          envelopeVersion: 1,
+        };
+        const bundle = await checked(execution, config.crypto.createMasterKeyBundle([
+          { context: deviceContext, wrappingKey: execution.deviceWrappingKey },
+          { context: recoveryContext, wrappingKey: recoveryDerived.key },
+        ]));
+        const contentContext = {
+          syncedPocketId: input.options.syncedPocketId,
+          revision: 1,
+          contentType: config.crypto.FORMAT.contentType,
+        };
+        const contentRecord = await checked(
+          execution,
+          config.crypto.sealContent(input.payload, bundle.masterKey, contentContext)
+        );
+        const deviceEnvelope = envelopeInput(deviceContext, bundle.envelopes[0].record, {
+          deviceId: input.options.deviceId,
+          kdf: "none",
+        });
+        const recoveryEnvelope = envelopeInput(recoveryContext, bundle.envelopes[1].record, {
+          kdf: recoveryDerived.kdf,
+          kdfSalt: recoveryDerived.kdfSalt,
+          derivationVersion: recoveryDerived.derivationVersion,
+        });
+        const draft = input.draftBuilder({
+          activationId,
+          ids,
+          continuity: input.continuity,
+          options: input.options,
+          content: { context: contentContext, record: contentRecord },
+          deviceEnvelope,
+          recoveryEnvelope,
+          recoveryVerifier: authorisation.recoveryVerifier,
+          recoveryAuthorisation: execution.recoveryAuthorisation,
+          recoveryRoot: config.crypto.encodeBase64Url(recoveryRootBytes),
+          createdAt,
+        });
+        execution.initialUsage = {
+          masterKeyGeneration: 1,
+          masterKeyContentEncryptions: 1,
+          masterKeyContentEncryptionLimit: 1,
+          deviceWrappingKeyEncryptions: 2,
+        };
+        execution.initialRecord = {
+          kind: deviceFormat.recordKind,
+          schemaVersion: deviceFormat.recordSchemaVersion,
+          storeRevision: 1,
+          syncedPocketId: input.options.syncedPocketId,
+          deviceId: input.options.deviceId,
+          deviceWrappingKey: execution.deviceWrappingKey,
+          deviceEnvelope: {
+            context: deviceContext,
+            metadata: {
+              contractVersion: 1,
+              syncedPocketId: input.options.syncedPocketId,
+              envelopeId: ids.deviceEnvelopeId,
+              kind: "device",
+              version: 1,
+              deviceId: input.options.deviceId,
+              createdAt,
+              kdf: "none",
+            },
+            record: bundle.envelopes[0].record,
+          },
+          content: { context: contentContext, record: contentRecord },
+          remote: {
+            confirmedRevision: 0,
+            pending: {
+              expectedRevision: 0,
+              operationId: ids.contentOperationId,
+              logicalChangeId: ids.contentLogicalChangeId,
+              attemptKind: "new-change",
+            },
+            conflict: null,
+          },
+          usage: execution.initialUsage,
+          activationDraft: null,
+          recoveryDraft: null,
+          additionalDeviceDraft: null,
+        };
+        await checked(execution, config.deviceStore.open());
+        if (await checked(
+          execution,
+          config.deviceStore.readPocket(input.options.syncedPocketId)
+        ) !== null) {
+          return safeFailure("device-staging-failed");
+        }
+        await persistDraft(execution, draft);
+        return null;
+      } finally {
+        recoveryRootBytes.fill(0);
+      }
+    }
+
     async function activate(dependenciesInput, optionsInput) {
       let dependencies;
       let options;
@@ -1150,7 +1330,7 @@ without adding UI, a live synced owner, background work, or deployment state.
         return safeFailure(error?.code === "unsupported-source-owner"
           ? "unsupported-source-owner" : "invalid-activation-input");
       }
-      const execution = { dependencies, sourceSession, destination: null, record: null, draft: null };
+      const execution = bindSourceCurrentGuard(createExecution(dependencies), sourceSession);
       try {
         await ensureCurrent(execution);
         let dirty;
@@ -1173,142 +1353,13 @@ without adding UI, a live synced owner, background work, or deployment state.
             resumable: false, remotelyCommitted: false, locallyDurable: false,
           });
         }
-        const activationId = freshId(config);
-        const ids = {};
-        IDENTIFIER_FIELDS.forEach((field) => { ids[field] = freshId(config); });
-        const recoveryRootBytes = freshBytes(config.randomBytes, 32);
-        const createdAt = validateTimestamp(config.now);
-        let recoveryDerived;
-        let verifier;
-        try {
-          execution.deviceWrappingKey = await checked(
-            execution,
-            config.crypto.generateDeviceWrappingKey()
-          );
-          const recoveryContext = {
-            syncedPocketId: options.syncedPocketId,
-            envelopeId: ids.recoveryEnvelopeId,
-            envelopeKind: "recovery",
-            envelopeVersion: 1,
-          };
-          recoveryDerived = await checked(
-            execution,
-            config.crypto.createDerivedWrappingKey(recoveryRootBytes, recoveryContext)
-          );
-          const authorisation = await checked(execution,
-            config.crypto.createRecoveryAuthorisationKeyPair());
-          verifier = authorisation.recoveryVerifier;
-          execution.recoveryAuthorisation = authorisation.recoveryAuthorisation;
-          const deviceContext = {
-            syncedPocketId: options.syncedPocketId,
-            envelopeId: ids.deviceEnvelopeId,
-            envelopeKind: "device",
-            envelopeVersion: 1,
-          };
-          const bundle = await checked(execution, config.crypto.createMasterKeyBundle([
-            { context: deviceContext, wrappingKey: execution.deviceWrappingKey },
-            { context: recoveryContext, wrappingKey: recoveryDerived.key },
-          ]));
-          const contentContext = {
-            syncedPocketId: options.syncedPocketId,
-            revision: 1,
-            contentType: config.crypto.FORMAT.contentType,
-          };
-          const contentRecord = await checked(
-            execution,
-            config.crypto.sealContent(payload, bundle.masterKey, contentContext)
-          );
-          const deviceEnvelope = envelopeInput(deviceContext, bundle.envelopes[0].record, {
-            deviceId: options.deviceId, kdf: "none",
-          });
-          const recoveryEnvelope = envelopeInput(recoveryContext, bundle.envelopes[1].record, {
-            kdf: recoveryDerived.kdf,
-            kdfSalt: recoveryDerived.kdfSalt,
-            derivationVersion: recoveryDerived.derivationVersion,
-          });
-          const draft = {
-            kind: "pocket.sync.activation-draft",
-            schemaVersion: 1,
-            activationId,
-            stage: "device-staged",
-            sourceOwnerKind: continuity.ownerKind,
-            sourceContinuityId: continuity.continuityId,
-            syncedPocketId: options.syncedPocketId,
-            deviceId: options.deviceId,
-            ids,
-            content: { context: contentContext, record: contentRecord },
-            deviceEnvelope,
-            prfEnvelope: null,
-            prfStatus: "pending",
-            recoveryEnvelope,
-            recoveryVerifier: verifier,
-            recoveryAuthorisation: execution.recoveryAuthorisation,
-            recoveryRoot: config.crypto.encodeBase64Url(recoveryRootBytes),
-            recoveryPackage: null,
-            registrationContinuation: null,
-            account: null,
-            confirmedRemoteRevision: 0,
-            keySetVersion: 0,
-            recoveryVersion: 0,
-            accountLocator: null,
-            pendingOperation: null,
-            sourceSaved: true,
-            recoveryCopyStored: false,
-            adopted: false,
-            createdAt,
-            updatedAt: createdAt,
-          };
-          execution.initialUsage = {
-            masterKeyGeneration: 1,
-            masterKeyContentEncryptions: 1,
-            masterKeyContentEncryptionLimit: 1,
-            deviceWrappingKeyEncryptions: 2,
-          };
-          execution.initialRecord = {
-            kind: deviceFormat.recordKind,
-            schemaVersion: deviceFormat.recordSchemaVersion,
-            storeRevision: 1,
-            syncedPocketId: options.syncedPocketId,
-            deviceId: options.deviceId,
-            deviceWrappingKey: execution.deviceWrappingKey,
-            deviceEnvelope: {
-              context: deviceContext,
-              metadata: {
-                contractVersion: 1,
-                syncedPocketId: options.syncedPocketId,
-                envelopeId: ids.deviceEnvelopeId,
-                kind: "device",
-                version: 1,
-                deviceId: options.deviceId,
-                createdAt,
-                kdf: "none",
-              },
-              record: bundle.envelopes[0].record,
-            },
-            content: { context: contentContext, record: contentRecord },
-            remote: {
-              confirmedRevision: 0,
-              pending: {
-                expectedRevision: 0,
-                operationId: ids.contentOperationId,
-                logicalChangeId: ids.contentLogicalChangeId,
-                attemptKind: "new-change",
-              },
-              conflict: null,
-            },
-            usage: execution.initialUsage,
-            activationDraft: null,
-            recoveryDraft: null,
-            additionalDeviceDraft: null,
-          };
-          await checked(execution, config.deviceStore.open());
-          if (await checked(execution, config.deviceStore.readPocket(options.syncedPocketId)) !== null) {
-            return safeFailure("device-staging-failed");
-          }
-          await persistDraft(execution, draft);
-        } finally {
-          recoveryRootBytes.fill(0);
-        }
+        const staged = await constructLocalMaterial(execution, {
+          payload,
+          options,
+          continuity,
+          draftBuilder: buildV1InitialDraft,
+        });
+        if (staged) return staged;
         return await continueActivation(execution);
       } catch (error) {
         if (error?.code === "source-session-changed") return safeFailure("source-session-changed", {
@@ -1334,23 +1385,22 @@ without adding UI, a live synced owner, background work, or deployment state.
       } catch (_error) {
         return safeFailure("invalid-activation-input");
       }
-      const execution = {
-        dependencies, sourceSession: null, destination: null, record: null, draft: null,
-      };
+      const execution = createExecution(dependencies);
       try {
         await config.deviceStore.open();
         const found = await config.deviceStore.readActivation(options.activationId);
         if (!found) return safeFailure("activation-state-invalid");
         execution.record = found.record;
-        execution.draft = validateDraft(found.draft, config);
+        execution.draft = execution.draftContract(found.draft);
         if (execution.draft.activationId !== options.activationId) {
           return safeFailure("activation-state-invalid");
         }
         if (execution.draft.stage === "adopted") return successResult(execution.draft);
         let continuity;
         try {
-          execution.sourceSession = dependencies.captureSourceSession();
-          continuity = sourceContinuity(execution.sourceSession);
+          const sourceSession = dependencies.captureSourceSession();
+          continuity = sourceContinuity(sourceSession);
+          bindSourceCurrentGuard(execution, sourceSession);
         } catch (error) {
           return safeFailure(error?.code === "unsupported-source-owner"
             ? "unsupported-source-owner" : "invalid-activation-input");
