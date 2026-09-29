@@ -209,8 +209,51 @@ body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast {
   pointer-events: none !important;
 }
 
-body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast.show.action {
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast.show.action,
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast.show.actions {
   pointer-events: auto !important;
+}
+
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast.actions {
+  gap: 10px !important;
+  border-radius: 12px !important;
+  padding: 7px 9px 7px 12px !important;
+  text-align: left !important;
+}
+
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusMessage {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusActions {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  flex: 0 0 auto !important;
+}
+
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusAction {
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  border: 1px solid rgba(100, 116, 139, 0.28) !important;
+  border-radius: 7px !important;
+  background: rgba(255, 255, 255, 0.48) !important;
+  color: rgba(51, 65, 85, 0.94) !important;
+  min-height: 24px !important;
+  padding: 3px 8px !important;
+  font: inherit !important;
+  font-weight: 600 !important;
+  line-height: 1.1 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+}
+
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusAction:hover,
+body.pocketShellOpen:not(.pipMode) .topbar .topStatusAction:focus-visible {
+  border-color: rgba(71, 85, 105, 0.52) !important;
+  background: rgba(255, 255, 255, 0.76) !important;
+  outline: none !important;
 }
 
 @media (max-width: 420px) {
@@ -223,6 +266,17 @@ body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast.show.action {
   body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast {
     padding: 5px 9px !important;
     font-size: 11px !important;
+  }
+
+  body.pocketShellOpen:not(.pipMode) .topbar .topStatusToast.actions {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    text-align: center !important;
+  }
+
+  body.pocketShellOpen:not(.pipMode) .topbar .topStatusActions {
+    justify-content: center !important;
   }
 }
 
