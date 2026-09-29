@@ -29,6 +29,9 @@ without adding UI, a live synced owner, background work, or deployment state.
     "saveLocalSource", "freezePayload", "prepareRecoveryCopyDestination",
     "buildRecoveryPackage", "writeRecoveryCopy", "adoptSyncedOwner",
   ]);
+  const OWNERLESS_DEPENDENCY_FIELDS = Object.freeze([
+    "captureTarget", "isTargetReplaceable",
+  ]);
   const IDENTIFIER_FIELDS = Object.freeze([
     "deviceEnvelopeId", "prfEnvelopeId", "recoveryEnvelopeId",
     "registrationOperationId", "contentOperationId", "contentLogicalChangeId",
@@ -130,6 +133,23 @@ without adding UI, a live synced owner, background work, or deployment state.
     }, extra || {}));
   }
 
+  function ownerlessFailure(reason, extra) {
+    return deepFreeze(Object.assign({ ok: false, reason }, extra || {}));
+  }
+
+  function ownerlessStagedResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-local-staged",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "device-staged",
+      locallyDurable: true,
+    });
+  }
+
   function byteLength(value) {
     if (typeof value !== "string"
         || value.length === 0
@@ -206,11 +226,44 @@ without adding UI, a live synced owner, background work, or deployment state.
     return dependencies;
   }
 
+  function validateOwnerlessDependencies(input) {
+    const dependencies = exactObject(
+      input,
+      OWNERLESS_DEPENDENCY_FIELDS,
+      "ownerless-activation-dependencies-invalid"
+    );
+    if (OWNERLESS_DEPENDENCY_FIELDS.some((field) => typeof dependencies[field] !== "function")) {
+      throw activationError("ownerless-activation-dependencies-invalid");
+    }
+    return dependencies;
+  }
+
   function validateActivateOptions(input) {
     const value = exactObject(input, ["syncedPocketId", "deviceId"], "activation-input-invalid");
     return Object.freeze({
       syncedPocketId: identifier(value.syncedPocketId),
       deviceId: identifier(value.deviceId),
+    });
+  }
+
+  function isExplicitOwnerlessOptions(input) {
+    return isObject(input)
+      && Object.prototype.hasOwnProperty.call(input, "activationMode");
+  }
+
+  function validateOwnerlessActivateOptions(input) {
+    const value = exactObject(input, [
+      "activationMode", "accountPath", "syncedPocketId", "deviceId",
+    ], "ownerless-activation-input-invalid");
+    if (value.activationMode !== "ownerless-first-create"
+        || !["existing-unbound", "new-account"].includes(value.accountPath)) {
+      throw activationError("ownerless-activation-input-invalid");
+    }
+    return Object.freeze({
+      activationMode: value.activationMode,
+      accountPath: value.accountPath,
+      syncedPocketId: identifier(value.syncedPocketId, "ownerless-activation-input-invalid"),
+      deviceId: identifier(value.deviceId, "ownerless-activation-input-invalid"),
     });
   }
 
@@ -535,6 +588,7 @@ without adding UI, a live synced owner, background work, or deployment state.
         dependencies,
         sourceSession: null,
         currentGuard: null,
+        currentFailureCode: "source-session-changed",
         draftContract: (input) => validateDraft(input, config),
         destination: null,
         record: null,
@@ -544,7 +598,19 @@ without adding UI, a live synced owner, background work, or deployment state.
 
     function bindSourceCurrentGuard(execution, sourceSession) {
       execution.sourceSession = sourceSession;
+      execution.currentFailureCode = "source-session-changed";
       execution.currentGuard = () => execution.dependencies.isSourceSessionCurrent(sourceSession);
+      return execution;
+    }
+
+    function bindOwnerlessCurrentGuard(execution) {
+      execution.currentFailureCode = "ownerless-target-stale";
+      execution.currentGuard = () => {
+        const target = execution.dependencies.captureTarget();
+        return isObject(target)
+          && target.ownerKind === "none"
+          && execution.dependencies.isTargetReplaceable(target) === true;
+      };
       return execution;
     }
 
@@ -555,7 +621,7 @@ without adding UI, a live synced owner, background work, or deployment state.
           ? execution.currentGuard()
           : false;
       } catch (_error) { current = false; }
-      if (current !== true) throw activationError("source-session-changed");
+      if (current !== true) throw activationError(execution.currentFailureCode);
     }
 
     async function checked(execution, promise) {
@@ -1312,7 +1378,87 @@ without adding UI, a live synced owner, background work, or deployment state.
       }
     }
 
+    async function activateOwnerless(dependenciesInput, optionsInput) {
+      let dependencies;
+      let options;
+      try {
+        dependencies = validateOwnerlessDependencies(dependenciesInput);
+        options = validateOwnerlessActivateOptions(optionsInput);
+      } catch (_error) {
+        return ownerlessFailure("invalid-ownerless-activation-input");
+      }
+
+      const ownerless = global.PocketSyncOwnerlessActivationDraft;
+      if (!isObject(ownerless)
+          || typeof ownerless.validate !== "function"
+          || typeof ownerless.buildInitialDraft !== "function") {
+        return ownerlessFailure("ownerless-contract-unavailable");
+      }
+      const firstUse = global.PocketFirstUseDocument;
+      if (!isObject(firstUse) || typeof firstUse.buildFreshPayload !== "function") {
+        return ownerlessFailure("ownerless-first-use-unavailable");
+      }
+
+      const execution = bindOwnerlessCurrentGuard(createExecution(dependencies));
+      execution.draftContract = (input) => ownerless.validate(input, {
+        securityContract: config.securityContract,
+        crypto: config.crypto,
+      });
+
+      try {
+        await ensureCurrent(execution);
+        let payload;
+        try {
+          payload = firstUse.buildFreshPayload(validateTimestamp(config.now));
+        } catch (_error) {
+          return ownerlessFailure("ownerless-first-use-failed");
+        }
+        await ensureCurrent(execution);
+
+        const staged = await constructLocalMaterial(execution, {
+          payload,
+          options,
+          continuity: null,
+          draftBuilder: (input) => ownerless.buildInitialDraft({
+            accountPath: options.accountPath,
+            activationId: input.activationId,
+            syncedPocketId: options.syncedPocketId,
+            deviceId: options.deviceId,
+            ids: input.ids,
+            content: input.content,
+            deviceEnvelope: input.deviceEnvelope,
+            recoveryEnvelope: input.recoveryEnvelope,
+            recoveryVerifier: input.recoveryVerifier,
+            recoveryAuthorisation: input.recoveryAuthorisation,
+            recoveryRoot: input.recoveryRoot,
+            createdAt: input.createdAt,
+          }, {
+            securityContract: config.securityContract,
+            crypto: config.crypto,
+          }),
+        });
+        if (staged) return ownerlessFailure(staged.reason || "ownerless-local-staging-failed");
+        return ownerlessStagedResult(execution.draft);
+      } catch (error) {
+        if (error?.code === "ownerless-target-stale") {
+          return ownerlessFailure("ownerless-target-stale", {
+            activationId: execution.draft?.activationId,
+          });
+        }
+        return ownerlessFailure(
+          error?.code === "ownerless-activation-state-invalid"
+            || error?.code === "ownerless-activation-builder-invalid"
+            ? "ownerless-activation-state-invalid"
+            : "ownerless-local-staging-failed",
+          { activationId: execution.draft?.activationId }
+        );
+      }
+    }
+
     async function activate(dependenciesInput, optionsInput) {
+      if (isExplicitOwnerlessOptions(optionsInput)) {
+        return activateOwnerless(dependenciesInput, optionsInput);
+      }
       let dependencies;
       let options;
       try {
