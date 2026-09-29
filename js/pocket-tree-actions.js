@@ -117,14 +117,17 @@ function insertChildUnder(nodeId) {
 function clearPendingDeleteGuardState() {
   pendingDeleteConfirmNodeId = "";
   pendingDeleteConfirmExpiresAt = 0;
+  pendingDeleteConfirmProjectionToken = null;
+}
+
+function invalidatePendingDeleteGuardForProjection(projectionToken) {
+  if (!projectionToken || projectionToken !== pendingDeleteConfirmProjectionToken) return false;
+  clearPendingDeleteGuardState();
+  return true;
 }
 
 function activePendingDeleteNodeId() {
-  if (!pendingDeleteConfirmNodeId) return "";
-  if (pendingDeleteConfirmExpiresAt <= Date.now()) {
-    clearPendingDeleteGuardState();
-    return "";
-  }
+  if (!pendingDeleteConfirmNodeId || !pendingDeleteConfirmProjectionToken) return "";
   return pendingDeleteConfirmNodeId;
 }
 
@@ -148,12 +151,13 @@ function projectPendingDeleteGuard(node, childCount) {
   const message = childCount > 0
     ? `Delete "${node.label}" and ${childCount} child item(s)? This removes the whole branch.`
     : `Delete "${node.label}"?`;
-  setStatus(message, "warn", {
+  return setStatus(message, "warn", {
     durationMs: TREE_DELETE_CONFIRM_WINDOW_MS,
     actions: [
       { label: "Confirm delete", onClick: () => confirmPendingDeleteGuard() },
       { label: "Cancel", onClick: () => cancelPendingDeleteGuard() },
     ],
+    onDismiss: ({ token }) => invalidatePendingDeleteGuardForProjection(token),
   });
 }
 
@@ -182,9 +186,14 @@ function deleteNodeById(nodeId, options = {}) {
   if (opts.confirm) {
     const activeNodeId = activePendingDeleteNodeId();
     if (activeNodeId && activeNodeId !== node.id) clearPendingDeleteGuardState();
+    const projectionToken = projectPendingDeleteGuard(node, childCount);
+    if (!projectionToken) {
+      clearPendingDeleteGuardState();
+      return false;
+    }
     pendingDeleteConfirmNodeId = node.id;
     pendingDeleteConfirmExpiresAt = Date.now() + TREE_DELETE_CONFIRM_WINDOW_MS;
-    projectPendingDeleteGuard(node, childCount);
+    pendingDeleteConfirmProjectionToken = projectionToken;
     refocusTreeNavigation(state.selectedId || node.id);
     return false;
   }
