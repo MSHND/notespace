@@ -114,6 +114,52 @@ function insertChildUnder(nodeId) {
   setStatus("Caught. Type, then Enter.", "ok");
 }
 
+function clearPendingDeleteGuardState() {
+  pendingDeleteConfirmNodeId = "";
+  pendingDeleteConfirmExpiresAt = 0;
+}
+
+function activePendingDeleteNodeId() {
+  if (!pendingDeleteConfirmNodeId) return "";
+  if (pendingDeleteConfirmExpiresAt <= Date.now()) {
+    clearPendingDeleteGuardState();
+    return "";
+  }
+  return pendingDeleteConfirmNodeId;
+}
+
+function cancelPendingDeleteGuard() {
+  const nodeId = activePendingDeleteNodeId();
+  if (!nodeId) return false;
+  clearPendingDeleteGuardState();
+  setStatus("Delete cancelled.", "ok");
+  refocusTreeNavigation(state.selectedId || nodeId);
+  return true;
+}
+
+function confirmPendingDeleteGuard() {
+  const nodeId = activePendingDeleteNodeId();
+  if (!nodeId) return false;
+  clearPendingDeleteGuardState();
+  return deleteNodeById(nodeId, { confirm: false }) === true;
+}
+
+function projectPendingDeleteGuard(node, childCount) {
+  const message = childCount > 0
+    ? `Delete "${node.label}" and ${childCount} child item(s)?`
+    : `Delete "${node.label}"?`;
+  const guidance = childCount > 0
+    ? "This removes the whole branch."
+    : "This cannot be undone except via Undo.";
+  setStatus(`${message} ${guidance}`, "warn", {
+    durationMs: TREE_DELETE_CONFIRM_WINDOW_MS,
+    actions: [
+      { label: "Confirm delete", onClick: () => confirmPendingDeleteGuard() },
+      { label: "Cancel", onClick: () => cancelPendingDeleteGuard() },
+    ],
+  });
+}
+
 function deleteNodeById(nodeId, options = {}) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const opts = { confirm: true, ...options };
@@ -136,29 +182,16 @@ function deleteNodeById(nodeId, options = {}) {
     for (const k of kids) q.push(k.id);
   }
   const childCount = Math.max(0, ids.length - 1);
-  const message = childCount > 0
-    ? `Delete "${node.label}" and ${childCount} child item(s)?`
-    : `Delete "${node.label}"?`;
   if (opts.confirm) {
-    const nowMs = Date.now();
-    const isArmed = pendingDeleteConfirmNodeId === node.id && pendingDeleteConfirmExpiresAt > nowMs;
-    if (!isArmed) {
-      const guidance = childCount > 0
-        ? "This removes the whole branch."
-        : "This cannot be undone except via Undo.";
-      pendingDeleteConfirmNodeId = node.id;
-      pendingDeleteConfirmExpiresAt = nowMs + TREE_DELETE_CONFIRM_WINDOW_MS;
-      setStatus(`Delete again to confirm · Esc cancels · ${message} ${guidance}`, "warn", {
-        durationMs: TREE_DELETE_CONFIRM_WINDOW_MS,
-      });
-      refocusTreeNavigation(state.selectedId || node.id);
-      return false;
-    }
-    pendingDeleteConfirmNodeId = "";
-    pendingDeleteConfirmExpiresAt = 0;
+    const activeNodeId = activePendingDeleteNodeId();
+    if (activeNodeId && activeNodeId !== node.id) clearPendingDeleteGuardState();
+    pendingDeleteConfirmNodeId = node.id;
+    pendingDeleteConfirmExpiresAt = Date.now() + TREE_DELETE_CONFIRM_WINDOW_MS;
+    projectPendingDeleteGuard(node, childCount);
+    refocusTreeNavigation(state.selectedId || node.id);
+    return false;
   }
-  pendingDeleteConfirmNodeId = "";
-  pendingDeleteConfirmExpiresAt = 0;
+  clearPendingDeleteGuardState();
 
   // Safety snapshot before destructive delete, so Restore last can recover quickly.
   const safetyPayload = {
@@ -1215,6 +1248,30 @@ function handleTreeKeydown(ev) {
     refocusTreeNavigation(state.selectedId);
     return;
   }
+  if (
+    !ev.metaKey
+    && !ev.ctrlKey
+    && !ev.altKey
+    && !ev.shiftKey
+    && activePendingDeleteNodeId()
+    && ev.key === "Enter"
+  ) {
+    ev.preventDefault();
+    confirmPendingDeleteGuard();
+    return;
+  }
+  if (
+    !ev.metaKey
+    && !ev.ctrlKey
+    && !ev.altKey
+    && !ev.shiftKey
+    && activePendingDeleteNodeId()
+    && ev.key === "Escape"
+  ) {
+    ev.preventDefault();
+    cancelPendingDeleteGuard();
+    return;
+  }
   const lowerKey = String(ev.key || "").toLowerCase();
   settlePendingFilterBeforeMainCommand(ev);
   if (
@@ -1242,14 +1299,6 @@ function handleTreeKeydown(ev) {
   if ((ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && lowerKey === "z") {
     ev.preventDefault();
     undoMostRecentTreeMutation();
-    return;
-  }
-  if (ev.key === "Escape" && pendingDeleteConfirmNodeId && pendingDeleteConfirmExpiresAt > Date.now()) {
-    ev.preventDefault();
-    pendingDeleteConfirmNodeId = "";
-    pendingDeleteConfirmExpiresAt = 0;
-    setStatus("Delete cancelled.", "ok");
-    refocusTreeNavigation(state.selectedId);
     return;
   }
   if (
