@@ -154,6 +154,8 @@ function makeHarness() {
     clearFocus: 0,
   };
   let timerId = 0;
+  const activeTimers = new Map();
+  const allTimerCallbacks = new Map();
 
   const context = {
     Object, Array, String, Number, Boolean, Map, Set, WeakMap, WeakSet, Error, Function, Reflect,
@@ -189,6 +191,7 @@ function makeHarness() {
     pendingPathImport: null,
     pendingDeleteConfirmNodeId: "",
     pendingDeleteConfirmExpiresAt: 0,
+    pendingDeleteConfirmProjectionToken: null,
     TREE_DELETE_CONFIRM_WINDOW_MS: 12000,
     lastDeleteUndoSnapshot: null,
     lastEditUndoSnapshot: null,
@@ -244,7 +247,9 @@ function makeHarness() {
     softlyEnsureSelectionVisible() {},
     persistPipSnapshot() { counters.persist += 1; },
     undoLastDeleteAction() {},
-    clearTimeout() {},
+    clearTimeout(id) {
+      activeTimers.delete(id);
+    },
     requestAnimationFrame(callback) {
       if (typeof callback === "function") callback();
       return 1;
@@ -253,8 +258,10 @@ function makeHarness() {
 
   context.window = context;
   context.globalThis = context;
-  context.window.setTimeout = () => {
+  context.window.setTimeout = (callback) => {
     timerId += 1;
+    activeTimers.set(timerId, callback);
+    allTimerCallbacks.set(timerId, callback);
     return timerId;
   };
   context.window.applyPocketFilterQueryValue = (value) => {
@@ -267,7 +274,7 @@ function makeHarness() {
 
   const history = source(HISTORY);
   vm.runInContext(
-    `let titleToastTimer = null; let statusActionHandler = null;\n${functionRange(history, "compactTopStatus", "formatSaveClockLabel")}`,
+    `let titleToastTimer = null; let statusProjectionToken = null; let statusProjectionDismissHandler = null; let statusActionHandler = null;\n${functionRange(history, "compactTopStatus", "formatSaveClockLabel")}`,
     context,
     { filename: HISTORY }
   );
@@ -326,7 +333,34 @@ function makeHarness() {
     };
   }
 
-  return { context, counters, titleToast, treeWrap, keydown, actionButtons, actionEvent };
+  function latestTimerId() {
+    return timerId;
+  }
+
+  function timerCallback(id) {
+    return allTimerCallbacks.get(id) || null;
+  }
+
+  function runTimer(id) {
+    const callback = activeTimers.get(id);
+    if (typeof callback !== "function") return false;
+    activeTimers.delete(id);
+    callback();
+    return true;
+  }
+
+  return {
+    context,
+    counters,
+    titleToast,
+    treeWrap,
+    keydown,
+    actionButtons,
+    actionEvent,
+    latestTimerId,
+    timerCallback,
+    runTimer,
+  };
 }
 
 function ids(h) {
