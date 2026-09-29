@@ -737,7 +737,7 @@ test("P249 Main typing feeds the existing Filter owner and keeps Main keyboard f
   assert.equal(h.context.state.typeJump.query, "");
   assert.equal(h.context.state.typeJump.lastAt, 0);
   assert.equal(h.pendingTimerCount(), 1);
-  assert.equal(h.document.activeElement, originalA, "focus remains in Main before scheduled filter render");
+  assert.equal(h.document.activeElement, h.treeWrap, "implicit typing synchronously stabilises Main keyboard ownership");
   assert.equal(h.counters.saveWorkspace, 0);
 
   h.runPendingTimers();
@@ -772,6 +772,48 @@ test("P249 consecutive Main text extends one Filter query without type-jump timi
   assert.deepEqual(h.context.getVisibleNodeIdsInRenderOrder(), ["B"]);
   assert.equal(h.context.state.selectedId, "B");
   assert.equal(h.document.activeElement, h.treeWrap);
+});
+
+test("P281 rapid implicit typing survives debounced row rebuild boundaries exactly", () => {
+  const h = makeHarness({ selectedId: "A" });
+  setLabels(h, { A: "Alpha", B: "Beta", C: "Bravo" });
+  h.materialise();
+  h.row("A").focus();
+
+  const query = "starlingfilter";
+  h.reset();
+  for (let index = 0; index < query.length; index += 1) {
+    h.keydown(index === 0 ? "A" : null, query[index]);
+    assert.equal(h.document.activeElement, h.treeWrap, "stable Main owner must hold focus synchronously");
+    if (index < query.length - 1) h.runPendingTimers();
+  }
+  h.stop();
+
+  assert.equal(h.search.value, query);
+});
+
+test("P281 rapid implicit Backspace remains exact across debounced rebuild boundaries and empty stays inert", () => {
+  const h = makeHarness({ selectedId: "A" });
+  setLabels(h, { A: "Alpha", B: "Beta", C: "Bravo" });
+  h.materialise();
+  h.row("A").focus();
+
+  h.reset();
+  for (const character of "starlingfilter") h.keydown(null, character);
+  h.runPendingTimers();
+  assert.equal(h.search.value, "starlingfilter");
+
+  const expected = ["starlingfilte", "starlingfilt", "starlingfil", "starlingfi", "starlingf", "starling", "starlin", "starli", "starl", "star", "sta", "st", "s", ""];
+  for (const value of expected) {
+    h.keydown(null, "Backspace");
+    assert.equal(h.search.value, value);
+    assert.equal(h.document.activeElement, h.treeWrap);
+    h.runPendingTimers();
+  }
+  const inert = h.keydown(null, "Backspace");
+  h.stop();
+  assert.equal(inert.defaultPrevented, true);
+  assert.equal(h.search.value, "");
 });
 
 test("P249 immediate ArrowDown settles filter before navigating filtered visible order", () => {
