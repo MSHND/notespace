@@ -298,7 +298,29 @@
       draft = await config.crypto.openContent(record.activationDraft.record,
         record.deviceWrappingKey, record.activationDraft.context);
     } catch (_error) { return false; }
-    return object(draft) && Object.keys(draft).length === ACTIVATION_DRAFT_FIELDS.length
+    if (!object(draft)) return false;
+
+    if (draft.schemaVersion === 2) {
+      const ownerlessContract = global.PocketSyncOwnerlessActivationDraft;
+      const securityContract = global.PocketSyncSecurityContract;
+      if (!object(ownerlessContract) || typeof ownerlessContract.classifyAdopted !== "function"
+          || !object(securityContract)) return false;
+      let classified;
+      try {
+        classified = ownerlessContract.classifyAdopted(draft, {
+          securityContract,
+          crypto: config.crypto,
+        });
+      } catch (_error) {
+        return false;
+      }
+      return !!classified
+        && classified.syncedPocketId === record.syncedPocketId
+        && classified.deviceId === record.deviceId
+        && record.remote.confirmedRevision >= 1;
+    }
+
+    return Object.keys(draft).length === ACTIVATION_DRAFT_FIELDS.length
       && ACTIVATION_DRAFT_FIELDS.every((field) => Object.prototype.hasOwnProperty.call(draft, field))
       && draft.kind === "pocket.sync.activation-draft" && draft.schemaVersion === 1
       && id(draft.activationId) && ["json", "vault"].includes(draft.sourceOwnerKind)
