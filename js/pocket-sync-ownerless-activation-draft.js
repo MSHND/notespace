@@ -25,7 +25,6 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     "recoveryOperationId", "recoveryLogicalChangeId",
   ]);
   const STAGES = Object.freeze({
-    "source-ready": 0,
     "local-material-ready": 1,
     "device-staged": 2,
     "account-ready": 3,
@@ -267,8 +266,7 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     const registrationPending = ["account-registration", "account-registration-finish"]
       .includes(draft.pendingOperation);
     if (draft.accountPath === "existing-unbound") {
-      if (!stageAtLeast(draft, "account-ready") || registrationPending
-          || draft.registrationContinuation !== null) throw contractError();
+      if (registrationPending || draft.registrationContinuation !== null) throw contractError();
     }
     if (draft.accountPath === "new-account") {
       if (stageAtLeast(draft, "account-ready")) {
