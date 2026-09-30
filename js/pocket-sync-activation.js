@@ -35,6 +35,7 @@ without adding UI, a live synced owner, background work, or deployment state.
   const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object.freeze([
     "captureTarget", "isTargetReplaceable", "withExistingAccountReady",
     "buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",
+    "adoptSyncedOwner",
   ]);
   const IDENTIFIER_FIELDS = Object.freeze([
     "deviceEnvelopeId", "prfEnvelopeId", "recoveryEnvelopeId",
@@ -286,6 +287,25 @@ without adding UI, a live synced owner, background work, or deployment state.
     });
   }
 
+  function ownerlessActivatedResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-activated",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "adopted",
+      locallyDurable: true,
+      remotelyCommitted: true,
+      confirmedRemoteRevision: 1,
+      keySetVersion: draft.keySetVersion,
+      recoveryVersion: 1,
+      recoveryCopyStored: true,
+      adopted: true,
+    });
+  }
+
   function byteLength(value) {
     if (typeof value !== "string"
         || value.length === 0
@@ -329,8 +349,9 @@ without adding UI, a live synced owner, background work, or deployment state.
   function validateFactory(input) {
     const config = exactObject(input, FACTORY_FIELDS, "activation-factory-invalid");
     requireMethods(config.securityContract, [
-      "validateActivationReadiness", "buildRecoveryPackage",
-      "validateOpaqueEncryptedRecord", "validateOpaqueMasterKeyEnvelopeRecord",
+      "validateActivationReadiness", "validateOwnerlessActivationReadiness",
+      "buildRecoveryPackage", "validateOpaqueEncryptedRecord",
+      "validateOpaqueMasterKeyEnvelopeRecord",
     ], "activation-security-contract-invalid");
     requireMethods(config.crypto, [
       "encodeBase64Url", "generateDeviceWrappingKey", "createDerivedWrappingKey",
