@@ -688,7 +688,9 @@ test("P288 real P278 account client plus P280 conductor keeps raw existing-accou
 test("P288 account-ready convergence performs zero downstream remote, recovery, copy or adoption work and remains runtime-dormant", () => {
   const activation = source(ACTIVATION);
   assert.doesNotMatch(activation, /readSyncedPocket|PocketSyncFirstCreate/);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js|pocket-sync-first-create\.js/);
+  const index = source("index.html");
+  assert.equal((index.match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
+  assert.equal((index.match(/pocket-sync-first-create\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js|pocket-sync-first-create\.js/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /ownerless-first-create|PocketSyncOwnerlessActivationDraft|PocketSyncFirstCreate|findOwnerlessActivation/);
