@@ -219,6 +219,7 @@
     const hasFilter = safeClean(value, 120).length > 0;
 
     if (hasFilter) rememberFilterOrigin();
+    else if (typeof restoreFilterViewStateOnClear === "function") restoreFilterViewStateOnClear();
     else clearFilterMemory();
     resetTypeJump();
 
