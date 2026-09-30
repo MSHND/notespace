@@ -390,7 +390,8 @@ function createHarness(options = {}) {
             ownerSaveBoundary: Object.freeze({
               installSyncedOwnerForSave(controller) {
                 counters.install += 1;
-                if (controller !== ownerController || options.installFails === true) return false;
+                if (!controller || typeof controller.adoptReadyActivation !== "function"
+                    || options.installFails === true) return false;
                 return true;
               },
             }),
