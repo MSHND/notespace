@@ -234,9 +234,9 @@ test("P223 Enter then Backspace is an exact local inverse for a beginning plain-
 
   h.setCaret("line_0", 0);
   assert.equal(h.press("line_0", "Enter").defaultPrevented, true);
-  const insertedId = h.pane.children[1].getAttribute("data-line-id");
-  assert.equal(h.lineById("line_0").textContent, "");
-  assert.equal(h.lineById(insertedId).textContent, "Alpha");
+  const insertedId = h.pane.children[0].getAttribute("data-line-id");
+  assert.equal(h.lineById("line_0").textContent, "Alpha");
+  assert.equal(h.lineById(insertedId).textContent, "");
 
   h.setCaret(insertedId, 0);
   assert.equal(h.press(insertedId, "Backspace").defaultPrevented, true);
@@ -402,7 +402,6 @@ test("P223 keeps one PE-row Backspace owner and the join path contains no full-p
   assert.ok(joinStart >= 0 && joinEnd > joinStart);
   const joinBody = runtime.slice(joinStart, joinEnd);
   assert.doesNotMatch(joinBody, /pane\.innerHTML/);
-  assert.match(joinBody, /content\.parseMarker/);
-  assert.match(joinBody, /subtreeEnd\(index - 1\) !== index/);
-  assert.match(joinBody, /hasChildren\(index\)/);
+  assert.match(joinBody, /content\.joinPlainSiblingAtStart\(lines, index, caretOffset\)/);
+  assert.doesNotMatch(joinBody, /content\.parseMarker|subtreeEnd\(index - 1\)|hasChildren\(index\)/);
 });
