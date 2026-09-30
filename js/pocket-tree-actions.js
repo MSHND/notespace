@@ -729,7 +729,7 @@ function clearFilterForCopyLoop() {
     window.cancelPocketPendingFilterRender();
   }
   el.search.value = "";
-  clearFilterMemory();
+  restoreFilterViewStateOnClear();
   resetTypeJump();
   return true;
 }
@@ -754,17 +754,46 @@ function hasNodeId(nodeId) {
   return !!id && state.nodes.some((node) => cleanText(node?.id, 80) === id);
 }
 
+let filterCollapsedSnapshot = null;
+
 function rememberFilterOrigin() {
   if (!state.navigationMemory || typeof state.navigationMemory !== "object") return;
-  if (state.navigationMemory.filterSelectedId || state.navigationMemory.filterFocusRootId) return;
+  if (Array.isArray(filterCollapsedSnapshot)) return;
   state.navigationMemory.filterSelectedId = cleanText(state.selectedId, 80);
   state.navigationMemory.filterFocusRootId = cleanText(state.focusRootId, 80);
+  const collapsedIds = state.collapsed instanceof Set ? Array.from(state.collapsed) : [];
+  filterCollapsedSnapshot = Object.freeze(
+    collapsedIds.map((id) => cleanText(id, 80)).filter(Boolean)
+  );
 }
 
 function clearFilterMemory() {
-  if (!state.navigationMemory || typeof state.navigationMemory !== "object") return;
-  state.navigationMemory.filterSelectedId = "";
-  state.navigationMemory.filterFocusRootId = "";
+  if (state.navigationMemory && typeof state.navigationMemory === "object") {
+    state.navigationMemory.filterSelectedId = "";
+    state.navigationMemory.filterFocusRootId = "";
+  }
+  filterCollapsedSnapshot = null;
+}
+
+function restoreFilterViewStateOnClear() {
+  const snapshot = Array.isArray(filterCollapsedSnapshot) ? filterCollapsedSnapshot : null;
+  const targetId = hasNodeId(state.selectedId) ? cleanText(state.selectedId, 80) : "";
+
+  if (snapshot) {
+    const currentIds = new Set(
+      (Array.isArray(state.nodes) ? state.nodes : [])
+        .map((node) => cleanText(node?.id, 80))
+        .filter(Boolean)
+    );
+    state.collapsed = new Set(snapshot.filter((id) => currentIds.has(id)));
+    if (targetId) {
+      state.selectedId = targetId;
+      expandPathToNode(targetId);
+    }
+  }
+
+  clearFilterMemory();
+  return targetId;
 }
 
 function restoreRememberedSelectionAfterFilter(fallbackId = "") {
@@ -794,14 +823,9 @@ function clearFilterAndReturnHome(statusText = "Filter cleared.") {
     window.cancelPocketPendingFilterRender();
   }
 
-  const targetId = hasNodeId(state.selectedId) ? cleanText(state.selectedId, 80) : "";
   el.search.value = "";
-  clearFilterMemory();
+  const targetId = restoreFilterViewStateOnClear();
   resetTypeJump();
-  if (targetId) {
-    state.selectedId = targetId;
-    expandPathToNode(targetId);
-  }
   refreshMeta();
   renderTree();
   refocusTreeNavigation(targetId || state.selectedId);
