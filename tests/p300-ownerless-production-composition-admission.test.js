@@ -101,10 +101,10 @@ test("P300 loading the admitted support modules defines contracts only and perfo
     Object.keys(context.PocketSyncOwnerlessActivationDraft),
     [
       "POLICY",
-      "createInitialDraft",
       "validate",
-      "buildDeviceStaged",
-      "buildAccountRegistrationPending",
+      "buildInitialDraft",
+      "buildRegistrationStarted",
+      "buildRegistrationPending",
       "buildAccountReady",
       "buildContentUploadPending",
       "buildContentConflict",
@@ -124,6 +124,7 @@ test("P300 loading the admitted support modules defines contracts only and perfo
       "buildAdopted",
       "classifyReadyForAdoption",
       "classifyAdopted",
+      "classifyDiscoveryCandidate",
     ]
   );
 });
