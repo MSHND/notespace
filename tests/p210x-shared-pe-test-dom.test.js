@@ -9,11 +9,11 @@ const crypto = require("node:crypto");
 const ROOT = path.resolve(__dirname, "..");
 function source(relativePath) { return fs.readFileSync(path.join(ROOT, relativePath), "utf8"); }
 
-test("P210x product runtime is byte-identical to frozen P210w-final", () => {
+test("P210x/P289 product runtime is byte-identical to the branch-aware semantic-owner candidate", () => {
   const bytes = fs.readFileSync(path.join(ROOT, "js/pocket-node-popout-runtime.js"));
   const prefix = Buffer.from(`blob ${bytes.length}\0`);
   const gitBlobSha = crypto.createHash("sha1").update(prefix).update(bytes).digest("hex");
-  assert.equal(gitBlobSha, "b1034fa1c57c52d2aac9af430dcac7127cee1422");
+  assert.equal(gitBlobSha, "6c5342ba3be7a53120e2a54f98dc4e7e151205df");
 });
 
 test("P210x migrated PE suites share one DOM mutation owner", () => {
