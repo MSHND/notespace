@@ -421,48 +421,59 @@
       focusLine(branch[0].id); return true;
     }
     function joinPlainLineAtStart(index, target, caretOffset) {
-      if (readOnly || index <= 0 || index >= lines.length || caretOffset !== 0 || !target) return false;
-      var current = lines[index], previous = lines[index - 1];
-      if (!current || !previous || current.content === "" || lineElement(current.id) !== target) return false;
-      var currentMarker = typeof content.parseMarker === "function" ? content.parseMarker(current.content) : null;
-      var previousMarker = typeof content.parseMarker === "function" ? content.parseMarker(previous.content) : null;
-      if (!currentMarker || currentMarker.kind !== "plain" || !previousMarker || previousMarker.kind !== "plain") return false;
-      if ((Number(current.depth) || 0) !== (Number(previous.depth) || 0)) return false;
-      if (hasChildren(index) || subtreeEnd(index) !== index + 1 || subtreeEnd(index - 1) !== index) return false;
-      var previousRow = rowForId(previous.id), currentRow = rowForId(current.id);
-      if (!previousRow || !currentRow || rowParts(currentRow).text !== target) return false;
-      var joinOffset = String(previous.content || "").length, removedId = current.id;
-      previous.content = String(previous.content || "") + String(current.content || "");
-      lines.splice(index, 1); collapsed.delete(removedId); markMutation();
-      updateRowPresentation(previousRow, index - 1, true); detachVisibleRow(removedId);
-      refreshRowsAt([index - 2, index]); selectedId = previous.id;
-      if (!focusLineAtOffset(previous.id, joinOffset)) focusLine(previous.id, true);
+      if (readOnly || index <= 0 || index >= lines.length || caretOffset !== 0 || !target
+          || typeof content.joinPlainSiblingAtStart !== "function") return false;
+      var current = lines[index]; if (!current || lineElement(current.id) !== target) return false;
+      var transformed = content.joinPlainSiblingAtStart(lines, index, caretOffset);
+      if (!transformed || transformed.ok !== true || transformed.kind !== "join") return false;
+      var survivorRow = rowForId(transformed.survivorId), currentRow = rowForId(transformed.removedId);
+      if (!survivorRow || !currentRow || rowParts(currentRow).text !== target) return false;
+      var oldBoundaryIds = [
+        lines[transformed.survivorIndex - 1]?.id || "",
+        lines[index + 1]?.id || "",
+      ];
+      lines = transformed.lines; collapsed.delete(transformed.removedId); markMutation();
+      updateRowPresentation(survivorRow, transformed.survivorIndex, true);
+      detachVisibleRow(transformed.removedId);
+      refreshRowsByIds(oldBoundaryIds.concat([transformed.survivorId]));
+      selectedId = transformed.focusId;
+      if (!focusLineAtOffset(transformed.focusId, transformed.focusOffset)) focusLine(transformed.focusId, true);
       return true;
     }
     function insertAfter(index, caretOffset) {
-      var id = lines[index].id, currentRow = rowForId(id); if (!currentRow) return "";
-      var marker = content.smartContinuation(lines[index].content);
-      if (marker.exitList) {
-        lines[index].content = ""; markMutation(); refreshRowAt(index, true); focusLine(id); return id;
+      if (readOnly || index < 0 || index >= lines.length || typeof content.splitLineAtCaret !== "function") return "";
+      var current = lines[index], currentRow = rowForId(current.id); if (!currentRow) return "";
+      var proposedId = "line_new_" + (nextId + 1);
+      var transformed = content.splitLineAtCaret(lines, index, caretOffset, proposedId);
+      if (!transformed || transformed.ok !== true) return "";
+      if (transformed.kind === "list-exit") {
+        lines = transformed.lines; markMutation();
+        var exitIndex = lineIndex(transformed.updatedId);
+        if (exitIndex >= 0) refreshRowAt(exitIndex, true);
+        selectedId = transformed.focusId;
+        if (!focusLineAtOffset(transformed.focusId, transformed.focusOffset)) focusLine(transformed.focusId);
+        return transformed.focusId;
       }
-      var currentContent = String(lines[index].content || "");
-      var parsedMarker = typeof content.parseMarker === "function" ? content.parseMarker(currentContent) : null;
-      var splitPlain = !!(parsedMarker && parsedMarker.kind === "plain" && !hasChildren(index)
-        && Number.isInteger(caretOffset) && caretOffset >= 0 && caretOffset <= currentContent.length);
-      var nextContent = marker.content;
-      if (splitPlain) {
-        lines[index].content = currentContent.slice(0, caretOffset);
-        nextContent = currentContent.slice(caretOffset);
+      if (transformed.kind !== "insert" || transformed.insertedId !== proposedId
+          || !Number.isInteger(transformed.insertIndex) || transformed.insertIndex < 0) return "";
+      var nextIdAfterInsert = transformed.lines[transformed.insertIndex + 1]?.id || "";
+      lines = transformed.lines; nextId += 1; markMutation();
+      var row = createVisibleRow(transformed.insertIndex);
+      var beforeRow = nextIdAfterInsert ? rowForId(nextIdAfterInsert) : null;
+      if (!row || !insertRowBefore(row, beforeRow)) return "";
+      if (transformed.updatedId) {
+        var updatedIndex = lineIndex(transformed.updatedId);
+        if (updatedIndex >= 0) refreshRowAt(updatedIndex, true);
       }
-      var next = createLine(nextContent, lines[index].depth);
-      lines.splice(index + 1, 0, next); markMutation();
-      var row = createVisibleRow(index + 1); if (!row || !insertRowAfter(row, currentRow)) return "";
-      if (splitPlain) refreshRowAt(index, true);
-      refreshRowsAt([index, index + 1, index + 2]);
-      if (splitPlain) {
-        if (!focusLineAtOffset(next.id, 0)) focusLine(next.id);
-      } else focusLine(next.id);
-      return next.id;
+      refreshRowsByIds([
+        transformed.sourceId,
+        transformed.insertedId,
+        lines[transformed.insertIndex - 1]?.id || "",
+        nextIdAfterInsert,
+      ]);
+      selectedId = transformed.focusId;
+      if (!focusLineAtOffset(transformed.focusId, transformed.focusOffset)) focusLine(transformed.focusId);
+      return transformed.insertedId;
     }
     function applyReadOnlyState() { if (!readOnly) return; titleInput.readOnly = true; saveBtn.disabled = true; saveCloseBtn.disabled = true; setDirty(false); }
     function buildPayload() { return { id: payload.id, title: titleInput.value, text: buildText(), body: buildText(), updatedAt: new Date().toISOString(), fileSessionId: payload.fileSessionId, sourceFileName: payload.sourceFileName, sourcePipSession: payload.sourcePipSession, sourceOwnerKind: payload.sourceOwnerKind, sourceVaultSessionId: payload.sourceVaultSessionId, originalUpdatedAt: payload.originalUpdatedAt }; }
