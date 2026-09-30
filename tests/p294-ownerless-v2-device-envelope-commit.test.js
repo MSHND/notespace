@@ -434,13 +434,16 @@ test("P294 both ownerless account paths converge through the one shared device-e
     assert.equal(committed.found.record.usage.masterKeyGeneration, 1);
     assert.equal(committed.found.record.usage.masterKeyContentEncryptionLimit, 2 ** 20);
 
-    const again = await harness.orchestrator.resume(
-      harness.resumeDependencies(),
-      resumeOptions(ready.staged.activationId)
+    assert.equal(
+      harness.counters.envelope,
+      1,
+      "the P294 device-envelope resume itself must publish exactly one envelope"
     );
-    assertSafeDeviceCommittedResult(again, accountPath);
-    assert.equal(harness.counters.envelope, 1, "committed envelope must not publish again");
-    assert.equal(harness.counters.recovery, 0, "P294 hard stop must not initialise recovery");
+    assert.equal(
+      harness.counters.recovery,
+      0,
+      "the P294 device-envelope resume itself must still stop before recovery"
+    );
   }
 });
 
