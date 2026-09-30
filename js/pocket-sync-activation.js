@@ -34,7 +34,7 @@ without adding UI, a live synced owner, background work, or deployment state.
   ]);
   const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object.freeze([
     "captureTarget", "isTargetReplaceable", "withExistingAccountReady",
-    "buildRecoveryPackage",
+    "buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",
   ]);
   const IDENTIFIER_FIELDS = Object.freeze([
     "deviceEnvelopeId", "prfEnvelopeId", "recoveryEnvelopeId",
@@ -263,6 +263,26 @@ without adding UI, a live synced owner, background work, or deployment state.
       keySetVersion: draft.keySetVersion,
       recoveryVersion: 1,
       recoveryCopyRequired: true,
+    });
+  }
+
+  function ownerlessReadyForAdoptionResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-ready-for-adoption",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "ready-for-adoption",
+      locallyDurable: true,
+      remotelyCommitted: true,
+      confirmedRemoteRevision: 1,
+      keySetVersion: draft.keySetVersion,
+      recoveryVersion: 1,
+      recoveryCopyRequired: false,
+      recoveryCopyStored: true,
+      adopted: false,
     });
   }
 
@@ -1565,7 +1585,8 @@ without adding UI, a live synced owner, background work, or deployment state.
           || execution.draft?.activationMode !== "ownerless-first-create") return null;
       const ownerless = global.PocketSyncOwnerlessActivationDraft;
       if (!isObject(ownerless)
-          || typeof ownerless.buildRecoveryCopyPending !== "function") {
+          || typeof ownerless.buildRecoveryCopyPending !== "function"
+          || typeof ownerless.buildReadyForAdoption !== "function") {
         throw activationError("ownerless-activation-state-invalid");
       }
       return ownerless;
@@ -1625,8 +1646,33 @@ without adding UI, a live synced owner, background work, or deployment state.
       return null;
     }
 
+    function recoveryCopyWriteFailure(execution) {
+      const extra = {
+        activationId: execution.draft.activationId,
+        locallyDurable: true,
+        remotelyCommitted: true,
+        resumable: true,
+        recoveryCopyRequired: true,
+      };
+      return ownerlessRecoveryCopyTransitionOwner(execution)
+        ? ownerlessFailure("ownerless-recovery-copy-not-stored", extra)
+        : safeFailure("recovery-copy-not-stored", extra);
+    }
+
     async function writePackage(execution) {
       if (execution.draft.recoveryCopyStored) return null;
+      const ownerless = ownerlessRecoveryCopyTransitionOwner(execution);
+      let ownerlessReadyDraft = null;
+      if (ownerless) {
+        try {
+          ownerlessReadyDraft = ownerless.buildReadyForAdoption(
+            { draft: execution.draft },
+            ownerlessContractConfig()
+          );
+        } catch (_error) {
+          throw activationError("ownerless-activation-state-invalid");
+        }
+      }
       if (!execution.destination) {
         let prepared;
         try {
@@ -1634,21 +1680,14 @@ without adding UI, a live synced owner, background work, or deployment state.
             execution,
             execution.dependencies.prepareRecoveryCopyDestination()
           );
-      } catch (error) {
-        if (error?.code === "source-session-changed") throw error;
-        prepared = null;
+        } catch (error) {
+          if (error?.code === execution.currentFailureCode) throw error;
+          prepared = null;
         }
         execution.destination = validateDestination(prepared);
       }
-      if (!execution.destination) {
-        return safeFailure("recovery-copy-not-stored", {
-          activationId: execution.draft.activationId,
-          locallyDurable: true,
-          remotelyCommitted: true,
-          resumable: true,
-          recoveryCopyRequired: true,
-        });
-      }
+      if (!execution.destination) return recoveryCopyWriteFailure(execution);
+
       let result;
       try {
         result = await checked(execution, execution.dependencies.writeRecoveryCopy({
@@ -1656,17 +1695,14 @@ without adding UI, a live synced owner, background work, or deployment state.
           recoveryPackage: execution.draft.recoveryPackage,
         }));
       } catch (error) {
-        if (error?.code === "source-session-changed") throw error;
+        if (error?.code === execution.currentFailureCode) throw error;
         result = null;
       }
-      if (!successWrite(result)) {
-        return safeFailure("recovery-copy-not-stored", {
-          activationId: execution.draft.activationId,
-          locallyDurable: true,
-          remotelyCommitted: true,
-          resumable: true,
-          recoveryCopyRequired: true,
-        });
+      if (!successWrite(result)) return recoveryCopyWriteFailure(execution);
+
+      if (ownerless) {
+        await persistDraft(execution, ownerlessReadyDraft);
+        return null;
       }
       await persistDraft(execution, changedDraft(execution.draft, {
         stage: "ready-for-adoption",
@@ -2126,7 +2162,8 @@ without adding UI, a live synced owner, background work, or deployment state.
           || typeof ownerless.buildRecoveryInitialisationPending !== "function"
           || typeof ownerless.buildRecoveryConflict !== "function"
           || typeof ownerless.buildRecoveryInitialised !== "function"
-          || typeof ownerless.buildRecoveryCopyPending !== "function") {
+          || typeof ownerless.buildRecoveryCopyPending !== "function"
+          || typeof ownerless.buildReadyForAdoption !== "function") {
         return ownerlessFailure("ownerless-contract-unavailable");
       }
 
@@ -2199,7 +2236,6 @@ without adding UI, a live synced owner, background work, or deployment state.
         const exactPostAccountBoundary = execution.draft.account !== null
           && execution.draft.registrationContinuation === null
           && ["available", "skipped"].includes(execution.draft.prfStatus)
-          && execution.draft.recoveryPackage === null
           && execution.draft.recoveryCopyStored === false
           && execution.draft.adopted === false;
         if (!exactPostAccountBoundary) {
@@ -2332,6 +2368,29 @@ without adding UI, a live synced owner, background work, or deployment state.
           const packageResult = await preparePackage(execution);
           if (packageResult) return packageResult;
           return ownerlessRecoveryCopyPendingResult(execution.draft);
+        }
+
+        if (execution.draft.stage === "recovery-copy-pending") {
+          const exactRecoveryKeySet = execution.draft.prfStatus === "available"
+            ? execution.draft.prfEnvelope !== null && execution.draft.keySetVersion === 3
+            : execution.draft.prfStatus === "skipped"
+              && execution.draft.prfEnvelope === null
+              && execution.draft.keySetVersion === 2;
+          if (!exactRecoveryKeySet
+              || execution.draft.confirmedRemoteRevision !== 1
+              || execution.draft.recoveryVersion !== 1
+              || execution.draft.accountLocator === null
+              || execution.draft.accountLocator === execution.draft.account?.accountId
+              || execution.draft.pendingOperation !== null
+              || !remoteContentWitnessExact
+              || !deviceUsageWitnessExact) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+          const written = await writePackage(execution);
+          if (written) return written;
+          return ownerlessReadyForAdoptionResult(execution.draft);
         }
 
         return ownerlessFailure("ownerless-activation-state-invalid", {
