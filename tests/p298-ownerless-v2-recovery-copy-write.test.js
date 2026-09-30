@@ -850,7 +850,7 @@ test("P298 ownerless currentness fails closed across the Recovery Copy write and
   assert.equal(after.draft.recoveryCopyStored, false);
 });
 
-test("P298 source shape reuses one writer, keeps P297 hard stop, owns v2 ready transition canonically, and contains zero owner adoption/runtime wiring", () => {
+test("P298 source shape reuses one writer, keeps the ready-for-adoption hard stop, and leaves later P299 adoption separate from runtime/UI wiring", () => {
   const activation = source(ACTIVATION);
   const ownerless = source(OWNERLESS);
 
@@ -858,13 +858,13 @@ test("P298 source shape reuses one writer, keeps P297 hard stop, owns v2 ready t
   assert.match(ownerless, /function buildReadyForAdoption\s*\(/);
   assert.match(
     activation,
-    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*\]\)/
+    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*"adoptSyncedOwner",\s*\]\)/
   );
 
   const dependenciesStart = activation.indexOf("const OWNERLESS_RESUME_DEPENDENCY_FIELDS");
   const dependenciesEnd = activation.indexOf("]);", dependenciesStart);
   const dependencies = activation.slice(dependenciesStart, dependenciesEnd);
-  assert.doesNotMatch(dependencies, /adoptSyncedOwner/);
+  assert.match(dependencies, /adoptSyncedOwner/);
 
   const ownerlessStart = activation.indexOf("async function resumeOwnerless");
   const ownerlessEnd = activation.indexOf("async function resume(", ownerlessStart + 10);
@@ -880,10 +880,23 @@ test("P298 source shape reuses one writer, keeps P297 hard stop, owns v2 ready t
   const p297Section = ownerlessResume.slice(recoveryInitialisedStart, recoveryCopyPendingStart);
   assert.match(p297Section, /preparePackage\(execution\)/);
   assert.doesNotMatch(p297Section, /writePackage\(execution\)/);
-  const p298Section = ownerlessResume.slice(recoveryCopyPendingStart);
+  const readyForAdoptionStart = ownerlessResume.indexOf(
+    'if (execution.draft.stage === "ready-for-adoption")'
+  );
+  const p298Section = ownerlessResume.slice(recoveryCopyPendingStart, ownerlessResume.length);
   assert.match(p298Section, /writePackage\(execution\)/);
   assert.match(p298Section, /ownerlessReadyForAdoptionResult\(execution\.draft\)/);
-  assert.doesNotMatch(ownerlessResume, /adopt\(execution\)|adoptSyncedOwner/);
+  const recoveryCopySection = ownerlessResume.slice(recoveryCopyPendingStart);
+  const recoveryCopyBranchEnd = recoveryCopySection.indexOf(
+    'return ownerlessReadyForAdoptionResult(execution.draft);'
+  );
+  assert.notEqual(recoveryCopyBranchEnd, -1);
+  assert.doesNotMatch(
+    recoveryCopySection.slice(0, recoveryCopyBranchEnd),
+    /adopt\(execution\)|adoptSyncedOwner/,
+    "P298 same-resume write must still stop before P299 owner adoption"
+  );
+  assert.notEqual(readyForAdoptionStart, -1);
 
   const writeStart = activation.indexOf("async function writePackage");
   const writeEnd = activation.indexOf("async function adopt(", writeStart);
