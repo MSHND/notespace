@@ -1,0 +1,30 @@
+name: P291 focused proof
+
+on:
+  push:
+
+jobs:
+  p291-focused-proof:
+    if: github.ref == 'refs/heads/candidate/p291-proof'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: P291 Main filter Space ownership
+        run: timeout --signal=TERM --kill-after=5s 180s node --test tests/p291-main-filter-space-ownership.test.js
+      - name: Historical Main filter regressions
+        run: >
+          timeout --signal=TERM --kill-after=5s 240s node --test
+          tests/p249-main-type-to-filter-unification.test.js
+          tests/p252-filter-first-actual-match.test.js
+          tests/p267-filter-ordered-word-fragment-matcher.test.js
+      - name: Existing mouse disclosure ownership
+        run: >
+          timeout --signal=TERM --kill-after=5s 180s node --test
+          --test-name-pattern="P060 main-tree disclosure owns selection and navigation while leaf gutters keep a structural marker"
+          tests/pe-persistence-contract.test.js
+      - name: Repository check
+        run: timeout --signal=TERM --kill-after=5s 240s npm run check
