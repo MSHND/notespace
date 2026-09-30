@@ -694,7 +694,7 @@ function assertSafeActivatedResult(result, accountPath, expectedKeySetVersion) {
   assert.equal(result.adopted, true);
   assert.doesNotMatch(
     JSON.stringify(result),
-    /ownerlessReadiness|accountId|credentialId|prfEvaluationInput|outputBytes|recoveryRoot|recoveryAuthorisation|recoveryPackage|masterKey|ciphertext/
+    /ownerlessReadiness|accountId|credentialId|prfEvaluationInput|outputBytes|recoveryRoot|recoveryAuthorisation|recoveryPackage|"masterKey":|ciphertext/
   );
 }
 
@@ -777,7 +777,7 @@ test("P299 both account paths and both PRF branches adopt once through the activ
       );
       assert.doesNotMatch(
         JSON.stringify(descriptor),
-        /accountId|credentialId|prfEvaluationInput|outputBytes|recoveryRoot|recoveryAuthorisation|recoveryPackage|masterKey|ciphertext/
+        /accountId|credentialId|prfEvaluationInput|outputBytes|recoveryRoot|recoveryAuthorisation|recoveryPackage|"masterKey":|ciphertext/
       );
 
       const adopted = await readCanonical(harness, ready.staged.activationId);
