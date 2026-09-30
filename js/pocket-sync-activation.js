@@ -880,10 +880,29 @@ without adding UI, a live synced owner, background work, or deployment state.
           || execution.draft.adopted !== false) {
         throw activationError("activation-state-invalid");
       }
+      let adoptedDraft;
+      if (execution.draft.schemaVersion === 2
+          && execution.draft.activationMode === "ownerless-first-create") {
+        const ownerless = global.PocketSyncOwnerlessActivationDraft;
+        if (!isObject(ownerless) || typeof ownerless.buildAdopted !== "function") {
+          throw activationError("ownerless-activation-state-invalid");
+        }
+        try {
+          adoptedDraft = ownerless.buildAdopted(
+            { draft: execution.draft },
+            ownerlessContractConfig()
+          );
+        } catch (_error) {
+          throw activationError("ownerless-activation-state-invalid");
+        }
+      } else {
+        adoptedDraft = Object.assign({}, jsonClone(execution.draft), {
+          stage: "adopted",
+          adopted: true,
+        });
+      }
       const nextRevision = current.storeRevision + 1;
-      const nextDraft = execution.draftContract(Object.assign({}, jsonClone(execution.draft), {
-        stage: "adopted",
-        adopted: true,
+      const nextDraft = execution.draftContract(Object.assign({}, jsonClone(adoptedDraft), {
         updatedAt: validateTimestamp(config.now),
       }));
       const draftContext = {
@@ -1738,33 +1757,66 @@ without adding UI, a live synced owner, background work, or deployment state.
     }
 
     async function adopt(execution) {
+      const ownerlessMode = execution.draft.schemaVersion === 2
+        && execution.draft.activationMode === "ownerless-first-create";
       if (execution.draft.stage === "adopted") {
-        return successResult(execution.draft);
+        return ownerlessMode
+          ? ownerlessActivatedResult(execution.draft)
+          : successResult(execution.draft);
       }
       if (execution.draft.stage !== "ready-for-adoption") {
-        throw activationError("activation-state-invalid");
+        throw activationError(ownerlessMode
+          ? "ownerless-activation-state-invalid"
+          : "activation-state-invalid");
       }
-      const readiness = config.securityContract.validateActivationReadiness({
-        activationPhase: "pre-adoption",
-        sourceSaved: execution.draft.sourceSaved,
-        sourceSessionCurrent: true,
-        masterKeyCreatedLocally: true,
-        deviceRecordDurable: true,
-        initialRemoteCommitSucceeded: execution.draft.confirmedRemoteRevision === 1,
-        accountCredentialRegistered: execution.draft.account !== null,
-        recoveryEnvelopeExists: execution.draft.recoveryVersion === 1,
-        recoveryCopyStored: execution.draft.recoveryCopyStored,
-        syncedOwnerAdopted: false,
-      });
-      if (!readiness || readiness.ok !== true) throw activationError("activation-state-invalid");
-      const owner = deepFreeze({
+
+      let readinessInput;
+      let readiness;
+      if (ownerlessMode) {
+        readinessInput = deepFreeze({
+          activationPhase: "pre-adoption",
+          targetCurrentOrReplaceable: true,
+          canonicalPayloadPreparedLocally: true,
+          masterKeyCreatedLocally: true,
+          deviceRecordDurable: true,
+          accountIdentityAuthenticatedAndPinned: true,
+          accountEligibleForFirstCreation: true,
+          initialRemoteCommitSucceeded: true,
+          recoveryEnvelopeExists: true,
+          recoveryCopyStored: true,
+          syncedOwnerAdopted: false,
+        });
+        readiness = config.securityContract.validateOwnerlessActivationReadiness(readinessInput);
+      } else {
+        readiness = config.securityContract.validateActivationReadiness({
+          activationPhase: "pre-adoption",
+          sourceSaved: execution.draft.sourceSaved,
+          sourceSessionCurrent: true,
+          masterKeyCreatedLocally: true,
+          deviceRecordDurable: true,
+          initialRemoteCommitSucceeded: execution.draft.confirmedRemoteRevision === 1,
+          accountCredentialRegistered: execution.draft.account !== null,
+          recoveryEnvelopeExists: execution.draft.recoveryVersion === 1,
+          recoveryCopyStored: execution.draft.recoveryCopyStored,
+          syncedOwnerAdopted: false,
+        });
+      }
+      if (!readiness || readiness.ok !== true || readiness.ready !== true) {
+        throw activationError(ownerlessMode
+          ? "ownerless-activation-state-invalid"
+          : "activation-state-invalid");
+      }
+
+      const owner = deepFreeze(Object.assign({
         ownerKind: "synced",
         activationId: execution.draft.activationId,
         syncedPocketId: execution.draft.syncedPocketId,
         deviceId: execution.draft.deviceId,
         confirmedRemoteRevision: 1,
         syncPending: false,
-      });
+      }, ownerlessMode ? { ownerlessReadiness: readinessInput } : {}));
+
+      // Ownership currentness is checked immediately before the one owner-changing call.
       await ensureCurrent(execution);
       let adopted;
       try { adopted = await execution.dependencies.adoptSyncedOwner(owner); }
@@ -1772,25 +1824,48 @@ without adding UI, a live synced owner, background work, or deployment state.
       const accepted = adopted === true || (isObject(adopted)
         && Object.keys(adopted).length === 1 && adopted.ok === true);
       if (!accepted) {
-        return safeFailure("owner-adoption-failed", {
-          activationId: execution.draft.activationId, locallyDurable: true,
-          remotelyCommitted: true, resumable: true, recoveryCopyRequired: false,
-        });
+        return ownerlessMode
+          ? ownerlessFailure("ownerless-adoption-failed", {
+            activationId: execution.draft.activationId,
+            adopted: false,
+            locallyDurable: true,
+            remotelyCommitted: true,
+            recoveryCopyStored: true,
+            recoveryCopyRequired: false,
+            resumable: true,
+          })
+          : safeFailure("owner-adoption-failed", {
+            activationId: execution.draft.activationId, locallyDurable: true,
+            remotelyCommitted: true, resumable: true, recoveryCopyRequired: false,
+          });
       }
+
+      // Deliberately no currentness check after successful adoption: the old target is retired.
       try {
         await persistAdoptedDraft(execution);
       } catch (_error) {
-        return safeFailure("owner-adoption-finalisation-failed", {
-          activationId: execution.draft.activationId,
-          adopted: true,
-          sourceOwnerPreserved: false,
-          locallyDurable: true,
-          remotelyCommitted: true,
-          recoveryCopyStored: true,
-          resumable: false,
-        });
+        return ownerlessMode
+          ? ownerlessFailure("ownerless-adoption-finalisation-failed", {
+            activationId: execution.draft.activationId,
+            adopted: true,
+            locallyDurable: true,
+            remotelyCommitted: true,
+            recoveryCopyStored: true,
+            resumable: false,
+          })
+          : safeFailure("owner-adoption-finalisation-failed", {
+            activationId: execution.draft.activationId,
+            adopted: true,
+            sourceOwnerPreserved: false,
+            locallyDurable: true,
+            remotelyCommitted: true,
+            recoveryCopyStored: true,
+            resumable: false,
+          });
       }
-      return successResult(execution.draft, owner);
+      return ownerlessMode
+        ? ownerlessActivatedResult(execution.draft)
+        : successResult(execution.draft, owner);
     }
 
     function successResult(draft, ownerInput) {
