@@ -626,7 +626,7 @@ test("P298 both account paths and both PRF branches write the exact persisted pa
         harness,
         accountPath,
         prfMode,
-        \`\${accountPath}-\${prfMode}-success\`
+        `${accountPath}-${prfMode}-success`
       );
       const before = plain(pending.canonical.draft);
       const beforeRemote = plain(pending.canonical.found.record.remote);
