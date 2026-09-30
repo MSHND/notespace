@@ -848,9 +848,27 @@ test("P296 canonical owner owns recovery transitions, only one initialiseRecover
   const ownerlessEnd = activation.indexOf("async function resume(", ownerlessStart + 10);
   const ownerlessResume = activation.slice(ownerlessStart, ownerlessEnd);
   assert.match(ownerlessResume, /initialiseRecovery\(execution\)/);
-  assert.doesNotMatch(ownerlessResume, /preparePackage\(execution\)/);
+  const recoveryTerminalStart = ownerlessResume.indexOf(
+    'if (execution.draft.stage === "prf-envelope-committed"'
+  );
+  const recoveryInitialisedStart = ownerlessResume.indexOf(
+    'if (execution.draft.stage === "recovery-initialised")'
+  );
+  const recoveryTerminalSection = ownerlessResume.slice(
+    recoveryTerminalStart,
+    recoveryInitialisedStart
+  );
+  assert.doesNotMatch(
+    recoveryTerminalSection,
+    /preparePackage\(execution\)/,
+    "P296 recovery resume must still hard-stop before P297 package construction"
+  );
+  assert.match(ownerlessResume, /preparePackage\(execution\)/);
   assert.doesNotMatch(ownerlessResume, /writePackage\(execution\)/);
-  assert.doesNotMatch(ownerlessResume, /buildRecoveryPackage|prepareRecoveryCopyDestination|writeRecoveryCopy/);
+  assert.doesNotMatch(
+    ownerlessResume,
+    /prepareRecoveryCopyDestination|writeRecoveryCopy|adoptSyncedOwner/
+  );
 
   assert.match(
     activation,
