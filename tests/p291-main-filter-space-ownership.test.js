@@ -127,7 +127,7 @@ test("P291 keeps exactly one implicit-filter owner and one selected-node Space o
   assert.equal((actions.match(/function settlePendingFilterBeforeMainCommand\(/g) || []).length, 1);
   assert.match(
     actions,
-    /if \(key === " " \) return cleanText\(currentMainFilterQueryRaw\(\), 120\)\.length > 0;/,
+    /if \(key === " "\) return cleanText\(currentMainFilterQueryRaw\(\), 120\)\.length > 0;/,
   );
 
   const handlerStart = actions.indexOf("function handleTreeKeydown(ev)");
