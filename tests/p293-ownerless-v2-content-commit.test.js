@@ -254,6 +254,9 @@ function createHarness(options = {}) {
       return Object.freeze({
         captureTarget: target,
         isTargetReplaceable: replaceable,
+        async buildRecoveryPackage() {
+          throw new Error("unexpected recovery package build before P297 boundary");
+        },
         async withExistingAccountReady(consumer) {
           counters.bridge += 1;
           return bridge(consumer);
