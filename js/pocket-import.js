@@ -1181,7 +1181,15 @@ function commitPathImport(pending) {
     state.collapsed.delete(focusNode.id);
     expandPathToNode(focusNode.id);
   }
-  if (el.search && cleanText(el.search.value, 160)) el.search.value = "";
+  if (el.search && cleanText(el.search.value, 160)) {
+    if (typeof window.cancelPocketPendingFilterRender === "function") {
+      window.cancelPocketPendingFilterRender();
+    }
+    el.search.value = "";
+    if (typeof restoreFilterViewStateOnClear === "function") restoreFilterViewStateOnClear();
+    else if (typeof clearFilterMemory === "function") clearFilterMemory();
+    if (typeof resetTypeJump === "function") resetTypeJump();
+  }
   if (pending.sourceInfo && typeof pending.sourceInfo === "object") {
     state.source = {
       schema: cleanText(pending.sourceInfo.schema, 80) || "path.lines",
