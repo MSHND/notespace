@@ -74,6 +74,7 @@ function loadProduction() {
     "js/pocket-first-use-document.js",
     OWNERLESS,
     DEVICE_STORE,
+    "js/pocket-sync-owner-controller.js",
     ACTIVATION,
     "js/pocket-sync-activation-owner-bridge.js",
   ]) vm.runInContext(source(file), context, { filename: file });
@@ -82,6 +83,7 @@ function loadProduction() {
     crypto: context.PocketSyncCrypto,
     ownerless: context.PocketSyncOwnerlessActivationDraft,
     deviceStoreModule: context.PocketSyncDeviceStore,
+    ownerControllerModule: context.PocketSyncOwnerController,
     activation: context.PocketSyncActivation,
     activationOwnerBridge: context.PocketSyncActivationOwnerBridge,
   };
@@ -191,7 +193,6 @@ function createHarness(options = {}) {
   const writeCalls = [];
   const adoptionDescriptors = [];
   let newAccountRawReference = null;
-  let ownerInstalled = false;
 
   const accountClient = options.accountPath === "new-account"
     ? Object.freeze({
@@ -243,28 +244,39 @@ function createHarness(options = {}) {
     open: (...args) => rawStore.open(...args),
     readPocket: (...args) => rawStore.readPocket(...args),
     readActivation: (...args) => rawStore.readActivation(...args),
+    readRecoveryAttempt: (...args) => rawStore.readRecoveryAttempt(...args),
     createPocket: (...args) => rawStore.createPocket(...args),
     replacePocket: (...args) => rawStore.replacePocket(...args),
     reservePocketEncryptionUsage: (...args) => rawStore.reservePocketEncryptionUsage(...args),
   });
 
   let randomCounter = 0;
+  const contentService = Object.freeze({
+    async conditionalUpload(input) {
+      counters.content += 1;
+      contentCalls.push(plain(input));
+      return Object.freeze({
+        conflict: false,
+        status: "committed",
+        revision: 1,
+      });
+    },
+  });
+  const ownerController = production.ownerControllerModule.createSyncedOwnerController({
+    crypto: production.crypto,
+    deviceStore,
+    contentService,
+    randomBytes(length) {
+      randomCounter += 1;
+      return bytes(length, randomCounter * 11);
+    },
+  });
   const orchestrator = production.activation.createActivationOrchestrator({
     securityContract: production.security,
     crypto: production.crypto,
     deviceStore,
     accountClient,
-    contentService: Object.freeze({
-      async conditionalUpload(input) {
-        counters.content += 1;
-        contentCalls.push(plain(input));
-        return Object.freeze({
-          conflict: false,
-          status: "committed",
-          revision: 1,
-        });
-      },
-    }),
+    contentService,
     envelopeService: Object.freeze({
       async addEnvelope(input) {
         counters.envelope += 1;
@@ -315,7 +327,8 @@ function createHarness(options = {}) {
     packageCalls,
     writeCalls,
     adoptionDescriptors,
-    get ownerInstalled() { return ownerInstalled; },
+    ownerController,
+    get ownerInstalled() { return ownerController.getSyncedOwnerState() !== null; },
     get newAccountRawReference() { return newAccountRawReference; },
     activateDependencies: Object.freeze({
       captureTarget: target,
@@ -367,19 +380,18 @@ function createHarness(options = {}) {
                 counters.adopt += 1;
                 adoptionDescriptors.push(plain(descriptor));
                 if (options.adoptionRejects === true) return Object.freeze({ ok: false });
-                ownerInstalled = true;
-                return Object.freeze({ ok: true, owner: Object.freeze({ generation: counters.adopt }) });
+                return ownerController.adoptReadyActivation(descriptor);
               },
               releaseSyncedOwner() {
                 counters.release += 1;
-                ownerInstalled = false;
-                return true;
+                return ownerController.releaseSyncedOwner();
               },
             }),
             ownerSaveBoundary: Object.freeze({
-              installSyncedOwnerForSave() {
+              installSyncedOwnerForSave(controller) {
                 counters.install += 1;
-                return options.installFails === true ? false : true;
+                if (controller !== ownerController || options.installFails === true) return false;
+                return true;
               },
             }),
           });
