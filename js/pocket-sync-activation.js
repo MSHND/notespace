@@ -349,9 +349,8 @@ without adding UI, a live synced owner, background work, or deployment state.
   function validateFactory(input) {
     const config = exactObject(input, FACTORY_FIELDS, "activation-factory-invalid");
     requireMethods(config.securityContract, [
-      "validateActivationReadiness", "validateOwnerlessActivationReadiness",
-      "buildRecoveryPackage", "validateOpaqueEncryptedRecord",
-      "validateOpaqueMasterKeyEnvelopeRecord",
+      "validateActivationReadiness", "buildRecoveryPackage",
+      "validateOpaqueEncryptedRecord", "validateOpaqueMasterKeyEnvelopeRecord",
     ], "activation-security-contract-invalid");
     requireMethods(config.crypto, [
       "encodeBase64Url", "generateDeviceWrappingKey", "createDerivedWrappingKey",
@@ -1773,6 +1772,9 @@ without adding UI, a live synced owner, background work, or deployment state.
       let readinessInput;
       let readiness;
       if (ownerlessMode) {
+        if (typeof config.securityContract.validateOwnerlessActivationReadiness !== "function") {
+          throw activationError("ownerless-activation-state-invalid");
+        }
         readinessInput = deepFreeze({
           activationPhase: "pre-adoption",
           targetCurrentOrReplaceable: true,
