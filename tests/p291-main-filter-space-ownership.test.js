@@ -59,21 +59,54 @@ test("P291 Main routes in-query Space through the existing implicit Filter owner
   assert.equal(h.counters.saveWorkspace, 0);
 });
 
-test("P291 initial Space with an empty implicit query keeps the existing fold/unfold owner", () => {
+test("P291 initial plain Space is quietly consumed while Left/Right retain structural ownership", () => {
   const h = makeHarness({ selectedId: "A" });
   setLabels(h, { A: "Parent", B: "Child", C: "Other" });
   node(h, "B").parentId = "A";
   h.materialise();
   h.row("A").focus();
 
+  const statuses = [];
+  h.context.setStatus = (message, kind) => {
+    statuses.push({ message: String(message || ""), kind: String(kind || "") });
+  };
+
   h.reset();
-  const event = h.keydown("A", " ");
+  const space = h.keydown("A", " ");
+
+  assert.equal(space.defaultPrevented, true, "plain Space is consumed so the page cannot scroll");
+  assert.equal(h.search.value, "", "initial Space must not start a blank implicit filter");
+  assert.equal(h.context.state.collapsed.has("A"), false, "plain Space no longer folds the selected node");
+  assert.deepEqual(statuses, [], "plain Space must not emit fold-related Möbius feedback");
+  assert.equal(h.counters.refreshMeta, 0);
+  assert.equal(h.counters.fullRender, 0);
+  assert.equal(h.pendingTimerCount(), 0);
+
+  h.keydown(null, "ArrowLeft");
+  assert.equal(h.context.state.collapsed.has("A"), true, "Left Arrow still collapses the selected parent");
+
+  h.keydown(null, "ArrowRight");
   h.stop();
 
-  assert.equal(event.defaultPrevented, true);
-  assert.equal(h.search.value, "");
-  assert.equal(h.context.state.collapsed.has("A"), true, "initial Space still folds the selected parent");
-  assert.equal(h.pendingTimerCount(), 0);
+  assert.equal(h.context.state.collapsed.has("A"), false, "Right Arrow still expands the selected parent");
+});
+
+test("P291 Shift+Space remains unclaimed even when an implicit query exists", () => {
+  const h = makeHarness({ selectedId: "A" });
+  setLabels(h, { A: "Anchor", B: "Electrical Services", C: "Other" });
+  h.materialise();
+  h.row("A").focus();
+
+  h.reset();
+  for (const key of ["e", "l", "e"]) h.keydown("A", key);
+  assert.equal(h.search.value, "ele");
+
+  const event = h.keydown("A", " ", { shiftKey: true });
+  h.stop();
+
+  assert.equal(event.defaultPrevented, false, "Shift+Space stays unclaimed");
+  assert.equal(h.search.value, "ele", "Shift+Space is not appended to the implicit filter");
+  assert.equal(h.context.state.collapsed.size, 0);
 });
 
 test("P291 preserves Backspace, Escape, immediate Arrow and Enter behaviour after an in-query Space", () => {
@@ -120,14 +153,14 @@ test("P291 preserves Backspace, Escape, immediate Arrow and Enter behaviour afte
   assert.equal(enter.pendingTimerCount(), 0);
 });
 
-test("P291 keeps exactly one implicit-filter owner and one selected-node Space owner", () => {
+test("P291 retires structural Space without adding another Space or filter owner", () => {
   const actions = source(ACTIONS);
 
   assert.equal((actions.match(/function isMainImplicitFilterCharacter\(/g) || []).length, 1);
   assert.equal((actions.match(/function settlePendingFilterBeforeMainCommand\(/g) || []).length, 1);
   assert.match(
     actions,
-    /if \(key === " "\) return cleanText\(currentMainFilterQueryRaw\(\), 120\)\.length > 0;/,
+    /if \(key === " "\) return !ev\.shiftKey && cleanText\(currentMainFilterQueryRaw\(\), 120\)\.length > 0;/,
   );
 
   const handlerStart = actions.indexOf("function handleTreeKeydown(ev)");
@@ -136,6 +169,20 @@ test("P291 keeps exactly one implicit-filter owner and one selected-node Space o
   assert.equal(
     (handler.match(/&& \(ev\.key === " " \|\| ev\.code === "Space"\)/g) || []).length,
     1,
-    "selected-node fold/unfold keeps one Space owner",
+    "Main keeps one plain-Space routing branch",
+  );
+
+  const spaceStart = handler.indexOf('&& (ev.key === " " || ev.code === "Space")');
+  const arrowStart = handler.indexOf('&& ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(ev.key)', spaceStart);
+  assert.ok(spaceStart >= 0 && arrowStart > spaceStart);
+  const spaceBranch = handler.slice(spaceStart, arrowStart);
+  assert.match(spaceBranch, /ev\.preventDefault\(\);\s*return;/);
+  assert.doesNotMatch(spaceBranch, /collapsed|sortNodesForParent|renderTree|refreshMeta|persistPipSnapshot|setStatus/);
+
+  assert.doesNotMatch(actions, /state\.(?:filter|searchQuery|filterQuery)\s*=/);
+  assert.match(
+    handler,
+    /target\?\.isContentEditable \|\| \["input", "textarea", "select"\]\.includes\(targetTag\)[\s\S]{0,80}target === el\.search\) return;/,
+    "focused Search/input ownership remains native",
   );
 });
