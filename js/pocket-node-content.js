@@ -236,6 +236,118 @@
     return { ok: true, lines: copy };
   }
 
+  function validNewLineId(lines, value) {
+    return typeof value === "string" && value.length > 0
+      && !lines.some(function (line) { return line && line.id === value; });
+  }
+
+  function splitLineAtCaret(lines, index, caretOffset, newLineId) {
+    if (!Array.isArray(lines) || !Number.isInteger(index) || index < 0 || index >= lines.length) return { ok: false, lines };
+    const current = lines[index];
+    if (!current) return { ok: false, lines };
+    const source = String(current.content == null ? "" : current.content);
+    const marker = parseMarker(source);
+    const copy = lines.slice();
+
+    if (marker.kind !== "plain") {
+      const continuation = smartContinuation(source);
+      if (continuation.exitList) {
+        copy[index] = { ...current, content: "" };
+        return {
+          ok: true,
+          kind: "list-exit",
+          lines: copy,
+          sourceId: current.id,
+          updatedId: current.id,
+          insertedId: "",
+          insertIndex: -1,
+          focusId: current.id,
+          focusOffset: 0,
+        };
+      }
+      if (!validNewLineId(lines, newLineId)) return { ok: false, lines };
+      const insertIndex = subtreeEnd(lines, index);
+      copy.splice(insertIndex, 0, {
+        id: newLineId,
+        depth: Math.max(0, Math.min(MAX_DEPTH, Number(current.depth) || 0)),
+        content: continuation.content,
+      });
+      return {
+        ok: true,
+        kind: "insert",
+        placement: "after-branch",
+        lines: copy,
+        sourceId: current.id,
+        updatedId: "",
+        insertedId: newLineId,
+        insertIndex,
+        focusId: newLineId,
+        focusOffset: 0,
+      };
+    }
+
+    if (!Number.isInteger(caretOffset) || caretOffset < 0 || caretOffset > source.length
+        || !validNewLineId(lines, newLineId)) return { ok: false, lines };
+
+    const atStart = caretOffset === 0;
+    const atEnd = caretOffset === source.length;
+    const insertIndex = atStart ? index : subtreeEnd(lines, index);
+    let nextContent = "";
+    let updatedId = "";
+    if (!atStart && !atEnd) {
+      copy[index] = { ...current, content: source.slice(0, caretOffset) };
+      nextContent = source.slice(caretOffset);
+      updatedId = current.id;
+    }
+    copy.splice(insertIndex, 0, {
+      id: newLineId,
+      depth: Math.max(0, Math.min(MAX_DEPTH, Number(current.depth) || 0)),
+      content: nextContent,
+    });
+    return {
+      ok: true,
+      kind: "insert",
+      placement: atStart ? "before-branch" : "after-branch",
+      lines: copy,
+      sourceId: current.id,
+      updatedId,
+      insertedId: newLineId,
+      insertIndex,
+      focusId: newLineId,
+      focusOffset: 0,
+    };
+  }
+
+  function joinPlainSiblingAtStart(lines, index, caretOffset) {
+    if (!Array.isArray(lines) || !Number.isInteger(index) || index <= 0 || index >= lines.length || caretOffset !== 0) {
+      return { ok: false, lines };
+    }
+    const current = lines[index];
+    if (!current || current.content === "" || subtreeEnd(lines, index) !== index + 1) return { ok: false, lines };
+    const previousIndex = siblingBefore(lines, index);
+    if (previousIndex < 0 || subtreeEnd(lines, previousIndex) !== index) return { ok: false, lines };
+    const previous = lines[previousIndex];
+    const currentMarker = parseMarker(current.content);
+    const previousMarker = parseMarker(previous && previous.content);
+    if (currentMarker.kind !== "plain" || previousMarker.kind !== "plain") return { ok: false, lines };
+
+    const previousContent = String(previous.content == null ? "" : previous.content);
+    const copy = lines.slice();
+    copy[previousIndex] = { ...previous, content: previousContent + String(current.content == null ? "" : current.content) };
+    copy.splice(index, 1);
+    return {
+      ok: true,
+      kind: "join",
+      lines: copy,
+      survivorId: previous.id,
+      survivorIndex: previousIndex,
+      removedId: current.id,
+      removedIndex: index,
+      focusId: previous.id,
+      focusOffset: previousContent.length,
+    };
+  }
+
   function visibleIndexes(lines, collapsedIds) {
     if (!Array.isArray(lines)) return [];
     const collapsed = collapsedIds instanceof Set ? collapsedIds : new Set(Array.isArray(collapsedIds) ? collapsedIds : []); const visible = [];
@@ -281,6 +393,8 @@
     indentSubtree,
     moveSubtree,
     removeEmptyLine,
+    splitLineAtCaret,
+    joinPlainSiblingAtStart,
     visibleIndexes,
     smartContinuation,
     utf8ByteLength,
