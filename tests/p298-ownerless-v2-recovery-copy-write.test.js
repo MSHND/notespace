@@ -351,6 +351,9 @@ function createHarness(options = {}) {
           }
           return Object.freeze({ ok: true });
         },
+        async adoptSyncedOwner() {
+          throw new Error("unexpected owner adoption before P299 boundary");
+        },
         async withExistingAccountReady(consumer) {
           counters.bridge += 1;
           return bridge(consumer);
