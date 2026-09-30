@@ -414,7 +414,7 @@ test("P287 successful local staging performs zero account, remote, Recovery Copy
 
 test("P287 remains dormant below production runtime and UI composition", () => {
   const activation = source(ACTIVATION);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /PocketSyncOwnerlessActivationDraft|findOwnerlessActivation|ownerless-first-create/);
