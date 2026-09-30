@@ -181,6 +181,22 @@ without adding UI, a live synced owner, background work, or deployment state.
     });
   }
 
+  function ownerlessDeviceEnvelopeCommittedResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-device-envelope-committed",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "device-envelope-committed",
+      locallyDurable: true,
+      remotelyCommitted: true,
+      confirmedRemoteRevision: 1,
+      keySetVersion: 1,
+    });
+  }
+
   function byteLength(value) {
     if (typeof value !== "string"
         || value.length === 0
@@ -1222,6 +1238,60 @@ without adding UI, a live synced owner, background work, or deployment state.
       return null;
     }
 
+    function ownerlessDeviceEnvelopeTransitionOwner(execution, isDevice) {
+      if (!isDevice
+          || execution.draft?.schemaVersion !== 2
+          || execution.draft?.activationMode !== "ownerless-first-create") return null;
+      const ownerless = global.PocketSyncOwnerlessActivationDraft;
+      if (!isObject(ownerless)
+          || typeof ownerless.buildDeviceEnvelopePending !== "function"
+          || typeof ownerless.buildDeviceEnvelopeConflict !== "function"
+          || typeof ownerless.buildDeviceEnvelopeCommitted !== "function") {
+        throw activationError("ownerless-activation-state-invalid");
+      }
+      return ownerless;
+    }
+
+    function envelopePendingDraft(execution, isDevice, operation) {
+      const ownerless = ownerlessDeviceEnvelopeTransitionOwner(execution, isDevice);
+      return ownerless
+        ? ownerless.buildDeviceEnvelopePending(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, { pendingOperation: operation });
+    }
+
+    function envelopeConflictDraft(execution, isDevice, conflictOperation) {
+      const ownerless = ownerlessDeviceEnvelopeTransitionOwner(execution, isDevice);
+      return ownerless
+        ? ownerless.buildDeviceEnvelopeConflict(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, { pendingOperation: conflictOperation });
+    }
+
+    function envelopeCommittedDraft(execution, isDevice, committedStage, keySetVersion) {
+      const ownerless = ownerlessDeviceEnvelopeTransitionOwner(execution, isDevice);
+      return ownerless
+        ? ownerless.buildDeviceEnvelopeCommitted(
+          { draft: execution.draft, keySetVersion },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, {
+          stage: committedStage,
+          keySetVersion,
+          pendingOperation: null,
+        });
+    }
+
+    function envelopeFailure(execution, isDevice, reason, extra) {
+      return ownerlessDeviceEnvelopeTransitionOwner(execution, isDevice)
+        ? ownerlessFailure(reason, extra)
+        : safeFailure(reason, extra);
+    }
+
     async function addEnvelope(execution, kind) {
       const isDevice = kind === "device";
       const operation = isDevice ? "device-envelope" : "prf-envelope";
@@ -1229,14 +1299,14 @@ without adding UI, a live synced owner, background work, or deployment state.
       const committedStage = isDevice ? "device-envelope-committed" : "prf-envelope-committed";
       if (stageAtLeast(execution.draft, committedStage)) return null;
       if (execution.draft.pendingOperation === conflictOperation) {
-        return safeFailure(`${operation}-failed`, {
+        return envelopeFailure(execution, isDevice, `${operation}-failed`, {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, conflict: true, resumable: false,
         });
       }
       const attemptKind = remoteAttemptKind(execution.draft, operation);
       if (execution.draft.pendingOperation !== operation || attemptKind === "idempotent-retry") {
-        await persistDraft(execution, changedDraft(execution.draft, { pendingOperation: operation }));
+        await persistDraft(execution, envelopePendingDraft(execution, isDevice, operation));
       }
       const ids = execution.draft.ids;
       const envelope = isDevice ? execution.draft.deviceEnvelope : execution.draft.prfEnvelope;
@@ -1253,17 +1323,18 @@ without adding UI, a live synced owner, background work, or deployment state.
           envelope,
         }));
       } catch (error) {
-        if (error?.code === "source-session-changed") throw error;
-        return safeFailure(`${operation}-failed`, {
+        if (error?.code === execution.currentFailureCode) throw error;
+        return envelopeFailure(execution, isDevice, `${operation}-failed`, {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, resumable: true,
         });
       }
       if (response.conflict === true) {
-        await persistDraft(execution, changedDraft(execution.draft, {
-          pendingOperation: conflictOperation,
-        }));
-        return safeFailure(`${operation}-failed`, {
+        await persistDraft(
+          execution,
+          envelopeConflictDraft(execution, isDevice, conflictOperation)
+        );
+        return envelopeFailure(execution, isDevice, `${operation}-failed`, {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, conflict: true, resumable: false,
         });
@@ -1276,14 +1347,19 @@ without adding UI, a live synced owner, background work, or deployment state.
           || response.masterKeyContentEncryptionLimit !== 2 ** 20)) {
         throw activationError("activation-state-invalid");
       }
-      await persistDraft(execution, changedDraft(execution.draft, {
-        stage: committedStage,
-        keySetVersion: response.keySetVersion,
-        pendingOperation: null,
-      }), isDevice ? { usage: Object.assign({}, execution.record.usage, {
-        masterKeyGeneration: response.masterKeyGeneration,
-        masterKeyContentEncryptionLimit: response.masterKeyContentEncryptionLimit,
-      }) } : undefined);
+      await persistDraft(
+        execution,
+        envelopeCommittedDraft(
+          execution,
+          isDevice,
+          committedStage,
+          response.keySetVersion
+        ),
+        isDevice ? { usage: Object.assign({}, execution.record.usage, {
+          masterKeyGeneration: response.masterKeyGeneration,
+          masterKeyContentEncryptionLimit: response.masterKeyContentEncryptionLimit,
+        }) } : undefined
+      );
       return null;
     }
 
@@ -1866,7 +1942,10 @@ without adding UI, a live synced owner, background work, or deployment state.
           || typeof ownerless.buildAccountReady !== "function"
           || typeof ownerless.buildContentUploadPending !== "function"
           || typeof ownerless.buildContentConflict !== "function"
-          || typeof ownerless.buildContentCommitted !== "function") {
+          || typeof ownerless.buildContentCommitted !== "function"
+          || typeof ownerless.buildDeviceEnvelopePending !== "function"
+          || typeof ownerless.buildDeviceEnvelopeConflict !== "function"
+          || typeof ownerless.buildDeviceEnvelopeCommitted !== "function") {
         return ownerlessFailure("ownerless-contract-unavailable");
       }
 
@@ -1936,46 +2015,70 @@ without adding UI, a live synced owner, background work, or deployment state.
           return await completeNewOwnerlessAccount(execution, ownerless);
         }
 
-        const exactContentBoundary = execution.draft.account !== null
+        const exactPostAccountBoundary = execution.draft.account !== null
           && execution.draft.registrationContinuation === null
           && ["available", "skipped"].includes(execution.draft.prfStatus)
-          && execution.draft.keySetVersion === 0
           && execution.draft.recoveryVersion === 0
           && execution.draft.accountLocator === null
           && execution.draft.recoveryCopyStored === false
           && execution.draft.adopted === false;
-        if (!exactContentBoundary) {
+        if (!exactPostAccountBoundary) {
           return ownerlessFailure("ownerless-activation-state-invalid", {
             activationId: options.activationId,
           });
         }
 
-        if (execution.draft.stage === "content-committed") {
-          if (execution.draft.confirmedRemoteRevision !== 1
-              || execution.draft.pendingOperation !== null
-              || execution.record?.remote?.confirmedRevision !== 1
-              || execution.record?.remote?.pending !== null
-              || execution.record?.remote?.conflict !== null) {
+        if (execution.draft.stage === "account-ready") {
+          if (execution.draft.confirmedRemoteRevision !== 0
+              || execution.draft.keySetVersion !== 0
+              || ![null, "content-upload", "content-conflict"]
+                .includes(execution.draft.pendingOperation)) {
             return ownerlessFailure("ownerless-activation-state-invalid", {
               activationId: options.activationId,
             });
           }
+          await ensureCurrent(execution);
+          const contentResult = await commitContent(execution);
+          if (contentResult) return contentResult;
           return ownerlessContentCommittedResult(execution.draft);
         }
 
-        if (execution.draft.stage !== "account-ready"
-            || execution.draft.confirmedRemoteRevision !== 0
-            || ![null, "content-upload", "content-conflict"]
-              .includes(execution.draft.pendingOperation)) {
-          return ownerlessFailure("ownerless-activation-state-invalid", {
-            activationId: options.activationId,
-          });
+        const remoteContentWitnessExact = execution.record?.remote?.confirmedRevision === 1
+          && execution.record?.remote?.pending === null
+          && execution.record?.remote?.conflict === null;
+        if (execution.draft.stage === "content-committed") {
+          if (execution.draft.confirmedRemoteRevision !== 1
+              || execution.draft.keySetVersion !== 0
+              || ![null, "device-envelope", "device-envelope-conflict"]
+                .includes(execution.draft.pendingOperation)
+              || !remoteContentWitnessExact) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+          await ensureCurrent(execution);
+          const envelopeResult = await addEnvelope(execution, "device");
+          if (envelopeResult) return envelopeResult;
+          return ownerlessDeviceEnvelopeCommittedResult(execution.draft);
         }
 
-        await ensureCurrent(execution);
-        const contentResult = await commitContent(execution);
-        if (contentResult) return contentResult;
-        return ownerlessContentCommittedResult(execution.draft);
+        if (execution.draft.stage === "device-envelope-committed") {
+          if (execution.draft.confirmedRemoteRevision !== 1
+              || execution.draft.keySetVersion !== 1
+              || execution.draft.pendingOperation !== null
+              || !remoteContentWitnessExact
+              || execution.record?.usage?.masterKeyGeneration !== 1
+              || execution.record?.usage?.masterKeyContentEncryptionLimit !== 2 ** 20) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+          return ownerlessDeviceEnvelopeCommittedResult(execution.draft);
+        }
+
+        return ownerlessFailure("ownerless-activation-state-invalid", {
+          activationId: options.activationId,
+        });
       } catch (error) {
         if (error?.code === "ownerless-target-stale") {
           return ownerlessFailure("ownerless-target-stale", {
