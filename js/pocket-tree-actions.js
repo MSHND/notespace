@@ -1179,7 +1179,9 @@ function currentMainFilterQueryRaw() {
 function isMainImplicitFilterCharacter(ev) {
   if (!ev || state.moveMode || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
   const key = String(ev.key || "");
-  if (key.length !== 1 || !/\S/.test(key)) return false;
+  if (key.length !== 1) return false;
+  if (key === " ") return cleanText(currentMainFilterQueryRaw(), 120).length > 0;
+  if (!/\S/.test(key)) return false;
   const lowerKey = key.toLowerCase();
   if ([".", "=", "+", "-", "/", "?"].includes(key)) return false;
   if (ev.shiftKey && lowerKey === "f") return false;
