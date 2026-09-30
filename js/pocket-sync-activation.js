@@ -229,6 +229,24 @@ without adding UI, a live synced owner, background work, or deployment state.
     });
   }
 
+  function ownerlessRecoveryInitialisedResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-recovery-initialised",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "recovery-initialised",
+      locallyDurable: true,
+      remotelyCommitted: true,
+      confirmedRemoteRevision: 1,
+      keySetVersion: draft.keySetVersion,
+      recoveryVersion: 1,
+      recoveryCopyRequired: true,
+    });
+  }
+
   function byteLength(value) {
     if (typeof value !== "string"
         || value.length === 0
@@ -1414,10 +1432,65 @@ without adding UI, a live synced owner, background work, or deployment state.
       return null;
     }
 
+    function ownerlessRecoveryTransitionOwner(execution) {
+      if (execution.draft?.schemaVersion !== 2
+          || execution.draft?.activationMode !== "ownerless-first-create") return null;
+      const ownerless = global.PocketSyncOwnerlessActivationDraft;
+      if (!isObject(ownerless)
+          || typeof ownerless.buildRecoveryInitialisationPending !== "function"
+          || typeof ownerless.buildRecoveryConflict !== "function"
+          || typeof ownerless.buildRecoveryInitialised !== "function") {
+        throw activationError("ownerless-activation-state-invalid");
+      }
+      return ownerless;
+    }
+
+    function recoveryPendingDraft(execution) {
+      const ownerless = ownerlessRecoveryTransitionOwner(execution);
+      return ownerless
+        ? ownerless.buildRecoveryInitialisationPending(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, { pendingOperation: "recovery-initialisation" });
+    }
+
+    function recoveryConflictDraft(execution) {
+      const ownerless = ownerlessRecoveryTransitionOwner(execution);
+      return ownerless
+        ? ownerless.buildRecoveryConflict(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, { pendingOperation: "recovery-conflict" });
+    }
+
+    function recoveryInitialisedDraft(execution, keySetVersion, accountLocator) {
+      const ownerless = ownerlessRecoveryTransitionOwner(execution);
+      return ownerless
+        ? ownerless.buildRecoveryInitialised(
+          { draft: execution.draft, keySetVersion, accountLocator },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, {
+          stage: "recovery-initialised",
+          keySetVersion,
+          recoveryVersion: 1,
+          accountLocator,
+          pendingOperation: null,
+        });
+    }
+
+    function recoveryFailure(execution, reason, extra) {
+      return ownerlessRecoveryTransitionOwner(execution)
+        ? ownerlessFailure(reason, extra)
+        : safeFailure(reason, extra);
+    }
+
     async function initialiseRecovery(execution) {
       if (stageAtLeast(execution.draft, "recovery-initialised")) return null;
       if (execution.draft.pendingOperation === "recovery-conflict") {
-        return safeFailure("recovery-initialisation-failed", {
+        return recoveryFailure(execution, "recovery-initialisation-failed", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, conflict: true, resumable: false,
         });
@@ -1425,9 +1498,7 @@ without adding UI, a live synced owner, background work, or deployment state.
       const attemptKind = remoteAttemptKind(execution.draft, "recovery-initialisation");
       if (execution.draft.pendingOperation !== "recovery-initialisation"
           || attemptKind === "idempotent-retry") {
-        await persistDraft(execution, changedDraft(execution.draft, {
-          pendingOperation: "recovery-initialisation",
-        }));
+        await persistDraft(execution, recoveryPendingDraft(execution));
       }
       let response;
       try {
@@ -1442,17 +1513,15 @@ without adding UI, a live synced owner, background work, or deployment state.
           recoveryEnvelope: execution.draft.recoveryEnvelope,
         }));
       } catch (error) {
-        if (error?.code === "source-session-changed") throw error;
-        return safeFailure("recovery-initialisation-failed", {
+        if (error?.code === execution.currentFailureCode) throw error;
+        return recoveryFailure(execution, "recovery-initialisation-failed", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, resumable: true,
         });
       }
       if (response.conflict === true) {
-        await persistDraft(execution, changedDraft(execution.draft, {
-          pendingOperation: "recovery-conflict",
-        }));
-        return safeFailure("recovery-initialisation-failed", {
+        await persistDraft(execution, recoveryConflictDraft(execution));
+        return recoveryFailure(execution, "recovery-initialisation-failed", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: true, conflict: true, resumable: false,
         });
@@ -1463,13 +1532,11 @@ without adding UI, a live synced owner, background work, or deployment state.
           || response.keySetVersion !== execution.draft.keySetVersion + 1) {
         throw activationError("activation-state-invalid");
       }
-      await persistDraft(execution, changedDraft(execution.draft, {
-        stage: "recovery-initialised",
-        keySetVersion: response.keySetVersion,
-        recoveryVersion: 1,
-        accountLocator: identifier(response.accountLocator, "activation-state-invalid"),
-        pendingOperation: null,
-      }));
+      const accountLocator = identifier(response.accountLocator, "activation-state-invalid");
+      await persistDraft(
+        execution,
+        recoveryInitialisedDraft(execution, response.keySetVersion, accountLocator)
+      );
       return null;
     }
 
@@ -2000,7 +2067,10 @@ without adding UI, a live synced owner, background work, or deployment state.
           || typeof ownerless.buildPrfEnvelopePending !== "function"
           || typeof ownerless.buildPrfEnvelopeConflict !== "function"
           || typeof ownerless.buildPrfEnvelopeCommitted !== "function"
-          || typeof ownerless.buildPrfEnvelopeSkipped !== "function") {
+          || typeof ownerless.buildPrfEnvelopeSkipped !== "function"
+          || typeof ownerless.buildRecoveryInitialisationPending !== "function"
+          || typeof ownerless.buildRecoveryConflict !== "function"
+          || typeof ownerless.buildRecoveryInitialised !== "function") {
         return ownerlessFailure("ownerless-contract-unavailable");
       }
 
@@ -2073,8 +2143,7 @@ without adding UI, a live synced owner, background work, or deployment state.
         const exactPostAccountBoundary = execution.draft.account !== null
           && execution.draft.registrationContinuation === null
           && ["available", "skipped"].includes(execution.draft.prfStatus)
-          && execution.draft.recoveryVersion === 0
-          && execution.draft.accountLocator === null
+          && execution.draft.recoveryPackage === null
           && execution.draft.recoveryCopyStored === false
           && execution.draft.adopted === false;
         if (!exactPostAccountBoundary) {
@@ -2086,6 +2155,8 @@ without adding UI, a live synced owner, background work, or deployment state.
         if (execution.draft.stage === "account-ready") {
           if (execution.draft.confirmedRemoteRevision !== 0
               || execution.draft.keySetVersion !== 0
+              || execution.draft.recoveryVersion !== 0
+              || execution.draft.accountLocator !== null
               || ![null, "content-upload", "content-conflict"]
                 .includes(execution.draft.pendingOperation)) {
             return ownerlessFailure("ownerless-activation-state-invalid", {
@@ -2104,6 +2175,8 @@ without adding UI, a live synced owner, background work, or deployment state.
         if (execution.draft.stage === "content-committed") {
           if (execution.draft.confirmedRemoteRevision !== 1
               || execution.draft.keySetVersion !== 0
+              || execution.draft.recoveryVersion !== 0
+              || execution.draft.accountLocator !== null
               || ![null, "device-envelope", "device-envelope-conflict"]
                 .includes(execution.draft.pendingOperation)
               || !remoteContentWitnessExact) {
@@ -2129,6 +2202,8 @@ without adding UI, a live synced owner, background work, or deployment state.
               && execution.draft.pendingOperation === null;
           if (execution.draft.confirmedRemoteRevision !== 1
               || execution.draft.keySetVersion !== 1
+              || execution.draft.recoveryVersion !== 0
+              || execution.draft.accountLocator !== null
               || !validPending
               || !remoteContentWitnessExact
               || !deviceUsageWitnessExact) {
@@ -2152,26 +2227,45 @@ without adding UI, a live synced owner, background work, or deployment state.
           return ownerlessPrfEnvelopeSkippedResult(execution.draft);
         }
 
-        if (execution.draft.stage === "prf-envelope-committed") {
-          if (execution.draft.prfStatus !== "available"
-              || execution.draft.prfEnvelope === null
+        if (execution.draft.stage === "prf-envelope-committed"
+            || execution.draft.stage === "prf-envelope-skipped") {
+          const available = execution.draft.stage === "prf-envelope-committed";
+          const exactPrfTerminal = available
+            ? execution.draft.prfStatus === "available"
+              && execution.draft.prfEnvelope !== null
+              && execution.draft.keySetVersion === 2
+            : execution.draft.prfStatus === "skipped"
+              && execution.draft.prfEnvelope === null
+              && execution.draft.keySetVersion === 1;
+          if (!exactPrfTerminal
               || execution.draft.confirmedRemoteRevision !== 1
-              || execution.draft.keySetVersion !== 2
-              || execution.draft.pendingOperation !== null
+              || execution.draft.recoveryVersion !== 0
+              || execution.draft.accountLocator !== null
+              || ![null, "recovery-initialisation", "recovery-conflict"]
+                .includes(execution.draft.pendingOperation)
               || !remoteContentWitnessExact
               || !deviceUsageWitnessExact) {
             return ownerlessFailure("ownerless-activation-state-invalid", {
               activationId: options.activationId,
             });
           }
-          return ownerlessPrfEnvelopeCommittedResult(execution.draft);
+          await ensureCurrent(execution);
+          const recoveryResult = await initialiseRecovery(execution);
+          if (recoveryResult) return recoveryResult;
+          return ownerlessRecoveryInitialisedResult(execution.draft);
         }
 
-        if (execution.draft.stage === "prf-envelope-skipped") {
-          if (execution.draft.prfStatus !== "skipped"
-              || execution.draft.prfEnvelope !== null
+        if (execution.draft.stage === "recovery-initialised") {
+          const exactRecoveryKeySet = execution.draft.prfStatus === "available"
+            ? execution.draft.prfEnvelope !== null && execution.draft.keySetVersion === 3
+            : execution.draft.prfStatus === "skipped"
+              && execution.draft.prfEnvelope === null
+              && execution.draft.keySetVersion === 2;
+          if (!exactRecoveryKeySet
               || execution.draft.confirmedRemoteRevision !== 1
-              || execution.draft.keySetVersion !== 1
+              || execution.draft.recoveryVersion !== 1
+              || execution.draft.accountLocator === null
+              || execution.draft.accountLocator === execution.draft.account?.accountId
               || execution.draft.pendingOperation !== null
               || !remoteContentWitnessExact
               || !deviceUsageWitnessExact) {
@@ -2179,7 +2273,7 @@ without adding UI, a live synced owner, background work, or deployment state.
               activationId: options.activationId,
             });
           }
-          return ownerlessPrfEnvelopeSkippedResult(execution.draft);
+          return ownerlessRecoveryInitialisedResult(execution.draft);
         }
 
         return ownerlessFailure("ownerless-activation-state-invalid", {
