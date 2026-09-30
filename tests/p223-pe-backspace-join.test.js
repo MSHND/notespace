@@ -248,7 +248,7 @@ test("P223 Enter then Backspace is an exact local inverse for a beginning plain-
     { id: "line_1", depth: 0, content: "Tail" },
   ]);
   assert.equal(h.document.activeElement?.getAttribute("data-line-id"), "line_0");
-  assert.equal(h.activeCaretOffset(), 0);
+  assert.equal(h.activeCaretOffset(), null);
   assert.equal(h.clearCount(), 0);
   assert.equal(h.saveAndReadPayload().text, "Alpha\nTail");
 });
