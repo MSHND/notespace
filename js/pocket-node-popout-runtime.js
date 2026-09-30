@@ -401,9 +401,7 @@
       for (var promoted = 0; promoted < promotedCount; promoted += 1) refreshRowAt(index + promoted, false);
       refreshRowsAt([index - 1, index + promotedCount]);
       refreshRowsByIds(oldBoundaryIds);
-      if (caretAtEnd) focusLine(selectedId, true);
-      else if (!focusLineAtOffset(selectedId, 0)) focusLine(selectedId);
-      return true;
+      focusLine(selectedId, caretAtEnd); return true;
     }
     function moveBranchBefore(sourceId, targetId) {
       var source = lineIndex(sourceId), target = lineIndex(targetId); if (readOnly || source < 0 || target < 0 || source === target) return false;
