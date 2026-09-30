@@ -1,0 +1,38 @@
+name: P289 focused proof
+
+on:
+  push:
+
+jobs:
+  p289-focused-proof:
+    if: github.ref == 'refs/heads/candidate/p289-proof'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: P289 branch-aware split/join
+        run: timeout --signal=TERM --kill-after=5s 180s node --test tests/p289-pe-branch-aware-enter-join.test.js
+      - name: Historical PE structural regressions
+        run: >
+          timeout --signal=TERM --kill-after=5s 240s node --test
+          tests/p207-pe-empty-line-backspace.test.js
+          tests/p207a-pe-collapsed-focus.test.js
+          tests/p207e-pe-caret-after-empty-backspace.test.js
+          tests/p209-pe-vertical-caret-travel.test.js
+          tests/p210d-pe-opening-focus.test.js
+          tests/p210e-pe-body-entry-focus.test.js
+          tests/p210n-pe-surface-dependencies.test.js
+          tests/p210v-pe-local-projection.test.js
+          tests/p210x-shared-pe-test-dom.test.js
+          tests/p213a-pe-enter-split.test.js
+          tests/p214-pe-terminal-boundary-scroll.test.js
+          tests/p223-pe-backspace-join.test.js
+          tests/p226-pe-home-end.test.js
+          tests/p232-pe-plain-right.test.js
+          tests/p239-pe-save-close-intrinsic-width.test.js
+          tests/p258-pe-save-escape-settlement.test.js
+      - name: Repository check
+        run: timeout --signal=TERM --kill-after=5s 240s npm run check
