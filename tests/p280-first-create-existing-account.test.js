@@ -575,7 +575,7 @@ test("P280 stays dormant below UI and contains no registration, content, recover
   const additional = source("js/pocket-sync-additional-device.js");
   const activation = source("js/pocket-sync-activation.js");
 
-  assert.doesNotMatch(index, /pocket-sync-first-create\.js/);
+  assert.equal((index.match(/pocket-sync-first-create\.js/g) || []).length, 1);
   assert.doesNotMatch(sw, /pocket-sync-first-create\.js/);
   assert.doesNotMatch(syncUi, /PocketSyncFirstCreate/);
   assert.doesNotMatch(doorway, /PocketSyncFirstCreate/);
