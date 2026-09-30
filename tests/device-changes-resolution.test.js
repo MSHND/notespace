@@ -3282,6 +3282,55 @@ test("PiP host-save coverage includes the details operation created by commitDet
   assert.deepEqual(plain(state.ops), []);
 });
 
+test("P290 keeps PiP host-save success acknowledgement quiet without changing nearby warning copy", async () => {
+  const host = {
+    async __pocketLiteSaveFromPip() {
+      return { ok: true };
+    },
+  };
+  const context = createIntegrationContext({
+    href: "https://example.test/index.html?pip=1",
+    parent: host,
+  });
+  resetIntegrationState(context, [
+    node("p290-save", { label: "P290 save" }),
+  ]);
+  context.setPocketFileSession(null, "Pocket popout", {
+    pipSession: true,
+    forceNewSession: true,
+  });
+
+  const saved = await context.saveThroughPipHost();
+  assert.equal(saved, true);
+  assert.deepEqual(context.__surfaceCalls.statuses.at(-1), {
+    message: "Saved.",
+    kind: "ok",
+    options: null,
+  });
+
+  const editorSource = source("js/pocket-editor-copy.js");
+  const start = editorSource.indexOf("async function saveThroughPipHost()");
+  const end = editorSource.indexOf("\nfunction restoreDetailsDraftOriginal()", start);
+  assert.ok(start >= 0 && end > start);
+  const saveBlock = editorSource.slice(start, end);
+
+  assert.equal((saveBlock.match(/async function saveThroughPipHost\(/g) || []).length, 1);
+  assert.equal((saveBlock.match(/setStatus\("Saved\.", "ok"\)/g) || []).length, 1);
+  assert.equal(saveBlock.includes("Saved via main pocket window."), false);
+
+  for (const unchanged of [
+    'setStatus("Document PiP is not available for encrypted Vaults or Synced Pockets because its transfer is not encrypted.", "warn", { durationMs: 6200 });',
+    'setStatus("PiP cannot write the truth file directly here. Use Save in the main pocket window.", "warn");',
+    '|| "PiP save could not write the truth file. Use Save in the main pocket window.";',
+    'setStatus("Popout save could not reach the main pocket window.", "warn");',
+    'refreshMeta();',
+    'persistPipSnapshot();',
+    'flashSaveChip("Safe");',
+  ]) {
+    assert.ok(saveBlock.includes(unchanged), unchanged);
+  }
+});
+
 test("the decision overlay has the required accessible structure and calm Pocket wording", () => {
   const html = source("index.html");
   const start = html.indexOf('<div id="deviceChangesOverlay"');
