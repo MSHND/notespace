@@ -170,9 +170,9 @@ function createHarness(text) {
 
 test("P213a actual plain-row Enter keydown path splits at collapsed caret for end, middle and beginning", () => {
   const cases = [
-    { name: "end", offset: 5, source: "Alpha", next: "", serialised: "Alpha\n\nTail" },
-    { name: "middle", offset: 2, source: "Al", next: "pha", serialised: "Al\npha\nTail" },
-    { name: "beginning", offset: 0, source: "", next: "Alpha", serialised: "\nAlpha\nTail" },
+    { name: "end", offset: 5, source: "Alpha", next: "", insertedPosition: 1, serialised: "Alpha\n\nTail" },
+    { name: "middle", offset: 2, source: "Al", next: "pha", insertedPosition: 1, serialised: "Al\npha\nTail" },
+    { name: "beginning", offset: 0, source: "Alpha", next: "", insertedPosition: 0, serialised: "\nAlpha\nTail" },
   ];
 
   for (const scenario of cases) {
@@ -189,7 +189,7 @@ test("P213a actual plain-row Enter keydown path splits at collapsed caret for en
     assert.equal(h.rowById("line_0"), sourceRow, scenario.name);
     assert.equal(h.rowById("line_1"), tailRow, scenario.name);
 
-    const insertedRow = h.pane.children[1];
+    const insertedRow = h.pane.children[scenario.insertedPosition];
     const insertedId = insertedRow.getAttribute("data-line-id");
     assert.ok(insertedId && !["line_0", "line_1"].includes(insertedId), scenario.name);
     assert.equal(h.lineById("line_0").textContent, scenario.source, scenario.name);
@@ -252,6 +252,7 @@ test("P213a source invariant keeps one PE-row Enter owner and passes collapsed c
   assert.equal((paneKeydown.match(/ev\.key==="Enter"/g) || []).length, 1);
   assert.match(paneKeydown, /var caretOffset=collapsedCaretOffset\(text\);ev\.preventDefault\(\);insertAfter\(index,caretOffset\)/);
   assert.match(runtime, /function insertAfter\(index, caretOffset\)/);
+  assert.match(runtime, /content\.splitLineAtCaret\(lines, index, caretOffset, proposedId\)/);
   const start = runtime.indexOf("function insertAfter(");
   const end = runtime.indexOf("function applyReadOnlyState", start);
   assert.ok(start >= 0 && end > start);
