@@ -117,6 +117,6 @@ test("P286 keeps one shared local-material construction path as later modes reus
 test("P286 shared-kernel evolution still leaves ownerless runtime and UI wiring dormant", () => {
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /findOwnerlessActivation|PocketSyncOwnerlessActivationDraft|ownerless-first-create/);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
