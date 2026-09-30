@@ -587,6 +587,72 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function buildPrfEnvelopePending(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "device-envelope-committed"
+        || draft.prfStatus !== "available"
+        || ![null, "prf-envelope"].includes(draft.pendingOperation)
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 1) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "prf-envelope",
+    }), configInput);
+  }
+
+  function buildPrfEnvelopeConflict(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "device-envelope-committed"
+        || draft.prfStatus !== "available"
+        || draft.pendingOperation !== "prf-envelope"
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 1) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "prf-envelope-conflict",
+    }), configInput);
+  }
+
+  function buildPrfEnvelopeCommitted(input, configInput) {
+    const value = exactObject(input, ["draft", "keySetVersion"],
+      "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "device-envelope-committed"
+        || draft.prfStatus !== "available"
+        || draft.pendingOperation !== "prf-envelope"
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 1
+        || value.keySetVersion !== 2) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "prf-envelope-committed",
+      keySetVersion: 2,
+      pendingOperation: null,
+    }), configInput);
+  }
+
+  function buildPrfEnvelopeSkipped(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "device-envelope-committed"
+        || draft.prfStatus !== "skipped"
+        || draft.prfEnvelope !== null
+        || draft.pendingOperation !== null
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 1) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "prf-envelope-skipped",
+      pendingOperation: null,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -644,6 +710,10 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildDeviceEnvelopePending,
     buildDeviceEnvelopeConflict,
     buildDeviceEnvelopeCommitted,
+    buildPrfEnvelopePending,
+    buildPrfEnvelopeConflict,
+    buildPrfEnvelopeCommitted,
+    buildPrfEnvelopeSkipped,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
