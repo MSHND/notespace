@@ -1180,7 +1180,7 @@ function isMainImplicitFilterCharacter(ev) {
   if (!ev || state.moveMode || ev.metaKey || ev.ctrlKey || ev.altKey) return false;
   const key = String(ev.key || "");
   if (key.length !== 1) return false;
-  if (key === " ") return cleanText(currentMainFilterQueryRaw(), 120).length > 0;
+  if (key === " ") return !ev.shiftKey && cleanText(currentMainFilterQueryRaw(), 120).length > 0;
   if (!/\S/.test(key)) return false;
   const lowerKey = key.toLowerCase();
   if ([".", "=", "+", "-", "/", "?"].includes(key)) return false;
@@ -1508,28 +1508,6 @@ function handleTreeKeydown(ev) {
     && (ev.key === " " || ev.code === "Space")
   ) {
     ev.preventDefault();
-    if (!state.selectedId) {
-      setStatus("Select an item first.", "warn");
-      return;
-    }
-    const map = nodeMap();
-    const current = map.get(state.selectedId);
-    if (!current) {
-      setStatus("That item is not available now.", "warn");
-      return;
-    }
-    const hasKids = sortNodesForParent(current.id).length > 0;
-    if (!hasKids) {
-      setStatus("No child items to fold.", "warn");
-      return;
-    }
-    if (state.collapsed.has(current.id)) state.collapsed.delete(current.id);
-    else state.collapsed.add(current.id);
-    refreshMeta();
-    renderTree();
-    refocusTreeNavigation(current.id);
-    softlyEnsureSelectionVisible();
-    persistPipSnapshot();
     return;
   }
   if (
