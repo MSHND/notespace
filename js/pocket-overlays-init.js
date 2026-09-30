@@ -668,6 +668,7 @@ function bind() {
   el.search.addEventListener("input", () => {
     const hasFilter = cleanText(el.search.value, 120).length > 0;
     if (hasFilter) rememberFilterOrigin();
+    else if (typeof restoreFilterViewStateOnClear === "function") restoreFilterViewStateOnClear();
     else clearFilterMemory();
     resetTypeJump();
     renderTree();
@@ -709,10 +710,12 @@ function bind() {
         if (hadFilter) {
           el.search.value = "";
           resetTypeJump();
-          clearFilterMemory();
+          if (typeof restoreFilterViewStateOnClear === "function") restoreFilterViewStateOnClear();
+          else clearFilterMemory();
+        } else {
+          expandPathToNode(targetId);
         }
         state.selectedId = targetId;
-        expandPathToNode(targetId);
         refreshMeta();
         renderTree();
         refocusTreeNavigation(targetId);
