@@ -822,6 +822,6 @@ test("P297 canonical owner/dependency/boundary source shape stays narrow and own
 
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /ownerless-first-create|PocketSyncOwnerlessActivationDraft|findOwnerlessActivation/);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
