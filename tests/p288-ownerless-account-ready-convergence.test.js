@@ -196,6 +196,12 @@ function createHarness(options = {}) {
         async buildRecoveryPackage() {
           throw new Error("unexpected recovery package build before P297 boundary");
         },
+        async prepareRecoveryCopyDestination() {
+          throw new Error("unexpected Recovery Copy destination before P298 boundary");
+        },
+        async writeRecoveryCopy() {
+          throw new Error("unexpected Recovery Copy write before P298 boundary");
+        },
         async withExistingAccountReady(consumer) {
           counters.bridge += 1;
           return bridge(consumer);
