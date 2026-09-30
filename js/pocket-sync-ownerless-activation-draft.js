@@ -229,6 +229,42 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     return checked.value;
   }
 
+  function sameRecoveryAuthorisation(left, right) {
+    return isObject(left) && isObject(right)
+      && left.version === right.version
+      && left.algorithm === right.algorithm
+      && left.privateKeyFormat === right.privateKeyFormat
+      && left.privateKey === right.privateKey;
+  }
+
+  function validateBoundRecoveryPackage(input, draft, config, code = "ownerless-activation-state-invalid") {
+    const recoveryPackage = validateStoredPackage(input, config);
+    const recoveryCopyBody = config.securityContract?.RECOVERY_COPY?.body;
+    if (recoveryPackage === null
+        || recoveryPackage.kind !== "pocket-recovery-package"
+        || recoveryPackage.localOnly !== true
+        || recoveryPackage.remoteUploadAllowed !== false
+        || recoveryPackage.packageVersion !== 2
+        || recoveryPackage.accountLocator !== draft.accountLocator
+        || recoveryPackage.syncedPocketId !== draft.syncedPocketId
+        || recoveryPackage.rootMaterial !== draft.recoveryRoot
+        || recoveryPackage.rootBits !== 256
+        || !sameRecoveryAuthorisation(
+          recoveryPackage.recoveryAuthorisation,
+          draft.recoveryAuthorisation
+        )
+        || typeof recoveryPackage.checksum !== "string"
+        || recoveryPackage.checksum.trim().length === 0
+        || typeof recoveryCopyBody !== "string"
+        || recoveryCopyBody.length === 0
+        || !Array.isArray(recoveryPackage.instructions)
+        || recoveryPackage.instructions.length !== 1
+        || recoveryPackage.instructions[0] !== recoveryCopyBody) {
+      throw contractError(code);
+    }
+    return recoveryPackage;
+  }
+
   function validateRegistrationContinuation(input, draft, ids) {
     if (input === null) return null;
     const value = exactObject(input, [
@@ -353,11 +389,15 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
       throw contractError();
     }
 
-    const recoveryPackage = validateStoredPackage(draft.recoveryPackage, config);
+    let recoveryPackage = null;
+    if (draft.stage === "recovery-copy-pending") {
+      recoveryPackage = validateBoundRecoveryPackage(draft.recoveryPackage, draft, config);
+    } else if (draft.recoveryPackage !== null) {
+      throw contractError();
+    }
     if (!stageAtLeast(draft, "ready-for-adoption") && draft.recoveryAuthorisation === null) {
       throw contractError();
     }
-    if (draft.stage === "recovery-copy-pending" && recoveryPackage === null) throw contractError();
 
     if (stageAtLeast(draft, "ready-for-adoption")) {
       if (!draft.recoveryCopyStored || draft.recoveryRoot !== null
@@ -731,6 +771,46 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function exactRecoveryInitialised(draft) {
+    const exactPrfBranch = draft.prfStatus === "available"
+      ? draft.prfEnvelope !== null && draft.keySetVersion === 3
+      : draft.prfStatus === "skipped"
+        && draft.prfEnvelope === null && draft.keySetVersion === 2;
+    return draft.stage === "recovery-initialised"
+      && exactPrfBranch
+      && draft.account !== null
+      && draft.confirmedRemoteRevision === 1
+      && draft.recoveryVersion === 1
+      && draft.accountLocator !== null
+      && draft.accountLocator !== draft.account.accountId
+      && draft.pendingOperation === null
+      && draft.recoveryPackage === null
+      && draft.recoveryCopyStored === false
+      && draft.recoveryRoot !== null
+      && draft.recoveryAuthorisation !== null
+      && draft.adopted === false;
+  }
+
+  function buildRecoveryCopyPending(input, configInput) {
+    const value = exactObject(input, ["draft", "recoveryPackage"],
+      "ownerless-activation-builder-invalid");
+    const config = validateFactory(configInput);
+    const draft = validate(value.draft, configInput);
+    if (!exactRecoveryInitialised(draft)) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    const recoveryPackage = validateBoundRecoveryPackage(
+      value.recoveryPackage,
+      draft,
+      config,
+      "ownerless-activation-builder-invalid"
+    );
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "recovery-copy-pending",
+      recoveryPackage,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -795,6 +875,7 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildRecoveryInitialisationPending,
     buildRecoveryConflict,
     buildRecoveryInitialised,
+    buildRecoveryCopyPending,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
