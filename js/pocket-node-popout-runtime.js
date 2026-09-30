@@ -401,7 +401,9 @@
       for (var promoted = 0; promoted < promotedCount; promoted += 1) refreshRowAt(index + promoted, false);
       refreshRowsAt([index - 1, index + promotedCount]);
       refreshRowsByIds(oldBoundaryIds);
-      focusLine(selectedId, caretAtEnd); return true;
+      if (caretAtEnd) focusLine(selectedId, true);
+      else if (!focusLineAtOffset(selectedId, 0)) focusLine(selectedId);
+      return true;
     }
     function moveBranchBefore(sourceId, targetId) {
       var source = lineIndex(sourceId), target = lineIndex(targetId); if (readOnly || source < 0 || target < 0 || source === target) return false;
@@ -444,7 +446,8 @@
       if (readOnly || index < 0 || index >= lines.length || typeof content.splitLineAtCaret !== "function") return "";
       var current = lines[index], currentRow = rowForId(current.id); if (!currentRow) return "";
       var proposedId = "line_new_" + (nextId + 1);
-      var transformed = content.splitLineAtCaret(lines, index, caretOffset, proposedId);
+      var semanticCaretOffset = Number.isInteger(caretOffset) ? caretOffset : String(current.content || "").length;
+      var transformed = content.splitLineAtCaret(lines, index, semanticCaretOffset, proposedId);
       if (!transformed || transformed.ok !== true) return "";
       if (transformed.kind === "list-exit") {
         lines = transformed.lines; markMutation();
