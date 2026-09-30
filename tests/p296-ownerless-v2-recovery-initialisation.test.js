@@ -893,7 +893,7 @@ test("P296 canonical owner owns recovery transitions, only one initialiseRecover
     activation,
     /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*"adoptSyncedOwner",\s*\]\)/
   );
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /ownerless-first-create|PocketSyncOwnerlessActivationDraft|findOwnerlessActivation/);
