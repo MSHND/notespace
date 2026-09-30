@@ -326,6 +326,12 @@ function createHarness(options = {}) {
             checksum: `P297-CHECKSUM-${counters.package}`,
           });
         },
+        async prepareRecoveryCopyDestination() {
+          throw new Error("unexpected Recovery Copy destination before P298 boundary");
+        },
+        async writeRecoveryCopy() {
+          throw new Error("unexpected Recovery Copy write before P298 boundary");
+        },
         async withExistingAccountReady(consumer) {
           counters.bridge += 1;
           return bridge(consumer);
@@ -772,23 +778,40 @@ test("P297 canonical owner/dependency/boundary source shape stays narrow and own
   assert.match(ownerless, /function buildRecoveryCopyPending\s*\(/);
   assert.match(
     activation,
-    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage",\s*\]\)/
+    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*\]\)/
   );
 
   const dependenciesStart = activation.indexOf("const OWNERLESS_RESUME_DEPENDENCY_FIELDS");
   const dependenciesEnd = activation.indexOf("]);", dependenciesStart);
   const dependencies = activation.slice(dependenciesStart, dependenciesEnd);
-  assert.doesNotMatch(dependencies, /prepareRecoveryCopyDestination|writeRecoveryCopy|adoptSyncedOwner/);
+  assert.match(dependencies, /prepareRecoveryCopyDestination/);
+  assert.match(dependencies, /writeRecoveryCopy/);
+  assert.doesNotMatch(dependencies, /adoptSyncedOwner/);
 
   const ownerlessStart = activation.indexOf("async function resumeOwnerless");
   const ownerlessEnd = activation.indexOf("async function resume(", ownerlessStart + 10);
   const ownerlessResume = activation.slice(ownerlessStart, ownerlessEnd);
-  assert.match(ownerlessResume, /preparePackage\(execution\)/);
-  assert.doesNotMatch(ownerlessResume, /writePackage\(execution\)/);
-  assert.doesNotMatch(ownerlessResume, /prepareRecoveryCopyDestination|writeRecoveryCopy|adoptSyncedOwner/);
+  const recoveryInitialisedStart = ownerlessResume.indexOf(
+    'if (execution.draft.stage === "recovery-initialised")'
+  );
+  const recoveryCopyPendingStart = ownerlessResume.indexOf(
+    'if (execution.draft.stage === "recovery-copy-pending")'
+  );
+  const recoveryInitialisedSection = ownerlessResume.slice(
+    recoveryInitialisedStart,
+    recoveryCopyPendingStart
+  );
+  assert.match(recoveryInitialisedSection, /preparePackage\(execution\)/);
+  assert.doesNotMatch(
+    recoveryInitialisedSection,
+    /writePackage\(execution\)/,
+    "P297 must still stop at recovery-copy-pending on the same resume"
+  );
+  assert.match(ownerlessResume.slice(recoveryCopyPendingStart), /writePackage\(execution\)/);
+  assert.doesNotMatch(ownerlessResume, /adoptSyncedOwner/);
 
   const prepareStart = activation.indexOf("async function preparePackage");
-  const prepareEnd = activation.indexOf("async function writePackage", prepareStart);
+  const prepareEnd = activation.indexOf("function recoveryCopyWriteFailure", prepareStart);
   const prepare = activation.slice(prepareStart, prepareEnd);
   assert.match(prepare, /checked\(execution, execution\.dependencies\.buildRecoveryPackage/);
   assert.match(prepare, /error\?\.code === execution\.currentFailureCode/);
@@ -799,4 +822,3 @@ test("P297 canonical owner/dependency/boundary source shape stays narrow and own
   assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
-
