@@ -23,7 +23,7 @@ function semanticLines(content, text) {
   return content.parseLines(text).map((line) => ({ id: line.id, depth: line.depth, content: line.content }));
 }
 
-function ids(lines) { return lines.map((line) => line.id); }
+function ids(lines) { return Array.from(lines, (line) => line.id); }
 
 function createHarness(text) {
   const { content, runtime } = loadModules();
