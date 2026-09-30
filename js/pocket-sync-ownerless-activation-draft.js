@@ -501,6 +501,47 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function buildContentUploadPending(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "account-ready"
+        || ![null, "content-upload"].includes(draft.pendingOperation)
+        || draft.confirmedRemoteRevision !== 0) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "content-upload",
+    }), configInput);
+  }
+
+  function buildContentConflict(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "account-ready"
+        || draft.pendingOperation !== "content-upload"
+        || draft.confirmedRemoteRevision !== 0) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "content-conflict",
+    }), configInput);
+  }
+
+  function buildContentCommitted(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "account-ready"
+        || draft.pendingOperation !== "content-upload"
+        || draft.confirmedRemoteRevision !== 0) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "content-committed",
+      confirmedRemoteRevision: 1,
+      pendingOperation: null,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -552,6 +593,9 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildRegistrationStarted,
     buildRegistrationPending,
     buildAccountReady,
+    buildContentUploadPending,
+    buildContentConflict,
+    buildContentCommitted,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
