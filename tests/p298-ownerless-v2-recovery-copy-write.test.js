@@ -924,6 +924,6 @@ test("P298 source shape reuses one writer, keeps the ready-for-adoption hard sto
 
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /ownerless-first-create|PocketSyncOwnerlessActivationDraft|findOwnerlessActivation/);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
