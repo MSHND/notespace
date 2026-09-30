@@ -542,6 +542,51 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function buildDeviceEnvelopePending(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "content-committed"
+        || ![null, "device-envelope"].includes(draft.pendingOperation)
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 0) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "device-envelope",
+    }), configInput);
+  }
+
+  function buildDeviceEnvelopeConflict(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "content-committed"
+        || draft.pendingOperation !== "device-envelope"
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 0) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "device-envelope-conflict",
+    }), configInput);
+  }
+
+  function buildDeviceEnvelopeCommitted(input, configInput) {
+    const value = exactObject(input, ["draft", "keySetVersion"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (draft.stage !== "content-committed"
+        || draft.pendingOperation !== "device-envelope"
+        || draft.confirmedRemoteRevision !== 1
+        || draft.keySetVersion !== 0
+        || value.keySetVersion !== 1) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "device-envelope-committed",
+      keySetVersion: 1,
+      pendingOperation: null,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -596,6 +641,9 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildContentUploadPending,
     buildContentConflict,
     buildContentCommitted,
+    buildDeviceEnvelopePending,
+    buildDeviceEnvelopeConflict,
+    buildDeviceEnvelopeCommitted,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
