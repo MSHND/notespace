@@ -811,6 +811,44 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function buildReadyForAdoption(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const config = validateFactory(configInput);
+    const draft = validate(value.draft, configInput);
+    const exactPrfBranch = draft.prfStatus === "available"
+      ? draft.prfEnvelope !== null && draft.keySetVersion === 3
+      : draft.prfStatus === "skipped"
+        && draft.prfEnvelope === null && draft.keySetVersion === 2;
+    if (draft.stage !== "recovery-copy-pending"
+        || !exactPrfBranch
+        || draft.account === null
+        || draft.confirmedRemoteRevision !== 1
+        || draft.recoveryVersion !== 1
+        || draft.accountLocator === null
+        || draft.accountLocator === draft.account.accountId
+        || draft.pendingOperation !== null
+        || draft.recoveryCopyStored !== false
+        || draft.recoveryRoot === null
+        || draft.recoveryAuthorisation === null
+        || draft.recoveryPackage === null
+        || draft.adopted !== false) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    validateBoundRecoveryPackage(
+      draft.recoveryPackage,
+      draft,
+      config,
+      "ownerless-activation-builder-invalid"
+    );
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "ready-for-adoption",
+      recoveryCopyStored: true,
+      recoveryRoot: null,
+      recoveryAuthorisation: null,
+      recoveryPackage: null,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -876,6 +914,7 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildRecoveryConflict,
     buildRecoveryInitialised,
     buildRecoveryCopyPending,
+    buildReadyForAdoption,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
