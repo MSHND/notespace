@@ -2259,7 +2259,9 @@ without adding UI, a live synced owner, background work, or deployment state.
           || typeof ownerless.buildRecoveryConflict !== "function"
           || typeof ownerless.buildRecoveryInitialised !== "function"
           || typeof ownerless.buildRecoveryCopyPending !== "function"
-          || typeof ownerless.buildReadyForAdoption !== "function") {
+          || typeof ownerless.buildReadyForAdoption !== "function"
+          || typeof ownerless.buildAdopted !== "function"
+          || typeof ownerless.classifyAdopted !== "function") {
         return ownerlessFailure("ownerless-contract-unavailable");
       }
 
@@ -2270,12 +2272,10 @@ without adding UI, a live synced owner, background work, or deployment state.
       );
 
       try {
-        await ensureCurrent(execution);
-        await checked(execution, config.deviceStore.open());
-        const found = await checked(
-          execution,
-          config.deviceStore.readActivation(options.activationId)
-        );
+        // Read and validate durable truth first so an exact adopted replay never
+        // consults the now-retired ownerless target.
+        await config.deviceStore.open();
+        const found = await config.deviceStore.readActivation(options.activationId);
         if (!found) return ownerlessFailure("ownerless-activation-state-invalid");
         execution.record = found.record;
         execution.draft = execution.draftContract(found.draft);
@@ -2286,6 +2286,54 @@ without adding UI, a live synced owner, background work, or deployment state.
             activationId: options.activationId,
           });
         }
+
+        if (execution.draft.stage === "adopted") {
+          let completed;
+          try {
+            completed = ownerless.classifyAdopted(
+              execution.draft,
+              ownerlessContractConfig()
+            );
+          } catch (_error) {
+            completed = null;
+          }
+          const exactRemote = execution.record?.remote?.confirmedRevision === 1
+            && execution.record?.remote?.pending === null
+            && execution.record?.remote?.conflict === null;
+          const exactUsage = execution.record?.usage?.masterKeyGeneration === 1
+            && execution.record?.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
+          const exactKeySet = execution.draft.prfStatus === "available"
+            ? execution.draft.prfEnvelope !== null && execution.draft.keySetVersion === 3
+            : execution.draft.prfStatus === "skipped"
+              && execution.draft.prfEnvelope === null
+              && execution.draft.keySetVersion === 2;
+          if (!completed
+              || completed.activationId !== options.activationId
+              || completed.syncedPocketId !== execution.draft.syncedPocketId
+              || completed.deviceId !== execution.draft.deviceId
+              || !exactRemote
+              || !exactUsage
+              || !exactKeySet
+              || execution.draft.account === null
+              || execution.draft.confirmedRemoteRevision !== 1
+              || execution.draft.recoveryVersion !== 1
+              || execution.draft.accountLocator === null
+              || execution.draft.accountLocator === execution.draft.account.accountId
+              || execution.draft.registrationContinuation !== null
+              || execution.draft.pendingOperation !== null
+              || execution.draft.recoveryCopyStored !== true
+              || execution.draft.recoveryRoot !== null
+              || execution.draft.recoveryAuthorisation !== null
+              || execution.draft.recoveryPackage !== null
+              || execution.draft.adopted !== true) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+          return ownerlessActivatedResult(execution.draft);
+        }
+
+        await ensureCurrent(execution);
 
         if (execution.draft.stage === "device-staged") {
           if (execution.draft.account !== null) {
@@ -2327,6 +2375,39 @@ without adding UI, a live synced owner, background work, or deployment state.
             return await completeExistingOwnerlessAccount(execution, ownerless);
           }
           return await completeNewOwnerlessAccount(execution, ownerless);
+        }
+
+        if (execution.draft.stage === "ready-for-adoption") {
+          const exactRemote = execution.record?.remote?.confirmedRevision === 1
+            && execution.record?.remote?.pending === null
+            && execution.record?.remote?.conflict === null;
+          const exactUsage = execution.record?.usage?.masterKeyGeneration === 1
+            && execution.record?.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
+          const exactKeySet = execution.draft.prfStatus === "available"
+            ? execution.draft.prfEnvelope !== null && execution.draft.keySetVersion === 3
+            : execution.draft.prfStatus === "skipped"
+              && execution.draft.prfEnvelope === null
+              && execution.draft.keySetVersion === 2;
+          if (!exactRemote
+              || !exactUsage
+              || !exactKeySet
+              || execution.draft.account === null
+              || execution.draft.confirmedRemoteRevision !== 1
+              || execution.draft.recoveryVersion !== 1
+              || execution.draft.accountLocator === null
+              || execution.draft.accountLocator === execution.draft.account.accountId
+              || execution.draft.registrationContinuation !== null
+              || execution.draft.pendingOperation !== null
+              || execution.draft.recoveryCopyStored !== true
+              || execution.draft.recoveryRoot !== null
+              || execution.draft.recoveryAuthorisation !== null
+              || execution.draft.recoveryPackage !== null
+              || execution.draft.adopted !== false) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+          return await adopt(execution);
         }
 
         const exactPostAccountBoundary = execution.draft.account !== null
