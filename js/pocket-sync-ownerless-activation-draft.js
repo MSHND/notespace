@@ -849,6 +849,35 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function buildAdopted(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    const exactPrfBranch = draft.prfStatus === "available"
+      ? draft.prfEnvelope !== null && draft.keySetVersion === 3
+      : draft.prfStatus === "skipped"
+        && draft.prfEnvelope === null && draft.keySetVersion === 2;
+    if (draft.stage !== "ready-for-adoption"
+        || !exactPrfBranch
+        || draft.account === null
+        || draft.confirmedRemoteRevision !== 1
+        || draft.recoveryVersion !== 1
+        || draft.accountLocator === null
+        || draft.accountLocator === draft.account.accountId
+        || draft.registrationContinuation !== null
+        || draft.pendingOperation !== null
+        || draft.recoveryCopyStored !== true
+        || draft.recoveryRoot !== null
+        || draft.recoveryAuthorisation !== null
+        || draft.recoveryPackage !== null
+        || draft.adopted !== false) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "adopted",
+      adopted: true,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -915,6 +944,7 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildRecoveryInitialised,
     buildRecoveryCopyPending,
     buildReadyForAdoption,
+    buildAdopted,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
