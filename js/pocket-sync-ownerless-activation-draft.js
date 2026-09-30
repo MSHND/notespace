@@ -653,6 +653,84 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     }), configInput);
   }
 
+  function exactRecoveryTerminal(draft) {
+    if (draft.stage === "prf-envelope-committed") {
+      return draft.prfStatus === "available"
+        && draft.prfEnvelope !== null
+        && draft.keySetVersion === 2;
+    }
+    if (draft.stage === "prf-envelope-skipped") {
+      return draft.prfStatus === "skipped"
+        && draft.prfEnvelope === null
+        && draft.keySetVersion === 1;
+    }
+    return false;
+  }
+
+  function buildRecoveryInitialisationPending(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (!exactRecoveryTerminal(draft)
+        || ![null, "recovery-initialisation"].includes(draft.pendingOperation)
+        || draft.confirmedRemoteRevision !== 1
+        || draft.recoveryVersion !== 0
+        || draft.accountLocator !== null
+        || draft.recoveryCopyStored !== false
+        || draft.adopted !== false) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "recovery-initialisation",
+    }), configInput);
+  }
+
+  function buildRecoveryConflict(input, configInput) {
+    const value = exactObject(input, ["draft"], "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    if (!exactRecoveryTerminal(draft)
+        || draft.pendingOperation !== "recovery-initialisation"
+        || draft.confirmedRemoteRevision !== 1
+        || draft.recoveryVersion !== 0
+        || draft.accountLocator !== null
+        || draft.recoveryCopyStored !== false
+        || draft.adopted !== false) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      pendingOperation: "recovery-conflict",
+    }), configInput);
+  }
+
+  function buildRecoveryInitialised(input, configInput) {
+    const value = exactObject(input, ["draft", "keySetVersion", "accountLocator"],
+      "ownerless-activation-builder-invalid");
+    const draft = validate(value.draft, configInput);
+    let accountLocator;
+    try {
+      accountLocator = identifier(value.accountLocator, "ownerless-activation-builder-invalid");
+    } catch (_error) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    if (!exactRecoveryTerminal(draft)
+        || draft.pendingOperation !== "recovery-initialisation"
+        || draft.confirmedRemoteRevision !== 1
+        || draft.recoveryVersion !== 0
+        || draft.accountLocator !== null
+        || draft.recoveryCopyStored !== false
+        || draft.adopted !== false
+        || value.keySetVersion !== draft.keySetVersion + 1
+        || accountLocator === draft.account?.accountId) {
+      throw contractError("ownerless-activation-builder-invalid");
+    }
+    return validate(Object.assign({}, jsonClone(draft), {
+      stage: "recovery-initialised",
+      keySetVersion: value.keySetVersion,
+      recoveryVersion: 1,
+      accountLocator,
+      pendingOperation: null,
+    }), configInput);
+  }
+
   function classifyCompletion(input, configInput, expectedStage, expectedAdopted) {
     let draft;
     try {
@@ -714,6 +792,9 @@ resume activation, call account/remote services, adopt an owner, or expose UI.
     buildPrfEnvelopeConflict,
     buildPrfEnvelopeCommitted,
     buildPrfEnvelopeSkipped,
+    buildRecoveryInitialisationPending,
+    buildRecoveryConflict,
+    buildRecoveryInitialised,
     classifyReadyForAdoption,
     classifyAdopted,
     classifyDiscoveryCandidate,
