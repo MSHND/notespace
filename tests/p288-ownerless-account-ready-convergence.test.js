@@ -202,6 +202,9 @@ function createHarness(options = {}) {
         async writeRecoveryCopy() {
           throw new Error("unexpected Recovery Copy write before P298 boundary");
         },
+        async adoptSyncedOwner() {
+          throw new Error("unexpected owner adoption before P299 boundary");
+        },
         async withExistingAccountReady(consumer) {
           counters.bridge += 1;
           return bridge(consumer);
