@@ -851,11 +851,11 @@ test("P298 source shape reuses one writer, keeps P297 hard stop, owns v2 ready t
   const activation = source(ACTIVATION);
   const ownerless = source(OWNERLESS);
 
-  assert.equal((activation.match(/async function writePackage\\s*\\(/g) || []).length, 1);
-  assert.match(ownerless, /function buildReadyForAdoption\\s*\\(/);
+  assert.equal((activation.match(/async function writePackage\s*\(/g) || []).length, 1);
+  assert.match(ownerless, /function buildReadyForAdoption\s*\(/);
   assert.match(
     activation,
-    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\\.freeze\\(\\[\\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\\s*\\]\\)/
+    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*\]\)/
   );
 
   const dependenciesStart = activation.indexOf("const OWNERLESS_RESUME_DEPENDENCY_FIELDS");
@@ -875,39 +875,39 @@ test("P298 source shape reuses one writer, keeps P297 hard stop, owns v2 ready t
   assert.notEqual(recoveryInitialisedStart, -1);
   assert.notEqual(recoveryCopyPendingStart, -1);
   const p297Section = ownerlessResume.slice(recoveryInitialisedStart, recoveryCopyPendingStart);
-  assert.match(p297Section, /preparePackage\\(execution\\)/);
-  assert.doesNotMatch(p297Section, /writePackage\\(execution\\)/);
+  assert.match(p297Section, /preparePackage\(execution\)/);
+  assert.doesNotMatch(p297Section, /writePackage\(execution\)/);
   const p298Section = ownerlessResume.slice(recoveryCopyPendingStart);
-  assert.match(p298Section, /writePackage\\(execution\\)/);
-  assert.match(p298Section, /ownerlessReadyForAdoptionResult\\(execution\\.draft\\)/);
-  assert.doesNotMatch(ownerlessResume, /adopt\\(execution\\)|adoptSyncedOwner/);
+  assert.match(p298Section, /writePackage\(execution\)/);
+  assert.match(p298Section, /ownerlessReadyForAdoptionResult\(execution\.draft\)/);
+  assert.doesNotMatch(ownerlessResume, /adopt\(execution\)|adoptSyncedOwner/);
 
   const writeStart = activation.indexOf("async function writePackage");
   const writeEnd = activation.indexOf("async function adopt(", writeStart);
   const write = activation.slice(writeStart, writeEnd);
-  assert.match(write, /ownerless\\.buildReadyForAdoption/);
-  assert.match(write, /execution\\.dependencies\\.prepareRecoveryCopyDestination\\(\\)/);
-  assert.match(write, /execution\\.dependencies\\.writeRecoveryCopy/);
-  assert.match(write, /recoveryPackage:\\s*execution\\.draft\\.recoveryPackage/);
+  assert.match(write, /ownerless\.buildReadyForAdoption/);
+  assert.match(write, /execution\.dependencies\.prepareRecoveryCopyDestination\(\)/);
+  assert.match(write, /execution\.dependencies\.writeRecoveryCopy/);
+  assert.match(write, /recoveryPackage:\s*execution\.draft\.recoveryPackage/);
   assert.equal(
-    (write.match(/error\\?\\.code === execution\\.currentFailureCode/g) || []).length,
+    (write.match(/error\?\.code === execution\.currentFailureCode/g) || []).length,
     2,
     "both local awaits preserve semantic ownerless currentness and historical v1 source currentness"
   );
-  assert.match(write, /if \\(ownerless\\) \\{\\s*await persistDraft\\(execution, ownerlessReadyDraft\\)/);
+  assert.match(write, /if \(ownerless\) \{\s*await persistDraft\(execution, ownerlessReadyDraft\)/);
 
   const builderStart = ownerless.indexOf("function buildReadyForAdoption");
   const builderEnd = ownerless.indexOf("function classifyCompletion", builderStart);
   const builder = ownerless.slice(builderStart, builderEnd);
-  assert.match(builder, /stage:\\s*"ready-for-adoption"/);
-  assert.match(builder, /recoveryCopyStored:\\s*true/);
-  assert.match(builder, /recoveryRoot:\\s*null/);
-  assert.match(builder, /recoveryAuthorisation:\\s*null/);
-  assert.match(builder, /recoveryPackage:\\s*null/);
-  assert.doesNotMatch(builder, /account:\\s*null|accountLocator:\\s*null|recoveryEnvelope:\\s*null|recoveryVerifier:\\s*null/);
+  assert.match(builder, /stage:\s*"ready-for-adoption"/);
+  assert.match(builder, /recoveryCopyStored:\s*true/);
+  assert.match(builder, /recoveryRoot:\s*null/);
+  assert.match(builder, /recoveryAuthorisation:\s*null/);
+  assert.match(builder, /recoveryPackage:\s*null/);
+  assert.doesNotMatch(builder, /account:\s*null|accountLocator:\s*null|recoveryEnvelope:\s*null|recoveryVerifier:\s*null/);
 
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /ownerless-first-create|PocketSyncOwnerlessActivationDraft|findOwnerlessActivation/);
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\\.js/);
-  assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\\.js/);
+  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
