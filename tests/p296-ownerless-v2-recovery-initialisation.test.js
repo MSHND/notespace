@@ -315,6 +315,12 @@ function createHarness(options = {}) {
         async buildRecoveryPackage() {
           throw new Error("unexpected recovery package build before P297 boundary");
         },
+        async prepareRecoveryCopyDestination() {
+          throw new Error("unexpected Recovery Copy destination before P298 boundary");
+        },
+        async writeRecoveryCopy() {
+          throw new Error("unexpected Recovery Copy write before P298 boundary");
+        },
         async withExistingAccountReady(consumer) {
           counters.bridge += 1;
           return bridge(consumer);
@@ -863,16 +869,25 @@ test("P296 canonical owner owns recovery transitions, only one initialiseRecover
     /preparePackage\(execution\)/,
     "P296 recovery resume must still hard-stop before P297 package construction"
   );
-  assert.match(ownerlessResume, /preparePackage\(execution\)/);
-  assert.doesNotMatch(ownerlessResume, /writePackage\(execution\)/);
-  assert.doesNotMatch(
-    ownerlessResume,
-    /prepareRecoveryCopyDestination|writeRecoveryCopy|adoptSyncedOwner/
+  const recoveryCopyPendingStart = ownerlessResume.indexOf(
+    'if (execution.draft.stage === "recovery-copy-pending")'
   );
+  const recoveryInitialisedSection = ownerlessResume.slice(
+    recoveryInitialisedStart,
+    recoveryCopyPendingStart
+  );
+  assert.match(recoveryInitialisedSection, /preparePackage\(execution\)/);
+  assert.doesNotMatch(
+    recoveryInitialisedSection,
+    /writePackage\(execution\)/,
+    "P297 same-resume hard stop must remain before P298 Recovery Copy writing"
+  );
+  assert.match(ownerlessResume.slice(recoveryCopyPendingStart), /writePackage\(execution\)/);
+  assert.doesNotMatch(ownerlessResume, /adoptSyncedOwner/);
 
   assert.match(
     activation,
-    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage",\s*\]\)/
+    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*\]\)/
   );
   assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
