@@ -166,6 +166,21 @@ without adding UI, a live synced owner, background work, or deployment state.
     });
   }
 
+  function ownerlessContentCommittedResult(draft) {
+    return deepFreeze({
+      ok: true,
+      reason: "ownerless-content-committed",
+      activationId: draft.activationId,
+      accountPath: draft.accountPath,
+      syncedPocketId: draft.syncedPocketId,
+      deviceId: draft.deviceId,
+      stage: "content-committed",
+      locallyDurable: true,
+      remotelyCommitted: true,
+      confirmedRemoteRevision: 1,
+    });
+  }
+
   function byteLength(value) {
     if (typeof value !== "string"
         || value.length === 0
@@ -1099,10 +1114,63 @@ without adding UI, a live synced owner, background work, or deployment state.
       return ownerlessAccountReadyResult(execution.draft);
     }
 
+    function ownerlessContentTransitionOwner(execution) {
+      if (execution.draft?.schemaVersion !== 2
+          || execution.draft?.activationMode !== "ownerless-first-create") return null;
+      const ownerless = global.PocketSyncOwnerlessActivationDraft;
+      if (!isObject(ownerless)
+          || typeof ownerless.buildContentUploadPending !== "function"
+          || typeof ownerless.buildContentConflict !== "function"
+          || typeof ownerless.buildContentCommitted !== "function") {
+        throw activationError("ownerless-activation-state-invalid");
+      }
+      return ownerless;
+    }
+
+    function contentUploadPendingDraft(execution) {
+      const ownerless = ownerlessContentTransitionOwner(execution);
+      return ownerless
+        ? ownerless.buildContentUploadPending(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, { pendingOperation: "content-upload" });
+    }
+
+    function contentConflictDraft(execution) {
+      const ownerless = ownerlessContentTransitionOwner(execution);
+      return ownerless
+        ? ownerless.buildContentConflict(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, { pendingOperation: "content-conflict" });
+    }
+
+    function contentCommittedDraft(execution) {
+      const ownerless = ownerlessContentTransitionOwner(execution);
+      return ownerless
+        ? ownerless.buildContentCommitted(
+          { draft: execution.draft },
+          ownerlessContractConfig()
+        )
+        : changedDraft(execution.draft, {
+          stage: "content-committed",
+          confirmedRemoteRevision: 1,
+          pendingOperation: null,
+        });
+    }
+
+    function contentFailure(execution, reason, extra) {
+      return ownerlessContentTransitionOwner(execution)
+        ? ownerlessFailure(reason, extra)
+        : safeFailure(reason, extra);
+    }
+
     async function commitContent(execution) {
       if (stageAtLeast(execution.draft, "content-committed")) return null;
       if (execution.draft.pendingOperation === "content-conflict") {
-        return safeFailure("initial-remote-conflict", {
+        return contentFailure(execution, "initial-remote-conflict", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: false, conflict: true, resumable: false,
         });
@@ -1110,9 +1178,9 @@ without adding UI, a live synced owner, background work, or deployment state.
       const attemptKind = remoteAttemptKind(execution.draft, "content-upload");
       if (execution.draft.pendingOperation !== "content-upload" || attemptKind === "idempotent-retry") {
         const pending = Object.assign({}, execution.record.remote.pending, { attemptKind });
-        await persistDraft(execution, changedDraft(execution.draft, {
-          pendingOperation: "content-upload",
-        }), { remote: Object.assign({}, execution.record.remote, { pending, conflict: null }) });
+        await persistDraft(execution, contentUploadPendingDraft(execution), {
+          remote: Object.assign({}, execution.record.remote, { pending, conflict: null }),
+        });
       }
       let response;
       try {
@@ -1126,8 +1194,8 @@ without adding UI, a live synced owner, background work, or deployment state.
           encryptedRecord: execution.draft.content.record,
         }));
       } catch (error) {
-        if (error?.code === "source-session-changed") throw error;
-        return safeFailure("initial-remote-unavailable", {
+        if (error?.code === execution.currentFailureCode) throw error;
+        return contentFailure(execution, "initial-remote-unavailable", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: false, resumable: true,
         });
@@ -1139,10 +1207,8 @@ without adding UI, a live synced owner, background work, or deployment state.
             operationId: execution.draft.ids.contentOperationId,
           },
         });
-        await persistDraft(execution, changedDraft(execution.draft, {
-          pendingOperation: "content-conflict",
-        }), { remote });
-        return safeFailure("initial-remote-conflict", {
+        await persistDraft(execution, contentConflictDraft(execution), { remote });
+        return contentFailure(execution, "initial-remote-conflict", {
           activationId: execution.draft.activationId, locallyDurable: true,
           remotelyCommitted: false, conflict: true, resumable: false,
         });
@@ -1150,11 +1216,9 @@ without adding UI, a live synced owner, background work, or deployment state.
       if (response.status !== "committed" || response.revision !== 1) {
         throw activationError("activation-state-invalid");
       }
-      await persistDraft(execution, changedDraft(execution.draft, {
-        stage: "content-committed",
-        confirmedRemoteRevision: 1,
-        pendingOperation: null,
-      }), { remote: { confirmedRevision: 1, pending: null, conflict: null } });
+      await persistDraft(execution, contentCommittedDraft(execution), {
+        remote: { confirmedRevision: 1, pending: null, conflict: null },
+      });
       return null;
     }
 
@@ -1799,7 +1863,10 @@ without adding UI, a live synced owner, background work, or deployment state.
           || typeof ownerless.validate !== "function"
           || typeof ownerless.buildRegistrationStarted !== "function"
           || typeof ownerless.buildRegistrationPending !== "function"
-          || typeof ownerless.buildAccountReady !== "function") {
+          || typeof ownerless.buildAccountReady !== "function"
+          || typeof ownerless.buildContentUploadPending !== "function"
+          || typeof ownerless.buildContentConflict !== "function"
+          || typeof ownerless.buildContentCommitted !== "function") {
         return ownerlessFailure("ownerless-contract-unavailable");
       }
 
@@ -1821,54 +1888,94 @@ without adding UI, a live synced owner, background work, or deployment state.
         execution.draft = execution.draftContract(found.draft);
         if (execution.draft.activationId !== options.activationId
             || execution.draft.schemaVersion !== 2
-            || execution.draft.activationMode !== "ownerless-first-create"
-            || execution.draft.stage !== "device-staged"
-            || execution.draft.account !== null) {
+            || execution.draft.activationMode !== "ownerless-first-create") {
           return ownerlessFailure("ownerless-activation-state-invalid", {
             activationId: options.activationId,
           });
         }
 
-        if (execution.draft.accountPath === "existing-unbound") {
-          if (execution.draft.registrationContinuation !== null
+        if (execution.draft.stage === "device-staged") {
+          if (execution.draft.account !== null) {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+          if (execution.draft.accountPath === "existing-unbound") {
+            if (execution.draft.registrationContinuation !== null
+                || execution.draft.pendingOperation !== null
+                || execution.draft.prfStatus !== "pending"
+                || execution.draft.prfEnvelope !== null) {
+              return ownerlessFailure("ownerless-activation-state-invalid", {
+                activationId: options.activationId,
+              });
+            }
+          } else if (execution.draft.accountPath === "new-account") {
+            const hasContinuation = execution.draft.registrationContinuation !== null;
+            const validFresh = !hasContinuation
+              && [null, "account-registration"].includes(execution.draft.pendingOperation)
+              && execution.draft.prfStatus === "pending"
+              && execution.draft.prfEnvelope === null;
+            const validPendingFinish = hasContinuation
+              && execution.draft.pendingOperation === "account-registration-finish"
+              && ["available", "skipped"].includes(execution.draft.prfStatus);
+            if (!validFresh && !validPendingFinish) {
+              return ownerlessFailure("ownerless-activation-state-invalid", {
+                activationId: options.activationId,
+              });
+            }
+          } else {
+            return ownerlessFailure("ownerless-activation-state-invalid", {
+              activationId: options.activationId,
+            });
+          }
+
+          await ensureCurrent(execution);
+          if (execution.draft.accountPath === "existing-unbound") {
+            return await completeExistingOwnerlessAccount(execution, ownerless);
+          }
+          return await completeNewOwnerlessAccount(execution, ownerless);
+        }
+
+        const exactContentBoundary = execution.draft.account !== null
+          && execution.draft.registrationContinuation === null
+          && ["available", "skipped"].includes(execution.draft.prfStatus)
+          && execution.draft.keySetVersion === 0
+          && execution.draft.recoveryVersion === 0
+          && execution.draft.accountLocator === null
+          && execution.draft.recoveryCopyStored === false
+          && execution.draft.adopted === false;
+        if (!exactContentBoundary) {
+          return ownerlessFailure("ownerless-activation-state-invalid", {
+            activationId: options.activationId,
+          });
+        }
+
+        if (execution.draft.stage === "content-committed") {
+          if (execution.draft.confirmedRemoteRevision !== 1
               || execution.draft.pendingOperation !== null
-              || execution.draft.prfStatus !== "pending"
-              || execution.draft.prfEnvelope !== null) {
+              || execution.record?.remote?.confirmedRevision !== 1
+              || execution.record?.remote?.pending !== null
+              || execution.record?.remote?.conflict !== null) {
             return ownerlessFailure("ownerless-activation-state-invalid", {
               activationId: options.activationId,
             });
           }
-        } else if (execution.draft.accountPath === "new-account") {
-          const hasContinuation = execution.draft.registrationContinuation !== null;
-          const validFresh = !hasContinuation
-            && [null, "account-registration"].includes(execution.draft.pendingOperation)
-            && execution.draft.prfStatus === "pending"
-            && execution.draft.prfEnvelope === null;
-          const validPendingFinish = hasContinuation
-            && execution.draft.pendingOperation === "account-registration-finish"
-            && ["available", "skipped"].includes(execution.draft.prfStatus);
-          if (!validFresh && !validPendingFinish) {
-            return ownerlessFailure("ownerless-activation-state-invalid", {
-              activationId: options.activationId,
-            });
-          }
-        } else {
+          return ownerlessContentCommittedResult(execution.draft);
+        }
+
+        if (execution.draft.stage !== "account-ready"
+            || execution.draft.confirmedRemoteRevision !== 0
+            || ![null, "content-upload", "content-conflict"]
+              .includes(execution.draft.pendingOperation)) {
           return ownerlessFailure("ownerless-activation-state-invalid", {
             activationId: options.activationId,
           });
         }
 
         await ensureCurrent(execution);
-
-        if (execution.draft.accountPath === "existing-unbound") {
-          return await completeExistingOwnerlessAccount(execution, ownerless);
-        }
-        if (execution.draft.accountPath === "new-account") {
-          return await completeNewOwnerlessAccount(execution, ownerless);
-        }
-        return ownerlessFailure("ownerless-activation-state-invalid", {
-          activationId: options.activationId,
-        });
+        const contentResult = await commitContent(execution);
+        if (contentResult) return contentResult;
+        return ownerlessContentCommittedResult(execution.draft);
       } catch (error) {
         if (error?.code === "ownerless-target-stale") {
           return ownerlessFailure("ownerless-target-stale", {
