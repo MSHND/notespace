@@ -886,11 +886,12 @@ test("P296 canonical owner owns recovery transitions, only one initialiseRecover
     "P297 same-resume hard stop must remain before P298 Recovery Copy writing"
   );
   assert.match(ownerlessResume.slice(recoveryCopyPendingStart), /writePackage\(execution\)/);
-  assert.doesNotMatch(ownerlessResume, /adoptSyncedOwner/);
+  assert.doesNotMatch(recoveryTerminalSection, /adopt\(execution\)|adoptSyncedOwner/);
+  assert.doesNotMatch(recoveryInitialisedSection, /adopt\(execution\)|adoptSyncedOwner/);
 
   assert.match(
     activation,
-    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*\]\)/
+    /const OWNERLESS_RESUME_DEPENDENCY_FIELDS = Object\.freeze\(\[\s*"captureTarget", "isTargetReplaceable", "withExistingAccountReady",\s*"buildRecoveryPackage", "prepareRecoveryCopyDestination", "writeRecoveryCopy",\s*"adoptSyncedOwner",\s*\]\)/
   );
   assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
