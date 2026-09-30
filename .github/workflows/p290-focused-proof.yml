@@ -1,0 +1,19 @@
+name: P290 focused proof
+
+on:
+  push:
+
+jobs:
+  p290-focused-proof:
+    if: github.ref == 'refs/heads/candidate/p290-proof'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: P290 quiet save acknowledgement regression
+        run: timeout --signal=TERM --kill-after=5s 180s node --test --test-name-pattern="P290" tests/device-changes-resolution.test.js
+      - name: Repository check
+        run: timeout --signal=TERM --kill-after=5s 240s npm run check
