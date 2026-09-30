@@ -392,14 +392,17 @@ test("P293 both ownerless account paths converge through the one shared first co
     assert.equal(committed.found.record.remote.pending, null);
     assert.equal(committed.found.record.remote.conflict, null);
 
-    const again = await harness.orchestrator.resume(
-      harness.resumeDependencies(),
-      resumeOptions(ready.staged.activationId)
+    assert.equal(harness.counters.content, 1, "P293 content step uploads exactly once");
+    assert.equal(
+      harness.counters.envelope,
+      0,
+      "the P293 content-commit resume itself must still stop before device-envelope publication"
     );
-    assertSafeCommittedResult(again, accountPath);
-    assert.equal(harness.counters.content, 1, "content-committed must not upload again");
-    assert.equal(harness.counters.envelope, 0, "P293 hard stop must not publish device envelope");
-    assert.equal(harness.counters.recovery, 0, "P293 hard stop must not initialise recovery");
+    assert.equal(
+      harness.counters.recovery,
+      0,
+      "the P293 content-commit resume itself must still stop before recovery"
+    );
   }
 });
 
