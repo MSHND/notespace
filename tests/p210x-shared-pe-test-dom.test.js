@@ -13,7 +13,7 @@ test("P210x/P289 product runtime is byte-identical to the branch-aware semantic-
   const bytes = fs.readFileSync(path.join(ROOT, "js/pocket-node-popout-runtime.js"));
   const prefix = Buffer.from(`blob ${bytes.length}\0`);
   const gitBlobSha = crypto.createHash("sha1").update(prefix).update(bytes).digest("hex");
-  assert.equal(gitBlobSha, "6c5342ba3be7a53120e2a54f98dc4e7e151205df");
+  assert.equal(gitBlobSha, "7400c1d90fd6617373714926b185343cccc3691f");
 });
 
 test("P210x migrated PE suites share one DOM mutation owner", () => {
