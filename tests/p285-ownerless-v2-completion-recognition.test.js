@@ -474,7 +474,7 @@ test("P285 additional-device recognises exact adopted v2, but not unfinished v2 
 });
 
 test("P285 recognition remains dormant below runtime/UI while P287 local staging consumes the canonical contract only", () => {
-  assert.doesNotMatch(source("index.html"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
     /findOwnerlessActivation|PocketSyncOwnerlessActivationDraft|ownerless-first-create/);
