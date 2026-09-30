@@ -446,8 +446,8 @@
       if (readOnly || index < 0 || index >= lines.length || typeof content.splitLineAtCaret !== "function") return "";
       var current = lines[index], currentRow = rowForId(current.id); if (!currentRow) return "";
       var proposedId = "line_new_" + (nextId + 1);
-      var semanticCaretOffset = Number.isInteger(caretOffset) ? caretOffset : String(current.content || "").length;
-      var transformed = content.splitLineAtCaret(lines, index, semanticCaretOffset, proposedId);
+      if (!Number.isInteger(caretOffset)) caretOffset = String(current.content || "").length;
+      var transformed = content.splitLineAtCaret(lines, index, caretOffset, proposedId);
       if (!transformed || transformed.ok !== true) return "";
       if (transformed.kind === "list-exit") {
         lines = transformed.lines; markMutation();
