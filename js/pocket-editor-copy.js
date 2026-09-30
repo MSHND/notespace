@@ -289,7 +289,7 @@ async function saveThroughPipHost() {
       refreshMeta();
       persistPipSnapshot();
       flashSaveChip("Safe");
-      setStatus("Saved via main pocket window.", "ok");
+      setStatus("Saved.", "ok");
       return true;
     }
     const errorText = cleanText(result && result.error, 180)
