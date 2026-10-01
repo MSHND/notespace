@@ -1,0 +1,18 @@
+name: P310 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p310-proof
+
+jobs:
+  p310-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: timeout 360s node --test tests/p053-sync-ui.test.js tests/p301-ownerless-first-create-runtime-start.test.js tests/p302-ownerless-durable-continuation.test.js tests/p309-ownerless-local-integration-admission.test.js tests/p310-ownerless-sync-ui-controller.test.js
+      - run: timeout 120s npm run check
