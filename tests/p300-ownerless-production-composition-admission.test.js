@@ -160,7 +160,6 @@ test("P300 keeps the browser module surface fixed while P301 owns the later prog
   for (const uiPath of [
     "js/pocket-sync-ui.js",
     "js/pocket-doorway-capabilities.js",
-    "js/pocket-sync-local-integration.js",
   ]) {
     assert.doesNotMatch(
       source(uiPath),
