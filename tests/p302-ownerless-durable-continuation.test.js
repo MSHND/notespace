@@ -37,6 +37,18 @@ function unavailableAuthenticationCredential() {
   };
 }
 
+function unavailableRegistrationCredential() {
+  const base = fixtures.nativeRegistrationCredential();
+  return {
+    getClientExtensionResults() { return { prf: { enabled: false } }; },
+    toJSON() {
+      const value = base.toJSON();
+      value.clientExtensionResults = { prf: { enabled: false } };
+      return value;
+    },
+  };
+}
+
 function createHarness(options = {}) {
   const shared = options.shared || createSharedDeviceStoreState();
   const counters = {
@@ -356,7 +368,9 @@ function createHarness(options = {}) {
       credentials: {
         async create() {
           counters.credentialCreate += 1;
-          return fixtures.nativeRegistrationCredential();
+          return options.unavailablePrf === true
+            ? unavailableRegistrationCredential()
+            : fixtures.nativeRegistrationCredential();
         },
         async get() {
           counters.credentialGet += 1;
