@@ -1,0 +1,32 @@
+name: P304 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p304-proof
+
+jobs:
+  p304-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P304 PRF terminal continuation and regression proof
+        timeout-minutes: 10
+        run: >
+          timeout --signal=TERM --kill-after=10s 540s
+          node --test
+          tests/p302-ownerless-durable-continuation.test.js
+          tests/p301-ownerless-first-create-runtime-start.test.js
+          tests/p031-sync-account-client.test.js
+          tests/p045-browser-sync-runtime.test.js
+          tests/p280-first-create-existing-account.test.js
+          tests/p293-ownerless-v2-content-commit.test.js
+          tests/p294-ownerless-v2-device-envelope-commit.test.js
+          tests/p295-ownerless-v2-prf-envelope-resolution.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
