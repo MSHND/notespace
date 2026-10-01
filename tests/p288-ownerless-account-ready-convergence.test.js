@@ -694,6 +694,6 @@ test("P288 account-ready convergence performs zero downstream remote, recovery, 
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js|pocket-sync-first-create\.js/);
   assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
+    /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.doesNotMatch(activation, /function\s+(?:resumeV2|accountReady)\s*\(/);
 });
