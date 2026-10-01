@@ -289,6 +289,14 @@ function createHarness(options = {}) {
         counters.content += 1;
         throw new Error("content upload unreachable before P301 stop");
       },
+      async readRevision() {
+        counters.content += 1;
+        throw new Error("content revision read unreachable before P301 stop");
+      },
+      async downloadEncryptedRecord() {
+        counters.content += 1;
+        throw new Error("content download unreachable before P301 stop");
+      },
     }),
     envelopeService: Object.freeze({
       async addEnvelope() {
@@ -299,7 +307,19 @@ function createHarness(options = {}) {
     recoveryService: Object.freeze({
       async initialiseRecovery() {
         counters.recovery += 1;
-        throw new Error("recovery unreachable before P301 stop");
+        throw new Error("recovery initialisation unreachable before P301 stop");
+      },
+      async beginRecovery() {
+        counters.recovery += 1;
+        throw new Error("recovery begin unreachable before P301 stop");
+      },
+      async finishRecovery() {
+        counters.recovery += 1;
+        throw new Error("recovery finish unreachable before P301 stop");
+      },
+      async rotateRecovery() {
+        counters.recovery += 1;
+        throw new Error("recovery rotation unreachable before P301 stop");
       },
     }),
     ...(options.omitDiscovery === true ? {} : { discoveryService }),
