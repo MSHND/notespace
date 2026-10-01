@@ -418,7 +418,7 @@ test("P287 remains dormant below production runtime and UI composition", () => {
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
+    /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.doesNotMatch(source("index.html"), /New Synced Pocket/);
   assert.match(activation, /global\.PocketSyncOwnerlessActivationDraft/);
   assert.match(activation, /global\.PocketFirstUseDocument/);
