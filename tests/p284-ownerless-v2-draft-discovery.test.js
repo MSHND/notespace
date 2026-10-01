@@ -580,7 +580,7 @@ test("P284 contract remains isolated from UI while P301 explicitly composes the 
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
+    /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.match(source(ACTIVATION), /global\.PocketSyncOwnerlessActivationDraft/);
   assert.doesNotMatch(source(ACTIVATION), /findOwnerlessActivation|PocketSyncFirstCreate/);
   assert.match(source(ACTIVATION), /draft\.schemaVersion !== 1/);
