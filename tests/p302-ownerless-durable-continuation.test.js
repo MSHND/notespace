@@ -670,7 +670,7 @@ async function assertAccountReady(harness, result, accountPath, prfStatus) {
 }
 
 
-test("P302 keeps the global surface fixed, adds one runtime operation and stays unwired", () => {
+test("P302 keeps the global surface fixed, adds one runtime operation and leaves Doorway wiring later", () => {
   const h = createHarness();
   assert.deepEqual(Object.keys(h.context.PocketSyncBrowserRuntime), ["createRuntime"]);
   assert.deepEqual(Object.keys(h.runtime), [
@@ -692,7 +692,6 @@ test("P302 keeps the global surface fixed, adds one runtime operation and stays 
 
   assert.match(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   for (const file of [
-    "js/pocket-sync-ui.js",
     "js/pocket-doorway-capabilities.js",
     "index.html",
     "sw.js",
@@ -1087,7 +1086,7 @@ test("P302 never exposes or invokes post-content ownerless stages", () => {
   assert.match(runtime, /draft\.pendingOperation !== "content-upload"/);
   assert.match(runtime, /orchestrator\.resume\(/);
   assert.match(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
-  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
 });
 
@@ -1436,12 +1435,12 @@ test("P303 device-envelope continuation still hard-stops at device-envelope-comm
   assert.equal(h.counters.adoption, 0);
 });
 
-test("P303 keeps its device-envelope owner boundary and UI integration remains dormant", () => {
+test("P303 keeps its device-envelope owner boundary while Doorway integration remains dormant", () => {
   const runtime = source("js/pocket-sync-browser-runtime.js");
   assert.match(runtime, /exactDeviceEnvelopeCommittedState/);
   assert.match(runtime, /continueOwnerlessDeviceEnvelopeWithCurrentAccount/);
   assert.match(runtime, /ownerless-device-envelope-committed/);
-  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
@@ -3006,7 +3005,7 @@ test("P308 durable adopted state without installed synced-owner truth fails clos
   assert.equal(second.counters.discovery, 0);
 });
 
-test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption and UI integration unwired", () => {
+test("P305 uses P296 as sole recovery owner while Recovery Copy, adoption and Doorway wiring remain later", () => {
   const runtime = source("js/pocket-sync-browser-runtime.js");
   assert.match(runtime, /exactRecoveryInputState/);
   assert.match(runtime, /continueOwnerlessRecoveryInitialisation/);
@@ -3028,7 +3027,7 @@ test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption a
   assert.match(activation, /recoveryLogicalChangeId/);
   assert.match(activation, /expectedKeySetVersion:\s*execution\.draft\.keySetVersion/);
 
-  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
@@ -3036,7 +3035,7 @@ test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption a
 
 
 
-test("P307 keeps P298 as sole Recovery Copy writer, hard-stops before P299, and leaves integration unwired", () => {
+test("P307 keeps P298 as sole Recovery Copy writer, hard-stops before P299, and leaves Doorway wiring later", () => {
   const runtime = source("js/pocket-sync-browser-runtime.js");
   assert.match(runtime, /exactRecoveryCopyPendingState/);
   assert.match(runtime, /continueOwnerlessRecoveryCopyPreparation/);
@@ -3102,13 +3101,13 @@ test("P307 keeps P298 as sole Recovery Copy writer, hard-stops before P299, and 
     "P298 same-resume write must stop before P299 adoption"
   );
 
-  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
 });
 
-test("P308 keeps P299 as sole final adopter, uses the existing bridge, and narrows post-adoption replay without UI wiring", () => {
+test("P308 keeps P299 as sole final adopter, uses the existing bridge, and narrows replay without Doorway wiring", () => {
   const runtime = source("js/pocket-sync-browser-runtime.js");
   assert.match(runtime, /function ownerlessFinalAdoptionDependencies/);
   assert.match(runtime, /async function continueOwnerlessFinalAdoption/);
@@ -3159,7 +3158,7 @@ test("P308 keeps P299 as sole final adopter, uses the existing bridge, and narro
   assert.match(ownerlessReadinessSection, /validateOwnerlessActivationReadiness/);
   assert.doesNotMatch(ownerlessReadinessSection, /sourceSaved/);
 
-  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
