@@ -1,0 +1,35 @@
+name: P309 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p309-proof
+
+jobs:
+  p309-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install repository dependencies
+        timeout-minutes: 3
+        run: timeout --signal=TERM --kill-after=10s 150s npm ci
+      - name: P309 LocalIntegration and ownerless regression proof
+        timeout-minutes: 10
+        run: >
+          timeout --signal=TERM --kill-after=10s 540s
+          node --test
+          tests/p309-ownerless-local-integration-admission.test.js
+          tests/p051-local-sync-integration.test.js
+          tests/p051a-local-sync-acceptance.test.js
+          tests/p185-open-reentry-observability.test.js
+          tests/p176-production-composition.test.js
+          tests/p300-ownerless-production-composition-admission.test.js
+          tests/p301-ownerless-first-create-runtime-start.test.js
+          tests/p302-ownerless-durable-continuation.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
