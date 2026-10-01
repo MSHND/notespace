@@ -376,6 +376,8 @@ function localIntegrationProjection(results) {
           async activate() { return { ok: false }; }, async resume() { return { ok: false }; },
           async recoverExisting() { return { ok: false }; }, async resumeRecovery() { return { ok: false }; },
           async findRecoveryAttempt() { return { ok: true }; },
+          async startOwnerlessFirstCreate() { return { ok: false }; },
+          async continueOwnerlessFirstCreate() { return { ok: false }; },
         };
       },
     },
