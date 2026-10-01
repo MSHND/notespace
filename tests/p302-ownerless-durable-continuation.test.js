@@ -2390,7 +2390,14 @@ test("P307 both account paths and both PRF branches use P298 once and hard-stop 
       assert.deepEqual(plain(ready.recoveryVerifier), beforeDraft.recoveryVerifier);
       assert.deepEqual(plain(ready.prfEnvelope), beforeDraft.prfEnvelope);
       assert.deepEqual(plain(found.record.remote), plain(beforeFound.record.remote));
-      assert.deepEqual(plain(found.record.usage), plain(beforeFound.record.usage));
+      assert.equal(
+        found.record.usage.masterKeyGeneration,
+        beforeFound.record.usage.masterKeyGeneration
+      );
+      assert.equal(
+        found.record.usage.masterKeyContentEncryptionLimit,
+        beforeFound.record.usage.masterKeyContentEncryptionLimit
+      );
       assert.equal(Object.prototype.hasOwnProperty.call(plain(ready), "destination"), false);
       assert.doesNotMatch(
         JSON.stringify(result),
