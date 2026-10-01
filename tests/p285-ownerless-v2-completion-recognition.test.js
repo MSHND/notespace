@@ -478,7 +478,7 @@ test("P285 recognition remains isolated from UI while P301 composes the accepted
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
   assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
+    /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.match(source("js/pocket-sync-activation.js"),
     /global\.PocketSyncOwnerlessActivationDraft/);
   assert.doesNotMatch(source("js/pocket-sync-activation.js"),
