@@ -3,6 +3,8 @@
   "use strict";
   let refreshInstalled = () => {};
   let canOpenExistingInstalled = () => false;
+  let canCreateNewInstalled = () => false;
+  let beginCreateNewInstalled = () => false;
   const RECOVERY_COPY = Object.freeze({
     "recovery-required": "A recovery copy is needed to open this synced Pocket on this device.",
     "recovery-package-invalid": "Recovery copy could not be used. Your current Pocket is unchanged.",
@@ -80,6 +82,8 @@
 
   function install(integration) {
     if (!integration || ["activate", "resume", "openExisting"].some((name) => typeof integration[name] !== "function")) return false;
+    const ownerlessCapable = typeof integration.startOwnerlessFirstCreate === "function"
+      && typeof integration.continueOwnerlessFirstCreate === "function";
     if (!global.document || global.PocketSyncUiInstalled) return false;
     const document = global.document;
     const button = document.getElementById("cmdSync");
@@ -90,6 +94,7 @@
     let discovering = false;
     let discoveryVersion = 0;
     let continuation = null;
+    let ownerlessActivationId = null;
     let restartEligible = false;
     let returnFocus = null;
     let switchTarget = null;
@@ -101,13 +106,14 @@
     overlay.innerHTML = '<section class="vaultDialogCard" role="dialog" aria-modal="true" aria-labelledby="syncSetupTitle" aria-describedby="syncSetupBody syncSetupStatus">'
       + '<header class="vaultDialogHeader"><h2 id="syncSetupTitle"></h2><p id="syncSetupBody"></p></header>'
       + '<p id="syncSetupStatus" class="vaultDialogError" role="status" aria-live="polite"></p>'
-      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
+      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogCreateAccount" type="button">Create new account</button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
       + '</section>';
     document.body.appendChild(overlay);
     const title = overlay.querySelector("h2");
     const body = overlay.querySelector("#syncSetupBody");
     const status = overlay.querySelector("#syncSetupStatus");
     const primary = overlay.querySelector(".vaultDialogPrimary");
+    const createAccount = overlay.querySelector(".vaultDialogCreateAccount");
     const recovery = overlay.querySelector(".vaultDialogRecovery");
     const restart = overlay.querySelector(".vaultDialogRestart");
     const cancel = overlay.querySelector(".vaultDialogSecondary");
@@ -120,6 +126,10 @@
       try { return global.hasPocketUnsavedChanges?.() === false; } catch (_error) { return false; }
     }
     canOpenExistingInstalled = () => eligibleOpen(owner());
+    function eligibleCreate(session) {
+      return ownerlessCapable && session?.ownerKind === "none";
+    }
+    canCreateNewInstalled = () => eligibleCreate(owner()) && !busy && !discovering && overlay.hidden;
     function dirtyLocal(session) {
       if (!session || !["json", "vault"].includes(session.ownerKind)) return false;
       try { return global.hasPocketUnsavedChanges?.() === true; } catch (_error) { return true; }
@@ -157,6 +167,7 @@
       discovering = false;
       overlay.hidden = true;
       continuation = null;
+      ownerlessActivationId = null;
       restartEligible = false;
       switchTarget = null;
       openExistingInput = null;
@@ -168,13 +179,30 @@
           || global.isPocketFilePermissionPromptOpen?.() === true
           || global.isPocketDeviceChangesDecisionOpen?.() === true
           || global.PocketVaultBrowserIo?.isDialogOpen?.() === true) return false;
-      const paletteClosed = global.closeCommandPalette?.({ restoreFocus: false }) === true;
-      returnFocus = paletteClosed ? (document.getElementById("btnMore") || topbarButton) : document.activeElement;
+      if (overlay.hidden) {
+        const paletteClosed = global.closeCommandPalette?.({ restoreFocus: false }) === true;
+        returnFocus = paletteClosed ? (document.getElementById("btnMore") || topbarButton) : document.activeElement;
+      }
       overlay.hidden = false;
       status.textContent = "";
       primary.hidden = false;
+      createAccount.hidden = true;
       restart.hidden = true;
-      if (mode === "open") {
+      if (mode === "ownerless-create") {
+        title.textContent = "New Synced Pocket";
+        body.textContent = "Use an existing Pocket account, or create a new one.";
+        primary.textContent = "Use existing account";
+        createAccount.hidden = false;
+        createAccount.textContent = "Create new account";
+      } else if (mode === "ownerless-continue") {
+        title.textContent = "Continue Synced Pocket setup";
+        body.textContent = "Setup is saved on this device. Continue when you're ready.";
+        primary.textContent = "Continue setup";
+      } else if (mode === "ownerless-attention") {
+        title.textContent = "Synced Pocket setup needs attention";
+        body.textContent = "Setup could not continue safely. Close this window and try again when you're ready.";
+        primary.hidden = true;
+      } else if (mode === "open") {
         title.textContent = "Open synced Pocket";
         body.textContent = "Open the encrypted Pocket already linked to your passkey on this device.";
         primary.textContent = "Open synced Pocket";
@@ -222,8 +250,129 @@
       recovery.hidden = mode === "switch" ? false : mode !== "open" || !hasRecovery();
       recovery.textContent = mode === "switch" ? "Discard and open Synced Pocket" : "Use recovery copy…";
       cancel.hidden = false;
-      global.requestAnimationFrame?.(() => primary.focus({ preventScroll: true }));
+      global.requestAnimationFrame?.(() => (primary.hidden ? cancel : primary).focus({ preventScroll: true }));
       return true;
+    }
+
+    const OWNERLESS_CONTINUE_STAGES = Object.freeze([
+      "account-ready",
+      "content-committed",
+      "device-envelope-committed",
+      "prf-envelope-committed",
+      "prf-envelope-skipped",
+      "recovery-initialised",
+      "recovery-copy-pending",
+      "ready-for-adoption",
+    ]);
+    function validOwnerlessIdentifier(value) {
+      return typeof value === "string" && value.trim().length > 0;
+    }
+    function setOwnerlessBusy(value) {
+      busy = value === true;
+      primary.disabled = busy;
+      createAccount.disabled = busy;
+      recovery.disabled = busy;
+      cancel.disabled = busy;
+      restart.disabled = busy;
+    }
+    function ownerlessAttention(copy) {
+      ownerlessActivationId = null;
+      show("ownerless-attention");
+      status.textContent = copy || "Synced Pocket setup needs attention before it can continue.";
+    }
+    function ownerlessContinue(activationId, copy = "") {
+      ownerlessActivationId = activationId;
+      show("ownerless-continue");
+      status.textContent = copy;
+    }
+    function handleOwnerlessStartResult(result) {
+      if (result?.ok === true
+          && result.status === "existing-pocket"
+          && validOwnerlessIdentifier(result.syncedPocketId)) {
+        ownerlessAttention("This account already has a Synced Pocket. Use Open to open it.");
+        return;
+      }
+      if (result?.ok === false
+          && result.reason === "ownerless-attempt-exists"
+          && validOwnerlessIdentifier(result.activationId)) {
+        ownerlessContinue(result.activationId);
+        return;
+      }
+      if (result?.ok === true
+          && result.reason === "ownerless-account-ready"
+          && result.stage === "account-ready"
+          && validOwnerlessIdentifier(result.activationId)) {
+        ownerlessContinue(result.activationId);
+        return;
+      }
+      if (result?.ok === false
+          && result.locallyDurable === true
+          && result.resumable === true
+          && validOwnerlessIdentifier(result.activationId)) {
+        ownerlessContinue(result.activationId);
+        return;
+      }
+      ownerlessAttention("Synced Pocket setup needs attention before it can continue.");
+    }
+    function handleOwnerlessContinueResult(result, activationId) {
+      const sameActivation = validOwnerlessIdentifier(result?.activationId)
+        && result.activationId === activationId;
+      if (result?.ok === true
+          && result.reason === "ownerless-activated"
+          && result.stage === "adopted"
+          && result.adopted === true
+          && sameActivation
+          && validOwnerlessIdentifier(result.syncedPocketId)) {
+        ownerlessActivationId = null;
+        overlay.hidden = true;
+        refresh();
+        return;
+      }
+      if (result?.ok === true
+          && result.adopted !== true
+          && sameActivation
+          && OWNERLESS_CONTINUE_STAGES.includes(result.stage)) {
+        ownerlessContinue(activationId);
+        return;
+      }
+      if (result?.ok === false && result.resumable === true && sameActivation) {
+        ownerlessContinue(activationId);
+        return;
+      }
+      ownerlessAttention("Synced Pocket setup needs attention before it can continue.");
+    }
+    async function runOwnerlessStart(accountPath) {
+      if (busy || discovering || !ownerlessCapable || !["existing-unbound", "new-account"].includes(accountPath)) return;
+      if (!eligibleCreate(owner())) {
+        ownerlessAttention("The current Pocket changed before setup could begin.");
+        return;
+      }
+      setOwnerlessBusy(true);
+      status.textContent = "Setting up Synced Pocket…";
+      let result;
+      try {
+        result = await integration.startOwnerlessFirstCreate({ accountPath });
+      } catch (_error) {
+        result = { ok: false, reason: "ownerless-first-create-unavailable" };
+      }
+      setOwnerlessBusy(false);
+      handleOwnerlessStartResult(result);
+      refresh();
+    }
+    async function runOwnerlessContinue() {
+      if (busy || discovering || !ownerlessCapable || !validOwnerlessIdentifier(ownerlessActivationId)) return;
+      const activationId = ownerlessActivationId;
+      setOwnerlessBusy(true);
+      status.textContent = "Continuing Synced Pocket setup…";
+      let result;
+      try {
+        result = await integration.continueOwnerlessFirstCreate({ activationId });
+      } catch (_error) {
+        result = { ok: false, reason: "ownerless-first-create-unavailable" };
+      }
+      setOwnerlessBusy(false);
+      handleOwnerlessContinueResult(result, activationId);
+      refresh();
     }
     async function run(mode) {
       if (busy || discovering || ["recovery-discovery", "recovery-attention"].includes(mode)) return;
@@ -360,6 +509,13 @@
         }
       })();
     }
+    function beginCreateNew() {
+      if (busy || discovering || !overlay.hidden || !eligibleCreate(owner())) return false;
+      ownerlessActivationId = null;
+      return show("ownerless-create");
+    }
+    beginCreateNewInstalled = beginCreateNew;
+
     function begin(intent = "default") {
       if (discovering) return;
       const session = owner();
@@ -382,8 +538,15 @@
     button.addEventListener("click", () => begin("default"));
     topbarButton.addEventListener("click", () => begin("open"));
     primary.addEventListener("click", () => {
-      if (primary.dataset.mode === "switch") void resolveDirtySwitch("save");
+      if (primary.dataset.mode === "ownerless-create") void runOwnerlessStart("existing-unbound");
+      else if (primary.dataset.mode === "ownerless-continue") void runOwnerlessContinue();
+      else if (primary.dataset.mode === "switch") void resolveDirtySwitch("save");
       else void run(primary.dataset.mode);
+    });
+    createAccount.addEventListener("click", () => {
+      if (!busy && !discovering && primary.dataset.mode === "ownerless-create") {
+        void runOwnerlessStart("new-account");
+      }
     });
     recovery.addEventListener("click", () => {
       if (primary.dataset.mode === "switch") void resolveDirtySwitch("discard");
@@ -407,5 +570,7 @@
     install,
     refresh: () => refreshInstalled(),
     canOpenExisting: () => canOpenExistingInstalled() === true,
+    canCreateNew: () => canCreateNewInstalled() === true,
+    beginCreateNew: () => beginCreateNewInstalled() === true,
   });
 })(typeof window !== "undefined" ? window : globalThis);
