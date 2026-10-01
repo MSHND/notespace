@@ -403,6 +403,7 @@ test("P301 keeps global runtime surface fixed and adds exactly one programmatic 
     "findRecoveryAttempt",
     "admitAcceptedDeleteRestore",
     "startOwnerlessFirstCreate",
+    "continueOwnerlessFirstCreate",
   ]);
   for (const forbidden of [
     "activateOwnerless",
@@ -417,7 +418,7 @@ test("P301 keeps global runtime surface fixed and adds exactly one programmatic 
     "js/pocket-doorway-capabilities.js",
     "index.html",
   ]) {
-    assert.doesNotMatch(source(file), /startOwnerlessFirstCreate/);
+    assert.doesNotMatch(source(file), /startOwnerlessFirstCreate|continueOwnerlessFirstCreate/);
   }
   assert.doesNotMatch(source("sw.js"), /pocket-sync-first-create\.js|pocket-sync-ownerless-activation-draft\.js/);
 });
