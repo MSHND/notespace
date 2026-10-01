@@ -462,6 +462,14 @@ function assertNoDownstream(harness) {
   assert.equal(harness.counters.adoption, 0);
 }
 
+function assertNoPostContent(harness) {
+  assert.equal(harness.counters.envelope, 0);
+  assert.equal(harness.counters.recovery, 0);
+  assert.equal(harness.counters.recoveryPackage, 0);
+  assert.equal(harness.counters.picker, 0);
+  assert.equal(harness.counters.adoption, 0);
+}
+
 async function assertAccountReady(harness, result, accountPath, prfStatus) {
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.reason, "ownerless-account-ready");
@@ -686,7 +694,7 @@ test("P302 same-runtime P301 account-ready witness avoids redundant authenticati
   const draft = await h.canonicalDraft(started.activationId);
   assert.equal(draft.stage, "content-committed");
   assert.equal(draft.confirmedRemoteRevision, 1);
-  assertNoDownstream(h);
+  assertNoPostContent(h);
 });
 
 test("P302 new runtime reauthenticates the exact pinned account inside P278 consumer and zeroes raw PRF", async () => {
@@ -721,7 +729,7 @@ test("P302 new runtime reauthenticates the exact pinned account inside P278 cons
   const committed = await second.canonicalDraft(started.activationId);
   assert.equal(JSON.stringify(committed).includes("outputBytes"), false);
   assert.equal(second.counters.content, 1);
-  assertNoDownstream(second);
+  assertNoPostContent(second);
 });
 
 test("P302 mismatched, cancelled and failed pinned-account reauthentication perform zero upload", async () => {
@@ -831,7 +839,7 @@ test("P302 ambiguous content upload remains durable and ready-same-pocket is adm
   pending = await h.canonicalDraft(started.activationId);
   assert.equal(pending.stage, "content-committed");
   assert.equal(pending.confirmedRemoteRevision, 1);
-  assertNoDownstream(h);
+  assertNoPostContent(h);
 });
 
 test("P302 content conflict remains durable and non-overwriting", async () => {
@@ -854,7 +862,7 @@ test("P302 content conflict remains durable and non-overwriting", async () => {
   assert.equal(draft.pendingOperation, "content-conflict");
   assert.equal(draft.confirmedRemoteRevision, 0);
   assert.equal(h.counters.content, 1);
-  assertNoDownstream(h);
+  assertNoPostContent(h);
 });
 
 test("P302 owner change across content await returns target-stale and does not falsely persist content success", async () => {
@@ -878,7 +886,7 @@ test("P302 owner change across content await returns target-stale and does not f
   assert.equal(draft.pendingOperation, "content-upload");
   assert.equal(draft.confirmedRemoteRevision, 0);
   assert.equal(h.counters.content, 1);
-  assertNoDownstream(h);
+  assertNoPostContent(h);
 });
 
 test("P302 exact content-committed replay performs zero authentication, discovery or remote work", async () => {
