@@ -69,7 +69,9 @@ function createHarness(options = {}) {
     envelope: 0,
     recovery: 0,
     recoveryPackage: 0,
+    orchestratorResume: 0,
     picker: 0,
+    recoveryWrite: 0,
     adoption: 0,
   };
   const accountIntents = [];
@@ -77,6 +79,7 @@ function createHarness(options = {}) {
   const contentCalls = [];
   const envelopeCalls = [];
   const recoveryCalls = [];
+  const recoveryPackageCalls = [];
   const discoveryResponses = (
     options.discoveryResponses || options.discoveryStatuses || ["not-configured"]
   ).slice();
@@ -154,10 +157,32 @@ function createHarness(options = {}) {
     "js/pocket-sync-activation.js",
   ]) vm.runInContext(source(file), context, { filename: file });
 
+  const realActivationModule = context.PocketSyncActivation;
+  context.PocketSyncActivation = Object.freeze(Object.assign({}, realActivationModule, {
+    createActivationOrchestrator(input) {
+      const orchestrator = realActivationModule.createActivationOrchestrator(input);
+      return Object.freeze(Object.assign({}, orchestrator, {
+        async resume(...args) {
+          counters.orchestratorResume += 1;
+          return orchestrator.resume(...args);
+        },
+      }));
+    },
+  }));
+
   const realSecurity = context.PocketSyncSecurityContract;
   context.PocketSyncSecurityContract = Object.freeze(Object.assign({}, realSecurity, {
     buildRecoveryPackage(input) {
       counters.recoveryPackage += 1;
+      recoveryPackageCalls.push(plain(input));
+      options.onBuildRecoveryPackage?.({
+        input: plain(input),
+        call: counters.recoveryPackage,
+        setOwnerKind: (value) => { ownerKind = value; },
+      });
+      if ((options.recoveryPackageFailures || 0) >= counters.recoveryPackage) {
+        throw new Error("synthetic recovery package build failure");
+      }
       return realSecurity.buildRecoveryPackage(input);
     },
   }));
@@ -385,9 +410,20 @@ function createHarness(options = {}) {
         },
       },
     },
-    showSaveFilePicker() {
+    async showSaveFilePicker() {
       counters.picker += 1;
-      throw new Error("Recovery Copy picker unreachable before P305 stop");
+      if (options.allowRecoveryPicker !== true) {
+        throw new Error("Recovery Copy picker unreachable in this slice");
+      }
+      return Object.freeze({
+        async createWritable() {
+          return Object.freeze({
+            async write() { counters.recoveryWrite += 1; },
+            async close() {},
+            async abort() {},
+          });
+        },
+      });
     },
   };
 
@@ -505,6 +541,7 @@ function createHarness(options = {}) {
     contentCalls,
     envelopeCalls,
     recoveryCalls,
+    recoveryPackageCalls,
     readActivation,
     canonicalDraft,
     setOwnerKind(value) { ownerKind = value; },
@@ -1383,6 +1420,24 @@ async function advanceToPrfTerminal(harness, accountPath, mode) {
   return { started: advanced.started, result, draft };
 }
 
+async function advanceToRecoveryInitialised(harness, accountPath, mode) {
+  const advanced = await advanceToPrfTerminal(harness, accountPath, mode);
+  const result = await harness.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.stage, "recovery-initialised");
+  const draft = await harness.canonicalDraft(advanced.started.activationId);
+  assert.equal(draft.stage, "recovery-initialised");
+  assert.equal(draft.keySetVersion, mode === "available" ? 3 : 2);
+  assert.equal(draft.recoveryVersion, 1);
+  assert.notEqual(draft.accountLocator, null);
+  assert.notEqual(draft.accountLocator, draft.account.accountId);
+  assert.equal(draft.recoveryPackage, null);
+  assert.equal(draft.recoveryCopyStored, false);
+  return { started: advanced.started, result, draft };
+}
+
 function assertNoPostRecovery(harness) {
   assert.equal(harness.counters.recoveryPackage, 0);
   assert.equal(harness.counters.picker, 0);
@@ -1984,26 +2039,310 @@ test("P305 owner change across recovery await returns target-stale without false
   assertNoPostRecovery(h);
 });
 
-test("P305 exact recovery-initialised replay performs zero auth, remote recovery, Recovery Copy or adoption work", async () => {
+test("P306 both account paths and both PRF branches advance exactly once through P297 to recovery-copy-pending", async () => {
+  for (const accountPath of ["new-account", "existing-unbound"]) {
+    for (const mode of ["available", "skipped"]) {
+      const h = createHarness({
+        unavailablePrf: mode === "skipped",
+        discoveryResponses: ["not-configured", "not-configured"],
+      });
+      const advanced = await advanceToRecoveryInitialised(h, accountPath, mode);
+      const before = {
+        beginRegistration: h.counters.beginRegistration,
+        finishRegistration: h.counters.finishRegistration,
+        beginAuthentication: h.counters.beginAuthentication,
+        finishAuthentication: h.counters.finishAuthentication,
+        credentialCreate: h.counters.credentialCreate,
+        credentialGet: h.counters.credentialGet,
+        discovery: h.counters.discovery,
+        content: h.counters.content,
+        envelope: h.counters.envelope,
+        recovery: h.counters.recovery,
+        orchestratorResume: h.counters.orchestratorResume,
+        packageCalls: h.recoveryPackageCalls.length,
+      };
+      const beforeDraft = plain(advanced.draft);
+
+      const result = await h.runtime.continueOwnerlessFirstCreate({
+        activationId: advanced.started.activationId,
+      });
+
+      assert.deepEqual(plain(result), {
+        ok: true,
+        reason: "ownerless-recovery-copy-pending",
+        activationId: advanced.started.activationId,
+        accountPath,
+        syncedPocketId: advanced.draft.syncedPocketId,
+        deviceId: advanced.draft.deviceId,
+        stage: "recovery-copy-pending",
+        locallyDurable: true,
+        remotelyCommitted: true,
+        confirmedRemoteRevision: 1,
+        keySetVersion: mode === "available" ? 3 : 2,
+        recoveryVersion: 1,
+        recoveryCopyRequired: true,
+      });
+      assert.equal(h.counters.orchestratorResume, before.orchestratorResume + 1);
+      assert.equal(h.counters.beginRegistration, before.beginRegistration);
+      assert.equal(h.counters.finishRegistration, before.finishRegistration);
+      assert.equal(h.counters.beginAuthentication, before.beginAuthentication);
+      assert.equal(h.counters.finishAuthentication, before.finishAuthentication);
+      assert.equal(h.counters.credentialCreate, before.credentialCreate);
+      assert.equal(h.counters.credentialGet, before.credentialGet);
+      assert.equal(h.counters.discovery, before.discovery);
+      assert.equal(h.counters.content, before.content);
+      assert.equal(h.counters.envelope, before.envelope);
+      assert.equal(h.counters.recovery, before.recovery);
+      assert.equal(h.counters.picker, 0);
+      assert.equal(h.counters.recoveryWrite, 0);
+      assert.equal(h.counters.adoption, 0);
+
+      const packageBuildInput = h.recoveryPackageCalls[before.packageCalls];
+      assert.notEqual(packageBuildInput, undefined);
+      assert.equal(packageBuildInput.packageVersion, 2);
+      assert.equal(packageBuildInput.accountLocator, beforeDraft.accountLocator);
+      assert.equal(packageBuildInput.syncedPocketId, beforeDraft.syncedPocketId);
+      assert.equal(packageBuildInput.rootMaterial, beforeDraft.recoveryRoot);
+      assert.equal(packageBuildInput.rootBits, 256);
+      assert.deepEqual(
+        packageBuildInput.recoveryAuthorisation,
+        beforeDraft.recoveryAuthorisation
+      );
+      assert.deepEqual(
+        packageBuildInput.instructions,
+        [h.context.PocketSyncSecurityContract.RECOVERY_COPY.body]
+      );
+
+      const pending = await h.canonicalDraft(advanced.started.activationId);
+      assert.equal(pending.stage, "recovery-copy-pending");
+      assert.equal(pending.confirmedRemoteRevision, 1);
+      assert.equal(pending.keySetVersion, mode === "available" ? 3 : 2);
+      assert.equal(pending.recoveryVersion, 1);
+      assert.equal(pending.pendingOperation, null);
+      assert.equal(pending.recoveryCopyStored, false);
+      assert.equal(pending.adopted, false);
+      assert.equal(pending.accountLocator, beforeDraft.accountLocator);
+      assert.equal(pending.recoveryRoot, beforeDraft.recoveryRoot);
+      assert.deepEqual(plain(pending.recoveryAuthorisation), beforeDraft.recoveryAuthorisation);
+      assert.deepEqual(plain(pending.recoveryVerifier), beforeDraft.recoveryVerifier);
+      assert.deepEqual(plain(pending.recoveryEnvelope), beforeDraft.recoveryEnvelope);
+      assert.deepEqual(plain(pending.account), beforeDraft.account);
+      assert.equal(pending.recoveryPackage.kind, "pocket-recovery-package");
+      assert.equal(pending.recoveryPackage.localOnly, true);
+      assert.equal(pending.recoveryPackage.remoteUploadAllowed, false);
+      assert.equal(pending.recoveryPackage.packageVersion, 2);
+      assert.equal(pending.recoveryPackage.accountLocator, beforeDraft.accountLocator);
+      assert.equal(pending.recoveryPackage.syncedPocketId, beforeDraft.syncedPocketId);
+      assert.equal(pending.recoveryPackage.rootMaterial, beforeDraft.recoveryRoot);
+      assert.equal(pending.recoveryPackage.rootBits, 256);
+      assert.deepEqual(
+        plain(pending.recoveryPackage.recoveryAuthorisation),
+        beforeDraft.recoveryAuthorisation
+      );
+      assert.deepEqual(
+        plain(pending.recoveryPackage.instructions),
+        [h.context.PocketSyncSecurityContract.RECOVERY_COPY.body]
+      );
+      assert.doesNotMatch(
+        JSON.stringify(result),
+        /recoveryPackage|recoveryRoot|recoveryAuthorisation|accountLocator|accountId|credentialId|checksum|recoveryEnvelope|recoveryVerifier|outputBytes/
+      );
+    }
+  }
+});
+
+test("P306 validates exact recovery-initialised durable truth before package work", async () => {
   const first = createHarness({
     discoveryResponses: ["not-configured", "not-configured"],
   });
-  const advanced = await advanceToPrfTerminal(first, "new-account", "available");
-  const terminal = await first.runtime.continueOwnerlessFirstCreate({
+  const advanced = await advanceToRecoveryInitialised(first, "new-account", "available");
+  const second = createHarness({
+    shared: first.shared,
+    readActivationTransform(found) {
+      if (found.draft?.stage !== "recovery-initialised") return found;
+      return Object.freeze({
+        record: Object.freeze(Object.assign({}, plain(found.record), {
+          usage: Object.freeze(Object.assign({}, plain(found.record.usage), {
+            masterKeyContentEncryptionLimit: 9,
+          })),
+        })),
+        draft: found.draft,
+      });
+    },
+  });
+
+  const result = await second.runtime.continueOwnerlessFirstCreate({
     activationId: advanced.started.activationId,
   });
-  assert.equal(terminal.stage, "recovery-initialised");
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-activation-state-invalid");
+  assert.equal(second.counters.orchestratorResume, 0);
+  assert.equal(second.counters.recoveryPackage, 0);
+  assert.equal(second.counters.beginAuthentication, 0);
+  assert.equal(second.counters.discovery, 0);
+  assert.equal(second.counters.content, 0);
+  assert.equal(second.counters.envelope, 0);
+  assert.equal(second.counters.recovery, 0);
+  assert.equal(second.counters.picker, 0);
+  assert.equal(second.counters.recoveryWrite, 0);
+  assert.equal(second.counters.adoption, 0);
+});
 
-  const second = createHarness({ shared: first.shared });
+test("P306 package-build failure is resumable with zero automatic retry and explicit retry succeeds once", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    recoveryPackageFailures: 1,
+  });
+  const advanced = await advanceToRecoveryInitialised(h, "existing-unbound", "available");
+  const before = plain(advanced.draft);
+  const resumesBefore = h.counters.orchestratorResume;
+
+  const failed = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, "ownerless-recovery-copy-preparation-failed");
+  assert.equal(failed.resumable, true);
+  assert.equal(failed.recoveryCopyRequired, true);
+  assert.equal(h.counters.orchestratorResume, resumesBefore + 1);
+  assert.equal(h.counters.recoveryPackage, 1, "no automatic package retry");
+  let after = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(after.stage, "recovery-initialised");
+  assert.equal(after.recoveryPackage, null);
+  assert.equal(after.recoveryCopyStored, false);
+  assert.equal(after.pendingOperation, null);
+  assert.equal(after.recoveryRoot, before.recoveryRoot);
+  assert.deepEqual(plain(after.recoveryAuthorisation), before.recoveryAuthorisation);
+  assert.equal(h.counters.picker, 0);
+  assert.equal(h.counters.recoveryWrite, 0);
+  assert.equal(h.counters.adoption, 0);
+
+  const retryResumesBefore = h.counters.orchestratorResume;
+  const retried = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(retried.ok, true, JSON.stringify(retried));
+  assert.equal(retried.stage, "recovery-copy-pending");
+  assert.equal(h.counters.orchestratorResume, retryResumesBefore + 1);
+  after = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(after.stage, "recovery-copy-pending");
+  assert.notEqual(after.recoveryPackage, null);
+  assert.equal(h.counters.picker, 0);
+  assert.equal(h.counters.recoveryWrite, 0);
+  assert.equal(h.counters.adoption, 0);
+});
+
+test("P306 ownerless target change across package construction cannot falsely advance", async () => {
+  let changed = false;
+  const h = createHarness({
+    unavailablePrf: true,
+    discoveryResponses: ["not-configured", "not-configured"],
+    onBuildRecoveryPackage({ setOwnerKind, call }) {
+      if (!changed && call === 1) {
+        changed = true;
+        setOwnerKind("json");
+      }
+    },
+  });
+  const advanced = await advanceToRecoveryInitialised(h, "new-account", "skipped");
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-target-stale");
+  const after = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(after.stage, "recovery-initialised");
+  assert.equal(after.recoveryPackage, null);
+  assert.equal(after.recoveryCopyStored, false);
+  assert.equal(h.counters.picker, 0);
+  assert.equal(h.counters.recoveryWrite, 0);
+  assert.equal(h.counters.adoption, 0);
+});
+
+test("P306 exact recovery-copy-pending replay performs zero orchestrator, package rebuild, P298 write or adoption work", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToRecoveryInitialised(first, "new-account", "available");
+  const pending = await first.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(pending.stage, "recovery-copy-pending");
+
+  const second = createHarness({
+    shared: first.shared,
+    allowRecoveryPicker: true,
+  });
+  const beforePackageValidationCalls = second.counters.recoveryPackage;
   const replay = await second.runtime.continueOwnerlessFirstCreate({
     activationId: advanced.started.activationId,
   });
-  assert.deepEqual(plain(replay), plain(terminal));
+  assert.deepEqual(plain(replay), plain(pending));
+  assert.equal(second.counters.orchestratorResume, 0,
+    "replay must not enter the orchestrator/P298");
   assert.equal(second.counters.beginAuthentication, 0);
   assert.equal(second.counters.finishAuthentication, 0);
+  assert.equal(second.counters.beginRegistration, 0);
+  assert.equal(second.counters.finishRegistration, 0);
+  assert.equal(second.counters.discovery, 0);
+  assert.equal(second.counters.content, 0);
   assert.equal(second.counters.envelope, 0);
   assert.equal(second.counters.recovery, 0);
-  assertNoPostRecovery(second);
+  assert.equal(second.counters.picker, 0);
+  assert.equal(second.counters.recoveryWrite, 0);
+  assert.equal(second.counters.adoption, 0);
+  assert.ok(second.counters.recoveryPackage >= beforePackageValidationCalls,
+    "canonical draft validation may revalidate the stored package without rebuilding it");
+});
+
+test("P306 ready-for-adoption and adopted stages remain unadmitted without mutation", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToRecoveryInitialised(first, "new-account", "available");
+  const pending = await first.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(pending.stage, "recovery-copy-pending");
+
+  for (const stage of ["ready-for-adoption", "adopted"]) {
+    let h;
+    h = createHarness({
+      shared: first.shared,
+      readActivationTransform(found) {
+        if (found.draft?.stage !== "recovery-copy-pending") return found;
+        const config = {
+          securityContract: h.context.PocketSyncSecurityContract,
+          crypto: h.context.PocketSyncCrypto,
+        };
+        const ready = h.context.PocketSyncOwnerlessActivationDraft.buildReadyForAdoption(
+          { draft: found.draft },
+          config
+        );
+        const draft = stage === "adopted"
+          ? h.context.PocketSyncOwnerlessActivationDraft.buildAdopted(
+            { draft: ready },
+            config
+          )
+          : ready;
+        return Object.freeze({ record: found.record, draft });
+      },
+      allowRecoveryPicker: true,
+    });
+
+    const result = await h.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+    assert.equal(result.ok, false, stage);
+    assert.equal(result.reason, "ownerless-activation-stage-not-admitted", stage);
+    assert.equal(h.counters.orchestratorResume, 0, stage);
+    assert.equal(h.counters.picker, 0, stage);
+    assert.equal(h.counters.recoveryWrite, 0, stage);
+    assert.equal(h.counters.adoption, 0, stage);
+    assert.equal(h.counters.beginAuthentication, 0, stage);
+    assert.equal(h.counters.discovery, 0, stage);
+  }
 });
 
 test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption and UI integration unwired", () => {
@@ -2035,3 +2374,50 @@ test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption a
   assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
 });
 
+
+
+test("P306 keeps P297 as sole package owner, hard-stops before P298, and leaves integration unwired", () => {
+  const runtime = source("js/pocket-sync-browser-runtime.js");
+  assert.match(runtime, /exactRecoveryCopyPendingState/);
+  assert.match(runtime, /continueOwnerlessRecoveryCopyPreparation/);
+  assert.match(runtime, /recoveryCopyPendingReplay/);
+
+  const packageStart = runtime.indexOf("async function continueOwnerlessRecoveryCopyPreparation");
+  const packageEnd = runtime.indexOf("async function continueOwnerlessDeviceStaged", packageStart);
+  const packageSection = runtime.slice(packageStart, packageEnd);
+  assert.match(packageSection, /orchestrator\.resume/);
+  assert.match(packageSection, /ownerlessRecoveryPackageDependencies/);
+  assert.doesNotMatch(
+    packageSection,
+    /buildRecoveryPackage\(|prepareRecoveryCopyDestination\(|writeRecoveryCopy\(|adoptSyncedOwner\(/
+  );
+
+  const depsStart = runtime.indexOf("function ownerlessRecoveryPackageDependencies");
+  const depsEnd = runtime.indexOf("function exactKeys", depsStart);
+  const depsSection = runtime.slice(depsStart, depsEnd);
+  assert.match(depsSection, /buildRecoveryPackage:\s*\(input\)\s*=>\s*buildRecoveryPackage/);
+  assert.match(depsSection, /prepareRecoveryCopyDestination:\s*downstreamForbidden/);
+  assert.match(depsSection, /writeRecoveryCopy:\s*downstreamForbidden/);
+  assert.match(depsSection, /adoptSyncedOwner:\s*downstreamForbidden/);
+
+  const dispatchStart = runtime.indexOf("async function continueOwnerlessFirstCreate");
+  const dispatchEnd = runtime.indexOf("async function begin", dispatchStart);
+  const dispatchSection = runtime.slice(dispatchStart, dispatchEnd);
+  const replayIndex = dispatchSection.indexOf('draft.stage === "recovery-copy-pending"');
+  const recoveryIndex = dispatchSection.indexOf('draft.stage === "recovery-initialised"');
+  assert.ok(replayIndex >= 0 && recoveryIndex > replayIndex);
+  const replaySection = dispatchSection.slice(replayIndex, recoveryIndex);
+  assert.match(replaySection, /recoveryCopyPendingReplay/);
+  assert.doesNotMatch(replaySection, /orchestrator\.resume|continueOwnerlessRecoveryCopyPreparation/);
+
+  const activation = source("js/pocket-sync-activation.js");
+  assert.equal((activation.match(/async function preparePackage\s*\(/g) || []).length, 1);
+  assert.match(activation, /ownerless\.buildRecoveryCopyPending/);
+  assert.match(activation, /async function writePackage\s*\(/);
+
+  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
+});
