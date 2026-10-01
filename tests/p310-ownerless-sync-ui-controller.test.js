@@ -358,11 +358,14 @@ test("P310 requires a new explicit click after every canonical intermediate owne
       reason: "ownerless-account-ready",
       activationId,
       stage: "account-ready",
+      locallyDurable: true,
+      adopted: false,
     }],
     continueResults: stages.map((stage) => ({
       ok: true,
       activationId,
       stage,
+      locallyDurable: true,
       adopted: false,
     })),
   });
@@ -436,6 +439,8 @@ test("P310 exposes only explicit resumable retry and fail-closes non-resumable, 
       reason: "ownerless-account-ready",
       activationId: " ",
       stage: "account-ready",
+      locallyDurable: true,
+      adopted: false,
     }],
   });
   malformed.context.PocketSyncUi.beginCreateNew();
@@ -462,6 +467,8 @@ test("P310 treats only exact adopted success as completion and never renders pri
       reason: "ownerless-account-ready",
       activationId,
       stage: "account-ready",
+      locallyDurable: true,
+      adopted: false,
       accountId: SECRET,
       credentialId: SECRET,
       outputBytes: SECRET,
@@ -515,6 +522,8 @@ test("P310 treats only exact adopted success as completion and never renders pri
         reason: "ownerless-account-ready",
         activationId,
         stage: "account-ready",
+        locallyDurable: true,
+        adopted: false,
       }],
       continueResults: [badResult],
     });
@@ -535,6 +544,8 @@ test("P310 Cancel/Escape clears transient ownerless continuation and preserves t
       reason: "ownerless-account-ready",
       activationId: "activation-cancel",
       stage: "account-ready",
+      locallyDurable: true,
+      adopted: false,
     }],
   });
   h.context.PocketSyncUi.beginCreateNew();
