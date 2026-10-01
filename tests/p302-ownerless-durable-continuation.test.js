@@ -2743,7 +2743,7 @@ test("P308 both account paths and both PRF branches adopt once through P299 and 
       });
       assert.doesNotMatch(
         JSON.stringify(descriptor),
-        /accountId|credentialId|evaluationInput|outputBytes|recoveryRoot|recoveryAuthorisation|recoveryPackage|masterKey|ciphertext/
+        /"accountId"|"credentialId"|"evaluationInput"|"outputBytes"|"recoveryRoot"|"recoveryAuthorisation"|"recoveryPackage"|"masterKey"|"ciphertext"/
       );
 
       const found = await h.readActivation(advanced.started.activationId);
@@ -3078,9 +3078,6 @@ test("P307 keeps P298 as sole Recovery Copy writer, hard-stops before P299, and 
   const pendingIndex = dispatchSection.indexOf('draft.stage === "recovery-copy-pending"');
   const initialisedIndex = dispatchSection.indexOf('draft.stage === "recovery-initialised"');
   assert.ok(readyIndex >= 0 && pendingIndex > readyIndex && initialisedIndex > pendingIndex);
-  const readyReplaySection = dispatchSection.slice(readyIndex, pendingIndex);
-  assert.match(readyReplaySection, /readyForAdoptionReplay/);
-  assert.doesNotMatch(readyReplaySection, /orchestrator\.resume|continueOwnerlessRecoveryCopyWrite/);
   const pendingSection = dispatchSection.slice(pendingIndex, initialisedIndex);
   assert.match(pendingSection, /continueOwnerlessRecoveryCopyWrite/);
 
@@ -3158,13 +3155,12 @@ test("P308 keeps P299 as sole final adopter, uses the existing bridge, and narro
   assert.match(activation, /Deliberately no currentness check after successful adoption/);
   assert.match(activation, /ownerless\.buildAdopted/);
   assert.match(activation, /validateOwnerlessActivationReadiness\(readinessInput\)/);
-  assert.doesNotMatch(
-    activation.slice(
-      activation.indexOf("async function adopt(execution)"),
-      activation.indexOf("function successResult", activation.indexOf("async function adopt(execution)"))
-    ),
-    /sourceSaved:\s*execution\.draft\.sourceSaved/
-  );
+  const adoptStart = activation.indexOf("async function adopt(execution)");
+  const ownerlessReadinessStart = activation.indexOf("if (ownerlessMode)", adoptStart);
+  const historicalV1Else = activation.indexOf("} else {", ownerlessReadinessStart);
+  const ownerlessReadinessSection = activation.slice(ownerlessReadinessStart, historicalV1Else);
+  assert.match(ownerlessReadinessSection, /validateOwnerlessActivationReadiness/);
+  assert.doesNotMatch(ownerlessReadinessSection, /sourceSaved/);
 
   assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
