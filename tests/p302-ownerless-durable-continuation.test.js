@@ -1086,7 +1086,7 @@ test("P302 never exposes or invokes post-content ownerless stages", () => {
   assert.match(runtime, /accountLocator:\s*pinnedAccountId/);
   assert.match(runtime, /draft\.pendingOperation !== "content-upload"/);
   assert.match(runtime, /orchestrator\.resume\(/);
-  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
 });
@@ -1441,7 +1441,6 @@ test("P303 keeps its device-envelope owner boundary and UI integration remains d
   assert.match(runtime, /exactDeviceEnvelopeCommittedState/);
   assert.match(runtime, /continueOwnerlessDeviceEnvelopeWithCurrentAccount/);
   assert.match(runtime, /ownerless-device-envelope-committed/);
-  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
@@ -3029,7 +3028,6 @@ test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption a
   assert.match(activation, /recoveryLogicalChangeId/);
   assert.match(activation, /expectedKeySetVersion:\s*execution\.draft\.keySetVersion/);
 
-  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
@@ -3104,7 +3102,6 @@ test("P307 keeps P298 as sole Recovery Copy writer, hard-stops before P299, and 
     "P298 same-resume write must stop before P299 adoption"
   );
 
-  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
@@ -3162,7 +3159,6 @@ test("P308 keeps P299 as sole final adopter, uses the existing bridge, and narro
   assert.match(ownerlessReadinessSection, /validateOwnerlessActivationReadiness/);
   assert.doesNotMatch(ownerlessReadinessSection, /sourceSaved/);
 
-  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
