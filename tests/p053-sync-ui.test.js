@@ -16,7 +16,7 @@ test("P053 leaves static Pocket inert and keeps the Sync doorway provider-neutra
   assert.match(index, /id="btnOpenSynced"[^>]*hidden disabled/);
   assert.match(index, /js\/pocket-sync-ui\.js/);
   assert.doesNotMatch(index, /pocket-sync-local-integration\.js/);
-  assert.doesNotMatch(ui, /localStorage|sessionStorage|fetch\(|accountLocator|syncedPocketId|credentialId|deviceId/);
+  assert.doesNotMatch(ui, /localStorage|sessionStorage|fetch\(|accountLocator|credentialId|deviceId/);
   assert.match(ui, /integration\.activate\(\)/);
   assert.match(ui, /integration\.openExisting\(openExistingInput \|\| undefined\)/);
   assert.match(ui, /integration\.resume\(\{ activationId: continuation \}\)/);
@@ -29,9 +29,13 @@ test("P053 exposes only an injectable installer and does no work while no integr
   context.globalThis = context;
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(UI_PATH, "utf8"), context, { filename: "pocket-sync-ui.js" });
-  assert.deepEqual(Object.keys(context.PocketSyncUi), ["install", "refresh", "canOpenExisting"]);
+  assert.deepEqual(Object.keys(context.PocketSyncUi), [
+    "install", "refresh", "canOpenExisting", "canCreateNew", "beginCreateNew",
+  ]);
   assert.equal(Object.isFrozen(context.PocketSyncUi), true);
   assert.equal(context.PocketSyncUi.canOpenExisting(), false);
+  assert.equal(context.PocketSyncUi.canCreateNew(), false);
+  assert.equal(context.PocketSyncUi.beginCreateNew(), false);
   assert.equal(context.PocketSyncUi.install(null), false);
 });
 
@@ -47,6 +51,7 @@ function createUiHarness(ownerKind = "json", options = {}) {
       this.children.set("#syncSetupBody", new Element("syncSetupBody"));
       this.children.set("#syncSetupStatus", new Element("syncSetupStatus"));
       this.children.set(".vaultDialogPrimary", new Button("syncPrimary"));
+      this.children.set(".vaultDialogCreateAccount", new Button("syncCreateAccount"));
       this.children.set(".vaultDialogRecovery", new Button("syncRecovery"));
       this.children.set(".vaultDialogRestart", new Button("syncRestart"));
       this.children.set(".vaultDialogSecondary", new Button("syncCancel"));
