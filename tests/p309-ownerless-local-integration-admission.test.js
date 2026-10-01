@@ -386,7 +386,7 @@ test("P309 preserves historical synced-owner remembering and reuses the same ver
   assert.deepEqual(h.calls.downloadIds, ["historical-pocket"]);
 });
 
-test("P309 remains programmatic LocalIntegration-only; visible product and runtime owners stay unwired/unmodified by composition", () => {
+test("P309 keeps LocalIntegration adapter ownership while later Sync UI composition may consume the ownerless methods", () => {
   const local = source("js/pocket-sync-local-integration.js");
   assert.match(local, /runtime\.startOwnerlessFirstCreate\(input\)/);
   assert.match(local, /runtime\.continueOwnerlessFirstCreate\(input\)/);
@@ -399,8 +399,9 @@ test("P309 remains programmatic LocalIntegration-only; visible product and runti
     "verifyRoundTrip remains the existing shared verification path");
 
   for (const file of [
-    "js/pocket-sync-ui.js",
     "js/pocket-doorway-capabilities.js",
+    "js/pocket-render.js",
+    "js/pocket-overlays-init.js",
     "index.html",
     "sw.js",
   ]) {
