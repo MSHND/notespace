@@ -6,6 +6,16 @@
   const SERVICE_FIELDS = Object.freeze([
     "accountService", "contentService", "envelopeService", "recoveryService",
   ]);
+  const OWNERLESS_DRAFT_METHODS = Object.freeze([
+    "validate", "buildInitialDraft", "buildRegistrationStarted", "buildRegistrationPending",
+    "buildAccountReady", "buildContentUploadPending", "buildContentConflict",
+    "buildContentCommitted", "buildDeviceEnvelopePending", "buildDeviceEnvelopeConflict",
+    "buildDeviceEnvelopeCommitted", "buildPrfEnvelopePending", "buildPrfEnvelopeConflict",
+    "buildPrfEnvelopeCommitted", "buildPrfEnvelopeSkipped",
+    "buildRecoveryInitialisationPending", "buildRecoveryConflict",
+    "buildRecoveryInitialised", "buildRecoveryCopyPending", "buildReadyForAdoption",
+    "buildAdopted", "classifyAdopted",
+  ]);
   const RECOVERY_FILENAME = "Pocket Recovery Copy.json";
   const BEGIN_ATTENTION_REASONS = Object.freeze({
     "begin-attention-expired": "recovery-begin-expired",
@@ -45,6 +55,10 @@
 
   function safeFailure(reason) {
     return frozen({ ok: false, reason, adopted: false, sourceOwnerPreserved: true });
+  }
+
+  function ownerlessStartFailure(reason, extra = null) {
+    return frozen(Object.assign({ ok: false, reason }, extra || {}));
   }
 
   function isLegacyRestartableDraft(draft, ownerKind) {
@@ -373,6 +387,8 @@
     const storeApi = global.PocketSyncDeviceStore;
     const accountApi = global.PocketSyncAccountClient;
     const activationApi = global.PocketSyncActivation;
+    const firstCreateApi = global.PocketSyncFirstCreate;
+    const ownerlessDraftApi = global.PocketSyncOwnerlessActivationDraft;
     const additionalApi = global.PocketSyncAdditionalDevice;
     const recoveryApi = global.PocketSyncEmergencyRecovery;
     const ownerApi = global.PocketSyncOwnerController;
@@ -389,6 +405,13 @@
     requireMethods(boundary, ["installSyncedOwnerForSave"], "foundation-unavailable");
 
     const now = typeof environment.now === "function" ? environment.now : Date.now;
+
+    function freshRuntimeIdentifier() {
+      const bytes = browserRandom(environment)(32);
+      try { return crypto.encodeBase64Url(bytes); }
+      finally { bytes.fill(0); }
+    }
+
     const deviceStore = storeApi.createStore(storeApi.createIndexedDbDriver(environment.indexedDB || global.indexedDB));
     const accountClient = accountApi.createClient({
       accountService: config.accountService,
@@ -471,6 +494,14 @@
         return typeof global.hasPocketUnsavedChanges === "function"
           && global.hasPocketUnsavedChanges() === false;
       } catch (_error) { return false; }
+    }
+
+    function ownerlessTargetEligible() {
+      let target;
+      try { target = additionalTarget(); } catch (_error) { return false; }
+      if (!target || target.ownerKind !== "none") return false;
+      try { return additionalTargetReplaceable(target) === true; }
+      catch (_error) { return false; }
     }
 
     function recoveryDependencies() {
@@ -648,6 +679,284 @@
       });
     }
 
+    function ownerlessActivateDependencies() {
+      return frozen({
+        captureTarget: additionalTarget,
+        isTargetReplaceable: additionalTargetReplaceable,
+      });
+    }
+
+    function ownerlessResumeDependencies(withExistingAccountReady) {
+      return frozen({
+        captureTarget: additionalTarget,
+        isTargetReplaceable: additionalTargetReplaceable,
+        withExistingAccountReady,
+        buildRecoveryPackage: (input) => buildRecoveryPackage(security, crypto, environment, input),
+        prepareRecoveryCopyDestination: recoveryPicker(environment),
+        writeRecoveryCopy: writeRecoveryCopy(environment),
+        adoptSyncedOwner: ownerBridge.adoptSyncedOwner,
+      });
+    }
+
+    function exactKeys(value, fields) {
+      return !!value && typeof value === "object" && !Array.isArray(value)
+        && Object.keys(value).length === fields.length
+        && fields.every((field) => Object.prototype.hasOwnProperty.call(value, field));
+    }
+
+    function validRuntimeIdentifier(value) {
+      return typeof value === "string" && value.length > 0
+        && value.length <= 160 && value === value.trim();
+    }
+
+    function exactOwnerlessStaged(result, accountPath, syncedPocketId, deviceId) {
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable",
+      ])
+        && result.ok === true
+        && result.reason === "ownerless-local-staged"
+        && validRuntimeIdentifier(result.activationId)
+        && result.accountPath === accountPath
+        && result.syncedPocketId === syncedPocketId
+        && result.deviceId === deviceId
+        && result.stage === "device-staged"
+        && result.locallyDurable === true;
+    }
+
+    function exactOwnerlessAccountReady(result, accountPath, syncedPocketId, deviceId) {
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable",
+      ])
+        && result.ok === true
+        && result.reason === "ownerless-account-ready"
+        && validRuntimeIdentifier(result.activationId)
+        && result.accountPath === accountPath
+        && result.syncedPocketId === syncedPocketId
+        && result.deviceId === deviceId
+        && result.stage === "account-ready"
+        && result.locallyDurable === true;
+    }
+
+    async function stageOwnerlessStart(accountPath, syncedPocketId, deviceId) {
+      let staged;
+      try {
+        staged = await orchestrator.activate(ownerlessActivateDependencies(), {
+          activationMode: "ownerless-first-create",
+          accountPath,
+          syncedPocketId,
+          deviceId,
+        });
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-local-staging-failed");
+      }
+      if (exactOwnerlessStaged(staged, accountPath, syncedPocketId, deviceId)) return staged;
+      if (staged && staged.ok === false && typeof staged.reason === "string") return staged;
+      return ownerlessStartFailure("ownerless-local-staging-failed", {
+        ...(validRuntimeIdentifier(staged?.activationId) ? { activationId: staged.activationId } : {}),
+      });
+    }
+
+    async function resumeOwnerlessToAccountReady(
+      staged, accountPath, syncedPocketId, deviceId, withExistingAccountReady
+    ) {
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessResumeDependencies(withExistingAccountReady),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: staged.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-account-ready-failed", {
+          activationId: staged.activationId,
+        });
+      }
+      if (exactOwnerlessAccountReady(resumed, accountPath, syncedPocketId, deviceId)) return resumed;
+      if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
+      return ownerlessStartFailure("ownerless-account-ready-failed", {
+        activationId: staged.activationId,
+      });
+    }
+
+    async function startOwnerlessFirstCreate(input) {
+      if (!exactKeys(input, ["accountPath"])
+          || !["existing-unbound", "new-account"].includes(input.accountPath)) {
+        return ownerlessStartFailure("invalid-ownerless-first-create-input");
+      }
+
+      try {
+        requireMethods(firstCreateApi, ["createConductor"], "ownerless-foundation-unavailable");
+        requireMethods(ownerlessDraftApi, OWNERLESS_DRAFT_METHODS, "ownerless-foundation-unavailable");
+        requireMethods(deviceStore, ["open", "findOwnerlessActivation"], "ownerless-foundation-unavailable");
+        requireMethods(config.discoveryService, ["readSyncedPocket"], "ownerless-foundation-unavailable");
+        requireMethods(orchestrator, ["activate", "resume"], "ownerless-foundation-unavailable");
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-foundation-unavailable");
+      }
+
+      if (!ownerlessTargetEligible()) {
+        return ownerlessStartFailure("ownerless-target-stale");
+      }
+
+      let discovered;
+      try {
+        await deviceStore.open();
+        discovered = await deviceStore.findOwnerlessActivation();
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-discovery-needs-attention");
+      }
+      if (exactKeys(discovered, ["state"]) && discovered.state === "none") {
+        // Continue below.
+      } else if (exactKeys(discovered, ["state", "activationId"])
+          && discovered.state === "match"
+          && validRuntimeIdentifier(discovered.activationId)) {
+        return ownerlessStartFailure("ownerless-attempt-exists", {
+          activationId: discovered.activationId,
+        });
+      } else {
+        return ownerlessStartFailure("ownerless-discovery-needs-attention");
+      }
+
+      let syncedPocketId;
+      let deviceId;
+      try {
+        syncedPocketId = freshRuntimeIdentifier();
+        deviceId = freshRuntimeIdentifier();
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-local-staging-failed");
+      }
+
+      if (input.accountPath === "existing-unbound") {
+        let conductor;
+        try {
+          conductor = firstCreateApi.createConductor({
+            accountClient,
+            discoveryService: config.discoveryService,
+            createOperationId: freshRuntimeIdentifier,
+          });
+        } catch (_error) {
+          return ownerlessStartFailure("ownerless-foundation-unavailable");
+        }
+
+        let ownerlessOutcome = null;
+        let privateReadyEntered = false;
+        let preflight;
+        try {
+          preflight = await conductor.prepareExistingAccount(async (ready) => {
+            if (privateReadyEntered) throw new Error("ownerless-private-ready-reentered");
+            privateReadyEntered = true;
+            if (!ownerlessTargetEligible()) {
+              ownerlessOutcome = ownerlessStartFailure("ownerless-target-stale");
+              throw new Error("ownerless-target-stale");
+            }
+
+            const staged = await stageOwnerlessStart(
+              "existing-unbound", syncedPocketId, deviceId
+            );
+            if (!exactOwnerlessStaged(staged, "existing-unbound", syncedPocketId, deviceId)) {
+              ownerlessOutcome = staged;
+              throw new Error("ownerless-local-staging-failed");
+            }
+
+            let bridgeCalls = 0;
+            const resumed = await resumeOwnerlessToAccountReady(
+              staged,
+              "existing-unbound",
+              syncedPocketId,
+              deviceId,
+              async (consumer) => {
+                bridgeCalls += 1;
+                if (bridgeCalls !== 1 || typeof consumer !== "function") {
+                  throw new Error("ownerless-private-ready-bridge-invalid");
+                }
+                return consumer(ready);
+              }
+            );
+            ownerlessOutcome = resumed;
+            if (!exactOwnerlessAccountReady(
+              resumed, "existing-unbound", syncedPocketId, deviceId
+            ) || bridgeCalls !== 1) {
+              throw new Error("ownerless-account-ready-failed");
+            }
+          });
+        } catch (_error) {
+          return ownerlessOutcome || ownerlessStartFailure("first-create-authentication-failed");
+        }
+
+        if (preflight?.ok === true
+            && preflight.status === "existing-pocket"
+            && validRuntimeIdentifier(preflight.syncedPocketId)) {
+          return frozen({
+            ok: true,
+            status: "existing-pocket",
+            syncedPocketId: preflight.syncedPocketId,
+          });
+        }
+        if (ownerlessOutcome !== null) return ownerlessOutcome;
+        if (preflight?.ok === false && typeof preflight.reason === "string") {
+          return ownerlessStartFailure(preflight.reason);
+        }
+        return ownerlessStartFailure("first-create-authentication-failed");
+      }
+
+      const staged = await stageOwnerlessStart("new-account", syncedPocketId, deviceId);
+      if (!exactOwnerlessStaged(staged, "new-account", syncedPocketId, deviceId)) {
+        return staged;
+      }
+      const resumed = await resumeOwnerlessToAccountReady(
+        staged,
+        "new-account",
+        syncedPocketId,
+        deviceId,
+        async () => {
+          throw new Error("existing-account-ready-bridge-forbidden");
+        }
+      );
+      if (!exactOwnerlessAccountReady(resumed, "new-account", syncedPocketId, deviceId)) {
+        return resumed;
+      }
+
+      if (!ownerlessTargetEligible()) {
+        return ownerlessStartFailure("ownerless-target-stale", {
+          activationId: staged.activationId,
+        });
+      }
+      let binding;
+      try {
+        const operationId = freshRuntimeIdentifier();
+        binding = await config.discoveryService.readSyncedPocket({
+          apiVersion: 1,
+          operationId,
+        });
+        if (!ownerlessTargetEligible()) {
+          return ownerlessStartFailure("ownerless-target-stale", {
+            activationId: staged.activationId,
+          });
+        }
+        if (!exactKeys(binding, [
+          "apiVersion", "ok", "operationId", "status", "syncedPocketId",
+        ])
+            || binding.apiVersion !== 1
+            || binding.ok !== true
+            || binding.operationId !== operationId
+            || binding.status !== "not-configured"
+            || binding.syncedPocketId !== null) {
+          return ownerlessStartFailure("ownerless-account-binding-attention", {
+            activationId: staged.activationId,
+          });
+        }
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-account-binding-attention", {
+          activationId: staged.activationId,
+        });
+      }
+      return resumed;
+    }
+
     async function activate() {
       const snapshot = sourceSession();
       if (!snapshot) return safeFailure("unsupported-source-owner");
@@ -807,7 +1116,8 @@
     }
 
     return frozen({ activate, resume, openExisting, recoverExisting, resumeRecovery,
-      restartLegacyRecovery, findRecoveryAttempt, admitAcceptedDeleteRestore });
+      restartLegacyRecovery, findRecoveryAttempt, admitAcceptedDeleteRestore,
+      startOwnerlessFirstCreate });
   }
 
   global.PocketSyncBrowserRuntime = frozen({ createRuntime });
