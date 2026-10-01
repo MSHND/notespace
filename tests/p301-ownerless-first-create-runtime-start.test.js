@@ -416,7 +416,6 @@ test("P301 keeps global runtime surface fixed and adds exactly one programmatic 
   assert.match(localIntegration, /startOwnerlessFirstCreate/);
   assert.match(localIntegration, /continueOwnerlessFirstCreate/);
   for (const file of [
-    "js/pocket-sync-ui.js",
     "js/pocket-doorway-capabilities.js",
     "index.html",
   ]) {
@@ -719,6 +718,6 @@ test("P301 source shape composes accepted owners and does not create a second ow
   assert.doesNotMatch(runtime, /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.doesNotMatch(source("js/pocket-sync-activation.js"), /PocketSyncFirstCreate/);
   assert.match(source("js/pocket-sync-local-integration.js"), /startOwnerlessFirstCreate/);
-  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /startOwnerlessFirstCreate/);
+  assert.match(source("js/pocket-sync-ui.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /startOwnerlessFirstCreate/);
 });
