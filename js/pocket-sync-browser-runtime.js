@@ -1074,6 +1074,12 @@
     function exactDeviceEnvelopeCommittedState(attempt) {
       const draft = attempt?.draft;
       const record = attempt?.record;
+      const exactPrfBoundary = draft?.prfStatus === "available"
+        ? draft.prfEnvelope !== null
+          && [null, "prf-envelope", "prf-envelope-conflict"].includes(draft.pendingOperation)
+        : draft?.prfStatus === "skipped"
+          && draft.prfEnvelope === null
+          && draft.pendingOperation === null;
       return !!draft && !!record
         && draft.stage === "device-envelope-committed"
         && draft.confirmedRemoteRevision === 1
@@ -1081,7 +1087,7 @@
         && draft.recoveryVersion === 0
         && draft.accountLocator === null
         && draft.registrationContinuation === null
-        && draft.pendingOperation === null
+        && exactPrfBoundary
         && draft.recoveryCopyStored === false
         && draft.adopted === false
         && validRuntimeIdentifier(draft.account?.accountId)
@@ -1125,6 +1131,77 @@
         && result.remotelyCommitted === true
         && result.confirmedRemoteRevision === 1
         && result.keySetVersion === 1;
+    }
+
+    function exactPrfTerminalState(attempt) {
+      const draft = attempt?.draft;
+      const record = attempt?.record;
+      const exactPrfTerminal = draft?.stage === "prf-envelope-committed"
+        ? draft.prfStatus === "available"
+          && draft.prfEnvelope !== null
+          && draft.keySetVersion === 2
+        : draft?.stage === "prf-envelope-skipped"
+          && draft.prfStatus === "skipped"
+          && draft.prfEnvelope === null
+          && draft.keySetVersion === 1;
+      return !!draft && !!record
+        && exactPrfTerminal
+        && draft.confirmedRemoteRevision === 1
+        && draft.recoveryVersion === 0
+        && draft.accountLocator === null
+        && draft.registrationContinuation === null
+        && draft.pendingOperation === null
+        && draft.recoveryCopyStored === false
+        && draft.adopted === false
+        && validRuntimeIdentifier(draft.account?.accountId)
+        && record.remote?.confirmedRevision === 1
+        && record.remote?.pending === null
+        && record.remote?.conflict === null
+        && record.usage?.masterKeyGeneration === 1
+        && record.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
+    }
+
+    function prfTerminalReplay(draft) {
+      const available = draft.stage === "prf-envelope-committed";
+      return frozen({
+        ok: true,
+        reason: available
+          ? "ownerless-prf-envelope-committed"
+          : "ownerless-prf-envelope-skipped",
+        activationId: draft.activationId,
+        accountPath: draft.accountPath,
+        syncedPocketId: draft.syncedPocketId,
+        deviceId: draft.deviceId,
+        stage: draft.stage,
+        locallyDurable: true,
+        remotelyCommitted: true,
+        confirmedRemoteRevision: 1,
+        keySetVersion: available ? 2 : 1,
+      });
+    }
+
+    function exactOwnerlessPrfTerminal(result, draft) {
+      const available = draft.prfStatus === "available";
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable", "remotelyCommitted",
+        "confirmedRemoteRevision", "keySetVersion",
+      ])
+        && result.ok === true
+        && result.reason === (available
+          ? "ownerless-prf-envelope-committed"
+          : "ownerless-prf-envelope-skipped")
+        && result.activationId === draft.activationId
+        && result.accountPath === draft.accountPath
+        && result.syncedPocketId === draft.syncedPocketId
+        && result.deviceId === draft.deviceId
+        && result.stage === (available
+          ? "prf-envelope-committed"
+          : "prf-envelope-skipped")
+        && result.locallyDurable === true
+        && result.remotelyCommitted === true
+        && result.confirmedRemoteRevision === 1
+        && result.keySetVersion === (available ? 2 : 1);
     }
 
     async function ownerlessBindingPreflight(draft) {
@@ -1257,6 +1334,44 @@
       if (exactOwnerlessDeviceEnvelopeCommitted(resumed, draft)) {
         const committed = await readExactOwnerlessAttempt(draft.activationId);
         return committed && exactDeviceEnvelopeCommittedState(committed)
+          ? resumed
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
+      if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
+      return ownerlessContinuationFailure(
+        "ownerless-activation-state-invalid", draft.activationId
+      );
+    }
+
+    async function continueOwnerlessPrfTerminal(attempt) {
+      const draft = attempt.draft;
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessResumeDependencies(async () => {
+            throw new Error("existing-account-ready-bridge-forbidden");
+          }),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: draft.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId
+        );
+      }
+      if (exactOwnerlessPrfTerminal(resumed, draft)) {
+        const terminal = await readExactOwnerlessAttempt(draft.activationId);
+        return terminal && exactPrfTerminalState(terminal)
           ? resumed
           : ownerlessContinuationFailure(
             "ownerless-activation-state-invalid", draft.activationId,
@@ -1428,13 +1543,74 @@
       }
 
       const draft = attempt.draft;
-      if (draft.stage === "device-envelope-committed") {
-        return exactDeviceEnvelopeCommittedState(attempt)
-          ? deviceEnvelopeCommittedReplay(draft)
+      if (draft.stage === "prf-envelope-committed"
+          || draft.stage === "prf-envelope-skipped") {
+        return exactPrfTerminalState(attempt)
+          ? prfTerminalReplay(draft)
           : ownerlessContinuationFailure(
             "ownerless-activation-state-invalid", draft.activationId,
             { resumable: false }
           );
+      }
+
+      if (draft.stage === "device-envelope-committed") {
+        if (!exactDeviceEnvelopeCommittedState(attempt)) {
+          return ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+        }
+
+        if (draft.prfStatus === "skipped") {
+          return continueOwnerlessPrfTerminal(attempt);
+        }
+
+        const pinnedAccountId = draft.account.accountId;
+        if (hasOwnerlessAuthenticatedWitness(draft.activationId, pinnedAccountId)) {
+          return continueOwnerlessPrfTerminal(attempt);
+        }
+
+        let continuationOutcome = null;
+        try {
+          await accountClient.authenticatePasskey({
+            apiVersion: 1,
+            operationId: freshRuntimeIdentifier(),
+            accountLocator: pinnedAccountId,
+          }, async (authenticated) => {
+            if (!authenticated || authenticated.ok !== true
+                || authenticated.accountAuthenticated !== true
+                || authenticated.contentUnlocked !== false
+                || authenticated.bootstrap === true
+                || authenticated.accountId !== pinnedAccountId) {
+              continuationOutcome = ownerlessContinuationFailure(
+                "ownerless-account-mismatch-attention",
+                draft.activationId,
+                { resumable: false }
+              );
+              return;
+            }
+            if (!ownerlessTargetEligible()) {
+              continuationOutcome = ownerlessContinuationFailure(
+                "ownerless-target-stale", draft.activationId
+              );
+              return;
+            }
+            seedOwnerlessAuthenticatedWitness(draft.activationId, pinnedAccountId);
+            continuationOutcome = await continueOwnerlessPrfTerminal(attempt);
+          });
+        } catch (_error) {
+          return ownerlessContinuationFailure(
+            "ownerless-account-authentication-failed",
+            draft.activationId,
+            { resumable: true }
+          );
+        }
+
+        return continuationOutcome || ownerlessContinuationFailure(
+          "ownerless-account-authentication-failed",
+          draft.activationId,
+          { resumable: true }
+        );
       }
 
       if (draft.stage === "content-committed") {
