@@ -124,6 +124,10 @@
     catch (_error) { return ""; }
   }
 
+  function validSyncedPocketId(value) {
+    return typeof value === "string" && value.length > 0 && value === value.trim();
+  }
+
   function create() {
     const serviceRoot = configuredServiceRoot;
     const remote = global.PocketSyncRemoteClient;
@@ -153,6 +157,11 @@
       envelopeService: remote.createEnvelopeService({ transport }),
       recoveryService: remote.createRecoveryService({ transport }),
     });
+    if (!runtime
+        || typeof runtime.startOwnerlessFirstCreate !== "function"
+        || typeof runtime.continueOwnerlessFirstCreate !== "function") {
+      throw new Error("Pocket Sync ownerless local integration foundation unavailable.");
+    }
     let syncedPocketId = null;
     let latestOpenDiagnostic = null;
 
@@ -160,8 +169,24 @@
       if (result?.ok === true && result.owner?.ownerKind === "synced"
           && typeof result.owner.syncedPocketId === "string") {
         syncedPocketId = result.owner.syncedPocketId;
+      } else if (result?.ok === true
+          && result.reason === "ownerless-activated"
+          && result.stage === "adopted"
+          && result.adopted === true
+          && validSyncedPocketId(result.syncedPocketId)) {
+        syncedPocketId = result.syncedPocketId;
       }
       return result;
+    }
+
+    async function startOwnerlessFirstCreate(input) {
+      try { return remember(await runtime.startOwnerlessFirstCreate(input)); }
+      catch (_error) { return safeFailure("ownerless-first-create-unavailable"); }
+    }
+
+    async function continueOwnerlessFirstCreate(input) {
+      try { return remember(await runtime.continueOwnerlessFirstCreate(input)); }
+      catch (_error) { return safeFailure("ownerless-first-create-unavailable"); }
     }
 
     async function activate() {
@@ -292,6 +317,7 @@
       activate, resume, openExisting, getLatestOpenDiagnostic,
       captureSwitchTarget, saveSwitchTarget, discardSwitchTarget,
       recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip, admitAcceptedDeleteRestore,
+      startOwnerlessFirstCreate, continueOwnerlessFirstCreate,
     });
     global.PocketSyncActiveIntegration = integration;
     try { global.PocketSyncUi?.install?.(integration); } catch (_error) {}
