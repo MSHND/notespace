@@ -301,6 +301,8 @@
       if (result?.ok === true
           && result.reason === "ownerless-account-ready"
           && result.stage === "account-ready"
+          && result.locallyDurable === true
+          && result.adopted === false
           && validOwnerlessIdentifier(result.activationId)) {
         ownerlessContinue(result.activationId);
         return;
@@ -329,6 +331,7 @@
         return;
       }
       if (result?.ok === true
+          && result.locallyDurable === true
           && result.adopted !== true
           && sameActivation
           && OWNERLESS_CONTINUE_STAGES.includes(result.stage)) {
