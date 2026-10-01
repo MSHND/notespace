@@ -63,10 +63,17 @@ function createHarness(options = {}) {
   const accountIntents = [];
   const authenticationInputs = [];
   const contentCalls = [];
+  const envelopeCalls = [];
   const discoveryResponses = (
     options.discoveryResponses || options.discoveryStatuses || ["not-configured"]
   ).slice();
   const contentResponses = (options.contentResponses || [{ status: "committed", revision: 1 }]).slice();
+  const envelopeResponses = (options.envelopeResponses || [{
+    status: "committed",
+    keySetVersion: 1,
+    masterKeyGeneration: 1,
+    masterKeyContentEncryptionLimit: 2 ** 20,
+  }]).slice();
   const authenticationAccountIds = (options.authenticationAccountIds || []).slice();
   let ownerKind = options.ownerKind || "none";
   let nextNodeId = 0;
@@ -190,6 +197,9 @@ function createHarness(options = {}) {
                 schemaVersion: 99,
               })),
             });
+          }
+          if (typeof options.readActivationTransform === "function" && found) {
+            return options.readActivationTransform(found, counters.readActivation);
           }
           return found;
         },
@@ -393,9 +403,25 @@ function createHarness(options = {}) {
       },
     }),
     envelopeService: Object.freeze({
-      async addEnvelope() {
+      async addEnvelope(input) {
         counters.envelope += 1;
-        throw new Error("envelope add unreachable before P302 stop");
+        envelopeCalls.push(plain(input));
+        options.onAddEnvelope?.({
+          input,
+          call: counters.envelope,
+          setOwnerKind: (value) => { ownerKind = value; },
+        });
+        const next = envelopeResponses.length > 0
+          ? envelopeResponses.shift()
+          : {
+            status: "committed",
+            keySetVersion: input.expectedKeySetVersion + 1,
+            masterKeyGeneration: 1,
+            masterKeyContentEncryptionLimit: 2 ** 20,
+          };
+        if (next === "throw") throw new Error("synthetic envelope unavailable");
+        if (next instanceof Error) throw next;
+        return Object.freeze(next);
       },
     }),
     recoveryService: Object.freeze({
@@ -443,11 +469,13 @@ function createHarness(options = {}) {
     accountIntents,
     authenticationInputs,
     contentCalls,
+    envelopeCalls,
     readActivation,
     canonicalDraft,
     setOwnerKind(value) { ownerKind = value; },
     pushDiscovery(value) { discoveryResponses.push(value); },
     pushContent(value) { contentResponses.push(value); },
+    pushEnvelope(value) { envelopeResponses.push(value); },
     get derivedPrfReference() { return derivedPrfReference; },
     get privatePrfReference() { return privatePrfReference; },
   };
@@ -889,7 +917,7 @@ test("P302 owner change across content await returns target-stale and does not f
   assertNoPostContent(h);
 });
 
-test("P302 exact content-committed replay performs zero authentication, discovery or remote work", async () => {
+test("P302 content continuation still hard-stops at content-committed within that invocation", async () => {
   const h = createHarness({
     discoveryResponses: ["not-configured", "not-configured"],
     contentResponses: [{ status: "committed", revision: 1 }],
@@ -901,27 +929,10 @@ test("P302 exact content-committed replay performs zero authentication, discover
     activationId: started.activationId,
   });
   assert.equal(committed.stage, "content-committed");
-
-  const before = {
-    authentication: h.counters.beginAuthentication,
-    discovery: h.counters.discovery,
-    content: h.counters.content,
-    envelope: h.counters.envelope,
-    recovery: h.counters.recovery,
-    adoption: h.counters.adoption,
-  };
-  const replay = await h.runtime.continueOwnerlessFirstCreate({
-    activationId: started.activationId,
-  });
-  assert.deepEqual(plain(replay), plain(committed));
-  assert.deepEqual({
-    authentication: h.counters.beginAuthentication,
-    discovery: h.counters.discovery,
-    content: h.counters.content,
-    envelope: h.counters.envelope,
-    recovery: h.counters.recovery,
-    adoption: h.counters.adoption,
-  }, before);
+  assert.equal(h.counters.content, 1);
+  assert.equal(h.counters.envelope, 0);
+  assert.equal(h.counters.recovery, 0);
+  assert.equal(h.counters.adoption, 0);
 });
 
 test("P302 never exposes or invokes post-content ownerless stages", () => {
@@ -934,4 +945,368 @@ test("P302 never exposes or invokes post-content ownerless stages", () => {
   assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
+});
+
+
+function assertNoPostEnvelope(harness) {
+  assert.equal(harness.counters.recovery, 0);
+  assert.equal(harness.counters.recoveryPackage, 0);
+  assert.equal(harness.counters.picker, 0);
+  assert.equal(harness.counters.adoption, 0);
+}
+
+async function advanceNewAccountToContentCommitted(harness) {
+  const started = await harness.runtime.startOwnerlessFirstCreate({
+    accountPath: "new-account",
+  });
+  assert.equal(started.ok, true, JSON.stringify(started));
+  assert.equal(started.stage, "account-ready");
+  const committed = await harness.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(committed.ok, true, JSON.stringify(committed));
+  assert.equal(committed.stage, "content-committed");
+  assert.equal(harness.counters.envelope, 0);
+  return { started, committed };
+}
+
+async function advanceExistingAccountToContentCommitted(harness) {
+  const started = await harness.runtime.startOwnerlessFirstCreate({
+    accountPath: "existing-unbound",
+  });
+  assert.equal(started.ok, true, JSON.stringify(started));
+  assert.equal(started.stage, "account-ready");
+  const committed = await harness.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(committed.ok, true, JSON.stringify(committed));
+  assert.equal(committed.stage, "content-committed");
+  assert.equal(harness.counters.envelope, 0);
+  return { started, committed };
+}
+
+test("P303 admits exact content-committed through P294 and hard-stops at device-envelope-committed", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(h);
+  const beforeRegistration = h.counters.beginRegistration;
+  const beforeAuthentication = h.counters.beginAuthentication;
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+
+  assert.deepEqual(plain(result), {
+    ok: true,
+    reason: "ownerless-device-envelope-committed",
+    activationId: started.activationId,
+    accountPath: "new-account",
+    syncedPocketId: result.syncedPocketId,
+    deviceId: result.deviceId,
+    stage: "device-envelope-committed",
+    locallyDurable: true,
+    remotelyCommitted: true,
+    confirmedRemoteRevision: 1,
+    keySetVersion: 1,
+  });
+  assert.equal(h.counters.beginRegistration, beforeRegistration);
+  assert.equal(h.counters.beginAuthentication, beforeAuthentication);
+  assert.equal(h.envelopeCalls.length, 1);
+  const call = h.envelopeCalls[0];
+  assert.equal(call.expectedKeySetVersion, 0);
+  assert.equal(call.attemptKind, "new-change");
+
+  const draft = await h.canonicalDraft(started.activationId);
+  assert.equal(draft.stage, "device-envelope-committed");
+  assert.equal(draft.confirmedRemoteRevision, 1);
+  assert.equal(draft.keySetVersion, 1);
+  assert.equal(draft.recoveryVersion, 0);
+  assert.equal(draft.pendingOperation, null);
+  assert.equal(call.operationId, draft.ids.deviceEnvelopeOperationId);
+  assert.equal(call.logicalChangeId, draft.ids.deviceEnvelopeLogicalChangeId);
+  assert.deepEqual(call.envelope, plain(draft.deviceEnvelope));
+  assertNoPostEnvelope(h);
+});
+
+test("P303 same-runtime witness avoids redundant authentication for both account paths", async () => {
+  for (const accountPath of ["new-account", "existing-unbound"]) {
+    const h = createHarness({
+      discoveryResponses: ["not-configured", "not-configured"],
+    });
+    const advanced = accountPath === "new-account"
+      ? await advanceNewAccountToContentCommitted(h)
+      : await advanceExistingAccountToContentCommitted(h);
+    const beforeAuthentication = h.counters.beginAuthentication;
+    const beforeRegistration = h.counters.beginRegistration;
+
+    const result = await h.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+    assert.equal(result.stage, "device-envelope-committed");
+    assert.equal(h.counters.beginAuthentication, beforeAuthentication);
+    assert.equal(h.counters.beginRegistration, beforeRegistration);
+    assert.equal(h.envelopeCalls.length, 1);
+    assert.equal(h.envelopeCalls[0].expectedKeySetVersion, 0);
+    assert.equal(h.envelopeCalls[0].attemptKind, "new-change");
+    assertNoPostEnvelope(h);
+  }
+});
+
+test("P303 reload reauthenticates exact pinned account in P278 lifetime and zeroes raw PRF", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(first);
+  const committedDraft = await first.canonicalDraft(started.activationId);
+  const accountId = committedDraft.account.accountId;
+
+  const second = createHarness({
+    shared: first.shared,
+    authenticationAccountIds: [accountId],
+  });
+  const result = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.stage, "device-envelope-committed");
+  assert.equal(second.counters.beginAuthentication, 1);
+  assert.equal(second.counters.finishAuthentication, 1);
+  assert.equal(second.authenticationInputs.length, 1);
+  assert.equal(second.authenticationInputs[0].accountLocator, accountId);
+  assert.equal(second.counters.beginRegistration, 0);
+  assert.equal(second.counters.finishRegistration, 0);
+  assert.equal(second.envelopeCalls.length, 1);
+  assert.ok(second.privatePrfReference instanceof Uint8Array);
+  assert.deepEqual(Array.from(second.privatePrfReference), new Array(32).fill(0));
+  assert.equal(JSON.stringify(result).includes("outputBytes"), false);
+  const durable = await second.canonicalDraft(started.activationId);
+  assert.equal(JSON.stringify(durable).includes("outputBytes"), false);
+  assertNoPostEnvelope(second);
+});
+
+test("P303 auth mismatch, cancellation and failure publish zero envelope", async () => {
+  for (const mode of ["mismatch", "cancel", "failure"]) {
+    const first = createHarness({
+      discoveryResponses: ["not-configured", "not-configured"],
+    });
+    const { started } = await advanceNewAccountToContentCommitted(first);
+    const draft = await first.canonicalDraft(started.activationId);
+    const options = { shared: first.shared };
+    if (mode === "mismatch") options.authenticationAccountIds = ["another-account"];
+    if (mode === "cancel") options.authenticationCancelled = true;
+    if (mode === "failure") options.authenticationFailure = true;
+    const second = createHarness(options);
+
+    const result = await second.runtime.continueOwnerlessFirstCreate({
+      activationId: started.activationId,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.reason,
+      mode === "mismatch"
+        ? "ownerless-account-mismatch-attention"
+        : "ownerless-account-authentication-failed"
+    );
+    assert.equal(second.counters.envelope, 0);
+    assert.equal(second.counters.beginRegistration, 0);
+    const after = await second.canonicalDraft(started.activationId);
+    assert.equal(after.stage, "content-committed");
+    assert.equal(after.keySetVersion, 0);
+    assert.equal(after.account.accountId, draft.account.accountId);
+    assertNoPostEnvelope(second);
+  }
+});
+
+test("P303 rejects malformed content-committed durable state before authentication or envelope", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(first);
+
+  const second = createHarness({
+    shared: first.shared,
+    readActivationTransform(found) {
+      if (found.draft?.stage !== "content-committed") return found;
+      return Object.freeze({
+        record: found.record,
+        draft: Object.freeze(Object.assign({}, plain(found.draft), {
+          keySetVersion: 9,
+        })),
+      });
+    },
+  });
+  const result = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-activation-state-invalid");
+  assert.equal(second.counters.beginAuthentication, 0);
+  assert.equal(second.counters.envelope, 0);
+  assertNoPostEnvelope(second);
+});
+
+test("P303 ambiguous envelope is durable and explicit retry is exact idempotent retry", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    envelopeResponses: ["throw"],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(h);
+
+  const first = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(first.ok, false);
+  assert.equal(first.reason, "device-envelope-failed");
+  assert.equal(first.resumable, true);
+  assert.equal(h.envelopeCalls.length, 1);
+  const firstCall = h.envelopeCalls[0];
+  assert.equal(firstCall.expectedKeySetVersion, 0);
+  assert.equal(firstCall.attemptKind, "new-change");
+  let pending = await h.canonicalDraft(started.activationId);
+  assert.equal(pending.stage, "content-committed");
+  assert.equal(pending.pendingOperation, "device-envelope");
+  assert.equal(pending.keySetVersion, 0);
+
+  h.pushEnvelope({
+    status: "committed",
+    keySetVersion: 1,
+    masterKeyGeneration: 1,
+    masterKeyContentEncryptionLimit: 2 ** 20,
+  });
+  const second = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.stage, "device-envelope-committed");
+  assert.equal(h.envelopeCalls.length, 2);
+  const retry = h.envelopeCalls[1];
+  assert.equal(retry.attemptKind, "idempotent-retry");
+  assert.equal(retry.expectedKeySetVersion, 0);
+  assert.equal(retry.operationId, firstCall.operationId);
+  assert.equal(retry.logicalChangeId, firstCall.logicalChangeId);
+  assert.deepEqual(retry.envelope, firstCall.envelope);
+  pending = await h.canonicalDraft(started.activationId);
+  assert.equal(pending.stage, "device-envelope-committed");
+  assert.equal(pending.pendingOperation, null);
+  assert.equal(pending.keySetVersion, 1);
+  assertNoPostEnvelope(h);
+});
+
+test("P303 envelope conflict remains durable and never republishes", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    envelopeResponses: [{ conflict: true, actualKeySetVersion: 1 }],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(h);
+
+  const first = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(first.ok, false);
+  assert.equal(first.reason, "device-envelope-failed");
+  assert.equal(first.conflict, true);
+  assert.equal(first.resumable, false);
+  assert.equal(h.envelopeCalls.length, 1);
+  let draft = await h.canonicalDraft(started.activationId);
+  assert.equal(draft.stage, "content-committed");
+  assert.equal(draft.pendingOperation, "device-envelope-conflict");
+  assert.equal(draft.keySetVersion, 0);
+
+  const second = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, "device-envelope-failed");
+  assert.equal(second.conflict, true);
+  assert.equal(second.resumable, false);
+  assert.equal(h.envelopeCalls.length, 1);
+  draft = await h.canonicalDraft(started.activationId);
+  assert.equal(draft.pendingOperation, "device-envelope-conflict");
+  assert.equal(draft.keySetVersion, 0);
+  assertNoPostEnvelope(h);
+});
+
+test("P303 malformed committed envelope response never falsely advances", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    envelopeResponses: [{
+      status: "committed",
+      keySetVersion: 1,
+      masterKeyGeneration: 1,
+      masterKeyContentEncryptionLimit: 123,
+    }],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(h);
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-activation-state-invalid");
+  assert.equal(h.envelopeCalls.length, 1);
+  const draft = await h.canonicalDraft(started.activationId);
+  assert.equal(draft.stage, "content-committed");
+  assert.equal(draft.pendingOperation, "device-envelope");
+  assert.equal(draft.keySetVersion, 0);
+  assertNoPostEnvelope(h);
+});
+
+test("P303 owner change across envelope await returns target-stale without false advancement", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    onAddEnvelope({ setOwnerKind }) {
+      setOwnerKind("json");
+    },
+  });
+  const { started } = await advanceNewAccountToContentCommitted(h);
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-target-stale");
+  assert.equal(h.envelopeCalls.length, 1);
+  const draft = await h.canonicalDraft(started.activationId);
+  assert.equal(draft.stage, "content-committed");
+  assert.equal(draft.pendingOperation, "device-envelope");
+  assert.equal(draft.keySetVersion, 0);
+  assertNoPostEnvelope(h);
+});
+
+test("P303 exact device-envelope-committed replay performs zero authentication, envelope or downstream work", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const { started } = await advanceNewAccountToContentCommitted(first);
+  const committed = await first.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.equal(committed.stage, "device-envelope-committed");
+
+  const second = createHarness({ shared: first.shared });
+  const replay = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: started.activationId,
+  });
+  assert.deepEqual(plain(replay), plain(committed));
+  assert.equal(second.counters.beginAuthentication, 0);
+  assert.equal(second.counters.finishAuthentication, 0);
+  assert.equal(second.counters.envelope, 0);
+  assert.equal(second.counters.recovery, 0);
+  assert.equal(second.counters.recoveryPackage, 0);
+  assert.equal(second.counters.picker, 0);
+  assert.equal(second.counters.adoption, 0);
+});
+
+test("P303 keeps PRF-envelope, recovery, Recovery Copy, adoption and UI integration dormant", () => {
+  const runtime = source("js/pocket-sync-browser-runtime.js");
+  assert.match(runtime, /exactDeviceEnvelopeCommittedState/);
+  assert.match(runtime, /continueOwnerlessDeviceEnvelopeWithCurrentAccount/);
+  assert.match(runtime, /ownerless-device-envelope-committed/);
+  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
 });
