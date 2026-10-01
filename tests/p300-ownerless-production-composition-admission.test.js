@@ -129,7 +129,7 @@ test("P300 loading the admitted support modules defines contracts only and perfo
   );
 });
 
-test("P300 leaves browser runtime public surface and ownerless reachability unchanged", () => {
+test("P300 keeps the browser module surface fixed while P301 owns the later programmatic runtime seam", () => {
   const runtimeSource = source("js/pocket-sync-browser-runtime.js");
   const context = {
     Object,
@@ -149,9 +149,10 @@ test("P300 leaves browser runtime public surface and ownerless reachability unch
 
   assert.deepEqual(Object.keys(context.PocketSyncBrowserRuntime), ["createRuntime"]);
   assert.equal(Object.isFrozen(context.PocketSyncBrowserRuntime), true);
+  assert.match(runtimeSource, /startOwnerlessFirstCreate/);
   assert.doesNotMatch(
     runtimeSource,
-    /ownerless-first-create|PocketSyncOwnerlessActivationDraft|PocketSyncFirstCreate|findOwnerlessActivation/
+    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/
   );
 
   const index = source("index.html");
