@@ -1,0 +1,41 @@
+name: P301 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p301-proof
+
+jobs:
+  p301-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P301 runtime start and regression proof
+        timeout-minutes: 10
+        run: >
+          timeout --signal=TERM --kill-after=10s 540s
+          node --test
+          tests/p301-ownerless-first-create-runtime-start.test.js
+          tests/p045-browser-sync-runtime.test.js
+          tests/p280-first-create-existing-account.test.js
+          tests/p284-ownerless-v2-draft-discovery.test.js
+          tests/p285-ownerless-v2-completion-recognition.test.js
+          tests/p286-activation-shared-execution-kernel.test.js
+          tests/p286-activation-v1-behaviour.test.js
+          tests/p287-ownerless-v2-local-staging.test.js
+          tests/p288-ownerless-account-ready-convergence.test.js
+          tests/p293-ownerless-v2-content-commit.test.js
+          tests/p294-ownerless-v2-device-envelope-commit.test.js
+          tests/p295-ownerless-v2-prf-envelope-resolution.test.js
+          tests/p296-ownerless-v2-recovery-initialisation.test.js
+          tests/p297-ownerless-v2-recovery-copy-package.test.js
+          tests/p298-ownerless-v2-recovery-copy-write.test.js
+          tests/p299-ownerless-v2-final-owner-adoption.test.js
+          tests/p300-ownerless-production-composition-admission.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
