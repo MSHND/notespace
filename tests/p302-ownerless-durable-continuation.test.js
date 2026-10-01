@@ -1391,6 +1391,10 @@ test("P304 AVAILABLE reload reauthenticates exact pinned account, ignores raw PR
   const second = createHarness({
     shared: first.shared,
     authenticationAccountIds: [accountId],
+    envelopeResponses: [{
+      status: "committed",
+      keySetVersion: 2,
+    }],
   });
   assert.equal(second.derivedPrfReference, null);
   const result = await second.runtime.continueOwnerlessFirstCreate({
