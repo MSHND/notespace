@@ -64,6 +64,7 @@ function createHarness(options = {}) {
   const authenticationInputs = [];
   const contentCalls = [];
   const envelopeCalls = [];
+  const recoveryCalls = [];
   const discoveryResponses = (
     options.discoveryResponses || options.discoveryStatuses || ["not-configured"]
   ).slice();
@@ -74,6 +75,7 @@ function createHarness(options = {}) {
     masterKeyGeneration: 1,
     masterKeyContentEncryptionLimit: 2 ** 20,
   }]).slice();
+  const recoveryResponses = (options.recoveryResponses || []).slice();
   const authenticationAccountIds = (options.authenticationAccountIds || []).slice();
   let ownerKind = options.ownerKind || "none";
   let nextNodeId = 0;
@@ -371,7 +373,7 @@ function createHarness(options = {}) {
     },
     showSaveFilePicker() {
       counters.picker += 1;
-      throw new Error("Recovery Copy picker unreachable before P302 stop");
+      throw new Error("Recovery Copy picker unreachable before P305 stop");
     },
   };
 
@@ -425,21 +427,39 @@ function createHarness(options = {}) {
       },
     }),
     recoveryService: Object.freeze({
-      async initialiseRecovery() {
+      async initialiseRecovery(input) {
         counters.recovery += 1;
-        throw new Error("recovery initialisation unreachable before P302 stop");
+        recoveryCalls.push(plain(input));
+        options.onInitialiseRecovery?.({
+          input,
+          call: counters.recovery,
+          setOwnerKind: (value) => { ownerKind = value; },
+        });
+        let next = recoveryResponses.length > 0
+          ? recoveryResponses.shift()
+          : {
+            status: "committed",
+            keySetVersion: input.expectedKeySetVersion + 1,
+            recoveryVersion: 1,
+            recoveryCopyRequired: true,
+            accountLocator: `recovery-locator-p305-${counters.recovery}`,
+          };
+        if (typeof next === "function") next = await next(input, counters.recovery);
+        if (next === "throw") throw new Error("synthetic recovery initialisation unavailable");
+        if (next instanceof Error) throw next;
+        return Object.freeze(next);
       },
       async beginRecovery() {
         counters.recovery += 1;
-        throw new Error("recovery begin unreachable before P302 stop");
+        throw new Error("recovery begin unreachable before P305 stop");
       },
       async finishRecovery() {
         counters.recovery += 1;
-        throw new Error("recovery finish unreachable before P302 stop");
+        throw new Error("recovery finish unreachable before P305 stop");
       },
       async rotateRecovery() {
         counters.recovery += 1;
-        throw new Error("recovery rotation unreachable before P302 stop");
+        throw new Error("recovery rotation unreachable before P305 stop");
       },
     }),
     ...(options.omitDiscovery === true ? {} : { discoveryService }),
@@ -470,12 +490,14 @@ function createHarness(options = {}) {
     authenticationInputs,
     contentCalls,
     envelopeCalls,
+    recoveryCalls,
     readActivation,
     canonicalDraft,
     setOwnerKind(value) { ownerKind = value; },
     pushDiscovery(value) { discoveryResponses.push(value); },
     pushContent(value) { contentResponses.push(value); },
     pushEnvelope(value) { envelopeResponses.push(value); },
+    pushRecovery(value) { recoveryResponses.push(value); },
     get derivedPrfReference() { return derivedPrfReference; },
     get privatePrfReference() { return privatePrfReference; },
   };
@@ -1328,6 +1350,31 @@ async function advanceToDeviceEnvelopeCommitted(harness, accountPath) {
   return { started: advanced.started, result, draft };
 }
 
+async function advanceToPrfTerminal(harness, accountPath, mode) {
+  const advanced = await advanceToDeviceEnvelopeCommitted(harness, accountPath);
+  assert.equal(advanced.draft.prfStatus, mode);
+  const result = await harness.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  const expectedStage = mode === "available"
+    ? "prf-envelope-committed"
+    : "prf-envelope-skipped";
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.stage, expectedStage);
+  const draft = await harness.canonicalDraft(advanced.started.activationId);
+  assert.equal(draft.stage, expectedStage);
+  assert.equal(draft.keySetVersion, mode === "available" ? 2 : 1);
+  assert.equal(draft.recoveryVersion, 0);
+  assert.equal(draft.accountLocator, null);
+  return { started: advanced.started, result, draft };
+}
+
+function assertNoPostRecovery(harness) {
+  assert.equal(harness.counters.recoveryPackage, 0);
+  assert.equal(harness.counters.picker, 0);
+  assert.equal(harness.counters.adoption, 0);
+}
+
 test("P304 AVAILABLE uses P295 for both account paths, exact staged envelope and one-stage hard stop", async () => {
   for (const accountPath of ["new-account", "existing-unbound"]) {
     const h = createHarness({
@@ -1669,46 +1716,308 @@ test("P304 SKIPPED records P295 terminal with zero new authentication and zero P
   assertNoPostPrf(h);
 });
 
-test("P304 exact committed and skipped terminal replays perform zero authentication, envelope or downstream work", async () => {
-  for (const mode of ["available", "skipped"]) {
-    const first = createHarness({
-      unavailablePrf: mode === "skipped",
-      discoveryResponses: ["not-configured", "not-configured"],
-    });
-    const accountPath = mode === "skipped" ? "existing-unbound" : "new-account";
-    const advanced = await advanceToDeviceEnvelopeCommitted(first, accountPath);
-    const terminal = await first.runtime.continueOwnerlessFirstCreate({
-      activationId: advanced.started.activationId,
-    });
-    assert.equal(
-      terminal.stage,
-      mode === "available" ? "prf-envelope-committed" : "prf-envelope-skipped"
-    );
+test("P305 both account paths and both PRF outcomes converge through P296 recovery initialisation and hard-stop", async () => {
+  for (const accountPath of ["new-account", "existing-unbound"]) {
+    for (const mode of ["available", "skipped"]) {
+      const h = createHarness({
+        unavailablePrf: mode === "skipped",
+        discoveryResponses: ["not-configured", "not-configured"],
+      });
+      const advanced = await advanceToPrfTerminal(h, accountPath, mode);
+      const beforeAuthentication = h.counters.beginAuthentication;
+      const beforeRegistration = h.counters.beginRegistration;
+      const beforeEnvelope = h.counters.envelope;
+      const expectedStart = mode === "available" ? 2 : 1;
+      const expectedEnd = expectedStart + 1;
 
-    const second = createHarness({ shared: first.shared });
-    const replay = await second.runtime.continueOwnerlessFirstCreate({
-      activationId: advanced.started.activationId,
-    });
-    assert.deepEqual(plain(replay), plain(terminal));
-    assert.equal(second.counters.beginAuthentication, 0);
-    assert.equal(second.counters.finishAuthentication, 0);
-    assert.equal(second.counters.envelope, 0);
-    assert.equal(second.counters.recovery, 0);
-    assert.equal(second.counters.recoveryPackage, 0);
-    assert.equal(second.counters.picker, 0);
-    assert.equal(second.counters.adoption, 0);
+      const result = await h.runtime.continueOwnerlessFirstCreate({
+        activationId: advanced.started.activationId,
+      });
+
+      assert.deepEqual(plain(result), {
+        ok: true,
+        reason: "ownerless-recovery-initialised",
+        activationId: advanced.started.activationId,
+        accountPath,
+        syncedPocketId: advanced.draft.syncedPocketId,
+        deviceId: advanced.draft.deviceId,
+        stage: "recovery-initialised",
+        locallyDurable: true,
+        remotelyCommitted: true,
+        confirmedRemoteRevision: 1,
+        keySetVersion: expectedEnd,
+        recoveryVersion: 1,
+        recoveryCopyRequired: true,
+      });
+      assert.equal(h.counters.beginAuthentication, beforeAuthentication);
+      assert.equal(h.counters.beginRegistration, beforeRegistration);
+      assert.equal(h.counters.envelope, beforeEnvelope);
+      assert.equal(h.counters.recovery, 1);
+      assert.equal(h.recoveryCalls.length, 1);
+      assert.deepEqual(h.recoveryCalls[0], {
+        apiVersion: 1,
+        operationId: advanced.draft.ids.recoveryOperationId,
+        logicalChangeId: advanced.draft.ids.recoveryLogicalChangeId,
+        attemptKind: "new-change",
+        syncedPocketId: advanced.draft.syncedPocketId,
+        expectedKeySetVersion: expectedStart,
+        recoveryVerifier: plain(advanced.draft.recoveryVerifier),
+        recoveryEnvelope: plain(advanced.draft.recoveryEnvelope),
+      });
+
+      const terminal = await h.canonicalDraft(advanced.started.activationId);
+      assert.equal(terminal.stage, "recovery-initialised");
+      assert.equal(terminal.keySetVersion, expectedEnd);
+      assert.equal(terminal.recoveryVersion, 1);
+      assert.equal(terminal.accountLocator, "recovery-locator-p305-1");
+      assert.notEqual(terminal.accountLocator, terminal.account.accountId);
+      assert.equal(terminal.pendingOperation, null);
+      assert.equal(terminal.recoveryPackage, null);
+      assert.equal(terminal.recoveryCopyStored, false);
+      assert.equal(terminal.adopted, false);
+      assertNoPostRecovery(h);
+    }
   }
 });
 
-test("P304 admits only PRF terminal and leaves recovery, Recovery Copy, adoption and UI integration unwired", () => {
+test("P305 validates exact PRF-terminal durable state before recovery work", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToPrfTerminal(first, "new-account", "available");
+  const second = createHarness({
+    shared: first.shared,
+    readActivationTransform(found) {
+      if (found.draft?.stage !== "prf-envelope-committed") return found;
+      return Object.freeze({
+        record: Object.freeze(Object.assign({}, plain(found.record), {
+          usage: Object.freeze(Object.assign({}, plain(found.record.usage), {
+            masterKeyGeneration: 9,
+          })),
+        })),
+        draft: found.draft,
+      });
+    },
+  });
+  const result = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-activation-state-invalid");
+  assert.equal(second.counters.beginAuthentication, 0);
+  assert.equal(second.counters.recovery, 0);
+  assertNoPostRecovery(second);
+});
+
+test("P305 ambiguous recovery stays durable and explicit retry reuses exact IDs and recovery material", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    recoveryResponses: [
+      "throw",
+      (input) => ({
+        status: "committed",
+        keySetVersion: input.expectedKeySetVersion + 1,
+        recoveryVersion: 1,
+        recoveryCopyRequired: true,
+        accountLocator: "recovery-locator-p305-retry",
+      }),
+    ],
+  });
+  const advanced = await advanceToPrfTerminal(h, "new-account", "available");
+
+  const first = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(first.ok, false);
+  assert.equal(first.reason, "recovery-initialisation-failed");
+  assert.equal(first.resumable, true);
+  assert.equal(h.counters.recovery, 1);
+  let pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.stage, "prf-envelope-committed");
+  assert.equal(pending.pendingOperation, "recovery-initialisation");
+  assert.equal(pending.recoveryVersion, 0);
+
+  const second = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.stage, "recovery-initialised");
+  assert.equal(h.counters.recovery, 2);
+  assert.deepEqual(h.recoveryCalls.map((call) => ({
+    operationId: call.operationId,
+    logicalChangeId: call.logicalChangeId,
+    attemptKind: call.attemptKind,
+    expectedKeySetVersion: call.expectedKeySetVersion,
+    recoveryVerifier: call.recoveryVerifier,
+    recoveryEnvelope: call.recoveryEnvelope,
+  })), [
+    {
+      operationId: advanced.draft.ids.recoveryOperationId,
+      logicalChangeId: advanced.draft.ids.recoveryLogicalChangeId,
+      attemptKind: "new-change",
+      expectedKeySetVersion: 2,
+      recoveryVerifier: plain(advanced.draft.recoveryVerifier),
+      recoveryEnvelope: plain(advanced.draft.recoveryEnvelope),
+    },
+    {
+      operationId: advanced.draft.ids.recoveryOperationId,
+      logicalChangeId: advanced.draft.ids.recoveryLogicalChangeId,
+      attemptKind: "idempotent-retry",
+      expectedKeySetVersion: 2,
+      recoveryVerifier: plain(advanced.draft.recoveryVerifier),
+      recoveryEnvelope: plain(advanced.draft.recoveryEnvelope),
+    },
+  ]);
+  pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.pendingOperation, null);
+  assertNoPostRecovery(h);
+});
+
+test("P305 recovery conflict remains durable and never republishes", async () => {
+  const h = createHarness({
+    unavailablePrf: true,
+    discoveryResponses: ["not-configured", "not-configured"],
+    recoveryResponses: [{
+      conflict: true,
+      actualKeySetVersion: 8,
+      recoveryVersion: 1,
+    }],
+  });
+  const advanced = await advanceToPrfTerminal(h, "existing-unbound", "skipped");
+
+  const first = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(first.ok, false);
+  assert.equal(first.reason, "recovery-initialisation-failed");
+  assert.equal(first.conflict, true);
+  assert.equal(first.resumable, false);
+  assert.equal(h.counters.recovery, 1);
+  let conflicted = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(conflicted.stage, "prf-envelope-skipped");
+  assert.equal(conflicted.pendingOperation, "recovery-conflict");
+
+  const second = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, "recovery-initialisation-failed");
+  assert.equal(second.conflict, true);
+  assert.equal(second.resumable, false);
+  assert.equal(h.counters.recovery, 1);
+  conflicted = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(conflicted.pendingOperation, "recovery-conflict");
+  assertNoPostRecovery(h);
+});
+
+test("P305 malformed recovery success cannot falsely advance", async () => {
+  for (const mode of ["wrong-version", "equal-account-locator"]) {
+    let equalAccountId = null;
+    const h = createHarness({
+      discoveryResponses: ["not-configured", "not-configured"],
+      recoveryResponses: [
+        (input) => ({
+          status: "committed",
+          keySetVersion: mode === "wrong-version"
+            ? input.expectedKeySetVersion + 2
+            : input.expectedKeySetVersion + 1,
+          recoveryVersion: 1,
+          recoveryCopyRequired: true,
+          accountLocator: mode === "equal-account-locator"
+            ? equalAccountId
+            : "recovery-locator-p305-malformed",
+        }),
+      ],
+    });
+    const advanced = await advanceToPrfTerminal(h, "new-account", "available");
+    equalAccountId = advanced.draft.account.accountId;
+
+    const result = await h.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, "ownerless-activation-state-invalid");
+    assert.equal(h.counters.recovery, 1);
+    const pending = await h.canonicalDraft(advanced.started.activationId);
+    assert.equal(pending.stage, "prf-envelope-committed");
+    assert.equal(pending.recoveryVersion, 0);
+    assert.equal(pending.accountLocator, null);
+    assert.equal(pending.pendingOperation, "recovery-initialisation");
+    assertNoPostRecovery(h);
+  }
+});
+
+test("P305 owner change across recovery await returns target-stale without false advancement", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    onInitialiseRecovery({ setOwnerKind }) {
+      setOwnerKind("json");
+    },
+  });
+  const advanced = await advanceToPrfTerminal(h, "new-account", "available");
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-target-stale");
+  assert.equal(h.counters.recovery, 1);
+  const pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.stage, "prf-envelope-committed");
+  assert.equal(pending.recoveryVersion, 0);
+  assert.equal(pending.accountLocator, null);
+  assert.equal(pending.pendingOperation, "recovery-initialisation");
+  assertNoPostRecovery(h);
+});
+
+test("P305 exact recovery-initialised replay performs zero auth, remote recovery, Recovery Copy or adoption work", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToPrfTerminal(first, "new-account", "available");
+  const terminal = await first.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(terminal.stage, "recovery-initialised");
+
+  const second = createHarness({ shared: first.shared });
+  const replay = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.deepEqual(plain(replay), plain(terminal));
+  assert.equal(second.counters.beginAuthentication, 0);
+  assert.equal(second.counters.finishAuthentication, 0);
+  assert.equal(second.counters.envelope, 0);
+  assert.equal(second.counters.recovery, 0);
+  assertNoPostRecovery(second);
+});
+
+test("P305 uses P296 as sole recovery owner and leaves Recovery Copy, adoption and UI integration unwired", () => {
   const runtime = source("js/pocket-sync-browser-runtime.js");
-  assert.match(runtime, /exactPrfTerminalState/);
-  assert.match(runtime, /continueOwnerlessPrfTerminal/);
-  assert.match(runtime, /ownerless-prf-envelope-committed/);
-  assert.match(runtime, /ownerless-prf-envelope-skipped/);
+  assert.match(runtime, /exactRecoveryInputState/);
+  assert.match(runtime, /continueOwnerlessRecoveryInitialisation/);
+  assert.match(runtime, /exactRecoveryInitialisedState/);
+  assert.match(runtime, /ownerless-recovery-initialised/);
+
+  const start = runtime.indexOf("async function continueOwnerlessRecoveryInitialisation");
+  const end = runtime.indexOf("async function continueOwnerlessDeviceStaged", start);
+  const section = runtime.slice(start, end);
+  assert.match(section, /orchestrator\.resume/);
+  assert.doesNotMatch(
+    section,
+    /buildRecoveryPackage|prepareRecoveryCopyDestination|writeRecoveryCopy|adoptSyncedOwner/
+  );
+
+  const activation = source("js/pocket-sync-activation.js");
+  assert.equal((activation.match(/async function initialiseRecovery\s*\(/g) || []).length, 1);
+  assert.match(activation, /recoveryOperationId/);
+  assert.match(activation, /recoveryLogicalChangeId/);
+  assert.match(activation, /expectedKeySetVersion:\s*execution\.draft\.keySetVersion/);
+
   assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
 });
+
