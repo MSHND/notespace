@@ -1426,7 +1426,7 @@
       }
       if (exactOwnerlessPrfTerminal(resumed, draft)) {
         const terminal = await readExactOwnerlessAttempt(draft.activationId);
-        return terminal && exactPrfTerminalState(terminal)
+        return terminal && exactRecoveryInputState(terminal)
           ? resumed
           : ownerlessContinuationFailure(
             "ownerless-activation-state-invalid", draft.activationId,
