@@ -689,9 +689,9 @@ test("P301 source shape composes accepted owners and does not create a second ow
   assert.match(runtime, /orchestrator\.activate\(ownerlessActivateDependencies\(\)/);
   assert.match(runtime, /orchestrator\.resume\(/);
   assert.match(runtime, /activationMode:\s*"ownerless-first-create"/);
-  assert.match(runtime, /if \\(input\\.accountPath === "existing-unbound"\\)/);
-  assert.match(runtime, /stageOwnerlessStart\\(\\s*"existing-unbound"/);
-  assert.match(runtime, /stageOwnerlessStart\\(\\s*"new-account"/);
+  assert.match(runtime, /if \(input\.accountPath === "existing-unbound"\)/);
+  assert.match(runtime, /stageOwnerlessStart\(\s*"existing-unbound"/);
+  assert.match(runtime, /stageOwnerlessStart\(\s*"new-account"/);
   assert.match(runtime, /ownerBridge\.adoptSyncedOwner/);
   assert.doesNotMatch(runtime, /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.doesNotMatch(source("js/pocket-sync-activation.js"), /PocketSyncFirstCreate/);
