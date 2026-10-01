@@ -405,6 +405,7 @@
     requireMethods(boundary, ["installSyncedOwnerForSave"], "foundation-unavailable");
 
     const now = typeof environment.now === "function" ? environment.now : Date.now;
+    let ownerlessAuthenticatedWitness = null;
 
     function freshRuntimeIdentifier() {
       const bytes = browserRandom(environment)(32);
@@ -709,6 +710,41 @@
         && value.length <= 160 && value === value.trim();
     }
 
+    function seedOwnerlessAuthenticatedWitness(activationId, accountId) {
+      if (!validRuntimeIdentifier(activationId) || !validRuntimeIdentifier(accountId)) {
+        throw new Error("ownerless-authenticated-witness-invalid");
+      }
+      ownerlessAuthenticatedWitness = frozen({ activationId, accountId });
+      return true;
+    }
+
+    function hasOwnerlessAuthenticatedWitness(activationId, accountId) {
+      return !!ownerlessAuthenticatedWitness
+        && ownerlessAuthenticatedWitness.activationId === activationId
+        && ownerlessAuthenticatedWitness.accountId === accountId;
+    }
+
+    function ownerlessContractConfig() {
+      return { securityContract: security, crypto };
+    }
+
+    async function readExactOwnerlessAttempt(activationId) {
+      let found;
+      let draft;
+      try {
+        await deviceStore.open();
+        found = await deviceStore.readActivation(activationId);
+        if (!found || !found.record || !found.draft) return null;
+        draft = ownerlessDraftApi.validate(found.draft, ownerlessContractConfig());
+      } catch (_error) {
+        return null;
+      }
+      if (draft.activationId !== activationId
+          || draft.schemaVersion !== 2
+          || draft.activationMode !== "ownerless-first-create") return null;
+      return { record: found.record, draft };
+    }
+
     function exactOwnerlessStaged(result, accountPath, syncedPocketId, deviceId) {
       return exactKeys(result, [
         "ok", "reason", "activationId", "accountPath", "syncedPocketId",
@@ -879,9 +915,15 @@
             ownerlessOutcome = resumed;
             if (!exactOwnerlessAccountReady(
               resumed, "existing-unbound", syncedPocketId, deviceId
-            ) || bridgeCalls !== 1) {
+            ) || resumed.activationId !== staged.activationId || bridgeCalls !== 1) {
               throw new Error("ownerless-account-ready-failed");
             }
+            const pinned = await readExactOwnerlessAttempt(staged.activationId);
+            if (!pinned || pinned.draft.stage !== "account-ready"
+                || pinned.draft.account?.accountId !== ready.accountId) {
+              throw new Error("ownerless-account-ready-failed");
+            }
+            seedOwnerlessAuthenticatedWitness(staged.activationId, ready.accountId);
           });
         } catch (_error) {
           return ownerlessOutcome || ownerlessStartFailure("first-create-authentication-failed");
@@ -916,9 +958,21 @@
           throw new Error("existing-account-ready-bridge-forbidden");
         }
       );
-      if (!exactOwnerlessAccountReady(resumed, "new-account", syncedPocketId, deviceId)) {
+      if (!exactOwnerlessAccountReady(resumed, "new-account", syncedPocketId, deviceId)
+          || resumed.activationId !== staged.activationId) {
         return resumed;
       }
+      const pinnedNewAccount = await readExactOwnerlessAttempt(staged.activationId);
+      if (!pinnedNewAccount || pinnedNewAccount.draft.stage !== "account-ready"
+          || !validRuntimeIdentifier(pinnedNewAccount.draft.account?.accountId)) {
+        return ownerlessStartFailure("ownerless-account-ready-failed", {
+          activationId: staged.activationId,
+        });
+      }
+      seedOwnerlessAuthenticatedWitness(
+        staged.activationId,
+        pinnedNewAccount.draft.account.accountId
+      );
 
       if (!ownerlessTargetEligible()) {
         return ownerlessStartFailure("ownerless-target-stale", {
@@ -955,6 +1009,412 @@
         });
       }
       return resumed;
+    }
+
+
+    function ownerlessContinuationFailure(reason, activationId, extra = null) {
+      return ownerlessStartFailure(reason, Object.assign({
+        activationId,
+        locallyDurable: true,
+      }, extra || {}));
+    }
+
+    function exactContentCommittedState(attempt) {
+      const draft = attempt?.draft;
+      const record = attempt?.record;
+      return !!draft && !!record
+        && draft.stage === "content-committed"
+        && draft.confirmedRemoteRevision === 1
+        && draft.keySetVersion === 0
+        && draft.recoveryVersion === 0
+        && draft.accountLocator === null
+        && draft.registrationContinuation === null
+        && draft.pendingOperation === null
+        && draft.recoveryCopyStored === false
+        && draft.adopted === false
+        && draft.account !== null
+        && record.remote?.confirmedRevision === 1
+        && record.remote?.pending === null
+        && record.remote?.conflict === null;
+    }
+
+    function contentCommittedReplay(draft) {
+      return frozen({
+        ok: true,
+        reason: "ownerless-content-committed",
+        activationId: draft.activationId,
+        accountPath: draft.accountPath,
+        syncedPocketId: draft.syncedPocketId,
+        deviceId: draft.deviceId,
+        stage: "content-committed",
+        locallyDurable: true,
+        remotelyCommitted: true,
+        confirmedRemoteRevision: 1,
+      });
+    }
+
+    function exactOwnerlessContentCommitted(result, draft) {
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable", "remotelyCommitted",
+        "confirmedRemoteRevision",
+      ])
+        && result.ok === true
+        && result.reason === "ownerless-content-committed"
+        && result.activationId === draft.activationId
+        && result.accountPath === draft.accountPath
+        && result.syncedPocketId === draft.syncedPocketId
+        && result.deviceId === draft.deviceId
+        && result.stage === "content-committed"
+        && result.locallyDurable === true
+        && result.remotelyCommitted === true
+        && result.confirmedRemoteRevision === 1;
+    }
+
+    async function ownerlessBindingPreflight(draft) {
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      let operationId;
+      let binding;
+      try {
+        operationId = freshRuntimeIdentifier();
+        binding = await config.discoveryService.readSyncedPocket({
+          apiVersion: 1,
+          operationId,
+        });
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-binding-attention",
+          draft.activationId,
+          { resumable: true }
+        );
+      }
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      if (!exactKeys(binding, [
+        "apiVersion", "ok", "operationId", "status", "syncedPocketId",
+      ])
+          || binding.apiVersion !== 1
+          || binding.ok !== true
+          || binding.operationId !== operationId
+          || !["ready", "not-configured"].includes(binding.status)) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-binding-attention",
+          draft.activationId,
+          { resumable: true }
+        );
+      }
+      if (binding.status === "not-configured") {
+        return binding.syncedPocketId === null
+          ? frozen({ ok: true })
+          : ownerlessContinuationFailure(
+            "ownerless-account-binding-attention",
+            draft.activationId,
+            { resumable: true }
+          );
+      }
+      if (!validRuntimeIdentifier(binding.syncedPocketId)) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-binding-attention",
+          draft.activationId,
+          { resumable: true }
+        );
+      }
+      if (binding.syncedPocketId !== draft.syncedPocketId) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-binding-attention",
+          draft.activationId,
+          { resumable: false }
+        );
+      }
+      if (draft.pendingOperation !== "content-upload") {
+        return ownerlessContinuationFailure(
+          "ownerless-account-binding-attention",
+          draft.activationId,
+          { resumable: false }
+        );
+      }
+      return frozen({ ok: true });
+    }
+
+    async function continueOwnerlessContentWithCurrentAccount(attempt) {
+      const draft = attempt.draft;
+      const binding = await ownerlessBindingPreflight(draft);
+      if (!binding?.ok) return binding;
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessResumeDependencies(async () => {
+            throw new Error("existing-account-ready-bridge-forbidden");
+          }),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: draft.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId
+        );
+      }
+      if (exactOwnerlessContentCommitted(resumed, draft)) return resumed;
+      if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
+      return ownerlessContinuationFailure(
+        "ownerless-activation-state-invalid", draft.activationId
+      );
+    }
+
+    async function continueOwnerlessDeviceStaged(attempt) {
+      const draft = attempt.draft;
+      if (draft.accountPath === "existing-unbound") {
+        let conductor;
+        try {
+          conductor = firstCreateApi.createConductor({
+            accountClient,
+            discoveryService: config.discoveryService,
+            createOperationId: freshRuntimeIdentifier,
+          });
+        } catch (_error) {
+          return ownerlessContinuationFailure(
+            "ownerless-foundation-unavailable", draft.activationId
+          );
+        }
+
+        let ownerlessOutcome = null;
+        let privateReadyEntered = false;
+        let preflight;
+        try {
+          preflight = await conductor.prepareExistingAccount(async (ready) => {
+            if (privateReadyEntered) throw new Error("ownerless-private-ready-reentered");
+            privateReadyEntered = true;
+            if (!ownerlessTargetEligible()) {
+              ownerlessOutcome = ownerlessContinuationFailure(
+                "ownerless-target-stale", draft.activationId
+              );
+              throw new Error("ownerless-target-stale");
+            }
+            let bridgeCalls = 0;
+            const resumed = await orchestrator.resume(
+              ownerlessResumeDependencies(async (consumer) => {
+                bridgeCalls += 1;
+                if (bridgeCalls !== 1 || typeof consumer !== "function") {
+                  throw new Error("ownerless-private-ready-bridge-invalid");
+                }
+                return consumer(ready);
+              }),
+              {
+                activationMode: "ownerless-first-create",
+                activationId: draft.activationId,
+              }
+            );
+            ownerlessOutcome = resumed;
+            if (!exactOwnerlessAccountReady(
+              resumed, draft.accountPath, draft.syncedPocketId, draft.deviceId
+            ) || resumed.activationId !== draft.activationId || bridgeCalls !== 1) {
+              throw new Error("ownerless-account-ready-failed");
+            }
+            const pinned = await readExactOwnerlessAttempt(draft.activationId);
+            if (!pinned || pinned.draft.stage !== "account-ready"
+                || pinned.draft.account?.accountId !== ready.accountId) {
+              throw new Error("ownerless-account-ready-failed");
+            }
+            seedOwnerlessAuthenticatedWitness(draft.activationId, ready.accountId);
+          });
+        } catch (_error) {
+          return ownerlessOutcome || ownerlessContinuationFailure(
+            "first-create-authentication-failed", draft.activationId
+          );
+        }
+
+        if (preflight?.ok === true && preflight.status === "existing-pocket") {
+          return ownerlessContinuationFailure(
+            "ownerless-existing-account-bound-attention",
+            draft.activationId,
+            { resumable: false }
+          );
+        }
+        if (ownerlessOutcome !== null) return ownerlessOutcome;
+        if (preflight?.ok === false && typeof preflight.reason === "string") {
+          return ownerlessContinuationFailure(preflight.reason, draft.activationId);
+        }
+        return ownerlessContinuationFailure(
+          "first-create-authentication-failed", draft.activationId
+        );
+      }
+
+      if (draft.accountPath !== "new-account") {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId
+        );
+      }
+
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessResumeDependencies(async () => {
+            throw new Error("existing-account-ready-bridge-forbidden");
+          }),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: draft.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-ready-failed", draft.activationId
+        );
+      }
+      if (!exactOwnerlessAccountReady(
+        resumed, draft.accountPath, draft.syncedPocketId, draft.deviceId
+      ) || resumed.activationId !== draft.activationId) {
+        return resumed && resumed.ok === false
+          ? resumed
+          : ownerlessContinuationFailure(
+            "ownerless-account-ready-failed", draft.activationId
+          );
+      }
+
+      const pinned = await readExactOwnerlessAttempt(draft.activationId);
+      if (!pinned || pinned.draft.stage !== "account-ready"
+          || !validRuntimeIdentifier(pinned.draft.account?.accountId)) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-ready-failed", draft.activationId
+        );
+      }
+      seedOwnerlessAuthenticatedWitness(
+        draft.activationId,
+        pinned.draft.account.accountId
+      );
+
+      const binding = await ownerlessBindingPreflight(pinned.draft);
+      if (!binding?.ok) return binding;
+      return resumed;
+    }
+
+    async function continueOwnerlessFirstCreate(input) {
+      if (!exactKeys(input, ["activationId"])
+          || !validRuntimeIdentifier(input.activationId)) {
+        return ownerlessStartFailure(
+          "invalid-ownerless-first-create-continuation-input"
+        );
+      }
+
+      try {
+        requireMethods(firstCreateApi, ["createConductor"], "ownerless-foundation-unavailable");
+        requireMethods(ownerlessDraftApi, OWNERLESS_DRAFT_METHODS, "ownerless-foundation-unavailable");
+        requireMethods(deviceStore, ["open", "readActivation"], "ownerless-foundation-unavailable");
+        requireMethods(config.discoveryService, ["readSyncedPocket"], "ownerless-foundation-unavailable");
+        requireMethods(accountClient, ["authenticatePasskey"], "ownerless-foundation-unavailable");
+        requireMethods(orchestrator, ["resume"], "ownerless-foundation-unavailable");
+      } catch (_error) {
+        return ownerlessStartFailure("ownerless-foundation-unavailable");
+      }
+
+      if (!ownerlessTargetEligible()) {
+        return ownerlessStartFailure("ownerless-target-stale");
+      }
+
+      const attempt = await readExactOwnerlessAttempt(input.activationId);
+      if (!attempt) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", input.activationId,
+          { resumable: false }
+        );
+      }
+
+      const draft = attempt.draft;
+      if (draft.stage === "content-committed") {
+        return exactContentCommittedState(attempt)
+          ? contentCommittedReplay(draft)
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
+
+      if (draft.stage === "device-staged") {
+        return continueOwnerlessDeviceStaged(attempt);
+      }
+
+      if (draft.stage !== "account-ready") {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-stage-not-admitted", draft.activationId,
+          { resumable: false }
+        );
+      }
+
+      if (!draft.account || !validRuntimeIdentifier(draft.account.accountId)
+          || draft.confirmedRemoteRevision !== 0
+          || draft.keySetVersion !== 0
+          || draft.recoveryVersion !== 0
+          || draft.accountLocator !== null
+          || ![null, "content-upload", "content-conflict"].includes(draft.pendingOperation)
+          || draft.registrationContinuation !== null
+          || draft.recoveryCopyStored !== false
+          || draft.adopted !== false) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId,
+          { resumable: false }
+        );
+      }
+
+      const pinnedAccountId = draft.account.accountId;
+      if (hasOwnerlessAuthenticatedWitness(draft.activationId, pinnedAccountId)) {
+        return continueOwnerlessContentWithCurrentAccount(attempt);
+      }
+
+      let continuationOutcome = null;
+      try {
+        await accountClient.authenticatePasskey({
+          apiVersion: 1,
+          operationId: freshRuntimeIdentifier(),
+          accountLocator: pinnedAccountId,
+        }, async (authenticated) => {
+          if (!authenticated || authenticated.ok !== true
+              || authenticated.accountAuthenticated !== true
+              || authenticated.contentUnlocked !== false
+              || authenticated.bootstrap === true
+              || authenticated.accountId !== pinnedAccountId) {
+            continuationOutcome = ownerlessContinuationFailure(
+              "ownerless-account-mismatch-attention",
+              draft.activationId,
+              { resumable: false }
+            );
+            return;
+          }
+          if (!ownerlessTargetEligible()) {
+            continuationOutcome = ownerlessContinuationFailure(
+              "ownerless-target-stale", draft.activationId
+            );
+            return;
+          }
+          seedOwnerlessAuthenticatedWitness(draft.activationId, pinnedAccountId);
+          continuationOutcome = await continueOwnerlessContentWithCurrentAccount(attempt);
+        });
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-account-authentication-failed",
+          draft.activationId,
+          { resumable: true }
+        );
+      }
+
+      return continuationOutcome || ownerlessContinuationFailure(
+        "ownerless-account-authentication-failed",
+        draft.activationId,
+        { resumable: true }
+      );
     }
 
     async function activate() {
@@ -1117,7 +1577,7 @@
 
     return frozen({ activate, resume, openExisting, recoverExisting, resumeRecovery,
       restartLegacyRecovery, findRecoveryAttempt, admitAcceptedDeleteRestore,
-      startOwnerlessFirstCreate });
+      startOwnerlessFirstCreate, continueOwnerlessFirstCreate });
   }
 
   global.PocketSyncBrowserRuntime = frozen({ createRuntime });
