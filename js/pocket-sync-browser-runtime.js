@@ -1029,10 +1029,10 @@
         && draft.recoveryVersion === 0
         && draft.accountLocator === null
         && draft.registrationContinuation === null
-        && draft.pendingOperation === null
+        && [null, "device-envelope", "device-envelope-conflict"].includes(draft.pendingOperation)
         && draft.recoveryCopyStored === false
         && draft.adopted === false
-        && draft.account !== null
+        && validRuntimeIdentifier(draft.account?.accountId)
         && record.remote?.confirmedRevision === 1
         && record.remote?.pending === null
         && record.remote?.conflict === null;
@@ -1069,6 +1069,62 @@
         && result.locallyDurable === true
         && result.remotelyCommitted === true
         && result.confirmedRemoteRevision === 1;
+    }
+
+    function exactDeviceEnvelopeCommittedState(attempt) {
+      const draft = attempt?.draft;
+      const record = attempt?.record;
+      return !!draft && !!record
+        && draft.stage === "device-envelope-committed"
+        && draft.confirmedRemoteRevision === 1
+        && draft.keySetVersion === 1
+        && draft.recoveryVersion === 0
+        && draft.accountLocator === null
+        && draft.registrationContinuation === null
+        && draft.pendingOperation === null
+        && draft.recoveryCopyStored === false
+        && draft.adopted === false
+        && validRuntimeIdentifier(draft.account?.accountId)
+        && record.remote?.confirmedRevision === 1
+        && record.remote?.pending === null
+        && record.remote?.conflict === null
+        && record.usage?.masterKeyGeneration === 1
+        && record.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
+    }
+
+    function deviceEnvelopeCommittedReplay(draft) {
+      return frozen({
+        ok: true,
+        reason: "ownerless-device-envelope-committed",
+        activationId: draft.activationId,
+        accountPath: draft.accountPath,
+        syncedPocketId: draft.syncedPocketId,
+        deviceId: draft.deviceId,
+        stage: "device-envelope-committed",
+        locallyDurable: true,
+        remotelyCommitted: true,
+        confirmedRemoteRevision: 1,
+        keySetVersion: 1,
+      });
+    }
+
+    function exactOwnerlessDeviceEnvelopeCommitted(result, draft) {
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable", "remotelyCommitted",
+        "confirmedRemoteRevision", "keySetVersion",
+      ])
+        && result.ok === true
+        && result.reason === "ownerless-device-envelope-committed"
+        && result.activationId === draft.activationId
+        && result.accountPath === draft.accountPath
+        && result.syncedPocketId === draft.syncedPocketId
+        && result.deviceId === draft.deviceId
+        && result.stage === "device-envelope-committed"
+        && result.locallyDurable === true
+        && result.remotelyCommitted === true
+        && result.confirmedRemoteRevision === 1
+        && result.keySetVersion === 1;
     }
 
     async function ownerlessBindingPreflight(draft) {
@@ -1169,6 +1225,44 @@
         );
       }
       if (exactOwnerlessContentCommitted(resumed, draft)) return resumed;
+      if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
+      return ownerlessContinuationFailure(
+        "ownerless-activation-state-invalid", draft.activationId
+      );
+    }
+
+    async function continueOwnerlessDeviceEnvelopeWithCurrentAccount(attempt) {
+      const draft = attempt.draft;
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessResumeDependencies(async () => {
+            throw new Error("existing-account-ready-bridge-forbidden");
+          }),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: draft.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId
+        );
+      }
+      if (exactOwnerlessDeviceEnvelopeCommitted(resumed, draft)) {
+        const committed = await readExactOwnerlessAttempt(draft.activationId);
+        return committed && exactDeviceEnvelopeCommittedState(committed)
+          ? resumed
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
       if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
       return ownerlessContinuationFailure(
         "ownerless-activation-state-invalid", draft.activationId
@@ -1334,13 +1428,68 @@
       }
 
       const draft = attempt.draft;
-      if (draft.stage === "content-committed") {
-        return exactContentCommittedState(attempt)
-          ? contentCommittedReplay(draft)
+      if (draft.stage === "device-envelope-committed") {
+        return exactDeviceEnvelopeCommittedState(attempt)
+          ? deviceEnvelopeCommittedReplay(draft)
           : ownerlessContinuationFailure(
             "ownerless-activation-state-invalid", draft.activationId,
             { resumable: false }
           );
+      }
+
+      if (draft.stage === "content-committed") {
+        if (!exactContentCommittedState(attempt)) {
+          return ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+        }
+        const pinnedAccountId = draft.account.accountId;
+        if (hasOwnerlessAuthenticatedWitness(draft.activationId, pinnedAccountId)) {
+          return continueOwnerlessDeviceEnvelopeWithCurrentAccount(attempt);
+        }
+
+        let continuationOutcome = null;
+        try {
+          await accountClient.authenticatePasskey({
+            apiVersion: 1,
+            operationId: freshRuntimeIdentifier(),
+            accountLocator: pinnedAccountId,
+          }, async (authenticated) => {
+            if (!authenticated || authenticated.ok !== true
+                || authenticated.accountAuthenticated !== true
+                || authenticated.contentUnlocked !== false
+                || authenticated.bootstrap === true
+                || authenticated.accountId !== pinnedAccountId) {
+              continuationOutcome = ownerlessContinuationFailure(
+                "ownerless-account-mismatch-attention",
+                draft.activationId,
+                { resumable: false }
+              );
+              return;
+            }
+            if (!ownerlessTargetEligible()) {
+              continuationOutcome = ownerlessContinuationFailure(
+                "ownerless-target-stale", draft.activationId
+              );
+              return;
+            }
+            seedOwnerlessAuthenticatedWitness(draft.activationId, pinnedAccountId);
+            continuationOutcome = await continueOwnerlessDeviceEnvelopeWithCurrentAccount(attempt);
+          });
+        } catch (_error) {
+          return ownerlessContinuationFailure(
+            "ownerless-account-authentication-failed",
+            draft.activationId,
+            { resumable: true }
+          );
+        }
+
+        return continuationOutcome || ownerlessContinuationFailure(
+          "ownerless-account-authentication-failed",
+          draft.activationId,
+          { resumable: true }
+        );
       }
 
       if (draft.stage === "device-staged") {
