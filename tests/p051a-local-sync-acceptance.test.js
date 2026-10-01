@@ -329,7 +329,10 @@ test("P051a verifyRoundTrip safely rejects every unavailable or mismatched local
         return { async activate() {
           state.activated = true;
           return { ok: true, owner: { ownerKind: "synced", syncedPocketId: "opaque-pocket" } };
-        }, async resume() { return { ok: false }; } };
+        },
+        async resume() { return { ok: false }; },
+        async startOwnerlessFirstCreate() { return { ok: false }; },
+        async continueOwnerlessFirstCreate() { return { ok: false }; } };
       },
     },
   };
