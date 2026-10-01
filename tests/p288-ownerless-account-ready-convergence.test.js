@@ -685,14 +685,15 @@ test("P288 real P278 account client plus P280 conductor keeps raw existing-accou
   await assertCanonicalReady(harness, staged.activationId, "existing-unbound", "available");
 });
 
-test("P288 account-ready convergence performs zero downstream remote, recovery, copy or adoption work and remains runtime-dormant", () => {
+test("P288 account-ready convergence performs zero downstream remote, recovery, copy or adoption work while P301 owns runtime entry", () => {
   const activation = source(ACTIVATION);
   assert.doesNotMatch(activation, /readSyncedPocket|PocketSyncFirstCreate/);
   const index = source("index.html");
   assert.equal((index.match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.equal((index.match(/pocket-sync-first-create\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js|pocket-sync-first-create\.js/);
+  assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /ownerless-first-create|PocketSyncOwnerlessActivationDraft|PocketSyncFirstCreate|findOwnerlessActivation/);
+    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
   assert.doesNotMatch(activation, /function\s+(?:resumeV2|accountReady)\s*\(/);
 });
