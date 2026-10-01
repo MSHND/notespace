@@ -1275,35 +1275,433 @@ test("P303 owner change across envelope await returns target-stale without false
   assertNoPostEnvelope(h);
 });
 
-test("P303 exact device-envelope-committed replay performs zero authentication, envelope or downstream work", async () => {
-  const first = createHarness({
+test("P303 device-envelope continuation still hard-stops at device-envelope-committed within that invocation", async () => {
+  const h = createHarness({
     discoveryResponses: ["not-configured", "not-configured"],
   });
-  const { started } = await advanceNewAccountToContentCommitted(first);
-  const committed = await first.runtime.continueOwnerlessFirstCreate({
+  const { started } = await advanceNewAccountToContentCommitted(h);
+  const committed = await h.runtime.continueOwnerlessFirstCreate({
     activationId: started.activationId,
   });
   assert.equal(committed.stage, "device-envelope-committed");
-
-  const second = createHarness({ shared: first.shared });
-  const replay = await second.runtime.continueOwnerlessFirstCreate({
-    activationId: started.activationId,
-  });
-  assert.deepEqual(plain(replay), plain(committed));
-  assert.equal(second.counters.beginAuthentication, 0);
-  assert.equal(second.counters.finishAuthentication, 0);
-  assert.equal(second.counters.envelope, 0);
-  assert.equal(second.counters.recovery, 0);
-  assert.equal(second.counters.recoveryPackage, 0);
-  assert.equal(second.counters.picker, 0);
-  assert.equal(second.counters.adoption, 0);
+  assert.equal(h.envelopeCalls.length, 1);
+  assert.equal(h.envelopeCalls[0].envelope.envelopeKind, "device");
+  assert.equal(h.counters.recovery, 0);
+  assert.equal(h.counters.recoveryPackage, 0);
+  assert.equal(h.counters.picker, 0);
+  assert.equal(h.counters.adoption, 0);
 });
 
-test("P303 keeps PRF-envelope, recovery, Recovery Copy, adoption and UI integration dormant", () => {
+test("P303 keeps its device-envelope owner boundary and UI integration remains dormant", () => {
   const runtime = source("js/pocket-sync-browser-runtime.js");
   assert.match(runtime, /exactDeviceEnvelopeCommittedState/);
   assert.match(runtime, /continueOwnerlessDeviceEnvelopeWithCurrentAccount/);
   assert.match(runtime, /ownerless-device-envelope-committed/);
+  assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("index.html"), /continueOwnerlessFirstCreate/);
+  assert.doesNotMatch(source("sw.js"), /continueOwnerlessFirstCreate/);
+});
+
+
+function assertNoPostPrf(harness) {
+  assert.equal(harness.counters.recovery, 0);
+  assert.equal(harness.counters.recoveryPackage, 0);
+  assert.equal(harness.counters.picker, 0);
+  assert.equal(harness.counters.adoption, 0);
+}
+
+async function advanceToDeviceEnvelopeCommitted(harness, accountPath) {
+  const advanced = accountPath === "new-account"
+    ? await advanceNewAccountToContentCommitted(harness)
+    : await advanceExistingAccountToContentCommitted(harness);
+  const result = await harness.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.stage, "device-envelope-committed");
+  const draft = await harness.canonicalDraft(advanced.started.activationId);
+  assert.equal(draft.stage, "device-envelope-committed");
+  assert.equal(draft.keySetVersion, 1);
+  assert.equal(draft.recoveryVersion, 0);
+  return { started: advanced.started, result, draft };
+}
+
+test("P304 AVAILABLE uses P295 for both account paths, exact staged envelope and one-stage hard stop", async () => {
+  for (const accountPath of ["new-account", "existing-unbound"]) {
+    const h = createHarness({
+      discoveryResponses: ["not-configured", "not-configured"],
+    });
+    const advanced = await advanceToDeviceEnvelopeCommitted(h, accountPath);
+    assert.equal(advanced.draft.prfStatus, "available");
+    assert.notEqual(advanced.draft.prfEnvelope, null);
+    const stagedEnvelope = plain(advanced.draft.prfEnvelope);
+    const beforeAuthentication = h.counters.beginAuthentication;
+    const beforeRegistration = h.counters.beginRegistration;
+    const beforeEnvelope = h.envelopeCalls.length;
+
+    const result = await h.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+
+    assert.deepEqual(plain(result), {
+      ok: true,
+      reason: "ownerless-prf-envelope-committed",
+      activationId: advanced.started.activationId,
+      accountPath,
+      syncedPocketId: advanced.draft.syncedPocketId,
+      deviceId: advanced.draft.deviceId,
+      stage: "prf-envelope-committed",
+      locallyDurable: true,
+      remotelyCommitted: true,
+      confirmedRemoteRevision: 1,
+      keySetVersion: 2,
+    });
+    assert.equal(h.counters.beginAuthentication, beforeAuthentication);
+    assert.equal(h.counters.beginRegistration, beforeRegistration);
+    assert.equal(h.envelopeCalls.length, beforeEnvelope + 1);
+    const prfCall = h.envelopeCalls.at(-1);
+    assert.equal(prfCall.envelope.envelopeKind, "passkey-prf");
+    assert.equal(prfCall.expectedKeySetVersion, 1);
+    assert.equal(prfCall.attemptKind, "new-change");
+    assert.equal(prfCall.operationId, advanced.draft.ids.prfEnvelopeOperationId);
+    assert.equal(prfCall.logicalChangeId, advanced.draft.ids.prfEnvelopeLogicalChangeId);
+    assert.deepEqual(prfCall.envelope, stagedEnvelope);
+
+    const terminal = await h.canonicalDraft(advanced.started.activationId);
+    assert.equal(terminal.stage, "prf-envelope-committed");
+    assert.equal(terminal.prfStatus, "available");
+    assert.equal(terminal.keySetVersion, 2);
+    assert.equal(terminal.recoveryVersion, 0);
+    assert.equal(terminal.pendingOperation, null);
+    assert.deepEqual(plain(terminal.prfEnvelope), stagedEnvelope);
+    assertNoPostPrf(h);
+  }
+});
+
+test("P304 AVAILABLE reload reauthenticates exact pinned account, ignores raw PRF and P278 zeroes it", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(first, "new-account");
+  const accountId = advanced.draft.account.accountId;
+  const stagedEnvelope = plain(advanced.draft.prfEnvelope);
+
+  const second = createHarness({
+    shared: first.shared,
+    authenticationAccountIds: [accountId],
+  });
+  assert.equal(second.derivedPrfReference, null);
+  const result = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.stage, "prf-envelope-committed");
+  assert.equal(second.counters.beginAuthentication, 1);
+  assert.equal(second.counters.finishAuthentication, 1);
+  assert.equal(second.authenticationInputs.length, 1);
+  assert.equal(second.authenticationInputs[0].accountLocator, accountId);
+  assert.equal(second.counters.beginRegistration, 0);
+  assert.equal(second.counters.finishRegistration, 0);
+  assert.equal(second.envelopeCalls.length, 1);
+  assert.equal(second.envelopeCalls[0].expectedKeySetVersion, 1);
+  assert.deepEqual(second.envelopeCalls[0].envelope, stagedEnvelope);
+  assert.equal(second.derivedPrfReference, null,
+    "reauthentication raw PRF must not rebuild or replace the staged PRF envelope");
+  assert.ok(second.privatePrfReference instanceof Uint8Array);
+  assert.deepEqual(Array.from(second.privatePrfReference), new Array(32).fill(0));
+  assert.equal(JSON.stringify(result).includes("outputBytes"), false);
+  const terminal = await second.canonicalDraft(advanced.started.activationId);
+  assert.equal(JSON.stringify(terminal).includes("outputBytes"), false);
+  assert.deepEqual(plain(terminal.prfEnvelope), stagedEnvelope);
+  assertNoPostPrf(second);
+});
+
+test("P304 AVAILABLE auth mismatch, cancellation and failure publish zero PRF envelope", async () => {
+  for (const mode of ["mismatch", "cancel", "failure"]) {
+    const first = createHarness({
+      discoveryResponses: ["not-configured", "not-configured"],
+    });
+    const advanced = await advanceToDeviceEnvelopeCommitted(first, "new-account");
+    const accountId = advanced.draft.account.accountId;
+    const options = { shared: first.shared };
+    if (mode === "mismatch") options.authenticationAccountIds = ["another-account"];
+    if (mode === "cancel") options.authenticationCancelled = true;
+    if (mode === "failure") options.authenticationFailure = true;
+    const second = createHarness(options);
+
+    const result = await second.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+    assert.equal(result.ok, false);
+    assert.equal(
+      result.reason,
+      mode === "mismatch"
+        ? "ownerless-account-mismatch-attention"
+        : "ownerless-account-authentication-failed"
+    );
+    assert.equal(second.counters.envelope, 0);
+    assert.equal(second.counters.beginRegistration, 0);
+    assert.equal(second.counters.finishRegistration, 0);
+    const after = await second.canonicalDraft(advanced.started.activationId);
+    assert.equal(after.stage, "device-envelope-committed");
+    assert.equal(after.keySetVersion, 1);
+    assert.equal(after.account.accountId, accountId);
+    assertNoPostPrf(second);
+  }
+});
+
+test("P304 validates exact device-envelope-committed durable state before authentication or PRF publication", async () => {
+  const first = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(first, "new-account");
+
+  const second = createHarness({
+    shared: first.shared,
+    readActivationTransform(found) {
+      if (found.draft?.stage !== "device-envelope-committed") return found;
+      return Object.freeze({
+        record: Object.freeze(Object.assign({}, plain(found.record), {
+          usage: Object.freeze(Object.assign({}, plain(found.record.usage), {
+            masterKeyGeneration: 9,
+          })),
+        })),
+        draft: found.draft,
+      });
+    },
+  });
+  const result = await second.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-activation-state-invalid");
+  assert.equal(second.counters.beginAuthentication, 0);
+  assert.equal(second.counters.envelope, 0);
+  assertNoPostPrf(second);
+});
+
+test("P304 AVAILABLE ambiguity is durable and explicit retry reuses exact IDs and staged envelope", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    envelopeResponses: [{
+      status: "committed",
+      keySetVersion: 1,
+      masterKeyGeneration: 1,
+      masterKeyContentEncryptionLimit: 2 ** 20,
+    }, "throw"],
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(h, "new-account");
+  const stagedEnvelope = plain(advanced.draft.prfEnvelope);
+
+  const first = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(first.ok, false);
+  assert.equal(first.reason, "prf-envelope-failed");
+  assert.equal(first.resumable, true);
+  assert.equal(h.envelopeCalls.length, 2);
+  const firstPrfCall = h.envelopeCalls[1];
+  assert.equal(firstPrfCall.expectedKeySetVersion, 1);
+  assert.equal(firstPrfCall.attemptKind, "new-change");
+  assert.deepEqual(firstPrfCall.envelope, stagedEnvelope);
+  let pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.stage, "device-envelope-committed");
+  assert.equal(pending.pendingOperation, "prf-envelope");
+  assert.equal(pending.keySetVersion, 1);
+
+  h.pushEnvelope({
+    status: "committed",
+    keySetVersion: 2,
+  });
+  const second = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(second.ok, true, JSON.stringify(second));
+  assert.equal(second.stage, "prf-envelope-committed");
+  assert.equal(h.envelopeCalls.length, 3);
+  const retry = h.envelopeCalls[2];
+  assert.equal(retry.attemptKind, "idempotent-retry");
+  assert.equal(retry.expectedKeySetVersion, 1);
+  assert.equal(retry.operationId, firstPrfCall.operationId);
+  assert.equal(retry.logicalChangeId, firstPrfCall.logicalChangeId);
+  assert.deepEqual(retry.envelope, firstPrfCall.envelope);
+  pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.stage, "prf-envelope-committed");
+  assert.equal(pending.keySetVersion, 2);
+  assert.equal(pending.pendingOperation, null);
+  assertNoPostPrf(h);
+});
+
+test("P304 AVAILABLE conflict remains durable and never republishes", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    envelopeResponses: [{
+      status: "committed",
+      keySetVersion: 1,
+      masterKeyGeneration: 1,
+      masterKeyContentEncryptionLimit: 2 ** 20,
+    }, { conflict: true, actualKeySetVersion: 5 }],
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(h, "new-account");
+
+  const first = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(first.ok, false);
+  assert.equal(first.reason, "prf-envelope-failed");
+  assert.equal(first.conflict, true);
+  assert.equal(first.resumable, false);
+  assert.equal(h.envelopeCalls.length, 2);
+  let conflicted = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(conflicted.stage, "device-envelope-committed");
+  assert.equal(conflicted.pendingOperation, "prf-envelope-conflict");
+  assert.equal(conflicted.keySetVersion, 1);
+
+  const second = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(second.ok, false);
+  assert.equal(second.reason, "prf-envelope-failed");
+  assert.equal(second.conflict, true);
+  assert.equal(second.resumable, false);
+  assert.equal(h.envelopeCalls.length, 2, "durable conflict must never republish");
+  conflicted = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(conflicted.pendingOperation, "prf-envelope-conflict");
+  assertNoPostPrf(h);
+});
+
+test("P304 AVAILABLE malformed committed response never falsely advances", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    envelopeResponses: [{
+      status: "committed",
+      keySetVersion: 1,
+      masterKeyGeneration: 1,
+      masterKeyContentEncryptionLimit: 2 ** 20,
+    }, {
+      status: "committed",
+      keySetVersion: 3,
+    }],
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(h, "new-account");
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-activation-state-invalid");
+  assert.equal(h.envelopeCalls.length, 2);
+  const pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.stage, "device-envelope-committed");
+  assert.equal(pending.pendingOperation, "prf-envelope");
+  assert.equal(pending.keySetVersion, 1);
+  assertNoPostPrf(h);
+});
+
+test("P304 AVAILABLE owner change across PRF await returns target-stale without false advancement", async () => {
+  const h = createHarness({
+    discoveryResponses: ["not-configured", "not-configured"],
+    onAddEnvelope({ input, setOwnerKind }) {
+      if (input.envelope?.envelopeKind === "passkey-prf") setOwnerKind("json");
+    },
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(h, "new-account");
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "ownerless-target-stale");
+  assert.equal(h.envelopeCalls.length, 2);
+  const pending = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(pending.stage, "device-envelope-committed");
+  assert.equal(pending.pendingOperation, "prf-envelope");
+  assert.equal(pending.keySetVersion, 1);
+  assertNoPostPrf(h);
+});
+
+test("P304 SKIPPED records P295 terminal with zero new authentication and zero PRF-envelope publication", async () => {
+  const h = createHarness({
+    unavailablePrf: true,
+    discoveryResponses: ["not-configured", "not-configured"],
+  });
+  const advanced = await advanceToDeviceEnvelopeCommitted(h, "existing-unbound");
+  assert.equal(advanced.draft.prfStatus, "skipped");
+  assert.equal(advanced.draft.prfEnvelope, null);
+  assert.equal(advanced.draft.pendingOperation, null);
+  const beforeAuthentication = h.counters.beginAuthentication;
+  const beforeRegistration = h.counters.beginRegistration;
+  const beforeEnvelope = h.envelopeCalls.length;
+
+  const result = await h.runtime.continueOwnerlessFirstCreate({
+    activationId: advanced.started.activationId,
+  });
+  assert.deepEqual(plain(result), {
+    ok: true,
+    reason: "ownerless-prf-envelope-skipped",
+    activationId: advanced.started.activationId,
+    accountPath: "existing-unbound",
+    syncedPocketId: advanced.draft.syncedPocketId,
+    deviceId: advanced.draft.deviceId,
+    stage: "prf-envelope-skipped",
+    locallyDurable: true,
+    remotelyCommitted: true,
+    confirmedRemoteRevision: 1,
+    keySetVersion: 1,
+  });
+  assert.equal(h.counters.beginAuthentication, beforeAuthentication);
+  assert.equal(h.counters.beginRegistration, beforeRegistration);
+  assert.equal(h.envelopeCalls.length, beforeEnvelope,
+    "skipped terminal must publish no PRF envelope");
+  const terminal = await h.canonicalDraft(advanced.started.activationId);
+  assert.equal(terminal.stage, "prf-envelope-skipped");
+  assert.equal(terminal.prfStatus, "skipped");
+  assert.equal(terminal.prfEnvelope, null);
+  assert.equal(terminal.keySetVersion, 1);
+  assert.equal(terminal.recoveryVersion, 0);
+  assertNoPostPrf(h);
+});
+
+test("P304 exact committed and skipped terminal replays perform zero authentication, envelope or downstream work", async () => {
+  for (const mode of ["available", "skipped"]) {
+    const first = createHarness({
+      unavailablePrf: mode === "skipped",
+      discoveryResponses: ["not-configured", "not-configured"],
+    });
+    const accountPath = mode === "skipped" ? "existing-unbound" : "new-account";
+    const advanced = await advanceToDeviceEnvelopeCommitted(first, accountPath);
+    const terminal = await first.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+    assert.equal(
+      terminal.stage,
+      mode === "available" ? "prf-envelope-committed" : "prf-envelope-skipped"
+    );
+
+    const second = createHarness({ shared: first.shared });
+    const replay = await second.runtime.continueOwnerlessFirstCreate({
+      activationId: advanced.started.activationId,
+    });
+    assert.deepEqual(plain(replay), plain(terminal));
+    assert.equal(second.counters.beginAuthentication, 0);
+    assert.equal(second.counters.finishAuthentication, 0);
+    assert.equal(second.counters.envelope, 0);
+    assert.equal(second.counters.recovery, 0);
+    assert.equal(second.counters.recoveryPackage, 0);
+    assert.equal(second.counters.picker, 0);
+    assert.equal(second.counters.adoption, 0);
+  }
+});
+
+test("P304 admits only PRF terminal and leaves recovery, Recovery Copy, adoption and UI integration unwired", () => {
+  const runtime = source("js/pocket-sync-browser-runtime.js");
+  assert.match(runtime, /exactPrfTerminalState/);
+  assert.match(runtime, /continueOwnerlessPrfTerminal/);
+  assert.match(runtime, /ownerless-prf-envelope-committed/);
+  assert.match(runtime, /ownerless-prf-envelope-skipped/);
   assert.doesNotMatch(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-ui.js"), /continueOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-doorway-capabilities.js"), /continueOwnerlessFirstCreate/);
