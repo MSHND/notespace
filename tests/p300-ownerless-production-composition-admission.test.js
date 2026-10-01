@@ -152,7 +152,7 @@ test("P300 keeps the browser module surface fixed while P301 owns the later prog
   assert.match(runtimeSource, /startOwnerlessFirstCreate/);
   assert.doesNotMatch(
     runtimeSource,
-    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/
+    /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/
   );
 
   const index = source("index.html");
