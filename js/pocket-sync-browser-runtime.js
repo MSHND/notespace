@@ -699,6 +699,21 @@
       });
     }
 
+    function ownerlessRecoveryPackageDependencies() {
+      const downstreamForbidden = async () => {
+        throw new Error("ownerless-recovery-copy-downstream-forbidden");
+      };
+      return frozen({
+        captureTarget: additionalTarget,
+        isTargetReplaceable: additionalTargetReplaceable,
+        withExistingAccountReady: downstreamForbidden,
+        buildRecoveryPackage: (input) => buildRecoveryPackage(security, crypto, environment, input),
+        prepareRecoveryCopyDestination: downstreamForbidden,
+        writeRecoveryCopy: downstreamForbidden,
+        adoptSyncedOwner: downstreamForbidden,
+      });
+    }
+
     function exactKeys(value, fields) {
       return !!value && typeof value === "object" && !Array.isArray(value)
         && Object.keys(value).length === fields.length
@@ -1186,6 +1201,41 @@
         && draft.recoveryCopyStored === false
         && draft.recoveryRoot !== null
         && draft.recoveryAuthorisation !== null
+        && draft.recoveryVerifier !== null
+        && draft.recoveryEnvelope !== null
+        && draft.adopted === false
+        && record.remote?.confirmedRevision === 1
+        && record.remote?.pending === null
+        && record.remote?.conflict === null
+        && record.usage?.masterKeyGeneration === 1
+        && record.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
+    }
+
+    function exactRecoveryCopyPendingState(attempt) {
+      const draft = attempt?.draft;
+      const record = attempt?.record;
+      const exactKeySet = draft?.prfStatus === "available"
+        ? draft.prfEnvelope !== null && draft.keySetVersion === 3
+        : draft?.prfStatus === "skipped"
+          && draft.prfEnvelope === null && draft.keySetVersion === 2;
+      // readExactOwnerlessAttempt has already run the canonical ownerless draft
+      // validator, which owns exact recovery-package structure and binding.
+      return !!draft && !!record
+        && draft.stage === "recovery-copy-pending"
+        && exactKeySet
+        && draft.confirmedRemoteRevision === 1
+        && draft.recoveryVersion === 1
+        && validRuntimeIdentifier(draft.account?.accountId)
+        && validRuntimeIdentifier(draft.accountLocator)
+        && draft.accountLocator !== draft.account.accountId
+        && draft.registrationContinuation === null
+        && draft.pendingOperation === null
+        && draft.recoveryPackage !== null
+        && draft.recoveryCopyStored === false
+        && draft.recoveryRoot !== null
+        && draft.recoveryAuthorisation !== null
+        && draft.recoveryVerifier !== null
+        && draft.recoveryEnvelope !== null
         && draft.adopted === false
         && record.remote?.confirmedRevision === 1
         && record.remote?.pending === null
@@ -1212,6 +1262,24 @@
       });
     }
 
+    function recoveryCopyPendingReplay(draft) {
+      return frozen({
+        ok: true,
+        reason: "ownerless-recovery-copy-pending",
+        activationId: draft.activationId,
+        accountPath: draft.accountPath,
+        syncedPocketId: draft.syncedPocketId,
+        deviceId: draft.deviceId,
+        stage: "recovery-copy-pending",
+        locallyDurable: true,
+        remotelyCommitted: true,
+        confirmedRemoteRevision: 1,
+        keySetVersion: draft.keySetVersion,
+        recoveryVersion: 1,
+        recoveryCopyRequired: true,
+      });
+    }
+
     function exactOwnerlessRecoveryInitialised(result, draft) {
       const expectedKeySetVersion = draft.prfStatus === "available" ? 3 : 2;
       return exactKeys(result, [
@@ -1227,6 +1295,29 @@
         && result.syncedPocketId === draft.syncedPocketId
         && result.deviceId === draft.deviceId
         && result.stage === "recovery-initialised"
+        && result.locallyDurable === true
+        && result.remotelyCommitted === true
+        && result.confirmedRemoteRevision === 1
+        && result.keySetVersion === expectedKeySetVersion
+        && result.recoveryVersion === 1
+        && result.recoveryCopyRequired === true;
+    }
+
+    function exactOwnerlessRecoveryCopyPending(result, draft) {
+      const expectedKeySetVersion = draft.prfStatus === "available" ? 3 : 2;
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable", "remotelyCommitted",
+        "confirmedRemoteRevision", "keySetVersion", "recoveryVersion",
+        "recoveryCopyRequired",
+      ])
+        && result.ok === true
+        && result.reason === "ownerless-recovery-copy-pending"
+        && result.activationId === draft.activationId
+        && result.accountPath === draft.accountPath
+        && result.syncedPocketId === draft.syncedPocketId
+        && result.deviceId === draft.deviceId
+        && result.stage === "recovery-copy-pending"
         && result.locallyDurable === true
         && result.remotelyCommitted === true
         && result.confirmedRemoteRevision === 1
@@ -1477,6 +1568,42 @@
       );
     }
 
+    async function continueOwnerlessRecoveryCopyPreparation(attempt) {
+      const draft = attempt.draft;
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessRecoveryPackageDependencies(),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: draft.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId
+        );
+      }
+      if (exactOwnerlessRecoveryCopyPending(resumed, draft)) {
+        const pending = await readExactOwnerlessAttempt(draft.activationId);
+        return pending && exactRecoveryCopyPendingState(pending)
+          ? resumed
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
+      if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
+      return ownerlessContinuationFailure(
+        "ownerless-activation-state-invalid", draft.activationId
+      );
+    }
+
     async function continueOwnerlessDeviceStaged(attempt) {
       const draft = attempt.draft;
       if (draft.accountPath === "existing-unbound") {
@@ -1636,9 +1763,18 @@
       }
 
       const draft = attempt.draft;
+      if (draft.stage === "recovery-copy-pending") {
+        return exactRecoveryCopyPendingState(attempt)
+          ? recoveryCopyPendingReplay(draft)
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
+
       if (draft.stage === "recovery-initialised") {
         return exactRecoveryInitialisedState(attempt)
-          ? recoveryInitialisedReplay(draft)
+          ? continueOwnerlessRecoveryCopyPreparation(attempt)
           : ownerlessContinuationFailure(
             "ownerless-activation-state-invalid", draft.activationId,
             { resumable: false }
