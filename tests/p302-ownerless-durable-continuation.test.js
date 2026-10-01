@@ -690,8 +690,8 @@ test("P302 keeps the global surface fixed, adds one runtime operation and stays 
     "prepareExistingAccount", "readActivation",
   ]) assert.equal(Object.prototype.hasOwnProperty.call(h.runtime, forbidden), false);
 
+  assert.match(source("js/pocket-sync-local-integration.js"), /continueOwnerlessFirstCreate/);
   for (const file of [
-    "js/pocket-sync-local-integration.js",
     "js/pocket-sync-ui.js",
     "js/pocket-doorway-capabilities.js",
     "index.html",
