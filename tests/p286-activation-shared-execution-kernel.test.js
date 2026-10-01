@@ -117,7 +117,7 @@ test("P286 keeps one shared local-material construction path as later modes reus
 test("P286 shared-kernel evolution remains isolated from UI while P301 owns runtime entry", () => {
   assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
+    /function\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\s*\(/);
   assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
 });
