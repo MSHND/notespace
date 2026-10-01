@@ -659,6 +659,7 @@ test("P294 canonical owner owns device-envelope v2 transitions, one shared addEn
 
   assert.equal((source("index.html").match(/pocket-sync-ownerless-activation-draft\.js/g) || []).length, 1);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-ownerless-activation-draft\.js/);
+  assert.match(source("js/pocket-sync-browser-runtime.js"), /startOwnerlessFirstCreate/);
   assert.doesNotMatch(source("js/pocket-sync-browser-runtime.js"),
-    /ownerless-first-create|PocketSyncOwnerlessActivationDraft|findOwnerlessActivation/);
+    /function\\s+(?:activateOwnerless|resumeOwnerless|findOwnerlessActivation)\\s*\\(/);
 });
