@@ -1133,7 +1133,7 @@
         && result.keySetVersion === 1;
     }
 
-    function exactPrfTerminalState(attempt) {
+    function exactRecoveryInputState(attempt) {
       const draft = attempt?.draft;
       const record = attempt?.record;
       const exactPrfTerminal = draft?.stage === "prf-envelope-committed"
@@ -1150,8 +1150,12 @@
         && draft.recoveryVersion === 0
         && draft.accountLocator === null
         && draft.registrationContinuation === null
-        && draft.pendingOperation === null
+        && [null, "recovery-initialisation", "recovery-conflict"]
+          .includes(draft.pendingOperation)
+        && draft.recoveryPackage === null
         && draft.recoveryCopyStored === false
+        && draft.recoveryRoot !== null
+        && draft.recoveryAuthorisation !== null
         && draft.adopted === false
         && validRuntimeIdentifier(draft.account?.accountId)
         && record.remote?.confirmedRevision === 1
@@ -1161,23 +1165,74 @@
         && record.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
     }
 
-    function prfTerminalReplay(draft) {
-      const available = draft.stage === "prf-envelope-committed";
+    function exactRecoveryInitialisedState(attempt) {
+      const draft = attempt?.draft;
+      const record = attempt?.record;
+      const exactKeySet = draft?.prfStatus === "available"
+        ? draft.prfEnvelope !== null && draft.keySetVersion === 3
+        : draft?.prfStatus === "skipped"
+          && draft.prfEnvelope === null && draft.keySetVersion === 2;
+      return !!draft && !!record
+        && draft.stage === "recovery-initialised"
+        && exactKeySet
+        && draft.confirmedRemoteRevision === 1
+        && draft.recoveryVersion === 1
+        && validRuntimeIdentifier(draft.account?.accountId)
+        && validRuntimeIdentifier(draft.accountLocator)
+        && draft.accountLocator !== draft.account.accountId
+        && draft.registrationContinuation === null
+        && draft.pendingOperation === null
+        && draft.recoveryPackage === null
+        && draft.recoveryCopyStored === false
+        && draft.recoveryRoot !== null
+        && draft.recoveryAuthorisation !== null
+        && draft.adopted === false
+        && record.remote?.confirmedRevision === 1
+        && record.remote?.pending === null
+        && record.remote?.conflict === null
+        && record.usage?.masterKeyGeneration === 1
+        && record.usage?.masterKeyContentEncryptionLimit === 2 ** 20;
+    }
+
+    function recoveryInitialisedReplay(draft) {
       return frozen({
         ok: true,
-        reason: available
-          ? "ownerless-prf-envelope-committed"
-          : "ownerless-prf-envelope-skipped",
+        reason: "ownerless-recovery-initialised",
         activationId: draft.activationId,
         accountPath: draft.accountPath,
         syncedPocketId: draft.syncedPocketId,
         deviceId: draft.deviceId,
-        stage: draft.stage,
+        stage: "recovery-initialised",
         locallyDurable: true,
         remotelyCommitted: true,
         confirmedRemoteRevision: 1,
-        keySetVersion: available ? 2 : 1,
+        keySetVersion: draft.keySetVersion,
+        recoveryVersion: 1,
+        recoveryCopyRequired: true,
       });
+    }
+
+    function exactOwnerlessRecoveryInitialised(result, draft) {
+      const expectedKeySetVersion = draft.prfStatus === "available" ? 3 : 2;
+      return exactKeys(result, [
+        "ok", "reason", "activationId", "accountPath", "syncedPocketId",
+        "deviceId", "stage", "locallyDurable", "remotelyCommitted",
+        "confirmedRemoteRevision", "keySetVersion", "recoveryVersion",
+        "recoveryCopyRequired",
+      ])
+        && result.ok === true
+        && result.reason === "ownerless-recovery-initialised"
+        && result.activationId === draft.activationId
+        && result.accountPath === draft.accountPath
+        && result.syncedPocketId === draft.syncedPocketId
+        && result.deviceId === draft.deviceId
+        && result.stage === "recovery-initialised"
+        && result.locallyDurable === true
+        && result.remotelyCommitted === true
+        && result.confirmedRemoteRevision === 1
+        && result.keySetVersion === expectedKeySetVersion
+        && result.recoveryVersion === 1
+        && result.recoveryCopyRequired === true;
     }
 
     function exactOwnerlessPrfTerminal(result, draft) {
@@ -1384,6 +1439,44 @@
       );
     }
 
+    async function continueOwnerlessRecoveryInitialisation(attempt) {
+      const draft = attempt.draft;
+      if (!ownerlessTargetEligible()) {
+        return ownerlessContinuationFailure(
+          "ownerless-target-stale", draft.activationId
+        );
+      }
+      let resumed;
+      try {
+        resumed = await orchestrator.resume(
+          ownerlessResumeDependencies(async () => {
+            throw new Error("existing-account-ready-bridge-forbidden");
+          }),
+          {
+            activationMode: "ownerless-first-create",
+            activationId: draft.activationId,
+          }
+        );
+      } catch (_error) {
+        return ownerlessContinuationFailure(
+          "ownerless-activation-state-invalid", draft.activationId
+        );
+      }
+      if (exactOwnerlessRecoveryInitialised(resumed, draft)) {
+        const terminal = await readExactOwnerlessAttempt(draft.activationId);
+        return terminal && exactRecoveryInitialisedState(terminal)
+          ? resumed
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
+      if (resumed && resumed.ok === false && typeof resumed.reason === "string") return resumed;
+      return ownerlessContinuationFailure(
+        "ownerless-activation-state-invalid", draft.activationId
+      );
+    }
+
     async function continueOwnerlessDeviceStaged(attempt) {
       const draft = attempt.draft;
       if (draft.accountPath === "existing-unbound") {
@@ -1543,10 +1636,19 @@
       }
 
       const draft = attempt.draft;
+      if (draft.stage === "recovery-initialised") {
+        return exactRecoveryInitialisedState(attempt)
+          ? recoveryInitialisedReplay(draft)
+          : ownerlessContinuationFailure(
+            "ownerless-activation-state-invalid", draft.activationId,
+            { resumable: false }
+          );
+      }
+
       if (draft.stage === "prf-envelope-committed"
           || draft.stage === "prf-envelope-skipped") {
-        return exactPrfTerminalState(attempt)
-          ? prfTerminalReplay(draft)
+        return exactRecoveryInputState(attempt)
+          ? continueOwnerlessRecoveryInitialisation(attempt)
           : ownerlessContinuationFailure(
             "ownerless-activation-state-invalid", draft.activationId,
             { resumable: false }
