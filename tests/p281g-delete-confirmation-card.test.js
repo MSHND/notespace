@@ -646,14 +646,14 @@ test("P314 ordinary Enter, Escape and Space ownership remains unchanged outside 
   assert.deepEqual(plain(h.context.state.nodes), before);
   assert.equal(h.counters.safetySnapshot, 0);
 
-  h.search.value = "alpha";
+  h.context.el.search.value = "alpha";
   const filterSpace = h.keydown(" ", { code: "Space" });
   assert.equal(filterSpace.defaultPrevented, true);
-  assert.equal(h.search.value, "alpha ", "ordinary active-filter Space remains implicit Filter input");
+  assert.equal(h.context.el.search.value, "alpha ", "ordinary active-filter Space remains implicit Filter input");
   assert.deepEqual(plain(h.context.state.nodes), before);
   assert.equal(h.counters.safetySnapshot, 0);
 
-  h.search.value = "";
+  h.context.el.search.value = "";
   const escape = h.keydown("Escape");
   assert.equal(escape.defaultPrevented, true);
   assert.equal(h.counters.clearFilter, 1);
