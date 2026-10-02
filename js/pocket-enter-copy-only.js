@@ -1,37 +1,6 @@
-/* Legacy Enter helper + PE Esc close guard.
-   Enter routing now belongs to handleTreeKeydown(); this file keeps its
-   older Enter helper dormant while retaining mobile Move display and
-   PE Esc guards. */
+/* Mobile Move display + PE Esc close guards. */
 (function initialisePocketEnterCopyOnly(global) {
   "use strict";
-
-  function clean(value, max = 80) {
-    return typeof cleanText === "function" ? cleanText(value, max) : String(value || "").trim().slice(0, max);
-  }
-
-  function isEditableTarget(target) {
-    if (!(target instanceof HTMLElement)) return false;
-    const tag = String(target.tagName || "").toLowerCase();
-    return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
-  }
-
-  function isOpenElement(element) {
-    return element instanceof HTMLElement && element.hidden !== true && element.getAttribute("aria-hidden") !== "true";
-  }
-
-  function hasOpenEnterOwningLayer() {
-    if (global.state?.commandPaletteOpen || global.state?.rowMiniMenuOpen) return true;
-    if (document.querySelector(".rowMiniMenu")) return true;
-    return ["commandOverlay", "controlsOverlay", "detailOverlay"].some((id) => isOpenElement(document.getElementById(id)));
-  }
-
-  function shouldIgnoreEnterTarget(target) {
-    if (isEditableTarget(target)) return true;
-    if (global.state?.moveMode || global.pendingPathImport || global.state?.inlineEdit?.id) return true;
-    if (hasOpenEnterOwningLayer()) return true;
-    if (!(target instanceof HTMLElement)) return false;
-    return !!target.closest(".rowMiniMenu, .commandOverlay, .controlsOverlay, .detailOverlay, [role='dialog'], [role='menu']");
-  }
 
   function installMoveDisplayGuard() {
     if (document.getElementById("pocketMoveDisplayGuard")) return;
@@ -235,97 +204,7 @@
     global.__pocketPeEscCloseGuardInstalled = true;
   }
 
-  function selectedNodeWithKids() {
-    const selectedId = clean(global.state?.selectedId, 80);
-    if (!selectedId || typeof nodeMap !== "function") return { node: null, hasKids: false };
-    const node = nodeMap().get(selectedId) || null;
-    const hasKids = node && typeof sortNodesForParent === "function" ? sortNodesForParent(node.id).length > 0 : false;
-    return { node, hasKids };
-  }
-
-  function copyContextRootIdForEnter(node) {
-    if (!node || typeof findCopyContextRootId !== "function") return "";
-    try {
-      return clean(findCopyContextRootId(node.id), 80);
-    } catch (_error) {
-      return "";
-    }
-  }
-
-  function shouldCopyOnEnter(node, hasKids) {
-    if (!node) return false;
-    if (typeof shouldCopyOnSingleClick === "function" && shouldCopyOnSingleClick(node, hasKids)) return true;
-    const nodeId = clean(node.id, 80);
-    const copyRootId = copyContextRootIdForEnter(node);
-    return !!copyRootId && copyRootId !== nodeId;
-  }
-
-  function copySelectedNodeIfAppropriate() {
-    const { node, hasKids } = selectedNodeWithKids();
-    if (!node || !shouldCopyOnEnter(node, hasKids)) return false;
-
-    if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
-    if (typeof clearFilterForCopyLoop === "function") clearFilterForCopyLoop();
-    if (typeof refreshMeta === "function") refreshMeta();
-    if (typeof renderTree === "function") renderTree();
-    if (typeof focusRowByNodeId === "function") focusRowByNodeId(node.id);
-
-    if (typeof copyText === "function") {
-      const payload = typeof copyContextPayloadForNode === "function"
-        ? copyContextPayloadForNode(node)
-        : { text: clean(node.label, 220), preserveLines: false, max: 220 };
-      if (!payload.text) return false;
-      void copyText(payload.text, {
-        preserveLines: payload.preserveLines === true,
-        max: payload.max || (payload.preserveLines ? 4000 : 220),
-      }).then((ok) => {
-        if (ok && typeof showCopiedFeedback === "function") showCopiedFeedback(node.id);
-        else if (!ok && typeof setStatus === "function") setStatus("Copy did not work.", "warn");
-      });
-      return true;
-    }
-    return false;
-  }
-
-  function openSelectedPe() {
-    const { node } = selectedNodeWithKids();
-    if (!node) {
-      if (typeof setStatus === "function") setStatus("Select an item first.", "warn");
-      return false;
-    }
-    if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
-    if (typeof openItemDetailsForNode === "function") return !!openItemDetailsForNode(node.id);
-    if (typeof global.openPocketPeEditor === "function") return !!global.openPocketPeEditor(node.id);
-    if (global.PocketPeEditor && typeof global.PocketPeEditor.open === "function") return !!global.PocketPeEditor.open(node.id);
-    if (typeof global.openPocketNodeEditor === "function") return !!global.openPocketNodeEditor(node.id);
-    if (typeof global.openPocketEditor === "function") return !!global.openPocketEditor(node.id);
-    if (typeof setStatus === "function") setStatus("Editor is not available yet. Refresh and try again.", "warn");
-    return false;
-  }
-
-  function handleEnter(ev) {
-    if (ev.key !== "Enter" || ev.metaKey || ev.ctrlKey || ev.altKey || ev.shiftKey) return;
-    const target = ev.target instanceof HTMLElement ? ev.target : null;
-    if (shouldIgnoreEnterTarget(target)) return;
-    const treeWrap = document.getElementById("treeWrap");
-    if (!(treeWrap instanceof HTMLElement)) return;
-    const isTreeTarget = !target || target === treeWrap || treeWrap.contains(target);
-
-    if (copySelectedNodeIfAppropriate()) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      ev.stopImmediatePropagation();
-      return;
-    }
-    if (!isTreeTarget) return;
-
-    ev.preventDefault();
-    ev.stopPropagation();
-    ev.stopImmediatePropagation();
-    openSelectedPe();
-  }
-
   installMoveDisplayGuard();
   installPeEscCloseGuard();
-  console.info("[enter PE/copy guard] Enter capture disabled; mobile Move display and PE Esc guards installed");
+  console.info("[Pocket UI guards] mobile Move display and PE Esc guards installed");
 })(window);
