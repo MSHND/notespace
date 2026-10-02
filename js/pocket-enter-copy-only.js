@@ -398,7 +398,7 @@
   document.addEventListener("click", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
   document.addEventListener("contextmenu", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "." || ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) {
+    if (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) {
       window.requestAnimationFrame(ensureMoveInRowMenu);
     }
   }, true);
