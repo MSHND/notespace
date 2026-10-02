@@ -206,10 +206,12 @@ test("P310 keeps one frozen product-level Sync UI surface and does not add brows
     const value = source(file);
     assert.doesNotMatch(
       value,
-      /beginCreateNew|canCreateNew|startOwnerlessFirstCreate|continueOwnerlessFirstCreate|New Synced Pocket/,
+      /startOwnerlessFirstCreate|continueOwnerlessFirstCreate/,
       file
     );
   }
+  assert.match(source("js/pocket-doorway-capabilities.js"), /canCreateNew/);
+  assert.match(source("js/pocket-overlays-init.js"), /beginCreateNew/);
 });
 
 test("P310 preserves legacy installation while canCreateNew is exact owner/capability/busy state", async () => {
