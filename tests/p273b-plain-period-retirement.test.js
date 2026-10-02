@@ -60,16 +60,9 @@ test("P273b Ctrl/Cmd period still owns Unfold all while ContextMenu and Shift+F1
   );
 });
 
-test("P273b obsolete helper no longer reacts to plain period", () => {
+test("P273b helper remains free of a plain-period row-menu trigger", () => {
   const helper = source(HELPER);
-  const listener = extractBetween(
-    helper,
-    '  document.addEventListener("keydown", (ev) => {',
-    "\n  }, true);",
-  );
-
-  assert.match(listener, /ev\.key === "ContextMenu" \|\| \(ev\.shiftKey && ev\.key === "F10"\)/);
-  assert.doesNotMatch(listener, /ev\.key === "\."/);
+  assert.doesNotMatch(helper, /ev\.key === "\."/);
 });
 
 test("P273b P273 mouse right-click still delegates to rowMiniMenu with no duplicate rowActionMenu", () => {
