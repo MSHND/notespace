@@ -1,7 +1,7 @@
 /* Legacy Enter helper + PE Esc close guard.
    Enter routing now belongs to handleTreeKeydown(); this file keeps its
-   older Enter helper dormant while retaining mobile Move display,
-   post-Move menu close and PE Esc guards. */
+   older Enter helper dormant while retaining mobile Move display and
+   PE Esc guards. */
 (function initialisePocketEnterCopyOnly(global) {
   "use strict";
 
@@ -235,15 +235,6 @@
     global.__pocketPeEscCloseGuardInstalled = true;
   }
 
-  function forceCloseRowMenus() {
-    if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
-    document.querySelectorAll(".rowMiniMenu").forEach((menu) => menu.remove());
-    if (global.state) {
-      global.state.rowMiniMenuOpen = false;
-      global.state.rowMiniMenuNodeId = "";
-    }
-  }
-
   function selectedNodeWithKids() {
     const selectedId = clean(global.state?.selectedId, 80);
     if (!selectedId || typeof nodeMap !== "function") return { node: null, hasKids: false };
@@ -334,16 +325,7 @@
     openSelectedPe();
   }
 
-  function closeMenusAfterMoveClick(ev) {
-    const target = ev.target instanceof HTMLElement ? ev.target.closest(".rowMiniMenuBtn") : null;
-    if (!(target instanceof HTMLElement)) return;
-    if (!clean(target.textContent, 80).toLowerCase().startsWith("move")) return;
-    window.setTimeout(forceCloseRowMenus, 0);
-    window.setTimeout(forceCloseRowMenus, 60);
-  }
-
   installMoveDisplayGuard();
   installPeEscCloseGuard();
-  document.addEventListener("click", closeMenusAfterMoveClick, true);
-  console.info("[enter PE/copy guard] Enter capture disabled; mobile Move display, row-menu close and PE Esc guards installed");
+  console.info("[enter PE/copy guard] Enter capture disabled; mobile Move display and PE Esc guards installed");
 })(window);
