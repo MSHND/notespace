@@ -2204,6 +2204,7 @@ test("P056 main-tree collapse and expand shortcuts respect keyboard ownership an
   context.globalThis = context;
   vm.createContext(context);
   runScript(context, "js/pocket-state.js");
+  context.cleanText = (value, max = 220) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
   const calls = { collapse: 0, expand: 0, render: 0 };
   context.isDetailsEditorOpen = () => false;
   context.isControlsHelpOpen = () => false;
@@ -2260,6 +2261,7 @@ test("P058 main-tree Ctrl/Cmd arrows move whole branches while plain arrows stay
   context.globalThis = context;
   vm.createContext(context);
   runScript(context, "js/pocket-state.js");
+  context.cleanText = (value, max = 220) => String(value || "").replace(/\s+/g, " ").trim().slice(0, max);
   context.renderTree = () => {};
   context.refreshMeta = () => {};
   context.refocusTreeNavigation = () => {};
