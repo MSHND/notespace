@@ -1,6 +1,7 @@
-/* Legacy Enter helper + row-menu safety guard + PE Esc close guard.
+/* Legacy Enter helper + PE Esc close guard.
    Enter routing now belongs to handleTreeKeydown(); this file keeps its
-   older Enter helper dormant while retaining Move menu and PE Esc guards. */
+   older Enter helper dormant while retaining mobile Move display,
+   post-Move menu close and PE Esc guards. */
 (function initialisePocketEnterCopyOnly(global) {
   "use strict";
 
@@ -333,57 +334,6 @@
     openSelectedPe();
   }
 
-  function rowMenuHasMove(menu) {
-    return Array.from(menu.querySelectorAll(".rowMiniMenuBtn"))
-      .some((button) => clean(button.textContent, 80).toLowerCase().startsWith("move"));
-  }
-
-  function makeMoveButton() {
-    const btn = document.createElement("button");
-    btn.className = "rowMiniMenuBtn";
-    btn.type = "button";
-    btn.setAttribute("role", "menuitem");
-    btn.dataset.shortcut = "m";
-    btn.setAttribute("aria-keyshortcuts", "M");
-    btn.title = "Move (M)";
-
-    const labelSpan = document.createElement("span");
-    labelSpan.className = "rowMiniMenuLabel";
-    labelSpan.textContent = "Move";
-    btn.appendChild(labelSpan);
-
-    const keySpan = document.createElement("span");
-    keySpan.className = "rowMiniMenuShortcut";
-    keySpan.textContent = "M";
-    btn.appendChild(keySpan);
-
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const id = clean(global.state?.rowMiniMenuNodeId || global.state?.selectedId, 80);
-      if (id && global.state) global.state.selectedId = id;
-      forceCloseRowMenus();
-      if (typeof toggleMoveMode === "function") toggleMoveMode(true);
-      else if (typeof runCommandPaletteAction === "function") runCommandPaletteAction("move");
-      window.setTimeout(forceCloseRowMenus, 0);
-    });
-
-    return btn;
-  }
-
-  function ensureMoveInRowMenu() {
-    const menu = document.querySelector(".rowMiniMenu");
-    if (!(menu instanceof HTMLElement) || rowMenuHasMove(menu)) return;
-    const buttons = Array.from(menu.querySelectorAll(".rowMiniMenuBtn"));
-    const addBelow = buttons.find((button) => clean(button.textContent, 80).toLowerCase().startsWith("add below"));
-    const focusHere = buttons.find((button) => clean(button.textContent, 80).toLowerCase().startsWith("focus"));
-    const moveButton = makeMoveButton();
-    if (addBelow instanceof HTMLElement) addBelow.insertAdjacentElement("afterend", moveButton);
-    else if (focusHere instanceof HTMLElement) focusHere.insertAdjacentElement("beforebegin", moveButton);
-    else menu.appendChild(moveButton);
-    console.info("[row menu move guard] restored Move action");
-  }
-
   function closeMenusAfterMoveClick(ev) {
     const target = ev.target instanceof HTMLElement ? ev.target.closest(".rowMiniMenuBtn") : null;
     if (!(target instanceof HTMLElement)) return;
@@ -395,14 +345,5 @@
   installMoveDisplayGuard();
   installPeEscCloseGuard();
   document.addEventListener("click", closeMenusAfterMoveClick, true);
-  document.addEventListener("click", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
-  document.addEventListener("contextmenu", () => window.requestAnimationFrame(ensureMoveInRowMenu), true);
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key === "ContextMenu" || (ev.shiftKey && ev.key === "F10")) {
-      window.requestAnimationFrame(ensureMoveInRowMenu);
-    }
-  }, true);
-  const observer = new MutationObserver(() => window.requestAnimationFrame(ensureMoveInRowMenu));
-  observer.observe(document.body, { childList: true, subtree: true });
-  console.info("[enter PE/copy guard] Enter capture disabled; row menu and PE Esc guards installed");
+  console.info("[enter PE/copy guard] Enter capture disabled; mobile Move display, row-menu close and PE Esc guards installed");
 })(window);
