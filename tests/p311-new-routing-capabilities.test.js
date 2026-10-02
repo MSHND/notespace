@@ -96,3 +96,61 @@ test("P311 Doorway stays routing-only", () => {
   assert.match(doorway, /beginCreateNew/);
   assert.doesNotMatch(doorway, /accountPath|activationId|ownerless|passkey|syncedPocketId|recoveryPackage|startOwnerlessFirstCreate|continueOwnerlessFirstCreate/i);
 });
+
+
+test("P311 New doorway branch grammar has exactly the four required routing outcomes", () => {
+  const overlays = source("js/pocket-overlays-init.js");
+  const start = overlays.indexOf("function openPocketNewDoorway()");
+  const end = overlays.indexOf("\nfunction closeStorageMenu", start);
+  const doorway = overlays.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(doorway, /if \(!capabilities\.anyNew\) return false/);
+  assert.match(doorway, /capabilities\.localNew && !capabilities\.syncedNew/);
+  assert.match(doorway, /createNewPocketFile\(\)/);
+  assert.match(doorway, /!capabilities\.localNew && capabilities\.syncedNew/);
+  assert.match(doorway, /PocketSyncUi\?\.beginCreateNew\?\.\(\) === true/);
+  assert.match(doorway, /el\.pocketNewOverlay\.hidden = false/);
+  assert.match(doorway, /querySelector\("\.commandBtn:not\(\[disabled\]\):not\(\[hidden\]\)"\)/);
+});
+
+test("P311 chooser actions close first and invoke only their selected owner", () => {
+  const overlays = source("js/pocket-overlays-init.js");
+  const start = overlays.indexOf('el.cmdNewFile?.addEventListener("click"');
+  const end = overlays.indexOf('el.cmdStorageClose?.addEventListener("click"', start);
+  const bindings = overlays.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(bindings, /cmdNewFile[\s\S]*closePocketNewDoorway\(\{ restoreFocus: false \}\)[\s\S]*createNewPocketFile\(\)/);
+  assert.match(bindings, /cmdNewSyncedPocket[\s\S]*closePocketNewDoorway\(\{ restoreFocus: false \}\)[\s\S]*PocketSyncUi\?\.beginCreateNew\?\.\(\)/);
+  assert.match(bindings, /cmdNewCancel[\s\S]*closePocketNewDoorway\(\{ restoreFocus: true \}\)/);
+});
+
+test("P311 chooser Cancel and Escape are zero-creation focus-return paths", () => {
+  const overlays = source("js/pocket-overlays-init.js");
+  const start = overlays.indexOf('el.pocketNewOverlay?.addEventListener("click"');
+  const end = overlays.indexOf('document.addEventListener("pointerdown"', start);
+  const dismissal = overlays.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(dismissal, /ev\.key === "Escape"/);
+  assert.match(dismissal, /closePocketNewDoorway\(\{ restoreFocus: true \}\)/);
+  assert.doesNotMatch(dismissal, /createNewPocketFile|beginCreateNew/);
+
+  const closeStart = overlays.indexOf("function closePocketNewDoorway");
+  const closeEnd = overlays.indexOf("\nfunction openPocketNewDoorway", closeStart);
+  const close = overlays.slice(closeStart, closeEnd);
+  assert.match(close, /el\.btnMore instanceof HTMLElement \? el\.btnMore : el\.treeWrap/);
+  assert.match(close, /focus\?\.\(\{ preventScroll: true \}\)/);
+});
+
+test("P311 New chooser has the exact routing-only visible choices", () => {
+  const index = source("index.html");
+  const start = index.indexOf('<div id="pocketNewOverlay"');
+  const end = index.indexOf('<div id="storageOverlay"', start);
+  const chooser = index.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(chooser, /class="commandOverlay"/);
+  assert.match(chooser, /New a Pocket/);
+  assert.match(chooser, /Pocket file…/);
+  assert.match(chooser, /Synced Pocket…/);
+  assert.match(chooser, />Cancel</);
+  assert.doesNotMatch(chooser, /syncSetup|vaultDialog/);
+});
