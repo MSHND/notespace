@@ -681,6 +681,7 @@ function bind() {
   el.cmdNewPocket?.addEventListener("click", () => runCommandPaletteAction("new_pocket"));
   el.cmdStorage?.addEventListener("click", () => runCommandPaletteAction("storage"));
   el.cmdHelp?.addEventListener("click", () => runCommandPaletteAction("help"));
+  el.btnHelp?.addEventListener("click", openControlsHelp);
   el.cmdOpenFile?.addEventListener("click", () => {
     closePocketOpenDoorway({ restoreFocus: false });
     if (typeof openPocketFile === "function") void openPocketFile();
@@ -893,10 +894,36 @@ function bind() {
         closeCommandPalette({ restoreFocus: true });
         return;
       }
+      if (
+        key === "?"
+        && !ev.metaKey
+        && !ev.ctrlKey
+        && !ev.altKey
+        && !isEditableTarget
+      ) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeCommandPalette({ restoreFocus: false });
+        openControlsHelp();
+        return;
+      }
       return;
     }
     if (
-      ((key === "/" && !ev.shiftKey) || key === "?")
+      key === "?"
+      && !ev.metaKey
+      && !ev.ctrlKey
+      && !ev.altKey
+      && !isEditableTarget
+    ) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openControlsHelp();
+      return;
+    }
+    if (
+      key === "/"
+      && !ev.shiftKey
       && !ev.metaKey
       && !ev.ctrlKey
       && !ev.altKey
