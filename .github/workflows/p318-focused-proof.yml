@@ -1,0 +1,21 @@
+name: P318 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p318-proof
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Focused P318 regressions
+        run: timeout 3m node --test tests/p273-row-mini-menu-owner.test.js tests/p273b-plain-period-retirement.test.js tests/p316-row-menu-single-owner.test.js tests/p318-post-move-row-menu-close-owner.test.js
+      - name: Repository check
+        run: timeout 3m npm run check
