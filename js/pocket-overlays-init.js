@@ -245,6 +245,7 @@ function closePocketOpenDoorway(options = {}) {
 function openPocketDoorway() {
   if (pocketAppSurfaceBlocked()) return false;
   closeCommandPalette({ restoreFocus: false });
+  closePocketNewDoorway({ restoreFocus: false });
   closeStorageMenu({ restoreFocus: false });
   window.PocketSyncUi?.refresh?.();
 
@@ -252,7 +253,9 @@ function openPocketDoorway() {
     localOpen: false,
     localNew: false,
     syncedOpen: false,
+    syncedNew: false,
     anyOpen: false,
+    anyNew: false,
     anyAction: false,
   });
 
@@ -289,6 +292,56 @@ function openPocketDoorway() {
   return true;
 }
 
+function closePocketNewDoorway(options = {}) {
+  if (!(el.pocketNewOverlay instanceof HTMLElement) || el.pocketNewOverlay.hidden) return false;
+  el.pocketNewOverlay.hidden = true;
+  if (options.restoreFocus !== false) {
+    const target = el.btnMore instanceof HTMLElement ? el.btnMore : el.treeWrap;
+    target?.focus?.({ preventScroll: true });
+  }
+  return true;
+}
+
+function openPocketNewDoorway() {
+  if (pocketAppSurfaceBlocked()) return false;
+  closeCommandPalette({ restoreFocus: false });
+  closePocketOpenDoorway({ restoreFocus: false });
+  closeStorageMenu({ restoreFocus: false });
+  window.PocketSyncUi?.refresh?.();
+
+  const capabilities = window.PocketDoorwayCapabilities?.read?.() || Object.freeze({
+    localOpen: false,
+    localNew: false,
+    syncedOpen: false,
+    syncedNew: false,
+    anyOpen: false,
+    anyNew: false,
+    anyAction: false,
+  });
+
+  if (!capabilities.anyNew) return false;
+
+  if (capabilities.localNew && !capabilities.syncedNew) {
+    if (typeof createNewPocketFile === "function") {
+      void createNewPocketFile();
+      return true;
+    }
+    return false;
+  }
+
+  if (!capabilities.localNew && capabilities.syncedNew) {
+    return window.PocketSyncUi?.beginCreateNew?.() === true;
+  }
+
+  if (!(el.pocketNewOverlay instanceof HTMLElement)) return false;
+  el.pocketNewOverlay.hidden = false;
+  requestAnimationFrame(() => {
+    const first = el.pocketNewOverlay?.querySelector(".commandBtn:not([disabled]):not([hidden])");
+    if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+  });
+  return true;
+}
+
 function closeStorageMenu(options = {}) {
   if (!(el.storageOverlay instanceof HTMLElement) || el.storageOverlay.hidden) return false;
   el.storageOverlay.hidden = true;
@@ -300,6 +353,7 @@ function openStorageMenu() {
   if (pocketAppSurfaceBlocked()) return false;
   closeCommandPalette({ restoreFocus: false });
   closePocketOpenDoorway({ restoreFocus: false });
+  closePocketNewDoorway({ restoreFocus: false });
   if (!(el.storageOverlay instanceof HTMLElement)) return false;
   refreshCommandPaletteState();
   el.storageOverlay.hidden = false;
@@ -323,6 +377,16 @@ function refreshCommandPaletteState() {
   setDisabled(el.cmdEdit, !hasSelection);
   setDisabled(el.cmdMove, !hasSelection);
   setDisabled(el.cmdFocus, !hasSelection);
+  const doorwayCapabilities = window.PocketDoorwayCapabilities?.read?.() || Object.freeze({
+    localOpen: false,
+    localNew: false,
+    syncedOpen: false,
+    syncedNew: false,
+    anyOpen: false,
+    anyNew: false,
+    anyAction: false,
+  });
+  setDisabled(el.cmdNewPocket, !doorwayCapabilities.anyNew);
   const ownerKind = typeof pocketDocumentOwnerKind === "function"
     ? pocketDocumentOwnerKind()
     : "none";
@@ -367,6 +431,7 @@ function openCommandPalette() {
       && typeof window.PocketVaultBrowserIo.isDialogOpen === "function"
       && window.PocketVaultBrowserIo.isDialogOpen()) return false;
   closePocketOpenDoorway({ restoreFocus: false });
+  closePocketNewDoorway({ restoreFocus: false });
   closeStorageMenu({ restoreFocus: false });
   closeRowMiniMenu({ restoreFocus: false });
   if (!(el.commandOverlay instanceof HTMLElement)) return false;
@@ -405,7 +470,7 @@ function runCommandPaletteAction(action) {
       openPocketDoorway();
     } else if (action === "new_pocket") {
       shouldReturnToTree = false;
-      if (typeof createNewPocketFile === "function") void createNewPocketFile();
+      openPocketNewDoorway();
     } else if (action === "storage") {
       shouldReturnToTree = false;
       openStorageMenu();
@@ -568,6 +633,17 @@ function bind() {
       return;
     }
   });
+  el.pocketNewOverlay?.addEventListener("click", (ev) => {
+    if (ev.target === el.pocketNewOverlay) closePocketNewDoorway({ restoreFocus: true });
+  });
+  el.pocketNewOverlay?.addEventListener("keydown", (ev) => {
+    if (el.pocketNewOverlay.hidden) return;
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closePocketNewDoorway({ restoreFocus: true });
+    }
+  });
   document.addEventListener("pointerdown", (ev) => {
     if (!isRowMiniMenuOpen()) return;
     if (rowMiniMenuEl instanceof HTMLElement && rowMiniMenuEl.contains(ev.target)) return;
@@ -614,6 +690,15 @@ function bind() {
     el.btnOpenSynced?.click?.();
   });
   el.cmdOpenCancel?.addEventListener("click", () => closePocketOpenDoorway({ restoreFocus: true }));
+  el.cmdNewFile?.addEventListener("click", () => {
+    closePocketNewDoorway({ restoreFocus: false });
+    if (typeof createNewPocketFile === "function") void createNewPocketFile();
+  });
+  el.cmdNewSyncedPocket?.addEventListener("click", () => {
+    closePocketNewDoorway({ restoreFocus: false });
+    window.PocketSyncUi?.beginCreateNew?.();
+  });
+  el.cmdNewCancel?.addEventListener("click", () => closePocketNewDoorway({ restoreFocus: true }));
   el.cmdStorageClose?.addEventListener("click", () => closeStorageMenu({ restoreFocus: true }));
   el.cmdSync?.addEventListener("click", () => closeStorageMenu({ restoreFocus: true }));
   el.btnUnfoldAll?.addEventListener("click", toggleUnfoldAll);
