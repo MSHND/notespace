@@ -134,7 +134,6 @@ function buildPocketFileGate() {
   if (capabilities.anyNew) {
     addAction("New", () => {
       if (typeof openPocketNewDoorway === "function") openPocketNewDoorway();
-      else if (capabilities.localNew && typeof createNewPocketFile === "function") void createNewPocketFile();
     });
   }
 
