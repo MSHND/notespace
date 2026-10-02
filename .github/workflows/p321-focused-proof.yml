@@ -1,0 +1,25 @@
+name: P321 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p321-proof
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Direct P056 P058
+        run: timeout 2m node --test --test-name-pattern="P056 main-tree collapse and expand shortcuts|P058 main-tree Ctrl/Cmd arrows move whole branches" tests/pe-persistence-contract.test.js
+      - name: Full PE persistence contract
+        run: timeout 5m node --test tests/pe-persistence-contract.test.js
+      - name: Newer Enter and PE regressions
+        run: timeout 3m node --test tests/p249-main-type-to-filter-unification.test.js tests/p320-dead-enter-retirement.test.js
+      - name: Repository check
+        run: timeout 3m npm run check
