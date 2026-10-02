@@ -304,7 +304,8 @@ test("P273 keyboard menu-open routes, semantic command route and phone owner rem
   const overlays = source(OVERLAYS);
   const phone = source(PHONE);
 
-  assert.match(actions, /ev\.key === "ContextMenu" \|\| ev\.key === "\."/);
+  assert.match(actions, /&& ev\.key === "ContextMenu"/);
+  assert.doesNotMatch(actions, /ev\.key === "ContextMenu" \|\| ev\.key === "\."/);
   assert.match(actions, /ev\.shiftKey[\s\S]*ev\.key === "F10"[\s\S]*openRowMiniMenuForSelected\(\)/);
   assert.match(actions, /return openRowMiniMenu\(id, anchor instanceof HTMLElement \? anchor : row\)/);
 
