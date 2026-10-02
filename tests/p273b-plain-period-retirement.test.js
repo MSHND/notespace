@@ -24,11 +24,9 @@ function extractBetween(text, startMarker, endMarker) {
 test("P273b plain period has no active Main row-menu owner and remains excluded from implicit Search", () => {
   const actions = source(ACTIONS);
 
-  const handler = extractBetween(
-    actions,
-    "function handleTreeKeydown(ev) {",
-    "\nfunction ",
-  );
+  const handlerStart = actions.indexOf("function handleTreeKeydown(ev) {");
+  assert.ok(handlerStart >= 0);
+  const handler = actions.slice(handlerStart);
 
   assert.match(handler, /&& ev\.key === "ContextMenu"[\s\S]*openRowMiniMenuForSelected\(\)/);
   assert.doesNotMatch(handler, /ev\.key === "ContextMenu" \|\| ev\.key === "\."/);
