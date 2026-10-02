@@ -69,7 +69,9 @@ function buildPocketFileGateState() {
     localOpen: false,
     localNew: false,
     syncedOpen: false,
+    syncedNew: false,
     anyOpen: false,
+    anyNew: false,
     anyAction: false,
   });
   return {
@@ -97,11 +99,11 @@ function buildPocketFileGate() {
   const text = document.createElement("div");
   text.className = "emptyStateText";
   const capabilities = gate.capabilities;
-  const availableText = capabilities.anyOpen && capabilities.localNew
+  const availableText = capabilities.anyOpen && capabilities.anyNew
     ? "Open an existing Pocket, or start a new one."
     : (capabilities.anyOpen
       ? "Open an existing Pocket to continue."
-      : (capabilities.localNew
+      : (capabilities.anyNew
         ? "Start a new Pocket to continue."
         : "Pocket cannot open or create a persistent local file here, and Synced Pocket is not available."));
   text.textContent = gate.recovery
@@ -129,9 +131,10 @@ function buildPocketFileGate() {
       else if (capabilities.localOpen && typeof openPocketFile === "function") void openPocketFile();
     });
   }
-  if (capabilities.localNew) {
+  if (capabilities.anyNew) {
     addAction("New", () => {
-      if (typeof createNewPocketFile === "function") void createNewPocketFile();
+      if (typeof openPocketNewDoorway === "function") openPocketNewDoorway();
+      else if (capabilities.localNew && typeof createNewPocketFile === "function") void createNewPocketFile();
     });
   }
 
