@@ -982,14 +982,42 @@ test("P249 genuine editing owners are not hijacked and explicit Filter input kee
   assert.equal(h.document.activeElement, h.search, "direct Filter input remains the text-editing owner");
 });
 
-test("P249 explicit Main commands keep precedence over implicit filter text", () => {
+test("P273b plain period is quiet and does not become row-menu or Filter input", () => {
   const h = makeHarness({ selectedId: "A" });
   h.materialise();
 
   h.reset();
-  h.keydown("A", ".");
+  const event = h.keydown("A", ".");
   h.stop();
 
+  assert.equal(event.defaultPrevented, false, "plain period remains unclaimed");
+  assert.equal(h.search.value, "", "plain period does not broaden implicit Search punctuation");
+  assert.equal(h.counters.menuOpen, 0, "plain period no longer opens row actions");
+  assert.equal(h.pendingTimerCount(), 0);
+});
+
+test("P249 standard ContextMenu command keeps precedence over implicit filter text", () => {
+  const h = makeHarness({ selectedId: "A" });
+  h.materialise();
+
+  h.reset();
+  const event = h.keydown("A", "ContextMenu");
+  h.stop();
+
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(h.search.value, "");
+  assert.equal(h.counters.menuOpen, 1);
+});
+
+test("P273b Shift+F10 standard row-menu route remains active", () => {
+  const h = makeHarness({ selectedId: "A" });
+  h.materialise();
+
+  h.reset();
+  const event = h.keydown("A", "F10", { shiftKey: true });
+  h.stop();
+
+  assert.equal(event.defaultPrevented, true);
   assert.equal(h.search.value, "");
   assert.equal(h.counters.menuOpen, 1);
 });
