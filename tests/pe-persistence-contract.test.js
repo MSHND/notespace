@@ -1907,8 +1907,24 @@ test("main-tree Enter remains owned only by handleTreeKeydown in the active scri
   const overlays = source("js/pocket-overlays-init.js");
   const guard = source("js/pocket-enter-copy-only.js");
   assert.equal(overlays.split('el.treeWrap?.addEventListener("keydown", handleTreeKeydown)').length - 1, 1);
+
+  const retiredLegacyEnterNames = [
+    "clean",
+    "isEditableTarget",
+    "isOpenElement",
+    "hasOpenEnterOwningLayer",
+    "shouldIgnoreEnterTarget",
+    "selectedNodeWithKids",
+    "copyContextRootIdForEnter",
+    "shouldCopyOnEnter",
+    "copySelectedNodeIfAppropriate",
+    "openSelectedPe",
+    "handleEnter",
+  ];
+  for (const name of retiredLegacyEnterNames) {
+    assert.doesNotMatch(guard, new RegExp(`\\bfunction\\s+${name}\\s*\\(`), name + " legacy Enter definition is absent");
+  }
   assert.equal(guard.includes('addEventListener("keydown", handleEnter'), false);
-  assert.match(guard, /Enter capture disabled/);
 });
 
 test("P095 routes the real Main-tree plain Enter boundary through canonical editor ownership", () => {
