@@ -1,0 +1,32 @@
+name: P311 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p311-proof
+
+jobs:
+  p311-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P311 proof-integrity regressions
+        timeout-minutes: 10
+        run: >
+          timeout --signal=TERM --kill-after=10s 540s
+          node --test
+          tests/p274-capability-aware-pocket-doorway.test.js
+          tests/p311-new-routing-capabilities.test.js
+          tests/p310-ownerless-sync-ui-controller.test.js
+          tests/p062-pocket-shell.test.js
+          tests/p255-new-pocket-first-use.test.js
+          tests/p257g-human-nested-copy-starter.test.js
+          tests/p257d-native-file-picker-focus-ownership.test.js
+          tests/p276-first-use-payload-owner.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
