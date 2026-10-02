@@ -528,15 +528,24 @@ test("P281m status lifecycle hook remains generic and Delete semantics stay in t
   assert.doesNotMatch(deleteGuardOwner, /setTimeout\s*\(/);
 });
 
-test("P281g Enter and Confirm delete converge on the same one-shot confirm semantic", () => {
-  const keyboard = makeHarness();
-  keyboard.keydown("Delete");
-  const enter = keyboard.keydown("Enter");
+test("P314 Enter, Space and Confirm delete converge on the same one-shot confirm semantic", () => {
+  const enterKeyboard = makeHarness();
+  enterKeyboard.keydown("Delete");
+  const enter = enterKeyboard.keydown("Enter");
   assert.equal(enter.defaultPrevented, true);
-  assert.deepEqual(ids(keyboard), ["D"]);
-  assert.equal(keyboard.counters.safetySnapshot, 1);
-  assert.equal(keyboard.context.state.operationHighWater, 18);
-  assert.equal(keyboard.context.pendingDeleteConfirmNodeId, "");
+  assert.deepEqual(ids(enterKeyboard), ["D"]);
+  assert.equal(enterKeyboard.counters.safetySnapshot, 1);
+  assert.equal(enterKeyboard.context.state.operationHighWater, 18);
+  assert.equal(enterKeyboard.context.pendingDeleteConfirmNodeId, "");
+
+  const spaceKeyboard = makeHarness();
+  spaceKeyboard.keydown("Delete");
+  const space = spaceKeyboard.keydown(" ", { code: "Space" });
+  assert.equal(space.defaultPrevented, true);
+  assert.deepEqual(ids(spaceKeyboard), ["D"]);
+  assert.equal(spaceKeyboard.counters.safetySnapshot, 1);
+  assert.equal(spaceKeyboard.context.state.operationHighWater, 18);
+  assert.equal(spaceKeyboard.context.pendingDeleteConfirmNodeId, "");
 
   const pointer = makeHarness();
   pointer.keydown("Delete");
@@ -587,6 +596,26 @@ test("P281g Escape and Cancel converge on the same non-mutating cancel semantic"
   assert.deepEqual(plain(pointer.context.state.nodes), pointerBefore);
 });
 
+test("P314 modified Space never confirms an armed Delete", () => {
+  for (const modifiers of [
+    { shiftKey: true },
+    { ctrlKey: true },
+    { metaKey: true },
+    { altKey: true },
+  ]) {
+    const h = makeHarness();
+    const before = plain(h.context.state.nodes);
+    h.keydown("Delete");
+
+    const event = h.keydown(" ", { code: "Space", ...modifiers });
+    assert.equal(h.context.pendingDeleteConfirmNodeId, "A");
+    assert.deepEqual(plain(h.context.state.nodes), before);
+    assert.equal(h.counters.safetySnapshot, 0);
+    assert.equal(h.context.state.operationHighWater, 17);
+    assert.equal(event.defaultPrevented, false);
+  }
+});
+
 test("P281g repeated Delete remains an arm gesture; Enter is the explicit keyboard confirmation", () => {
   const h = makeHarness();
   const before = plain(h.context.state.nodes);
@@ -603,7 +632,7 @@ test("P281g repeated Delete remains an arm gesture; Enter is the explicit keyboa
   assert.equal(h.counters.safetySnapshot, 1);
 });
 
-test("P281g ordinary Enter and Escape ownership remains unchanged outside an armed guard", () => {
+test("P314 ordinary Enter, Escape and Space ownership remains unchanged outside an armed guard", () => {
   const h = makeHarness();
   const before = plain(h.context.state.nodes);
 
@@ -612,6 +641,19 @@ test("P281g ordinary Enter and Escape ownership remains unchanged outside an arm
   assert.equal(h.counters.routeEnter, 1);
   assert.deepEqual(plain(h.context.state.nodes), before);
 
+  const space = h.keydown(" ", { code: "Space" });
+  assert.equal(space.defaultPrevented, true, "ordinary empty-query Main Space remains claimed exactly as before");
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.counters.safetySnapshot, 0);
+
+  h.search.value = "alpha";
+  const filterSpace = h.keydown(" ", { code: "Space" });
+  assert.equal(filterSpace.defaultPrevented, true);
+  assert.equal(h.search.value, "alpha ", "ordinary active-filter Space remains implicit Filter input");
+  assert.deepEqual(plain(h.context.state.nodes), before);
+  assert.equal(h.counters.safetySnapshot, 0);
+
+  h.search.value = "";
   const escape = h.keydown("Escape");
   assert.equal(escape.defaultPrevented, true);
   assert.equal(h.counters.clearFilter, 1);
@@ -628,6 +670,10 @@ test("P281g source keeps one guard owner and the transient card outside the four
   assert.equal((actions.match(/let pendingDeleteConfirmNodeId/g) || []).length, 0);
   assert.equal((actions.match(/function confirmPendingDeleteGuard\(/g) || []).length, 1);
   assert.equal((actions.match(/function cancelPendingDeleteGuard\(/g) || []).length, 1);
+  assert.match(
+    actions,
+    /activePendingDeleteNodeId\(\)[\s\S]*\(ev\.key === "Enter" \|\| ev\.key === " " \|\| ev\.code === "Space"\)[\s\S]*confirmPendingDeleteGuard\(\)/,
+  );
   assert.match(actions, /deleteNodeById\(nodeId, \{ confirm: false \}\)/);
   assert.match(actions, /actions:\s*\[[\s\S]*Confirm delete[\s\S]*Cancel/);
   assert.doesNotMatch(actions, /Delete again to confirm/i);
