@@ -83,11 +83,11 @@ test("P273 Main right-click delegates to the existing rowMiniMenu owner with sel
   assert.equal(context.state.selectedId, "node-B", "right-clicked row becomes selected");
   assert.equal(refreshCalls, 1);
   assert.equal(renderCalls, 1);
-  assert.deepEqual(opens, [{
-    id: "node-B",
-    anchor: mountedRow,
-    point: { x: 321, y: 222 },
-  }], "existing rowMiniMenu receives the remounted row and exact pointer coordinates");
+  assert.equal(opens.length, 1);
+  assert.equal(opens[0].id, "node-B");
+  assert.equal(opens[0].anchor, mountedRow, "existing rowMiniMenu receives the remounted row");
+  assert.equal(opens[0].point.x, 321);
+  assert.equal(opens[0].point.y, 222);
 
   context.state.selectedId = "node-A";
   context.state.inlineEdit.id = "node-B";
@@ -205,6 +205,7 @@ function makeMiniMenuHarness() {
     activeElement: null,
     body: null,
     mountedRow: null,
+    documentElement: { clientWidth: 1200, clientHeight: 900 },
     createElement(tagName) { return new MiniElement(document, tagName); },
     querySelector(selector) {
       return /^\[data-node-id=/.test(selector) ? document.mountedRow : null;
