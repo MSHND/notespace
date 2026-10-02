@@ -18,13 +18,14 @@ function source(file) {
   return fs.readFileSync(path.join(ROOT, file), "utf8");
 }
 
-function capabilityRuntime({ localOpen = false, localNew = false, syncedOpen = false } = {}) {
+function capabilityRuntime({ localOpen = false, localNew = false, syncedOpen = false, syncedNew = false } = {}) {
   const context = {
     Object, Array, String, Number, Boolean, Map, Set, Error, Function, Reflect, JSON, Date, Math,
     showOpenFilePicker: localOpen ? function showOpenFilePicker() {} : undefined,
     showSaveFilePicker: localNew ? function showSaveFilePicker() {} : undefined,
     PocketSyncUi: Object.freeze({
       canOpenExisting() { return syncedOpen; },
+      canCreateNew() { return syncedNew; },
     }),
   };
   context.window = context;
@@ -36,11 +37,13 @@ function capabilityRuntime({ localOpen = false, localNew = false, syncedOpen = f
 
 test("P274 capability owner derives Open and New independently from runtime capability plus existing Sync eligibility", () => {
   const matrix = [
-    { input: { localOpen: true, localNew: true, syncedOpen: true }, expected: { localOpen: true, localNew: true, syncedOpen: true, anyOpen: true, anyAction: true } },
-    { input: { localOpen: true, localNew: false, syncedOpen: false }, expected: { localOpen: true, localNew: false, syncedOpen: false, anyOpen: true, anyAction: true } },
-    { input: { localOpen: false, localNew: true, syncedOpen: false }, expected: { localOpen: false, localNew: true, syncedOpen: false, anyOpen: false, anyAction: true } },
-    { input: { localOpen: false, localNew: false, syncedOpen: true }, expected: { localOpen: false, localNew: false, syncedOpen: true, anyOpen: true, anyAction: true } },
-    { input: { localOpen: false, localNew: false, syncedOpen: false }, expected: { localOpen: false, localNew: false, syncedOpen: false, anyOpen: false, anyAction: false } },
+    { input: { localOpen: true, localNew: true, syncedOpen: true }, expected: { localOpen: true, localNew: true, syncedOpen: true, syncedNew: false, anyOpen: true, anyNew: true, anyAction: true } },
+    { input: { localOpen: true, localNew: false, syncedOpen: false }, expected: { localOpen: true, localNew: false, syncedOpen: false, syncedNew: false, anyOpen: true, anyNew: false, anyAction: true } },
+    { input: { localOpen: false, localNew: true, syncedOpen: false }, expected: { localOpen: false, localNew: true, syncedOpen: false, syncedNew: false, anyOpen: false, anyNew: true, anyAction: true } },
+    { input: { localOpen: false, localNew: false, syncedOpen: true }, expected: { localOpen: false, localNew: false, syncedOpen: true, syncedNew: false, anyOpen: true, anyNew: false, anyAction: true } },
+    { input: { localOpen: false, localNew: false, syncedOpen: false }, expected: { localOpen: false, localNew: false, syncedOpen: false, syncedNew: false, anyOpen: false, anyNew: false, anyAction: false } },
+    { input: { localOpen: false, localNew: false, syncedOpen: false, syncedNew: true }, expected: { localOpen: false, localNew: false, syncedOpen: false, syncedNew: true, anyOpen: false, anyNew: true, anyAction: true } },
+    { input: { localOpen: true, localNew: true, syncedOpen: false, syncedNew: true }, expected: { localOpen: true, localNew: true, syncedOpen: false, syncedNew: true, anyOpen: true, anyNew: true, anyAction: true } },
   ];
 
   for (const entry of matrix) {
@@ -110,6 +113,7 @@ function gateHarness(options = {}) {
     },
   };
   let openDoorwayCalls = 0;
+  let newDoorwayCalls = 0;
   let openFileCalls = 0;
   let newFileCalls = 0;
   const context = {
@@ -119,12 +123,16 @@ function gateHarness(options = {}) {
     cleanText(value, max = Number.MAX_SAFE_INTEGER) { return String(value || "").trim().slice(0, max); },
     readLocalSafetySnapshot() { return null; },
     openPocketDoorway() { openDoorwayCalls += 1; return true; },
+    openPocketNewDoorway() { newDoorwayCalls += 1; return true; },
     openPocketFile() { openFileCalls += 1; return true; },
     createNewPocketFile() { newFileCalls += 1; return true; },
   };
   context.window = context;
   context.globalThis = context;
-  context.PocketSyncUi = Object.freeze({ canOpenExisting: () => options.syncedOpen === true });
+  context.PocketSyncUi = Object.freeze({
+    canOpenExisting: () => options.syncedOpen === true,
+    canCreateNew: () => options.syncedNew === true,
+  });
   if (options.localOpen) context.showOpenFilePicker = () => {};
   if (options.localNew) context.showSaveFilePicker = () => {};
 
@@ -147,7 +155,7 @@ function gateHarness(options = {}) {
     buttons,
     labels: buttons.map((button) => button.textContent),
     text,
-    counts: () => ({ openDoorwayCalls, openFileCalls, newFileCalls }),
+    counts: () => ({ openDoorwayCalls, newDoorwayCalls, openFileCalls, newFileCalls }),
   };
 }
 
@@ -156,7 +164,7 @@ test("P274 full local-capable no-document gate preserves Open / New", () => {
   assert.deepEqual(h.labels, ["Open", "New"]);
   h.buttons[0].click();
   h.buttons[1].click();
-  assert.deepEqual(h.counts(), { openDoorwayCalls: 1, openFileCalls: 0, newFileCalls: 1 });
+  assert.deepEqual(h.counts(), { openDoorwayCalls: 1, newDoorwayCalls: 1, openFileCalls: 0, newFileCalls: 0 });
   assert.ok(h.text.includes("Open an existing Pocket, or start a new one."));
 });
 
@@ -164,7 +172,7 @@ test("P274 Sync-only no-document gate exposes Open but no dead local New", () =>
   const h = gateHarness({ localOpen: false, localNew: false, syncedOpen: true });
   assert.deepEqual(h.labels, ["Open"]);
   h.buttons[0].click();
-  assert.deepEqual(h.counts(), { openDoorwayCalls: 1, openFileCalls: 0, newFileCalls: 0 });
+  assert.deepEqual(h.counts(), { openDoorwayCalls: 1, newDoorwayCalls: 0, openFileCalls: 0, newFileCalls: 0 });
   assert.ok(h.text.includes("Open an existing Pocket to continue."));
 });
 
@@ -177,7 +185,16 @@ test("P274 partial local capability is represented independently", () => {
   const newOnly = gateHarness({ localOpen: false, localNew: true, syncedOpen: false });
   assert.deepEqual(newOnly.labels, ["New"]);
   newOnly.buttons[0].click();
-  assert.equal(newOnly.counts().newFileCalls, 1);
+  assert.equal(newOnly.counts().newDoorwayCalls, 1);
+  assert.equal(newOnly.counts().newFileCalls, 0);
+});
+
+test("P274 Synced New alone makes gate New available through the normal New doorway", () => {
+  const h = gateHarness({ localOpen: false, localNew: false, syncedOpen: false, syncedNew: true });
+  assert.deepEqual(h.labels, ["New"]);
+  assert.ok(h.text.includes("Start a new Pocket to continue."));
+  h.buttons[0].click();
+  assert.deepEqual(h.counts(), { openDoorwayCalls: 0, newDoorwayCalls: 1, openFileCalls: 0, newFileCalls: 0 });
 });
 
 test("P274 no usable owner gives durable in-gate explanation and no inert action", () => {
@@ -189,12 +206,12 @@ test("P274 no usable owner gives durable in-gate explanation and no inert action
 function extractOpenPocketDoorway() {
   const overlays = source(OVERLAYS);
   const start = overlays.indexOf("function openPocketDoorway() {");
-  const end = overlays.indexOf("\nfunction closeStorageMenu", start);
+  const end = overlays.indexOf("\nfunction closePocketNewDoorway", start);
   assert.ok(start >= 0 && end > start, "openPocketDoorway source is extractable");
   return overlays.slice(start, end);
 }
 
-function doorwayHarness({ localOpen = false, localNew = false, syncedOpen = false } = {}) {
+function doorwayHarness({ localOpen = false, localNew = false, syncedOpen = false, syncedNew = false } = {}) {
   const cmdOpenFile = new HTMLButtonElement();
   cmdOpenFile.className = "commandBtn";
   const cmdOpenSyncedPocket = new HTMLButtonElement();
@@ -213,13 +230,16 @@ function doorwayHarness({ localOpen = false, localNew = false, syncedOpen = fals
   let syncRefreshes = 0;
   btnOpenSynced.addEventListener("click", () => { syncClicks += 1; });
 
-  const caps = { localOpen, localNew, syncedOpen, anyOpen: localOpen || syncedOpen, anyAction: localOpen || localNew || syncedOpen };
+  const anyOpen = localOpen || syncedOpen;
+  const anyNew = localNew || syncedNew;
+  const caps = { localOpen, localNew, syncedOpen, syncedNew, anyOpen, anyNew, anyAction: anyOpen || anyNew };
   const context = {
     Object, Array, String, Number, Boolean, Map, Set, Error, Function, Reflect, JSON,
     HTMLElement, HTMLButtonElement,
     el: { cmdOpenFile, cmdOpenSyncedPocket, cmdOpenCancel, btnOpenSynced, pocketOpenOverlay: overlay },
     pocketAppSurfaceBlocked() { return false; },
     closeCommandPalette() { return true; },
+    closePocketNewDoorway() { return true; },
     closeStorageMenu() { return true; },
     openPocketFile() { openFileCalls += 1; return true; },
     requestAnimationFrame(callback) { callback(); return 1; },
@@ -271,8 +291,8 @@ test("P274 Open doorway routes directly to existing local owner when Sync open i
   assert.deepEqual(h.counts(), { openFileCalls: 1, syncClicks: 0, syncRefreshes: 1 });
 });
 
-test("P274 Open doorway fails truthfully when there is no usable Open owner", () => {
-  const h = doorwayHarness({ localOpen: false, localNew: true, syncedOpen: false });
+test("P274 Open doorway fails truthfully when there is no usable Open owner even when Synced New is available", () => {
+  const h = doorwayHarness({ localOpen: false, localNew: false, syncedOpen: false, syncedNew: true });
   assert.equal(h.result(), false);
   assert.equal(h.overlay.hidden, true);
   assert.deepEqual(h.counts(), { openFileCalls: 0, syncClicks: 0, syncRefreshes: 1 });
@@ -289,6 +309,9 @@ test("P274 reuses existing Sync eligibility and storage owners without device/br
   const sw = source("sw.js");
 
   assert.match(capabilities, /PocketSyncUi\?\.canOpenExisting\?\.\(\) === true/);
+  assert.match(capabilities, /PocketSyncUi\?\.canCreateNew\?\.\(\) === true/);
+  assert.match(capabilities, /const anyNew = localNew \|\| syncedNew/);
+  assert.match(capabilities, /anyAction: anyOpen \|\| anyNew/);
   assert.match(sync, /canOpenExistingInstalled = \(\) => eligibleOpen\(owner\(\)\)/);
   assert.match(sync, /canOpenExisting: \(\) => canOpenExistingInstalled\(\) === true/);
   assert.match(doorway, /el\.btnOpenSynced\?\.click\?\.\(\)/);
