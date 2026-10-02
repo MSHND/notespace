@@ -50,7 +50,8 @@ test("P316 legacy row-menu Move injection fallback is absent from runtime JS", (
   assert.doesNotMatch(helper, /requestAnimationFrame\([^)]*ensureMove/);
   assert.match(helper, /function installMoveDisplayGuard\(\)/);
   assert.match(helper, /function installPeEscCloseGuard\(\)/);
-  assert.match(helper, /function closeMenusAfterMoveClick\(ev\)/);
+  assert.doesNotMatch(helper, /forceCloseRowMenus/);
+  assert.doesNotMatch(helper, /closeMenusAfterMoveClick/);
 });
 
 test("P316 openRowMiniMenu remains the single rowMiniMenu constructor with the accepted six actions", () => {
