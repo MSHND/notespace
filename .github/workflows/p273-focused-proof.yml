@@ -1,0 +1,26 @@
+name: P273 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p273-proof
+
+jobs:
+  p273-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P273 row menu owner regressions
+        timeout-minutes: 8
+        run: >
+          timeout --signal=TERM --kill-after=10s 420s
+          node --test
+          tests/p273-row-mini-menu-owner.test.js
+          tests/p249-main-type-to-filter-unification.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
