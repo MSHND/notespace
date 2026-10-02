@@ -1286,7 +1286,7 @@ function handleTreeKeydown(ev) {
     && !ev.altKey
     && !ev.shiftKey
     && activePendingDeleteNodeId()
-    && ev.key === "Enter"
+    && (ev.key === "Enter" || ev.key === " " || ev.code === "Space")
   ) {
     ev.preventDefault();
     confirmPendingDeleteGuard();
