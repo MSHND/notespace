@@ -154,3 +154,17 @@ test("P311 New chooser has the exact routing-only visible choices", () => {
   assert.match(chooser, />Cancel</);
   assert.doesNotMatch(chooser, /syncSetup|vaultDialog/);
 });
+
+
+test("P311 Open doorway keeps the accepted local and Synced routing branches", () => {
+  const overlays = source("js/pocket-overlays-init.js");
+  const start = overlays.indexOf("function openPocketDoorway()");
+  const end = overlays.indexOf("\nfunction closePocketNewDoorway", start);
+  const openDoorway = overlays.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(openDoorway, /!capabilities\.localOpen && capabilities\.syncedOpen/);
+  assert.match(openDoorway, /el\.btnOpenSynced\?\.click\?\.\(\)/);
+  assert.match(openDoorway, /capabilities\.localOpen && !capabilities\.syncedOpen/);
+  assert.match(openDoorway, /typeof openPocketFile === "function"/);
+  assert.match(openDoorway, /capabilities\.anyOpen/);
+});
