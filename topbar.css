@@ -33,6 +33,7 @@ body:not(.pipMode) .topbar #btnExportTree.safetyCheck,
 body:not(.pipMode) .topbar #btnExportTree.on,
 body:not(.pipMode) .topbar #btnPip,
 body:not(.pipMode) .topbar #btnPhoneMode,
+body:not(.pipMode) .topbar #btnHelp,
 body:not(.pipMode) .topbar #btnMore {
   flex: 0 0 auto !important;
   width: auto !important;
@@ -62,6 +63,7 @@ body:not(.pipMode) .topbar #btnExportTree:disabled {
   filter: none !important;
 }
 
+body:not(.pipMode) .topbar #btnHelp,
 body:not(.pipMode) .topbar #btnMore {
   display: inline-flex !important;
 }
@@ -71,6 +73,7 @@ body:not(.pipMode) .topbar #btnLoad:hover,
 body:not(.pipMode) .topbar #btnExportTree:not(:disabled):hover,
 body:not(.pipMode) .topbar #btnPip:hover,
 body:not(.pipMode) .topbar #btnPhoneMode:hover,
+body:not(.pipMode) .topbar #btnHelp:hover,
 body:not(.pipMode) .topbar #btnMore:hover {
   background: transparent !important;
   border-color: transparent !important;
@@ -128,6 +131,7 @@ body.phoneMode:not(.pipMode) .topbar #btnPhoneMode {
   body:not(.pipMode) .topbar #btnExportTree,
   body:not(.pipMode) .topbar #btnPip,
   body:not(.pipMode) .topbar #btnPhoneMode,
+  body:not(.pipMode) .topbar #btnHelp,
   body:not(.pipMode) .topbar #btnMore {
     font-size: 11px !important;
     padding-inline: 1px !important;
@@ -282,7 +286,7 @@ body.pocketShellOpen:not(.pipMode) .topbar .topStatusAction:focus-visible {
 
 body.pocketShellOpen:not(.pipMode) .topbar .title,
 body.pocketShellOpen:not(.pipMode) .topbar #btnExportTree,
-body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
+body.pocketShellOpen:not(.pipMode) .topbar .topbarUtilities {
   display: inline-flex !important;
 }
 
@@ -322,9 +326,14 @@ body.pocketShellOpen:not(.pipMode) .topbar #btnExportTree {
   justify-self: center;
 }
 
-body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
+body.pocketShellOpen:not(.pipMode) .topbar .topbarUtilities {
   grid-column: 4;
   justify-self: end;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 4px !important;
+  min-width: 0 !important;
 }
 
 body.pocketShellOpen:not(.pipMode) .topbar .title {
@@ -335,6 +344,7 @@ body.pocketShellOpen:not(.pipMode) .topbar .title {
 }
 
 body.pocketShellOpen:not(.pipMode) .topbar #btnExportTree,
+body.pocketShellOpen:not(.pipMode) .topbar #btnHelp,
 body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
   height: 24px !important;
   padding-inline: 2px !important;
@@ -342,6 +352,11 @@ body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
   font-size: 12px !important;
   font-weight: 400 !important;
   letter-spacing: 0 !important;
+}
+
+body.pocketShellOpen:not(.pipMode) .topbar #btnHelp {
+  font-size: 13px !important;
+  line-height: 1 !important;
 }
 
 body.pocketShellOpen:not(.pipMode) .topbar #btnMore {
