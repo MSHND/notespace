@@ -1,0 +1,28 @@
+name: P315a focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p315a-proof
+
+jobs:
+  p315a-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: P315a Help convergence regressions
+        timeout-minutes: 8
+        run: >
+          timeout --signal=TERM --kill-after=10s 420s
+          node --test
+          tests/p315a-help-convergence.test.js
+          tests/p062-pocket-shell.test.js
+          tests/p273-row-mini-menu-owner.test.js
+          tests/p273b-plain-period-retirement.test.js
+      - name: Repository check
+        timeout-minutes: 4
+        run: timeout --signal=TERM --kill-after=10s 180s npm run check
