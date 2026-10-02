@@ -140,6 +140,7 @@ const el = {
   btnLoad: document.getElementById("btnLoad"),
   btnOpenSynced: document.getElementById("btnOpenSynced"),
   btnPip: document.getElementById("btnPip"),
+  btnHelp: document.getElementById("btnHelp"),
   btnImportNow: document.getElementById("btnImportNow"),
   btnCancelImport: document.getElementById("btnCancelImport"),
   btnUndoImport: document.getElementById("btnUndoImport"),
