@@ -150,8 +150,6 @@ function buildPocketFileGate() {
   return li;
 }
 
-let rowActionMenuEl = null;
-
 // Derived Main presentation index. Full renderTree() owns its lifecycle;
 // semantic truth remains in state.nodes.
 const mainMountedNodeRegistry = new Map();
@@ -245,17 +243,11 @@ function projectMainSameParentReorder(movingNodeId, adjacentTargetNodeId, direct
   return true;
 }
 
-function closeRowActionMenu() {
-  if (rowActionMenuEl instanceof HTMLElement) rowActionMenuEl.remove();
-  rowActionMenuEl = null;
-}
-
 function openItemDetailsForNode(nodeId) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const id = cleanText(nodeId || state.selectedId, 80);
   if (!id) return false;
   state.selectedId = id;
-  closeRowActionMenu();
   if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
   if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
   if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
@@ -263,116 +255,6 @@ function openItemDetailsForNode(nodeId) {
   if (typeof window.openPocketNodeEditor === "function") return !!window.openPocketNodeEditor(id);
   if (typeof window.openPocketEditor === "function") return !!window.openPocketEditor(id);
   return false;
-}
-
-function positionRowActionMenu(menu, point) {
-  const gap = 6;
-  const vw = Math.max(document.documentElement.clientWidth || 0, window.innerWidth || 0);
-  const vh = Math.max(document.documentElement.clientHeight || 0, window.innerHeight || 0);
-  menu.style.left = "0px";
-  menu.style.top = "0px";
-  menu.style.visibility = "hidden";
-  const rect = menu.getBoundingClientRect();
-  const width = Math.min(rect.width || 148, Math.max(118, vw - gap * 2));
-  const height = Math.min(rect.height || 170, Math.max(80, vh - gap * 2));
-  let left = Number.isFinite(point?.x) ? point.x + 4 : gap;
-  let top = Number.isFinite(point?.y) ? point.y + 4 : gap;
-  if (left + width > vw - gap) left = vw - width - gap;
-  if (top + height > vh - gap) top = vh - height - gap;
-  menu.style.left = `${Math.max(gap, Math.round(left))}px`;
-  menu.style.top = `${Math.max(gap, Math.round(top))}px`;
-  menu.style.visibility = "";
-}
-
-function addRowActionButton(menu, label, action) {
-  const btn = document.createElement("button");
-  btn.className = "rowMiniMenuBtn";
-  btn.type = "button";
-  btn.setAttribute("role", "menuitem");
-  const span = document.createElement("span");
-  span.className = "rowMiniMenuLabel";
-  span.textContent = label;
-  btn.appendChild(span);
-  let fired = false;
-  const fire = (ev) => {
-    if (ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-    }
-    if (fired) return;
-    fired = true;
-    action();
-  };
-  btn.addEventListener("pointerdown", fire);
-  btn.addEventListener("click", fire);
-  menu.appendChild(btn);
-  return btn;
-}
-
-function openRowActionMenu(nodeId, point) {
-  const id = cleanText(nodeId, 80);
-  const node = id ? nodeMap().get(id) || null : null;
-  if (!node) return false;
-
-  closeRowActionMenu();
-  if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
-  if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-  state.selectedId = id;
-
-  const menu = document.createElement("div");
-  menu.className = "rowMiniMenu";
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("aria-label", "Row actions");
-
-  const title = document.createElement("div");
-  title.className = "rowMiniMenuTitle";
-  title.textContent = `Actions · ${cleanText(node.label || "Untitled", 80) || "Untitled"}`;
-  menu.appendChild(title);
-
-  addRowActionButton(menu, "Edit", () => openItemDetailsForNode(id));
-  addRowActionButton(menu, "Add below", () => {
-    closeRowActionMenu();
-    state.selectedId = id;
-    insertSiblingBelow(id);
-  });
-
-  const sep = document.createElement("div");
-  sep.className = "rowMiniMenuSep";
-  sep.setAttribute("role", "separator");
-  menu.appendChild(sep);
-
-  addRowActionButton(menu, "Delete", () => {
-    closeRowActionMenu();
-    state.selectedId = id;
-    deleteSelected();
-  });
-
-  menu.addEventListener("click", (ev) => ev.stopPropagation());
-  menu.addEventListener("pointerdown", (ev) => ev.stopPropagation());
-  menu.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeRowActionMenu();
-      refocusTreeNavigation(id);
-    }
-  });
-
-  document.body.appendChild(menu);
-  rowActionMenuEl = menu;
-  positionRowActionMenu(menu, point);
-  const first = menu.querySelector(".rowMiniMenuBtn");
-  if (first instanceof HTMLElement) first.focus({ preventScroll: true });
-
-  window.setTimeout(() => {
-    document.addEventListener("pointerdown", function closeOnOutsidePointer(ev) {
-      if (rowActionMenuEl instanceof HTMLElement && rowActionMenuEl.contains(ev.target)) return;
-      closeRowActionMenu();
-      document.removeEventListener("pointerdown", closeOnOutsidePointer, true);
-    }, true);
-  }, 0);
-
-  return true;
 }
 
 function supportedOutlineForNode(node) {
@@ -658,7 +540,15 @@ function renderTree(options = {}) {
       state.selectedId = node.id;
       refreshMeta();
       renderTree();
-      openRowActionMenu(node.id, { x: ev.clientX, y: ev.clientY });
+      const currentRow = typeof getMountedMainRowForNodeId === "function"
+        ? getMountedMainRowForNodeId(node.id)
+        : row;
+      if (typeof openRowMiniMenu === "function") {
+        openRowMiniMenu(node.id, currentRow instanceof HTMLElement ? currentRow : row, {
+          x: ev.clientX,
+          y: ev.clientY,
+        });
+      }
     });
 
     li.appendChild(row);
