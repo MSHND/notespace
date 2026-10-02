@@ -1311,7 +1311,7 @@ function handleTreeKeydown(ev) {
     && !ev.ctrlKey
     && !ev.altKey
     && !ev.shiftKey
-    && (ev.key === "ContextMenu" || ev.key === ".")
+    && ev.key === "ContextMenu"
   ) {
     ev.preventDefault();
     openRowMiniMenuForSelected();
