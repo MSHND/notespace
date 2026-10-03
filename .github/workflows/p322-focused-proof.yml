@@ -1,0 +1,20 @@
+name: P322 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p322-proof
+
+jobs:
+  p322-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test tests/p315a-help-convergence.test.js tests/p249-main-type-to-filter-unification.test.js tests/p273b-plain-period-retirement.test.js tests/p318-post-move-row-menu-close-owner.test.js
+        timeout-minutes: 2
+      - run: npm run check
+        timeout-minutes: 2
