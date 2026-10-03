@@ -1,0 +1,21 @@
+name: P331 focused proof
+on:
+  push:
+    branches:
+      - candidate/p331-proof
+
+jobs:
+  p331-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run P331 focused regressions
+        run: node --test tests/p331-open-diagnostic-projection.test.js tests/p053-sync-ui.test.js tests/p185-open-reentry-observability.test.js tests/p031-sync-account-client.test.js tests/p310-ownerless-sync-ui-controller.test.js
+        timeout-minutes: 7
+      - name: Run repository check
+        run: npm run check
+        timeout-minutes: 2
