@@ -293,23 +293,18 @@
 
     <div id="controlsOverlay" class="controlsOverlay" hidden>
       <div class="controlsCard" role="dialog" aria-modal="true" aria-labelledby="controlsTitle">
-        <div id="controlsTitle" class="controlsTitle">pocket controls</div>
-        <div class="controlsIntro">Fast paths stay fast; this is the map. Right-click opens row actions; ? opens this Help.</div>
-        <div class="controlsList">
-          <div class="controlRow"><span class="controlKey">?</span><span class="controlMeaning">open Help / controls</span></div>
-          <div class="controlRow"><span class="controlKey">Type · Backspace · Esc</span><span class="controlMeaning">filter from Main; Backspace edits the Filter; Esc clears it</span></div>
-          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + F</span><span class="controlMeaning">focus Find</span></div>
-          <div class="controlRow"><span class="controlKey">+ / =</span><span class="controlMeaning">add a new item below the selected item</span></div>
-          <div class="controlRow"><span class="controlKey">Enter / Double-click</span><span class="controlMeaning">Enter copies in Copy branches, otherwise edits details; double-click always edits details</span></div>
-          <div class="controlRow"><span class="controlKey">Arrow keys / Ctrl/Cmd + Arrow</span><span class="controlMeaning">navigate the tree / move the selected item structurally</span></div>
-          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + C</span><span class="controlMeaning">copy selected text</span></div>
-          <div class="controlRow"><span class="controlKey">Shift + F</span><span class="controlMeaning">Focus here</span></div>
-          <div class="controlRow"><span class="controlKey">Delete / -</span><span class="controlMeaning">arm Delete; Enter or Space confirms while armed; Esc cancels</span></div>
-          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + , / .</span><span class="controlMeaning">fold all / unfold all</span></div>
-          <div class="controlRow"><span class="controlKey">Right-click / Context Menu / Shift+F10</span><span class="controlMeaning">open row actions</span></div>
-          <div class="controlRow"><span class="controlKey">/ · Ctrl/Cmd + K</span><span class="controlMeaning">open More</span></div>
-          <div class="controlRow"><span class="controlKey">Ctrl/Cmd + S</span><span class="controlMeaning">save the active Pocket file or encrypted Vault</span></div>
-        </div>
+        <div id="controlsTitle" class="controlsTitle">pocket help</div>
+        <div class="controlsIntro">A few useful basics:</div>
+        <ul class="controlsList">
+          <li class="controlRow"><span><strong class="controlKey">Start typing</strong> — to filter what you can see</span></li>
+          <li class="controlRow"><span><strong class="controlKey">Enter</strong> — opens the selected item</span></li>
+          <li class="controlRow"><span><strong class="controlKey">+</strong> — adds a new item below</span></li>
+          <li class="controlRow"><span><strong class="controlKey">Arrow keys</strong> — move around</span></li>
+          <li class="controlRow"><span><strong class="controlKey">Ctrl/Cmd + Arrow</strong> — moves the selected item</span></li>
+          <li class="controlRow"><span><strong class="controlKey">Delete</strong> — asks before deleting</span></li>
+          <li class="controlRow"><span><strong class="controlKey">Right-click</strong> — opens row actions</span></li>
+          <li class="controlRow"><span><strong class="controlKey">Ctrl/Cmd + S</strong> — saves</span></li>
+        </ul>
         <div class="controlsFooter">
           <button id="btnControlsClose" class="chip" type="button">Done</button>
         </div>
