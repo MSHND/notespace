@@ -1,0 +1,21 @@
+name: P324 focused proof
+on:
+  push:
+    branches:
+      - candidate/p324-proof
+
+jobs:
+  p324-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run P288 P301 P302 P310
+        run: node --test tests/p288-ownerless-account-ready-convergence.test.js tests/p301-ownerless-first-create-runtime-start.test.js tests/p302-ownerless-durable-continuation.test.js tests/p310-ownerless-sync-ui-controller.test.js
+        timeout-minutes: 5
+      - name: Run repository check
+        run: npm run check
+        timeout-minutes: 2
