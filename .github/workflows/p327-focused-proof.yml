@@ -1,0 +1,21 @@
+name: P327 focused proof
+on:
+  push:
+    branches:
+      - candidate/p327-proof
+
+jobs:
+  p327-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run P327 focused regressions
+        run: node --test tests/p327-row-mini-menu-mobius-shell.test.js tests/p326-temporary-surface-shell.test.js tests/p273-row-mini-menu-owner.test.js tests/p316-row-menu-single-owner.test.js tests/p318-post-move-row-menu-close-owner.test.js
+        timeout-minutes: 5
+      - name: Run repository check
+        run: npm run check
+        timeout-minutes: 2
