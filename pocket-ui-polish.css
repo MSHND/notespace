@@ -9,7 +9,8 @@
 }
 
 .commandCard,
-.controlsCard {
+.controlsCard,
+.rowMiniMenu {
   border: var(--pocket-temporary-surface-border);
   border-radius: var(--pocket-temporary-surface-radius);
   background: var(--pocket-temporary-surface-bg);
