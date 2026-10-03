@@ -47,9 +47,8 @@ test("P326 commandCard and controlsCard share exactly the settled temporary-surf
   ];
 
   for (const [name, value] of expectedTokens) {
-    const declaration = new RegExp(`${name.replace(/[.*+?^$\\{\\}()|[\\]\\\\]/g, "\\\\$&")}\\s*:\\s*${value.replace(/[.*+?^$\\{\\}()|[\\]\\\\]/g, "\\\\$&")}\\s*;`);
-    assert.match(polish, declaration, `${name} keeps the settled value`);
-    assert.equal((polish.match(new RegExp(name, "g")) || []).length, 2, `${name} is declared once and consumed once`);
+    assert.ok(polish.includes(`${name}: ${value};`), `${name} keeps the settled value`);
+    assert.equal(polish.split(name).length - 1, 2, `${name} is declared once and consumed once`);
   }
 
   const groupedSelector = ".commandCard,\n.controlsCard {";
