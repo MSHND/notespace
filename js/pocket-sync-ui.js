@@ -302,7 +302,6 @@
           && result.reason === "ownerless-account-ready"
           && result.stage === "account-ready"
           && result.locallyDurable === true
-          && result.adopted === false
           && validOwnerlessIdentifier(result.activationId)) {
         ownerlessContinue(result.activationId);
         return;
