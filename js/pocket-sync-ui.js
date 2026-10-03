@@ -106,12 +106,14 @@
     overlay.innerHTML = '<section class="vaultDialogCard" role="dialog" aria-modal="true" aria-labelledby="syncSetupTitle" aria-describedby="syncSetupBody syncSetupStatus">'
       + '<header class="vaultDialogHeader"><h2 id="syncSetupTitle"></h2><p id="syncSetupBody"></p></header>'
       + '<p id="syncSetupStatus" class="vaultDialogError" role="status" aria-live="polite"></p>'
+      + '<pre id="syncOpenDiagnostic" class="vaultDialogOpenDiagnostic" hidden aria-label="Open diagnostic"></pre>'
       + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogCreateAccount" type="button">Create new account</button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
       + '</section>';
     document.body.appendChild(overlay);
     const title = overlay.querySelector("h2");
     const body = overlay.querySelector("#syncSetupBody");
     const status = overlay.querySelector("#syncSetupStatus");
+    const openDiagnostic = overlay.querySelector("#syncOpenDiagnostic");
     const primary = overlay.querySelector(".vaultDialogPrimary");
     const createAccount = overlay.querySelector(".vaultDialogCreateAccount");
     const recovery = overlay.querySelector(".vaultDialogRecovery");
@@ -142,6 +144,28 @@
       return typeof integration.recoverExisting === "function"
         && typeof integration.resumeRecovery === "function";
     }
+    function clearOpenDiagnostic() {
+      if (!openDiagnostic) return;
+      openDiagnostic.hidden = true;
+      openDiagnostic.textContent = "";
+    }
+    function showOpenDiagnostic() {
+      clearOpenDiagnostic();
+      let enabled = false;
+      try { enabled = global.location?.hash === "#pocket-open-diagnostic"; }
+      catch (_error) { enabled = false; }
+      if (!enabled || typeof integration.getLatestOpenDiagnostic !== "function") return;
+      let diagnostic;
+      try { diagnostic = integration.getLatestOpenDiagnostic(); }
+      catch (_error) { return; }
+      if (!diagnostic || typeof diagnostic !== "object") return;
+      let rendered;
+      try { rendered = JSON.stringify(diagnostic, null, 2); }
+      catch (_error) { return; }
+      if (typeof rendered !== "string" || rendered.length === 0) return;
+      openDiagnostic.textContent = rendered;
+      openDiagnostic.hidden = false;
+    }
     function refresh() {
       const session = owner();
       const synced = session?.ownerKind === "synced";
@@ -171,6 +195,7 @@
       restartEligible = false;
       switchTarget = null;
       openExistingInput = null;
+      clearOpenDiagnostic();
       returnFocus?.focus?.({ preventScroll: true });
       return true;
     }
@@ -179,6 +204,7 @@
           || global.isPocketFilePermissionPromptOpen?.() === true
           || global.isPocketDeviceChangesDecisionOpen?.() === true
           || global.PocketVaultBrowserIo?.isDialogOpen?.() === true) return false;
+      clearOpenDiagnostic();
       if (overlay.hidden) {
         const paletteClosed = global.closeCommandPalette?.({ restoreFocus: false }) === true;
         returnFocus = paletteClosed ? (document.getElementById("btnMore") || topbarButton) : document.activeElement;
@@ -378,6 +404,7 @@
     }
     async function run(mode) {
       if (busy || discovering || ["recovery-discovery", "recovery-attention"].includes(mode)) return;
+      clearOpenDiagnostic();
       busy = true;
       primary.disabled = true;
       recovery.disabled = true;
@@ -407,6 +434,7 @@
         return;
       }
       if (result?.ok === true) {
+        clearOpenDiagnostic();
         overlay.hidden = true;
         continuation = null;
         refresh();
@@ -414,6 +442,7 @@
       }
       if (result?.reason === "local-activation-attention") {
         show("local-activation-attention");
+        if (mode === "open") showOpenDiagnostic();
         refresh();
         return;
       }
@@ -438,6 +467,7 @@
         primary.textContent = "Continue setup";
       }
       status.textContent = message(result);
+      if (mode === "open") showOpenDiagnostic();
       refresh();
     }
     async function resolveDirtySwitch(decision) {
