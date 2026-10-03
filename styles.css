@@ -874,11 +874,7 @@
       width: min(138px, calc(100vw - 12px));
       max-height: min(230px, calc(100vh - 12px));
       overflow: auto;
-      border: 1px solid rgba(119, 127, 140, 0.22);
-      border-radius: 9px;
       padding: 3px;
-      background: rgb(var(--panel-rgb));
-      box-shadow: 0 10px 22px rgba(15, 23, 42, 0.14);
     }
     .rowMiniMenuTitle {
       display: none;
