@@ -35,7 +35,7 @@ function runtimeJsFiles() {
   return files;
 }
 
-test("P326 commandCard and controlsCard share exactly the settled temporary-surface shell", () => {
+test("P326 temporary-surface family shares exactly the settled shell", () => {
   const polish = source("pocket-ui-polish.css");
   const styles = source("styles.css");
 
@@ -51,8 +51,8 @@ test("P326 commandCard and controlsCard share exactly the settled temporary-surf
     assert.equal(polish.split(name).length - 1, 2, `${name} is declared once and consumed once`);
   }
 
-  const groupedSelector = ".commandCard,\n.controlsCard {";
-  assert.ok(polish.includes(groupedSelector), "commandCard and controlsCard share one explicit shell selector");
+  const groupedSelector = ".commandCard,\n.controlsCard,\n.rowMiniMenu {";
+  assert.ok(polish.includes(groupedSelector), "commandCard, controlsCard and rowMiniMenu share one explicit shell selector");
   const shell = cssBlock(polish, groupedSelector);
   assert.match(shell, /border:\s*var\(--pocket-temporary-surface-border\)/);
   assert.match(shell, /border-radius:\s*var\(--pocket-temporary-surface-radius\)/);
@@ -84,14 +84,13 @@ test("P326 shared shell stays presentation-only and excludes unrelated surfaces"
   const polish = source("pocket-ui-polish.css");
   const index = source("index.html");
 
-  const groupedSelector = ".commandCard,\n.controlsCard {";
+  const groupedSelector = ".commandCard,\n.controlsCard,\n.rowMiniMenu {";
   const start = polish.indexOf(groupedSelector);
   assert.ok(start >= 0);
   const end = polish.indexOf("}", start);
   const selectorAndBlock = polish.slice(start, end + 1);
 
   for (const unrelated of [
-    "rowMiniMenu",
     "topStatusToast",
     "detailCard",
     "filePermissionCard",
