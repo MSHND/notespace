@@ -218,31 +218,51 @@ test("P315a More > Help and visible Help converge on the same existing controls 
   assert.equal((overlays.match(/function openControlsHelp\(/g) || []).length, 1);
 });
 
-test("P315a Help copy is current, compact and no longer teaches retired period or Space behaviour", () => {
+test("P322 Help is human, compact and keeps the settled eight basics in order", () => {
   const index = source("index.html");
+  const css = source("styles.css");
   const help = section(index, '<div id="controlsOverlay"', '<div id="detailOverlay"');
+  const helpCss = section(css, "    .controlsOverlay {", "    .detailOverlay {");
 
-  assert.doesNotMatch(help, /row actions live on right-click \/ \./i);
-  assert.doesNotMatch(help, /Right-click \/ \.<\/span>/i);
-  assert.doesNotMatch(help, /Space<\/span><span class="controlMeaning">fold or unfold children/i);
+  assert.match(help, /id="controlsTitle" class="controlsTitle">pocket help<\/div>/);
+  assert.match(help, /class="controlsIntro">A few useful basics:<\/div>/);
+  assert.match(help, /<ul class="controlsList">/);
+  assert.equal((help.match(/class="controlRow"/g) || []).length, 8);
 
-  for (const expected of [
-    "open Help / controls",
-    "Type · Backspace · Esc",
-    "Ctrl/Cmd + F",
-    "+ / =",
-    "Enter / Double-click",
-    "Arrow keys / Ctrl/Cmd + Arrow",
-    "Ctrl/Cmd + C",
-    "Shift + F",
-    "Delete / -",
-    "Enter or Space confirms while armed; Esc cancels",
-    "Ctrl/Cmd + , / .",
-    "fold all / unfold all",
-    "Right-click / Context Menu / Shift+F10",
-    "/ · Ctrl/Cmd + K",
-    "Ctrl/Cmd + S",
-  ]) {
-    assert.ok(help.includes(expected), expected);
+  const expected = [
+    '<strong class="controlKey">Start typing</strong> — to filter what you can see',
+    '<strong class="controlKey">Enter</strong> — opens the selected item',
+    '<strong class="controlKey">+</strong> — adds a new item below',
+    '<strong class="controlKey">Arrow keys</strong> — move around',
+    '<strong class="controlKey">Ctrl/Cmd + Arrow</strong> — moves the selected item',
+    '<strong class="controlKey">Delete</strong> — asks before deleting',
+    '<strong class="controlKey">Right-click</strong> — opens row actions',
+    '<strong class="controlKey">Ctrl/Cmd + S</strong> — saves',
+  ];
+  let cursor = -1;
+  for (const item of expected) {
+    const next = help.indexOf(item);
+    assert.ok(next > cursor, `ordered Help item: ${item}`);
+    cursor = next;
   }
+
+  for (const stale of [
+    "pocket controls",
+    "open Help / controls",
+    "Shift + F",
+    "Focus here",
+    "Backspace edits the Filter",
+    "encrypted Vault",
+    "fold all / unfold all",
+    "/ · Ctrl/Cmd + K",
+    "Ctrl/Cmd + F",
+    "Context Menu / Shift+F10",
+  ]) {
+    assert.ok(!help.includes(stale), `stale Help copy absent: ${stale}`);
+  }
+
+  assert.match(helpCss, /\.controlsList \{[\s\S]*?padding-left: 20px;/);
+  assert.match(helpCss, /\.controlRow::marker \{/);
+  assert.doesNotMatch(helpCss, /\.controlRow \{[\s\S]*?grid-template-columns:/);
+  assert.doesNotMatch(helpCss, /\.controlMeaning \{/);
 });
