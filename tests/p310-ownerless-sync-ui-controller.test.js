@@ -18,6 +18,27 @@ function plain(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
 
+function canonicalOwnerlessAccountReady(activationId = "activation-ready") {
+  return {
+    ok: true,
+    reason: "ownerless-account-ready",
+    activationId,
+    accountPath: "new-account",
+    syncedPocketId: "synced-pocket-ready",
+    deviceId: "device-ready",
+    stage: "account-ready",
+    locallyDurable: true,
+  };
+}
+
+function ownerlessAccountReadyProducerFields() {
+  const match = source("js/pocket-sync-activation.js").match(
+    /function ownerlessAccountReadyResult\(draft\) \{[\s\S]*?return deepFreeze\(\{([\s\S]*?)\}\);\n  \}/
+  );
+  assert.ok(match, "canonical ownerless account-ready producer must remain inspectable");
+  return [...match[1].matchAll(/^\s*([A-Za-z][A-Za-z0-9]*):/gm)].map((entry) => entry[1]);
+}
+
 async function settle() {
   for (let i = 0; i < 8; i += 1) await Promise.resolve();
 }
@@ -303,6 +324,21 @@ test("P310 routes existing-pocket safely and never turns it into continuation or
   assert.equal(h.overlay.querySelector(".vaultDialogPrimary").hidden, true);
 });
 
+test("P324 real canonical account-ready producer shape is accepted by the UI consumer without invented fields", async () => {
+  const result = canonicalOwnerlessAccountReady("activation-contract");
+  assert.deepEqual(Object.keys(result), ownerlessAccountReadyProducerFields());
+  assert.equal(Object.prototype.hasOwnProperty.call(result, "adopted"), false);
+
+  const h = createHarness("none", { startResults: [result] });
+  h.context.PocketSyncUi.beginCreateNew();
+  h.overlay.querySelector(".vaultDialogCreateAccount").fire("click");
+  await settle();
+
+  assert.equal(h.calls.continue.length, 0);
+  assert.equal(h.overlay.querySelector("h2").textContent, "Continue Synced Pocket setup");
+  assert.equal(h.overlay.querySelector(".vaultDialogPrimary").textContent, "Continue setup");
+});
+
 test("P310 makes ownerless-attempt-exists and fresh account-ready explicit one-click continuations only", async () => {
   const existingAttempt = createHarness("none", {
     startResults: [{
@@ -322,15 +358,7 @@ test("P310 makes ownerless-attempt-exists and fresh account-ready explicit one-c
   assert.deepEqual(existingAttempt.calls.continue, [{ activationId: "activation-existing" }]);
 
   const accountReady = createHarness("none", {
-    startResults: [{
-      ok: true,
-      reason: "ownerless-account-ready",
-      activationId: "activation-ready",
-      accountPath: "new-account",
-      stage: "account-ready",
-      locallyDurable: true,
-      adopted: false,
-    }],
+    startResults: [canonicalOwnerlessAccountReady()],
   });
   accountReady.context.PocketSyncUi.beginCreateNew();
   accountReady.overlay.querySelector(".vaultDialogCreateAccount").fire("click");
@@ -355,14 +383,7 @@ test("P310 requires a new explicit click after every canonical intermediate owne
     "ready-for-adoption",
   ];
   const h = createHarness("none", {
-    startResults: [{
-      ok: true,
-      reason: "ownerless-account-ready",
-      activationId,
-      stage: "account-ready",
-      locallyDurable: true,
-      adopted: false,
-    }],
+    startResults: [canonicalOwnerlessAccountReady(activationId)],
     continueResults: stages.map((stage) => ({
       ok: true,
       activationId,
@@ -436,14 +457,7 @@ test("P310 exposes only explicit resumable retry and fail-closes non-resumable, 
   assert.equal(nonResumable.calls.continue.length, 0);
 
   const malformed = createHarness("none", {
-    startResults: [{
-      ok: true,
-      reason: "ownerless-account-ready",
-      activationId: " ",
-      stage: "account-ready",
-      locallyDurable: true,
-      adopted: false,
-    }],
+    startResults: [canonicalOwnerlessAccountReady(" ")],
   });
   malformed.context.PocketSyncUi.beginCreateNew();
   malformed.overlay.querySelector(".vaultDialogPrimary").fire("click");
@@ -465,12 +479,7 @@ test("P310 treats only exact adopted success as completion and never renders pri
   };
   const good = createHarness("none", {
     startResults: [{
-      ok: true,
-      reason: "ownerless-account-ready",
-      activationId,
-      stage: "account-ready",
-      locallyDurable: true,
-      adopted: false,
+      ...canonicalOwnerlessAccountReady(activationId),
       accountId: SECRET,
       credentialId: SECRET,
       outputBytes: SECRET,
@@ -519,14 +528,7 @@ test("P310 treats only exact adopted success as completion and never renders pri
     },
   ]) {
     const h = createHarness("none", {
-      startResults: [{
-        ok: true,
-        reason: "ownerless-account-ready",
-        activationId,
-        stage: "account-ready",
-        locallyDurable: true,
-        adopted: false,
-      }],
+      startResults: [canonicalOwnerlessAccountReady(activationId)],
       continueResults: [badResult],
     });
     h.context.PocketSyncUi.beginCreateNew();
@@ -541,14 +543,7 @@ test("P310 treats only exact adopted success as completion and never renders pri
 
 test("P310 Cancel/Escape clears transient ownerless continuation and preserves the original focus target", async () => {
   const h = createHarness("none", {
-    startResults: [{
-      ok: true,
-      reason: "ownerless-account-ready",
-      activationId: "activation-cancel",
-      stage: "account-ready",
-      locallyDurable: true,
-      adopted: false,
-    }],
+    startResults: [canonicalOwnerlessAccountReady("activation-cancel")],
   });
   h.context.PocketSyncUi.beginCreateNew();
   h.overlay.querySelector(".vaultDialogPrimary").fire("click");
