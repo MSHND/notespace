@@ -128,6 +128,13 @@
     return value;
   }
 
+  function validOpenOptions(value) {
+    if (!object(value) || Object.keys(value).some((key) => key !== "accountSelection")
+        || (value.accountSelection !== undefined
+          && value.accountSelection !== "choose-another")) return null;
+    return value;
+  }
+
   function randomId(config) {
     try { return config.crypto.encodeBase64Url(config.randomBytes(32)); } catch (_error) { return null; }
   }
@@ -469,10 +476,11 @@
       bundle.masterKey, bundle.semanticAuthority || null);
   }
 
-  async function openExisting(dependenciesInput) {
+  async function openExisting(dependenciesInput, optionsInput = {}) {
     const config = validFactory(this);
     const dependencies = validDependencies(dependenciesInput);
-    if (!config || !dependencies) return fail("additional-device-input-invalid");
+    const options = validOpenOptions(optionsInput);
+    if (!config || !dependencies || !options) return fail("additional-device-input-invalid");
     let captured;
     try { captured = target(dependencies.captureTarget()); } catch (_error) { captured = null; }
     if (!captured || !sameTarget(dependencies, captured)) return fail("additional-device-target-invalid");
@@ -480,7 +488,12 @@
     try {
       let authentication;
       try {
-        authentication = await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: randomId(config) });
+        authentication = await config.accountClient.authenticatePasskey({
+          apiVersion: 1,
+          operationId: randomId(config),
+          ...(options.accountSelection === "choose-another"
+            ? { accountSelection: "choose-another" } : {}),
+        });
       } catch (error) {
         return authenticationFailure(error);
       }
