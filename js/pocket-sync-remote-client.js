@@ -15,7 +15,7 @@ persisting session state, retrying work, or changing a Pocket owner.
     credentials: "same-origin",
     cache: "no-store",
     redirect: "error",
-    referrerPolicy: "no-referrer",
+    referrerPolicy: "same-origin",
     requestMethod: "POST",
     requestContentType: "application/json",
     responseContentType: "application/json",
