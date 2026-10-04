@@ -29,7 +29,7 @@ P038 calls P028/P029's production `validateOpaqueMasterKeyEnvelopeRecord` for ev
 
 ## Transport and ambiguity
 
-All eight routes use P032's POST-only same-origin credentials/mode, JSON content type, no-store cache, redirect rejection and no-referrer policy. Requests and responses use the 262,144-byte small-JSON limit. List, download, begin and finish accept HTTP 200 only. Add, revoke, initialise and rotate accept 200 or 409, then require the exact committed or conflict body. Status/body disagreement fails closed.
+All eight routes use P032's POST-only same-origin credentials/mode, JSON content type, no-store cache, redirect rejection and same-origin referrer policy. Requests and responses use the 262,144-byte small-JSON limit. List, download, begin and finish accept HTTP 200 only. Add, revoke, initialise and rotate accept 200 or 409, then require the exact committed or conflict body. Status/body disagreement fails closed.
 
 Network ambiguity remains `remote-unavailable` with `retryable: true`, but P038 sends no retry. A deliberate later caller may make an explicit idempotent retry with unchanged operation identity and `attemptKind`; the client neither invents nor alters those values.
 
