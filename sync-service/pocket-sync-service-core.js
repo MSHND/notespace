@@ -2888,24 +2888,45 @@ function createServiceCore(input) {
         return frozen({ replay: await completedReplay(transaction, ceremony, digest, at) });
       }
       ensurePendingCeremony(ceremony, "authentication", request, context, digest, at);
+      const selectionMode = ["discoverable", "reselect"].includes(ceremony.mode);
       let account;
       let priorSession = null;
-      if (context.sessionId !== null) {
+      if (ceremony.mode === "reselect") {
+        const authorised = await authoriseSession(transaction, context.sessionId, at);
+        if (authorised.session.sessionId !== ceremony.priorSessionId) {
+          throw serviceError("service-ceremony-invalid", 400);
+        }
+        priorSession = authorised.session;
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
+          throw selectionAuthenticationFailure(ceremony);
+        }
+      } else if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
         account = authorised.account;
         priorSession = authorised.session;
       } else if (ceremony.mode === "discoverable") {
-        const credential = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
-        if (credential === null) throw selectionAuthenticationFailure(ceremony);
-        account = await readRecord(transaction, COLLECTIONS.accounts, credential.accountId);
-        if (account === null || !account.credentialIds.includes(credential.credentialId)) {
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
           throw selectionAuthenticationFailure(ceremony);
         }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
         if (account === null) throw serviceError("service-state-invalid", 500);
       }
-      if ((ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
+      if ((!selectionMode && account.accountId !== ceremony.accountId)
           || !account.credentialIds.includes(request.credential.id)) {
         throw selectionAuthenticationFailure(ceremony)
           || serviceError("service-authorisation-failed", 403);
@@ -2935,7 +2956,7 @@ function createServiceCore(input) {
       });
       verified = validateAuthenticationVerifierResult(rawVerified);
     } catch (error) {
-      if (prepared.ceremony.mode === "discoverable"
+      if (["discoverable", "reselect"].includes(prepared.ceremony.mode)
           && error?.code === "service-webauthn-failed") {
         throw serviceError("service-authentication-failed", 400);
       }
@@ -2965,14 +2986,35 @@ function createServiceCore(input) {
         throw serviceError("service-transaction-conflict", 409, { retryable: true });
       }
 
+      const selectionMode = ["discoverable", "reselect"].includes(ceremony.mode);
       let account;
       let priorSession = null;
-      if (context.sessionId !== null) {
+      if (ceremony.mode === "reselect") {
+        const authorised = await authoriseSession(transaction, context.sessionId, commitAt);
+        if (authorised.session.sessionId !== ceremony.priorSessionId) {
+          throw serviceError("service-transaction-conflict", 409, { retryable: true });
+        }
+        priorSession = authorised.session;
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
+          throw selectionAuthenticationFailure(ceremony);
+        }
+      } else if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, commitAt);
         account = authorised.account;
         priorSession = authorised.session;
       } else if (ceremony.mode === "discoverable") {
-        const selected = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
         if (selected === null) throw selectionAuthenticationFailure(ceremony);
         account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
         if (account === null || !account.credentialIds.includes(selected.credentialId)) {
@@ -2988,7 +3030,7 @@ function createServiceCore(input) {
         request.credential.id
       );
       if (credential === null
-          || (ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
+          || (!selectionMode && account.accountId !== ceremony.accountId)
           || credential.accountId !== account.accountId) {
         throw selectionAuthenticationFailure(ceremony)
           || serviceError("service-transaction-conflict", 409, { retryable: true });
@@ -2997,7 +3039,8 @@ function createServiceCore(input) {
           || credential.storeVersion !== prepared.credential.storeVersion
           || (prepared.priorSession !== null
             && (!priorSession
-              || priorSession.storeVersion !== prepared.priorSession.storeVersion))) {
+              || priorSession.storeVersion !== prepared.priorSession.storeVersion
+              || priorSession.sessionId !== prepared.priorSession.sessionId))) {
         throw serviceError("service-transaction-conflict", 409, { retryable: true });
       }
       if (credential.signCount > 0 && verified.signCount <= credential.signCount) {
