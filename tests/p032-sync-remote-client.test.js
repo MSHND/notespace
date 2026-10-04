@@ -939,3 +939,54 @@ test("production source has no storage, token, worker, retry, logging, crypto, o
   assert.match(source("index.html"), /pocket-sync-remote-client\.js/);
   assert.doesNotMatch(source("sw.js"), /pocket-sync-remote-client\.js/);
 });
+
+
+test("P341 remote account service forwards only the bounded reselection intent", async () => {
+  const { api } = loadProduction();
+  const calls = [];
+  const bootstrap = {
+    apiVersion: 1,
+    ok: true,
+    operationId: "p341-remote-auth",
+    ceremonyId: "p341-remote-ceremony",
+    expiresAt: fixtures.EXPIRES,
+    bootstrap: true,
+    publicKeyRequestOptions: {
+      challenge: fixtures.b64(fixtures.bytes(32, 41)),
+      timeout: 120000,
+      rpId: "pocket.example",
+      userVerification: "required",
+    },
+  };
+  const service = api.createAccountService({
+    transport: validTransport((route, body) => {
+      calls.push([route, plain(body)]);
+      return { status: 200, body: bootstrap };
+    }),
+    now: () => fixtures.NOW,
+  });
+  const result = await service.beginAuthentication({
+    apiVersion: 1,
+    operationId: "p341-remote-auth",
+    accountSelection: "choose-another",
+  });
+  assert.equal(result.bootstrap, true);
+  assert.deepEqual(calls, [[
+    "beginAuthentication",
+    {
+      apiVersion: 1,
+      operationId: "p341-remote-auth",
+      accountSelection: "choose-another",
+    },
+  ]]);
+  await assert.rejects(
+    service.beginAuthentication({
+      apiVersion: 1,
+      operationId: "p341-invalid",
+      accountLocator: "account",
+      accountSelection: "choose-another",
+    }),
+    () => true
+  );
+  assert.equal(calls.length, 1);
+});
