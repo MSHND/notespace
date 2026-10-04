@@ -503,7 +503,15 @@
         return fail("additional-device-open-failed");
       }
       const discovery = await config.discoveryService.readSyncedPocket({ apiVersion: 1, operationId: randomId(config) });
-      if (!discovery || discovery.status !== "ready" || !id(discovery.syncedPocketId)) return fail("synced-pocket-not-configured");
+      if (!discovery || discovery.status !== "ready" || !id(discovery.syncedPocketId)) {
+        if (discovery?.status === "not-configured") {
+          const suffix = authentication.accountId.slice(-5);
+          if (/^[A-Za-z0-9_-]{5}$/.test(suffix)) {
+            return fail("synced-pocket-not-configured", { authenticatedAccountSuffix: suffix });
+          }
+        }
+        return fail("synced-pocket-not-configured");
+      }
       await config.deviceStore.open();
       let record;
       try { record = await config.deviceStore.readPocket(discovery.syncedPocketId); }
