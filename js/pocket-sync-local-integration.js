@@ -82,6 +82,11 @@
     if (typeof result?.sourceOwnerPreserved === "boolean") {
       projection.sourceOwnerPreserved = result.sourceOwnerPreserved;
     }
+    if (result?.reason === "synced-pocket-not-configured"
+        && typeof result?.authenticatedAccountSuffix === "string"
+        && /^[A-Za-z0-9_-]{5}$/.test(result.authenticatedAccountSuffix)) {
+      projection.authenticatedAccountSuffix = result.authenticatedAccountSuffix;
+    }
     const acceptedStage = result?.failureStage === OPEN_DIAGNOSTIC_STAGE;
     const acceptedCode = OPEN_DIAGNOSTIC_CODES.includes(result?.failureCode);
     if (acceptedStage) projection.failureStage = OPEN_DIAGNOSTIC_STAGE;
