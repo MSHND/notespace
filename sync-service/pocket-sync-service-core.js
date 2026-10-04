@@ -838,16 +838,20 @@ function validateStoredRecord(collection, input, key) {
     case COLLECTIONS.ceremonies: {
       if (input.kind !== "pocket.sync.service-ceremony"
           || !["registration", "authentication"].includes(input.ceremonyType)
-          || !["account-bound", "create-new-account", "discoverable"].includes(input.mode)
+          || !["account-bound", "create-new-account", "discoverable", "reselect"].includes(input.mode)
           || input.operationId !== key
           || !DIGEST_PATTERN.test(input.requestDigest)) {
         throw serviceError("service-state-invalid", 500);
       }
+      const selectionMode = ["discoverable", "reselect"].includes(input.mode);
       identifier(input.operationId, "service-state-invalid");
       identifier(input.ceremonyId, "service-state-invalid");
-      if (input.mode === "discoverable") {
+      if (selectionMode) {
         if (input.ceremonyType !== "authentication" || input.accountId !== null
-            || input.priorSessionId !== null) throw serviceError("service-state-invalid", 500);
+            || (input.mode === "discoverable" && input.priorSessionId !== null)
+            || (input.mode === "reselect" && input.priorSessionId === null)) {
+          throw serviceError("service-state-invalid", 500);
+        }
       } else {
         if (input.mode === "create-new-account" && input.ceremonyType !== "registration") {
           throw serviceError("service-state-invalid", 500);
@@ -861,21 +865,21 @@ function validateStoredRecord(collection, input, key) {
         throw serviceError("service-state-invalid", 500);
       }
       canonicalBinary(input.challenge, { minimum: 32, maximum: 32 }, "service-state-invalid");
-      if (input.mode === "discoverable") {
+      if (selectionMode) {
         if (input.prfEvaluationInput !== null) throw serviceError("service-state-invalid", 500);
       } else {
         canonicalBinary(input.prfEvaluationInput, { minimum: 32, maximum: 32 }, "service-state-invalid");
       }
       isoTimestamp(input.expiresAt);
       const beginBody = validateBeginBody(input.beginBody,
-        input.mode === "discoverable" ? "authentication-bootstrap" : input.ceremonyType);
+        selectionMode ? "authentication-bootstrap" : input.ceremonyType);
       const options = input.ceremonyType === "registration"
         ? beginBody.publicKeyCreationOptions
         : beginBody.publicKeyRequestOptions;
       if (beginBody.operationId !== input.operationId
           || beginBody.ceremonyId !== input.ceremonyId
           || beginBody.expiresAt !== input.expiresAt
-          || (input.mode !== "discoverable" && beginBody.prfEvaluationInput !== input.prfEvaluationInput)
+          || (!selectionMode && beginBody.prfEvaluationInput !== input.prfEvaluationInput)
           || options.challenge !== input.challenge
           || (input.ceremonyType === "registration"
             && (options.user.name !== input.accountId
@@ -890,12 +894,14 @@ function validateStoredRecord(collection, input, key) {
       if (completed) {
         const completedResult = validateResultWrapper(
           input.completedResult,
-          input.mode === "discoverable" ? "authentication-bootstrap" : input.ceremonyType
+          selectionMode ? "authentication-bootstrap" : input.ceremonyType
         );
         if (completedResult.body.operationId !== input.operationId
             || completedResult.body.ceremonyId !== input.ceremonyId
-            || (input.mode !== "discoverable" && (completedResult.body.accountId !== input.accountId
-              || completedResult.body.prfEvaluationInput !== input.prfEvaluationInput))) {
+            || (!selectionMode && (completedResult.body.accountId !== input.accountId
+              || completedResult.body.prfEvaluationInput !== input.prfEvaluationInput))
+            || (input.mode === "reselect"
+              && completedResult.session.replaceSessionId !== input.priorSessionId)) {
           throw serviceError("service-state-invalid", 500);
         }
       }
