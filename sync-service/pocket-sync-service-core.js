@@ -1393,13 +1393,21 @@ function validateBeginAuthenticationRequest(input) {
     "apiVersion",
     "operationId",
     "accountLocator",
+    "accountSelection",
   ], ["apiVersion", "operationId"]);
-  if (value.apiVersion !== POLICY.apiVersion) throw serviceError("service-request-invalid");
+  if (value.apiVersion !== POLICY.apiVersion
+      || (value.accountSelection !== undefined
+        && value.accountSelection !== "choose-another")
+      || (value.accountSelection === "choose-another"
+        && value.accountLocator !== undefined)) {
+    throw serviceError("service-request-invalid");
+  }
   const result = {
     apiVersion: 1,
     operationId: identifier(value.operationId),
   };
   if (value.accountLocator !== undefined) result.accountLocator = identifier(value.accountLocator);
+  if (value.accountSelection !== undefined) result.accountSelection = "choose-another";
   return frozen(result);
 }
 
