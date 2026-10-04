@@ -208,6 +208,57 @@ test("P331 exact fragment renders only the existing sanitised getter projection 
     "Sync setup could not finish. Your current Pocket is unchanged.");
 });
 
+test("P335 safe account suffix is visible only through the exact diagnostic fragment", async () => {
+  const projected = {
+    ok: false,
+    reason: "synced-pocket-not-configured",
+    adopted: false,
+    authenticatedAccountSuffix: "x2-DE",
+  };
+
+  const ordinary = createHarness({
+    openResults: [{
+      ok: false,
+      reason: "synced-pocket-not-configured",
+      adopted: false,
+      authenticatedAccountSuffix: "x2-DE",
+      accountId: SECRET,
+      credentialId: SECRET,
+      prfOutput: SECRET,
+    }],
+    diagnostic: projected,
+  });
+  openDialog(ordinary).fire("click");
+  await settle();
+  assert.equal(ordinary.getterCalls, 0);
+  assert.equal(ordinary.diagnostic.hidden, true);
+  assert.equal(ordinary.diagnostic.textContent, "");
+  assert.equal(ordinary.overlay.querySelector("#syncSetupStatus").textContent,
+    "Sync setup could not finish. Check Storage & Sync before continuing.");
+
+  const diagnostic = createHarness({
+    hash: "#pocket-open-diagnostic",
+    openResults: [{
+      ok: false,
+      reason: "synced-pocket-not-configured",
+      adopted: false,
+      authenticatedAccountSuffix: "x2-DE",
+      accountId: SECRET,
+      credentialId: SECRET,
+      prfOutput: SECRET,
+    }],
+    diagnostic: projected,
+  });
+  openDialog(diagnostic).fire("click");
+  await settle();
+  assert.equal(diagnostic.getterCalls, 1);
+  assert.equal(diagnostic.diagnostic.hidden, false);
+  assert.equal(diagnostic.diagnostic.textContent, JSON.stringify(projected, null, 2));
+  assert.equal(diagnostic.diagnostic.textContent.includes(SECRET), false);
+  assert.equal(diagnostic.overlay.querySelector("#syncSetupStatus").textContent,
+    "Sync setup could not finish. Check Storage & Sync before continuing.");
+});
+
 test("P331 requires the exact fragment and keeps missing null or throwing getters hidden", async () => {
   const wrongFragment = createHarness({
     hash: "#pocket-open-diagnostic-extra",
