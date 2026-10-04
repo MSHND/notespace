@@ -2491,7 +2491,13 @@ function createServiceCore(input) {
         if (Date.parse(existing.expiresAt) <= at) {
           throw serviceError("service-ceremony-expired", 410);
         }
-      if (context.sessionId !== null) {
+        if (existing.mode === "reselect") {
+          if (context.sessionId === null) throw serviceError("service-authentication-required", 401);
+          const authorised = await authoriseSession(transaction, context.sessionId, at);
+          if (authorised.session.sessionId !== existing.priorSessionId) {
+            throw serviceError("service-state-invalid", 500);
+          }
+        } else if (context.sessionId !== null) {
           const authorised = await authoriseSession(transaction, context.sessionId, at);
           if (authorised.account.accountId !== existing.accountId) {
             throw serviceError("service-state-invalid", 500);
@@ -2503,10 +2509,19 @@ function createServiceCore(input) {
         return frozen({ status: 200, body: existing.beginBody, session: null });
       }
 
-      const discoverable = context.sessionId === null && request.accountLocator === undefined;
+      const reselect = request.accountSelection === "choose-another";
+      const discoverable = !reselect
+        && context.sessionId === null
+        && request.accountLocator === undefined;
+      const selectionMode = discoverable || reselect;
       let account = null;
       let credentials = null;
-      if (context.sessionId !== null) {
+      if (reselect) {
+        if (context.sessionId === null) {
+          throw serviceError("service-authentication-required", 401, { clearSession: false });
+        }
+        await authoriseSession(transaction, context.sessionId, at);
+      } else if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
         account = authorised.account;
         credentials = authorised.credentials;
@@ -2519,11 +2534,13 @@ function createServiceCore(input) {
         if (account === null) throw serviceError("service-account-unresolved", 404);
         credentials = await loadAccountCredentials(transaction, account);
       }
-      if (!discoverable && credentials.length < 1) throw serviceError("service-account-unresolved", 404);
+      if (!selectionMode && credentials.length < 1) {
+        throw serviceError("service-account-unresolved", 404);
+      }
       const ceremonyId = randomToken();
       const challenge = randomToken();
       const expiresAt = expiry(at, ceremonyLifetimeMs);
-      const beginBody = discoverable ? frozen({
+      const beginBody = selectionMode ? frozen({
         apiVersion: 1,
         ok: true,
         operationId: request.operationId,
@@ -2544,7 +2561,7 @@ function createServiceCore(input) {
           credentials
         ),
       });
-      if (discoverable) validateDiscoverableAuthenticationOptions(
+      if (selectionMode) validateDiscoverableAuthenticationOptions(
         beginBody.publicKeyRequestOptions, "service-state-invalid"
       );
       else validateAuthenticationOptions(beginBody.publicKeyRequestOptions,
@@ -2554,15 +2571,15 @@ function createServiceCore(input) {
         schemaVersion: 1,
         storeVersion: 1,
         ceremonyType: "authentication",
-        mode: discoverable ? "discoverable" : "account-bound",
+        mode: reselect ? "reselect" : (discoverable ? "discoverable" : "account-bound"),
         operationId: request.operationId,
         ceremonyId,
         requestDigest: digest,
-        accountId: discoverable ? null : account.accountId,
+        accountId: selectionMode ? null : account.accountId,
         priorSessionId: context.sessionId,
         deviceId: null,
         challenge,
-        prfEvaluationInput: discoverable ? null : account.prfEvaluationInput,
+        prfEvaluationInput: selectionMode ? null : account.prfEvaluationInput,
         expiresAt,
         beginBody,
         finishDigest: null,
@@ -2653,7 +2670,7 @@ function createServiceCore(input) {
       credentialVersion: POLICY.credentialVersion,
       accountPolicyVersion: POLICY.accountPolicyVersion,
     };
-    if (ceremony.mode === "discoverable") {
+    if (["discoverable", "reselect"].includes(ceremony.mode)) {
       body.bootstrap = true;
     } else {
       body.prfEvaluationInput = ceremony.prfEvaluationInput;
