@@ -109,7 +109,7 @@ test("policy and route map are exact and deeply frozen", () => {
     credentials: "same-origin",
     cache: "no-store",
     redirect: "error",
-    referrerPolicy: "no-referrer",
+    referrerPolicy: "same-origin",
     requestMethod: "POST",
     requestContentType: "application/json",
     responseContentType: "application/json",
@@ -290,7 +290,7 @@ test("fetch uses the exact same-origin POST policy without identifiers in the pa
   assert.equal(calls[0].options.mode, "same-origin");
   assert.equal(calls[0].options.cache, "no-store");
   assert.equal(calls[0].options.redirect, "error");
-  assert.equal(calls[0].options.referrerPolicy, "no-referrer");
+  assert.equal(calls[0].options.referrerPolicy, "same-origin");
   assert.deepEqual(plain(calls[0].options.headers), { Accept: "application/json", "Content-Type": "application/json" });
   assert.equal(Object.hasOwn(calls[0].options.headers, "Authorization"), false);
   assert.equal(calls[0].options.body, before);
