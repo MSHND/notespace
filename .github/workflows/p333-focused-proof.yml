@@ -1,0 +1,26 @@
+name: P333 focused proof
+on:
+  push:
+    branches:
+      - candidate/p333-proof
+
+jobs:
+  p333-focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install exact dependencies
+        run: npm ci
+        timeout-minutes: 3
+      - name: Run P333 focused regressions
+        run: |
+          node --test tests/p333-same-origin-sync-request-origin-policy.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js tests/p075-private-alpha-gate.test.js tests/p076-production-browser-boundary.test.js tests/p176-production-composition.test.js
+          node --test --test-name-pattern="module load is inert and every new route uses the bounded same-origin transport policy" tests/p038-key-recovery-remote-client.test.js
+        timeout-minutes: 7
+      - name: Run repository check
+        run: npm run check
+        timeout-minutes: 2
