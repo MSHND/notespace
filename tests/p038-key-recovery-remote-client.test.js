@@ -158,8 +158,12 @@ test("module load is inert and every new route uses the bounded same-origin tran
   const calls = [];
   const transport = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
     async fetch(url, options) { calls.push({ url, options }); return fixtures.textResponse({ ok: true }); } });
-  for (const route of Object.keys(api.ROUTES).slice(7)) await transport.request(route, {});
-  assert.equal(calls.length, 9);
+  const p038Routes = [
+    "listEnvelopes", "downloadEnvelope", "addEnvelope", "revokeEnvelope",
+    "initialiseRecovery", "beginRecovery", "finishRecovery", "rotateRecovery",
+  ];
+  for (const route of p038Routes) await transport.request(route, {});
+  assert.equal(calls.length, p038Routes.length);
   for (const call of calls) {
     assert.match(call.url, /^\/sync\/v1\//);
     assert.doesNotMatch(call.url, /[?#]/);
