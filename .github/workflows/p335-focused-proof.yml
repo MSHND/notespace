@@ -20,7 +20,9 @@ jobs:
       - run: npm ci
       - name: P335 local contract proof
         run: node --test tests/p335-safe-not-configured-account-diagnostic-hint.test.js
-      - name: P335 owning seam regressions
-        run: node --test tests/p331-open-diagnostic-projection.test.js tests/p185-open-reentry-observability.test.js tests/p052-additional-device.test.js
+      - name: P335 diagnostic/open regressions
+        run: node --test tests/p331-open-diagnostic-projection.test.js tests/p185-open-reentry-observability.test.js
+      - name: P335 bounded additional-device regressions
+        run: node --test --test-name-pattern="P052 remains dormant|P052i1 rejects a bootstrap account mismatch" tests/p052-additional-device.test.js
       - name: Repository check
         run: npm run check
