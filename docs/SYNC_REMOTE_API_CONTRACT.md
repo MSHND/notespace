@@ -28,7 +28,7 @@ The future service is reached beneath one caller-supplied same-origin absolute-p
 - `/account/recovery/finish`
 - `/account/recovery/rotate`
 
-All fifteen operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and no-referrer policy. Identifiers occur only in request bodies. Authentication uses a browser-managed same-origin cookie; the client neither sends nor persists a bearer token. P046 maps exact POST/Origin/Fetch-Metadata/content-type/session requests to P034-P037, bounds UTF-8 JSON streams and emits only Secure, HttpOnly, SameSite=Strict, host-prefixed cookies. Rate and abuse controls remain a required deployment composition.
+All fifteen operations use POST-only JSON. Fetch uses same-origin mode/credentials, no-store caching, redirect rejection and same-origin referrer policy. Identifiers occur only in request bodies. Authentication uses a browser-managed same-origin cookie; the client neither sends nor persists a bearer token. P046 maps exact POST/Origin/Fetch-Metadata/content-type/session requests to P034-P037, bounds UTF-8 JSON streams and emits only Secure, HttpOnly, SameSite=Strict, host-prefixed cookies. Rate and abuse controls remain a required deployment composition.
 
 Account/revision/key/recovery responses and their requests are limited to 262,144 UTF-8 bytes. Encrypted content download/upload JSON is limited to 16,777,216 UTF-8 bytes. P032/P038 reject declared or actually oversized responses, non-JSON/HTML bodies, redirects, malformed JSON and unexpected statuses. They never retry automatically.
 
