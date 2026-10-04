@@ -50,7 +50,7 @@ Locked route suffixes are:
 | `finishRecovery` | `/account/recovery/finish` |
 | `rotateRecovery` | `/account/recovery/rotate` |
 
-Every request is one `POST` with `mode: "same-origin"`, `credentials: "same-origin"`, `cache: "no-store"`, `redirect: "error"`, `referrerPolicy: "no-referrer"`, `Accept: application/json` and `Content-Type: application/json`. Identifiers are in the JSON body, never the URL. The request is validated as finite plain JSON and stringified exactly once.
+Every request is one `POST` with `mode: "same-origin"`, `credentials: "same-origin"`, `cache: "no-store"`, `redirect: "error"`, `referrerPolicy: "same-origin"`, `Accept: application/json` and `Content-Type: application/json`. Identifiers are in the JSON body, never the URL. The request is validated as finite plain JSON and stringified exactly once.
 
 Only exact JSON object responses are accepted. Redirected responses, missing or non-JSON content types, empty/malformed JSON, arrays, `null`, unexpected statuses and unknown fields fail closed. Account/revision/download, envelope list/download and recovery begin/finish operations accept HTTP 200 only. Conditional upload and key/recovery mutations accept 200 or 409 and then require the matching body form. Declared and actual UTF-8 response sizes are bounded; an oversized stream is cancelled immediately.
 
