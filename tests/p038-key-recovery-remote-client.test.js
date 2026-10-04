@@ -168,7 +168,7 @@ test("module load is inert and every new route uses the bounded same-origin tran
     assert.equal(call.options.mode, "same-origin");
     assert.equal(call.options.cache, "no-store");
     assert.equal(call.options.redirect, "error");
-    assert.equal(call.options.referrerPolicy, "no-referrer");
+    assert.equal(call.options.referrerPolicy, "same-origin");
     assert.equal(Object.hasOwn(call.options.headers, "Authorization"), false);
   }
   const tooLarge = api.createBrowserJsonTransport({ serviceRoot: "/sync/v1",
