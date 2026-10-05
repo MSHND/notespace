@@ -143,10 +143,10 @@ test("P342 row-menu, double-click and selected controls converge on exact-target
     'addButton("Edit", "edit", "e")',
     'addButton("Add below", "add_sibling", "a")',
     'addButton("Move", "move", "m")',
-    'addButton("Focus here", "focus", "f")',
     'addButton("Copy text", "copy_text", "c")',
     'addButton("Delete", "delete", "d")',
   ]) assert.equal(menuOwner.includes(expected), true, expected);
+  assert.equal(menuOwner.includes('addButton("Focus here", "focus", "f")'), false, "row menu no longer presents or binds Focus here");
 
   const doubleClick = extractBetween(
     render,
