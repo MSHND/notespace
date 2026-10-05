@@ -182,6 +182,10 @@ function openRowMiniMenu(nodeId, anchorEl, point = null) {
     }
     btn.disabled = !!disabled;
     btn.addEventListener("click", () => {
+      if (action === "edit") {
+        openItemDetailsForNode(id);
+        return;
+      }
       closeRowMiniMenu({ restoreFocus: false });
       state.selectedId = id;
       runCommandPaletteAction(action);
@@ -553,23 +557,12 @@ function moveCommandPaletteFocus(delta) {
 }
 
 function openSelectedItemDetailsFromControls() {
-  if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
   const id = cleanText(state.selectedId, 80);
   if (!id || !nodeMap().get(id)) {
     setStatus("Select an item first.", "warn");
     return false;
   }
-  if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
-  if (document.body?.classList?.contains("phoneMode") === true
-      && typeof window.openPocketNodeEditor === "function") {
-    return !!window.openPocketNodeEditor(id);
-  }
-  if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
-  if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") return !!window.PocketPeEditor.open(id);
-  if (typeof window.openPocketNodeEditor === "function") return !!window.openPocketNodeEditor(id);
-  if (typeof window.openPocketEditor === "function") return !!window.openPocketEditor(id);
-  setStatus("Editor is not available yet. Refresh and try again.", "warn");
-  return false;
+  return openItemDetailsForNode(id);
 }
 
 function handleWindowFocusToTree() {
