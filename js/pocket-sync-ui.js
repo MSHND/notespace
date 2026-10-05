@@ -107,7 +107,7 @@
       + '<header class="vaultDialogHeader"><h2 id="syncSetupTitle"></h2><p id="syncSetupBody"></p></header>'
       + '<p id="syncSetupStatus" class="vaultDialogError" role="status" aria-live="polite"></p>'
       + '<pre id="syncOpenDiagnostic" class="vaultDialogOpenDiagnostic" hidden aria-label="Open diagnostic"></pre>'
-      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogCreateAccount" type="button">Create new account</button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
+      + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogCreateAccount" type="button">Create new account</button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogChooseAccount" type="button" hidden>Choose another account</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
       + '</section>';
     document.body.appendChild(overlay);
     const title = overlay.querySelector("h2");
@@ -117,6 +117,7 @@
     const primary = overlay.querySelector(".vaultDialogPrimary");
     const createAccount = overlay.querySelector(".vaultDialogCreateAccount");
     const recovery = overlay.querySelector(".vaultDialogRecovery");
+    const chooseAccount = overlay.querySelector(".vaultDialogChooseAccount");
     const restart = overlay.querySelector(".vaultDialogRestart");
     const cancel = overlay.querySelector(".vaultDialogSecondary");
 
@@ -213,6 +214,7 @@
       status.textContent = "";
       primary.hidden = false;
       createAccount.hidden = true;
+      if (chooseAccount) chooseAccount.hidden = true;
       restart.hidden = true;
       if (mode === "ownerless-create") {
         title.textContent = "New Synced Pocket";
@@ -298,6 +300,7 @@
       primary.disabled = busy;
       createAccount.disabled = busy;
       recovery.disabled = busy;
+      if (chooseAccount) chooseAccount.disabled = busy;
       cancel.disabled = busy;
       restart.disabled = busy;
     }
@@ -405,9 +408,11 @@
     async function run(mode) {
       if (busy || discovering || ["recovery-discovery", "recovery-attention"].includes(mode)) return;
       clearOpenDiagnostic();
+      if (mode === "open" && chooseAccount) chooseAccount.hidden = true;
       busy = true;
       primary.disabled = true;
       recovery.disabled = true;
+      if (chooseAccount) chooseAccount.disabled = true;
       cancel.disabled = true;
       restart.disabled = true;
       status.textContent = mode === "open" ? "Opening synced Pocket…"
@@ -424,6 +429,7 @@
       busy = false;
       primary.disabled = false;
       recovery.disabled = false;
+      if (chooseAccount) chooseAccount.disabled = false;
       cancel.disabled = false;
       restart.disabled = false;
       if (result?.ok === true && result?.recoveryRestarted === true) {
@@ -467,6 +473,9 @@
         primary.textContent = "Continue setup";
       }
       status.textContent = message(result);
+      if (mode === "open" && result?.reason === "synced-pocket-not-configured" && chooseAccount) {
+        chooseAccount.hidden = false;
+      }
       if (mode === "open") showOpenDiagnostic();
       refresh();
     }
@@ -583,6 +592,11 @@
     recovery.addEventListener("click", () => {
       if (primary.dataset.mode === "switch") void resolveDirtySwitch("discard");
       else if (!busy && !discovering && eligibleOpen(owner())) show("recovery");
+    });
+    chooseAccount?.addEventListener("click", () => {
+      if (busy || discovering || chooseAccount.hidden || primary.dataset.mode !== "open") return;
+      openExistingInput = { ...(openExistingInput || {}), accountSelection: "choose-another" };
+      void run("open");
     });
     restart.addEventListener("click", () => void run("recovery-restart"));
     cancel.addEventListener("click", close);
