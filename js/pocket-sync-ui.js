@@ -196,6 +196,7 @@
       restartEligible = false;
       switchTarget = null;
       openExistingInput = null;
+      if (chooseAccount) chooseAccount.hidden = true;
       clearOpenDiagnostic();
       returnFocus?.focus?.({ preventScroll: true });
       return true;
@@ -594,7 +595,7 @@
       else if (!busy && !discovering && eligibleOpen(owner())) show("recovery");
     });
     chooseAccount?.addEventListener("click", () => {
-      if (busy || discovering || chooseAccount.hidden || primary.dataset.mode !== "open") return;
+      if (busy || discovering || chooseAccount.hidden || primary.dataset.mode !== "open" || !eligibleOpen(owner())) return;
       openExistingInput = { ...(openExistingInput || {}), accountSelection: "choose-another" };
       void run("open");
     });
