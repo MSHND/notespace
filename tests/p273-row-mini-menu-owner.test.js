@@ -215,6 +215,7 @@ function makeMiniMenuHarness() {
   document.mountedRow = new MiniElement(document, "div");
 
   const commands = [];
+  const edits = [];
   const refocused = [];
   const context = {
     Object, Array, String, Number, Boolean, Map, Set, Error, Function, Reflect, JSON, Date, Math,
@@ -233,6 +234,7 @@ function makeMiniMenuHarness() {
     renderTree() {},
     refocusTreeNavigation(id) { refocused.push(id); },
     runCommandPaletteAction(action) { commands.push(action); },
+    openItemDetailsForNode(id) { edits.push(id); return true; },
     requestAnimationFrame(callback) { callback(); return 1; },
   };
   context.window = context;
@@ -246,7 +248,7 @@ function makeMiniMenuHarness() {
   vm.createContext(context);
   vm.runInContext(miniOwner, context, { filename: OVERLAYS });
 
-  return { context, document, commands, refocused };
+  return { context, document, commands, edits, refocused };
 }
 
 function currentMenu(h) {
@@ -281,8 +283,9 @@ test("P273 rowMiniMenu owns first focus, wrapped arrows, native Enter single act
   assert.equal(h.document.activeElement, buttons[0], "ArrowDown wraps last -> first");
 
   menuKey(menu, "Enter");
-  assert.deepEqual(h.commands, ["edit"], "native Enter activates focused existing button path exactly once");
-  assert.equal(currentMenu(h), null);
+  assert.deepEqual(h.edits, ["node-B"], "native Enter activates exact-target Edit exactly once");
+  assert.deepEqual(h.commands, [], "Edit does not detour through ambient command selection");
+  assert.equal(currentMenu(h), menu, "the exact-target editor owner decides menu closure");
 
   assert.equal(h.context.openRowMiniMenu("node-B", h.document.mountedRow), true);
   menu = currentMenu(h);
@@ -296,7 +299,8 @@ test("P273 rowMiniMenu owns first focus, wrapped arrows, native Enter single act
   assert.equal(h.context.openRowMiniMenu("node-B", h.document.mountedRow), true);
   menu = currentMenu(h);
   menuKey(menu, "c");
-  assert.deepEqual(h.commands, ["edit", "copy_text"], "existing shortcut still uses the button/command path");
+  assert.deepEqual(h.edits, ["node-B"], "non-Edit shortcuts do not reopen the editor");
+  assert.deepEqual(h.commands, ["copy_text"], "existing non-Edit shortcut still uses the command path");
 });
 
 test("P273 keyboard menu-open routes, semantic command route and phone owner remain unchanged", () => {
@@ -309,7 +313,8 @@ test("P273 keyboard menu-open routes, semantic command route and phone owner rem
   assert.match(actions, /ev\.shiftKey[\s\S]*ev\.key === "F10"[\s\S]*openRowMiniMenuForSelected\(\)/);
   assert.match(actions, /return openRowMiniMenu\(id, anchor instanceof HTMLElement \? anchor : row\)/);
 
-  assert.match(overlays, /btn\.addEventListener\("click", \(\) => \{[\s\S]*runCommandPaletteAction\(action\)/);
+  assert.match(overlays, /if \(action === "edit"\) \{\s*openItemDetailsForNode\(id\);\s*return;\s*\}/);
+  assert.match(overlays, /state\.selectedId = id;\s*runCommandPaletteAction\(action\)/);
   for (const shortcut of ["e", "a", "m", "f", "c", "d"]) {
     assert.match(overlays, new RegExp('addButton\\([^\\n]+, "' + shortcut + '"'));
   }
