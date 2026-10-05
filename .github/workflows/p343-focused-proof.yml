@@ -1,0 +1,30 @@
+name: P343 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p343-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p343-focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: P343 Möbius inner polish
+        run: node --test tests/p343-row-mini-menu-mobius-inner-polish.test.js
+      - name: P326 and P327 temporary-surface shell regressions
+        run: node --test tests/p326-temporary-surface-shell.test.js tests/p327-row-mini-menu-mobius-shell.test.js
+      - name: Row-menu behaviour regressions
+        run: node --test tests/p273-row-mini-menu-owner.test.js tests/p316-row-menu-single-owner.test.js tests/p318-post-move-row-menu-close-owner.test.js
+      - name: P342 exact-target ownership
+        run: node --test tests/p342-edit-target-ownership.test.js
+      - name: Repository check
+        run: npm run check
