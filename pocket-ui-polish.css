@@ -75,3 +75,41 @@
   outline: none;
   box-shadow: var(--pocket-focus-ring);
 }
+
+/* Desktop row menu: compact command-card inner rhythm without changing ownership or geometry. */
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) {
+  padding: 5px;
+}
+
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) .rowMiniMenuBtn {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  min-height: 34px;
+  padding: 7px 10px;
+  gap: 12px;
+  font-size: 13px;
+}
+
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) .rowMiniMenuBtn:hover,
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) .rowMiniMenuBtn:focus-visible {
+  background: rgba(108, 116, 126, 0.065);
+  border-color: rgba(108, 116, 126, 0.13);
+}
+
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) .rowMiniMenuBtn[disabled] {
+  opacity: 0.42;
+}
+
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) .rowMiniMenuShortcut {
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 1;
+  white-space: nowrap;
+}
+
+body:not(.phoneMode) .rowMiniMenu:not(.sheetMode) .rowMiniMenuSep {
+  height: 1px;
+  margin: 4px 10px;
+  background: rgba(108, 116, 126, 0.13);
+  opacity: 1;
+}
