@@ -245,15 +245,16 @@ function projectMainSameParentReorder(movingNodeId, adjacentTargetNodeId, direct
 
 function openItemDetailsForNode(nodeId) {
   if (typeof requirePocketFileForChanges === "function" && !requirePocketFileForChanges()) return false;
-  const id = cleanText(nodeId || state.selectedId, 80);
-  if (!id) return false;
+  const id = cleanText(nodeId, 80);
+  if (!id || !nodeMap().get(id)) return false;
   state.selectedId = id;
+  if (typeof cancelPendingCopyClick === "function") cancelPendingCopyClick();
   if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
   if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-  if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
-  if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") return !!window.PocketPeEditor.open(id);
   if (typeof window.openPocketNodeEditor === "function") return !!window.openPocketNodeEditor(id);
   if (typeof window.openPocketEditor === "function") return !!window.openPocketEditor(id);
+  if (typeof window.openPocketPeEditor === "function") return !!window.openPocketPeEditor(id);
+  if (window.PocketPeEditor && typeof window.PocketPeEditor.open === "function") return !!window.PocketPeEditor.open(id);
   return false;
 }
 
