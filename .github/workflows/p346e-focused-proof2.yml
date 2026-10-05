@@ -1,0 +1,38 @@
+name: P346e focused proof 2
+
+on:
+  push:
+    branches:
+      - candidate/p346e-proof2
+
+permissions:
+  contents: read
+
+jobs:
+  p346e-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: timeout 5m npm ci
+      - name: P346e exact pair concurrency and fail-closed proof
+        run: timeout 5m node --test tests/p346e-starling-node-pair-concurrency.test.js
+      - name: Current production Starling composition
+        run: timeout 8m node --test tests/p176-production-composition.test.js
+      - name: P172 semantic admission and real successor composition
+        run: |
+          timeout 5m node --test tests/p172-real-truth-cutover-admission.test.js
+          timeout 5m node --test tests/p172-real-p168-composition.test.js
+      - name: P190 production-shaped Save and current semantic mismatch
+        run: |
+          timeout 8m node --test tests/p190-starling-save-observability-and-reentry.test.js
+          timeout 8m node --test tests/proof-p346e-p190-semantic-mismatch-current.test.js
+      - name: P206 diagnostic regression
+        run: timeout 5m node --test tests/p206-starling-save-detail-observability.test.js
+      - name: Full Pocket check
+        run: timeout 5m npm run check
