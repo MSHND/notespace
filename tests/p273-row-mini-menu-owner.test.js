@@ -234,7 +234,12 @@ function makeMiniMenuHarness() {
     renderTree() {},
     refocusTreeNavigation(id) { refocused.push(id); },
     runCommandPaletteAction(action) { commands.push(action); },
-    openItemDetailsForNode(id) { edits.push(id); return true; },
+    openItemDetailsForNode(id) {
+      edits.push(id);
+      return typeof context.closeRowMiniMenu === "function"
+        ? context.closeRowMiniMenu({ restoreFocus: false })
+        : true;
+    },
     requestAnimationFrame(callback) { callback(); return 1; },
   };
   context.window = context;
@@ -285,7 +290,7 @@ test("P273 rowMiniMenu owns first focus, wrapped arrows, native Enter single act
   menuKey(menu, "Enter");
   assert.deepEqual(h.edits, ["node-B"], "native Enter activates exact-target Edit exactly once");
   assert.deepEqual(h.commands, [], "Edit does not detour through ambient command selection");
-  assert.equal(currentMenu(h), menu, "the exact-target editor owner decides menu closure");
+  assert.equal(currentMenu(h), null, "the exact-target editor owner closes the menu");
 
   assert.equal(h.context.openRowMiniMenu("node-B", h.document.mountedRow), true);
   menu = currentMenu(h);
