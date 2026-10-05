@@ -97,7 +97,9 @@
         if (current.has(frame.nodeId)) return fail("duplicate-or-cyclic-current-node");
         current.add(frame.nodeId);
         let placement, content;
-        try { placement = await session.readPlacement(frame.nodeId); content = await session.readContent(frame.nodeId); } catch (_error) { return fail("session-read-failed"); }
+        try { [placement, content] = await Promise.all([
+          session.readPlacement(frame.nodeId), session.readContent(frame.nodeId),
+        ]); } catch (_error) { return fail("session-read-failed"); }
         if (!placement || placement.ok !== true || placement.nodeId !== frame.nodeId || placement.parentId !== frame.parentId) return fail("placement-parent-disagreement");
         if (!content || content.ok !== true || content.nodeId !== frame.nodeId || !plainObject(content.payload)) return fail("invalid-content-record");
         if (["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key))) return fail("reserved-content-payload-key");
