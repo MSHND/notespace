@@ -246,6 +246,25 @@ test("P345 action is exact-reason scoped, hidden at every new Open execution, an
   assert.equal(h.choose.hidden, true, "non-matching completion cannot revive stale action");
 });
 
+
+test("P345 stale visible action cannot run after the current owner stops being eligible for Open", async () => {
+  const h = createHarness({
+    openResults: [{ ok: false, reason: "synced-pocket-not-configured" }],
+  });
+
+  h.topbar.fire("click");
+  h.primary.fire("click");
+  await settle();
+  assert.equal(h.choose.hidden, false);
+  assert.equal(h.openInputs.length, 1);
+
+  h.setSession({ ownerKind: "synced", id: 99 });
+  h.choose.fire("click");
+  await settle();
+
+  assert.equal(h.openInputs.length, 1, "stale action does not invoke Open after owner eligibility changes");
+});
+
 test("P345 Cancel closes and clears Open-local reselection input", async () => {
   const h = createHarness({
     openResults: [
