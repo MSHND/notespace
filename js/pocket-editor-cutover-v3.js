@@ -22,12 +22,10 @@
     return id && typeof nodeMap === "function" ? nodeMap().get(id) || null : null;
   }
 
-  function selectedNode(input) {
+  function targetNode(input) {
     let id = "";
     if (typeof input === "string") id = clean(input, 80);
     else if (input && typeof input === "object") id = clean(input.id, 80);
-    if (!id) id = clean(global.state?.selectedId, 80);
-    if (!id) id = clean(global.state?.detailsEdit?.id, 80);
     return mapNode(id);
   }
 
@@ -84,7 +82,7 @@
   }
 
   function openDirect(input) {
-    const node = selectedNode(input);
+    const node = targetNode(input);
     console.info("[editor cutover v3] edit requested", {
       foundNode: !!node,
       hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
@@ -116,52 +114,10 @@
     return ok;
   }
 
-  function eatAndOpen(ev, nodeId) {
-    if (ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      ev.stopImmediatePropagation();
-    }
-    if (typeof closeCommandPalette === "function") closeCommandPalette({ restoreFocus: false });
-    if (typeof closeRowMiniMenu === "function") closeRowMiniMenu({ restoreFocus: false });
-    return openDirect(nodeId || null);
-  }
-
-  function rowFromEvent(ev) {
-    const target = ev.target instanceof HTMLElement ? ev.target : null;
-    return target ? target.closest("[data-node-id]") : null;
-  }
-
-  function nodeIdFromEvent(ev) {
-    const row = rowFromEvent(ev);
-    return row instanceof HTMLElement ? clean(row.getAttribute("data-node-id"), 80) : "";
-  }
-
-  function clickCapture(ev) {
-    const target = ev.target instanceof HTMLElement ? ev.target : null;
-    if (!target) return;
-    const rowId = nodeIdFromEvent(ev);
-    const isPrimaryEdit = target.closest("#btnOpenPrimary") || target.closest("#cmdEdit") || target.closest("#btnDetailPopout");
-    const menuButton = target.closest(".rowMiniMenuBtn");
-    const isRowEdit = menuButton && clean(menuButton.textContent, 40).toLowerCase().startsWith("edit");
-    if (!isPrimaryEdit && !isRowEdit) return;
-    if (rowId && global.state) global.state.selectedId = rowId;
-    eatAndOpen(ev, rowId);
-  }
-
-  function doubleClickCapture(ev) {
-    const id = nodeIdFromEvent(ev);
-    if (!id) return;
-    if (global.state) global.state.selectedId = id;
-    eatAndOpen(ev, id);
-  }
-
   function install() {
     hideInlineEditor();
     global.openPocketNodeEditor = openDirect;
     global.openPocketEditor = openDirect;
-    document.addEventListener("click", clickCapture, true);
-    document.addEventListener("dblclick", doubleClickCapture, true);
     console.info("[editor cutover v3] installed", {
       hasStandalone: !!(global.PocketPeEditor && typeof global.PocketPeEditor.open === "function"),
       hasLegacyOpen: !!legacyOpenDetailsForSelectedNode
