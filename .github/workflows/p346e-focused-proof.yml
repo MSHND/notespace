@@ -1,0 +1,31 @@
+name: P346e focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p346e-proof
+
+jobs:
+  p346e-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install
+        run: timeout 5m npm ci
+      - name: Focused Starling concurrency and regressions
+        run: |
+          timeout 8m node --test \
+            tests/p346e-starling-node-pair-concurrency.test.js \
+            tests/p125-starling-remote-edit.test.js \
+            tests/p164-starling-successor-mirror.test.js \
+            tests/p172-real-truth-cutover-admission.test.js \
+            tests/p172-real-p168-composition.test.js \
+            tests/p190b-semantic-admission-negative.test.js \
+            tests/p190-starling-save-observability-and-reentry.test.js \
+            tests/p206-starling-save-detail-observability.test.js
+      - name: Full Pocket check
+        run: timeout 10m npm run check
