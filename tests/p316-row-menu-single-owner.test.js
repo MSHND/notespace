@@ -54,7 +54,7 @@ test("P316 legacy row-menu Move injection fallback is absent from runtime JS", (
   assert.doesNotMatch(helper, /closeMenusAfterMoveClick/);
 });
 
-test("P316 openRowMiniMenu remains the single rowMiniMenu constructor with the accepted six actions", () => {
+test("P316 openRowMiniMenu remains the single rowMiniMenu constructor with the settled five actions", () => {
   const runtime = jsFiles().map((file) => ({ file, text: source(file) }));
   const constructors = runtime
     .filter(({ text }) => /className\s*=\s*"rowMiniMenu"/.test(text))
@@ -70,10 +70,11 @@ test("P316 openRowMiniMenu remains the single rowMiniMenu constructor with the a
     { label: "Edit", action: "edit", shortcut: "e" },
     { label: "Add below", action: "add_sibling", shortcut: "a" },
     { label: "Move", action: "move", shortcut: "m" },
-    { label: "Focus here", action: "focus", shortcut: "f" },
     { label: "Copy text", action: "copy_text", shortcut: "c" },
     { label: "Delete", action: "delete", shortcut: "d" },
   ]);
+
+  assert.equal(actions.some((item) => item.label === "Focus here" || item.shortcut === "f"), false, "row menu no longer owns Focus here or F");
 
   const move = actions.filter((item) => item.label === "Move");
   assert.deepEqual(move, [{ label: "Move", action: "move", shortcut: "m" }], "exactly one Move action remains in the canonical owner");
