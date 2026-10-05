@@ -324,7 +324,9 @@ test("P273 keyboard menu-open routes, semantic command route and phone owner rem
     assert.match(overlays, new RegExp('addButton\\([^\\n]+, "' + shortcut + '"'));
   }
 
-  assert.equal(overlays.includes('addButton("Focus here", "focus", "f")'), false);\n\n  assert.match(phone, /global\.openRowMiniMenu\(nodeId, button\)/);
+  assert.equal(overlays.includes('addButton("Focus here", "focus", "f")'), false);
+
+  assert.match(phone, /global\.openRowMiniMenu\(nodeId, button\)/);
   assert.match(phone, /const originalOpenRowMiniMenu = global\.openRowMiniMenu/);
   assert.match(phone, /originalOpenRowMiniMenu\.apply\(this, arguments\)/);
 });
