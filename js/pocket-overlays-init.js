@@ -203,7 +203,6 @@ function openRowMiniMenu(nodeId, anchorEl, point = null) {
   addButton("Edit", "edit", "e");
   addButton("Add below", "add_sibling", "a");
   addButton("Move", "move", "m");
-  addButton("Focus here", "focus", "f");
   addSeparator();
   addButton("Copy text", "copy_text", "c");
   addSeparator();
