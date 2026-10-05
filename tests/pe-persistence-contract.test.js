@@ -2025,7 +2025,7 @@ test("P095 routes the real Main-tree plain Enter boundary through canonical edit
   assert.equal(legacyCalls, 0);
 });
 
-test("P098 executable PE entry-route matrix proves the current owners", () => {
+test("P098 executable PE canonical-owner matrix proves the current owners", () => {
   class RouteElement {
     constructor(tagName = "div") {
       this.tagName = String(tagName).toUpperCase();
@@ -2035,14 +2035,14 @@ test("P098 executable PE entry-route matrix proves the current owners", () => {
   }
 
   let phoneMode = false;
-  const listeners = {};
+  const documentEvents = [];
   const context = createFullContractContext({
     HTMLElement: RouteElement,
     document: {
       readyState: "complete",
       body: { classList: { contains(name) { return phoneMode && name === "phoneMode"; } } },
       getElementById() { return null; },
-      addEventListener(type, listener) { listeners[type] = listener; },
+      addEventListener(type) { documentEvents.push(type); },
     },
   });
   const ordinary = syntheticNode("p098_ordinary", { label: "Ordinary" });
@@ -2104,23 +2104,6 @@ test("P098 executable PE entry-route matrix proves the current owners", () => {
     return event;
   };
 
-  const eventTarget = (kind, id) => {
-    const row = new RouteElement("div");
-    row.getAttribute = (name) => name === "data-node-id" ? id : null;
-    const editButton = new RouteElement("button");
-    editButton.textContent = "Edit";
-    const target = new RouteElement("button");
-    target.closest = (selector) => {
-      if (selector === "[data-node-id]") return row;
-      if (selector === ".rowMiniMenuBtn") return kind === "row-edit" ? editButton : null;
-      if (selector === "#btnOpenPrimary") return kind === "primary" ? target : null;
-      if (selector === "#cmdEdit") return kind === "command" ? target : null;
-      if (selector === "#btnDetailPopout") return null;
-      return null;
-    };
-    return target;
-  };
-
   state.selectedId = ordinary.id;
   assert.equal(dispatch("Enter").defaultPrevented, true);
   assert.deepEqual(canonicalCalls, [ordinary.id], "plain Enter reaches the canonical desktop owner");
@@ -2143,32 +2126,27 @@ test("P098 executable PE entry-route matrix proves the current owners", () => {
   assert.equal(canonicalCalls.length, 1, "Phone Enter does not open desktop PE");
   phoneMode = false;
 
-  for (const [kind, eventName] of [
-    ["primary", "click"],
-    ["command", "click"],
-    ["row-edit", "click"],
-    ["row", "dblclick"],
-  ]) {
-    const event = {
-      target: eventTarget(kind, ordinary.id),
-      preventDefault() {},
-      stopPropagation() {},
-      stopImmediatePropagation() {},
-    };
-    listeners[eventName](event);
-  }
-  assert.deepEqual(canonicalCalls.slice(1), [ordinary.id, ordinary.id, ordinary.id, ordinary.id],
-    "primary Edit, command Edit, row-menu Edit and double-click share the canonical owner");
-  assert.equal(inlineCalls.length, 1);
+  assert.deepEqual(
+    documentEvents.filter((type) => type === "click" || type === "dblclick"),
+    [],
+    "editor cutover does not duplicate UI target ownership with capture listeners",
+  );
 
-  assert.equal(context.openPocketEditor(ordinary.id), true, "canonical public alias remains supported");
+  assert.equal(context.openPocketNodeEditor(ordinary.id), true, "canonical exact-target public alias remains supported");
+  assert.equal(context.openPocketEditor(ordinary.id), true, "compatibility exact-target public alias remains supported");
   assert.equal(context.PocketPeEditor.open(ordinary.id), true, "legacy public bridge remains supported");
-  assert.equal(canonicalCalls.length, 7);
+  assert.deepEqual(canonicalCalls.slice(1), [ordinary.id, ordinary.id, ordinary.id]);
+
+  const beforeMissingTarget = canonicalCalls.length;
+  state.selectedId = ordinary.id;
+  assert.equal(context.openPocketNodeEditor(), false, "canonical editor owner does not rediscover an omitted target");
+  assert.equal(canonicalCalls.length, beforeMissingTarget);
+  assert.match(statuses.at(-1).message, /select an item first/i);
 
   canonicalResult = false;
   assert.equal(context.openPocketNodeEditor(unsupported.id), false, "unsupported data fails closed");
   assert.equal(inlineCalls.length, 1, "unsupported desktop data does not enter Phone details");
-  assert.equal(canonicalCalls.length, 8, "unsupported data still reaches the canonical validation boundary");
+  assert.equal(canonicalCalls.length, beforeMissingTarget + 1, "unsupported data still reaches the canonical validation boundary");
   assert.match(statuses.at(-1).message, /read-only compatibility view/i);
 });
 
