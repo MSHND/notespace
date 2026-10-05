@@ -340,8 +340,10 @@
           const nodeId = children[index];
           if (seen.has(nodeId)) return false;
           seen.add(nodeId);
-          const place = await record(root.placementRef, "placement-trie", "placement-record", nodeId);
-          const content = await record(root.contentRef, "content-trie", "content-record", nodeId);
+          const [place, content] = await Promise.all([
+            record(root.placementRef, "placement-trie", "placement-record", nodeId),
+            record(root.contentRef, "content-trie", "content-record", nodeId),
+          ]);
           if (!place || !exact(place, ["schema", "kind", "nodeId", "parentId"])
               || place.schema !== logical.OBJECT_SCHEMA || place.kind !== "placement-record"
               || place.nodeId !== nodeId || place.parentId !== parentId
