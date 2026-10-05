@@ -1,0 +1,34 @@
+name: P345 focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p345-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p345-focused-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: P345 explicit reselection UI
+        run: node --test tests/p345-account-reselection-ui.test.js
+      - name: Existing Sync UI regressions
+        run: node --test tests/p053-sync-ui.test.js tests/p310-ownerless-sync-ui-controller.test.js
+      - name: Diagnostic independence regressions
+        run: node --test tests/p331-open-diagnostic-projection.test.js tests/p335-safe-not-configured-account-diagnostic-hint.test.js
+      - name: P341 account-reselection foundation
+        run: node --test tests/p341-account-reselection-foundation.test.js
+      - name: Additional-device reselection/bootstrap regressions
+        run: node --test --test-name-pattern="P341|P052 remains dormant|P052i1|P052c public browser Device B adoption" tests/p052-additional-device.test.js
+      - name: Ownerless preservation regressions
+        run: node --test tests/p280-first-create-existing-account.test.js tests/p288-ownerless-account-ready-convergence.test.js tests/p301-ownerless-first-create-runtime-start.test.js tests/p302-ownerless-durable-continuation.test.js
+      - name: Repository check
+        run: npm run check
