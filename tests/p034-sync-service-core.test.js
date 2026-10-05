@@ -1738,3 +1738,160 @@ test("package and production loader boundaries retain the P048/P049 server-only 
   assert.doesNotMatch(source("index.html"), /sync-service\//);
   assert.doesNotMatch(source("sw.js"), /sync-service\//);
 });
+
+
+test("P341 explicit reselect preserves the prior session until successful cross-account finish", async () => {
+  const harness = createHarness();
+  const accountA = await register(harness, {
+    operationId: "p341-register-a",
+    credentialId: credentialId(141),
+  });
+  const accountB = await register(harness, {
+    operationId: "p341-register-b",
+    credentialId: credentialId(151),
+  });
+
+  const ordinarySessionBegin = await harness.core.beginAuthentication(call(
+    beginAuthenticationBody("p341-ordinary-session"),
+    accountA.sessionId
+  ));
+  assert.equal(harness.driver.snapshot().ceremonies["p341-ordinary-session"].mode, "account-bound");
+  assert.equal(ordinarySessionBegin.body.bootstrap, undefined);
+
+  const ordinaryDiscoverableBegin = await harness.core.beginAuthentication(call(
+    beginAuthenticationBody("p341-ordinary-discoverable")
+  ));
+  assert.equal(harness.driver.snapshot().ceremonies["p341-ordinary-discoverable"].mode, "discoverable");
+  assert.equal(ordinaryDiscoverableBegin.body.bootstrap, true);
+
+  const ordinaryLocatorBegin = await harness.core.beginAuthentication(call(
+    beginAuthenticationBody("p341-ordinary-locator", { accountLocator: accountA.accountId })
+  ));
+  assert.equal(harness.driver.snapshot().ceremonies["p341-ordinary-locator"].mode, "account-bound");
+  assert.equal(ordinaryLocatorBegin.body.bootstrap, undefined);
+
+  await assert.rejects(
+    harness.core.beginAuthentication(call(beginAuthenticationBody("p341-reselect-no-session", {
+      accountSelection: "choose-another",
+    }))),
+    errorCode("service-authentication-required")
+  );
+  await assert.rejects(
+    harness.core.beginAuthentication(call(beginAuthenticationBody("p341-reselect-with-locator", {
+      accountLocator: accountA.accountId,
+      accountSelection: "choose-another",
+    }), accountA.sessionId)),
+    errorCode("service-request-invalid")
+  );
+
+  const begin = await harness.core.beginAuthentication(call(
+    beginAuthenticationBody("p341-reselect", { accountSelection: "choose-another" }),
+    accountA.sessionId
+  ));
+  assert.equal(begin.body.bootstrap, true);
+  assert.equal(begin.body.prfEvaluationInput, undefined);
+  assert.equal(begin.body.publicKeyRequestOptions.allowCredentials, undefined);
+  assert.equal(begin.body.publicKeyRequestOptions.userVerification, "required");
+
+  let snapshot = harness.driver.snapshot();
+  const ceremony = snapshot.ceremonies["p341-reselect"];
+  assert.equal(ceremony.mode, "reselect");
+  assert.equal(ceremony.accountId, null);
+  assert.equal(ceremony.priorSessionId, accountA.sessionId);
+  assert.equal(ceremony.prfEvaluationInput, null);
+  assert.equal(snapshot.sessions[accountA.sessionId].status, "active");
+
+  const finishRequest = {
+    apiVersion: 1,
+    operationId: "p341-reselect",
+    ceremonyId: begin.body.ceremonyId,
+    credential: authenticationCredential(accountB.credentialId),
+  };
+  const finish = await harness.core.finishAuthentication(call(finishRequest, accountA.sessionId));
+  assert.equal(finish.body.bootstrap, true);
+  assert.equal(finish.body.accountId, accountB.accountId);
+  assert.equal(finish.body.credentialId, accountB.credentialId);
+  assert.equal(finish.session.replaceSessionId, accountA.sessionId);
+  assert.equal(JSON.stringify(finish.body).includes(finish.session.sessionId), false);
+
+  snapshot = harness.driver.snapshot();
+  assert.equal(snapshot.sessions[accountA.sessionId].status, "revoked");
+  assert.equal(snapshot.sessions[accountA.sessionId].replacedBy, finish.session.sessionId);
+  assert.equal(snapshot.sessions[finish.session.sessionId].status, "active");
+  assert.equal(snapshot.sessions[finish.session.sessionId].accountId, accountB.accountId);
+  assert.equal(snapshot.sessions[finish.session.sessionId].credentialId, accountB.credentialId);
+  assert.equal(snapshot.sessions[accountB.sessionId].status, "active");
+
+  const replay = await harness.core.finishAuthentication(call(finishRequest, accountA.sessionId));
+  assert.deepEqual(plain(replay), plain(finish));
+  await assert.rejects(
+    harness.core.finishAuthentication(call(finishRequest, accountB.sessionId)),
+    errorCode("service-operation-reuse")
+  );
+});
+
+test("P341 cancelled failed and expired reselection leave the exact prior session active", async () => {
+  {
+    const harness = createHarness();
+    const accountA = await register(harness, {
+      operationId: "p341-cancel-a", credentialId: credentialId(161),
+    });
+    await harness.core.beginAuthentication(call(
+      beginAuthenticationBody("p341-cancel", { accountSelection: "choose-another" }),
+      accountA.sessionId
+    ));
+    const snapshot = harness.driver.snapshot();
+    assert.equal(snapshot.sessions[accountA.sessionId].status, "active");
+    assert.equal(snapshot.sessions[accountA.sessionId].replacedBy, null);
+  }
+
+  {
+    const harness = createHarness();
+    const accountA = await register(harness, {
+      operationId: "p341-fail-a", credentialId: credentialId(171),
+    });
+    const begin = await harness.core.beginAuthentication(call(
+      beginAuthenticationBody("p341-fail", { accountSelection: "choose-another" }),
+      accountA.sessionId
+    ));
+    await assert.rejects(
+      harness.core.finishAuthentication(call({
+        apiVersion: 1,
+        operationId: "p341-fail",
+        ceremonyId: begin.body.ceremonyId,
+        credential: authenticationCredential(credentialId(199)),
+      }, accountA.sessionId)),
+      errorCode("service-authentication-failed")
+    );
+    const snapshot = harness.driver.snapshot();
+    assert.equal(snapshot.sessions[accountA.sessionId].status, "active");
+    assert.equal(snapshot.sessions[accountA.sessionId].replacedBy, null);
+  }
+
+  {
+    const harness = createHarness();
+    const accountA = await register(harness, {
+      operationId: "p341-expire-a", credentialId: credentialId(181),
+    });
+    const accountB = await register(harness, {
+      operationId: "p341-expire-b", credentialId: credentialId(191),
+    });
+    const begin = await harness.core.beginAuthentication(call(
+      beginAuthenticationBody("p341-expire", { accountSelection: "choose-another" }),
+      accountA.sessionId
+    ));
+    harness.setTime(Date.parse(begin.body.expiresAt));
+    await assert.rejects(
+      harness.core.finishAuthentication(call({
+        apiVersion: 1,
+        operationId: "p341-expire",
+        ceremonyId: begin.body.ceremonyId,
+        credential: authenticationCredential(accountB.credentialId),
+      }, accountA.sessionId)),
+      errorCode("service-ceremony-expired")
+    );
+    const snapshot = harness.driver.snapshot();
+    assert.equal(snapshot.sessions[accountA.sessionId].status, "active");
+    assert.equal(snapshot.sessions[accountA.sessionId].replacedBy, null);
+  }
+});

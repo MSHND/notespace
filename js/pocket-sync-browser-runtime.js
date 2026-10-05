@@ -2326,7 +2326,9 @@
       try { requireMethods(config.discoveryService, ["readSyncedPocket"], "discovery-service-invalid"); }
       catch (_error) { return safeFailure("additional-device-unavailable"); }
       if (!input || typeof input !== "object" || Array.isArray(input)
-          || Object.keys(input).some((field) => field !== "discardTarget")) {
+          || Object.keys(input).some((field) => !["discardTarget", "accountSelection"].includes(field))
+          || (input.accountSelection !== undefined
+            && input.accountSelection !== "choose-another")) {
         return safeFailure("additional-device-target-dirty");
       }
       const requestedDiscard = input.discardTarget || null;
@@ -2365,7 +2367,9 @@
           isTargetCurrent: additionalTargetCurrent,
           validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
           adoptOpenedPocket: (opened) => adoptAdditionalDevice(opened, discardTarget, jsonSafetyToken),
-        });
+        }, input.accountSelection === "choose-another"
+          ? { accountSelection: "choose-another" }
+          : {});
         return opened;
       } finally {
         global.releaseJsonSafetyForSyncedDiscard?.(jsonSafetyToken);

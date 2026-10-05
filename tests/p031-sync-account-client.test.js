@@ -1087,3 +1087,85 @@ test("P278 authentication consumer boundary introduces no secret persistence, lo
   assert.match(moduleSource, /serialised\.prf\.outputBytes\.fill\(0\)/);
 });
 
+
+
+test("P341 account client admits only explicit choose-another and keeps bootstrap result semantics", async () => {
+  const { api } = loadClient();
+  assert.deepEqual(JSON.parse(JSON.stringify(api.validateBeginAuthenticationRequest({
+    apiVersion: 1,
+    operationId: "p341-request",
+    accountSelection: "choose-another",
+  }))), {
+    apiVersion: 1,
+    operationId: "p341-request",
+    accountSelection: "choose-another",
+  });
+  for (const invalid of [
+    { apiVersion: 1, operationId: "p341-bad", accountSelection: "other" },
+    { apiVersion: 1, operationId: "p341-bad", accountSelection: "choose-another", accountLocator: "account" },
+  ]) {
+    assert.throws(
+      () => api.validateBeginAuthenticationRequest(invalid),
+      (error) => error.code === "authentication-request-invalid"
+    );
+  }
+
+  const begin = {
+    apiVersion: 1,
+    ok: true,
+    operationId: "p341-auth",
+    ceremonyId: "p341-ceremony",
+    expiresAt: EXPIRES,
+    bootstrap: true,
+    publicKeyRequestOptions: {
+      challenge: CHALLENGE,
+      timeout: 120000,
+      rpId: "pocket.example",
+      userVerification: "required",
+    },
+  };
+  const finish = {
+    apiVersion: 1,
+    ok: true,
+    operationId: "p341-auth",
+    ceremonyId: "p341-ceremony",
+    accountId: "selected-account",
+    credentialId: CREDENTIAL_ID,
+    credentialVersion: 1,
+    accountPolicyVersion: 1,
+    bootstrap: true,
+  };
+  const calls = [];
+  const client = api.createClient({
+    accountService: service({
+      async beginAuthentication(input) {
+        calls.push(["begin", JSON.parse(JSON.stringify(input))]);
+        return begin;
+      },
+      async finishAuthentication(input) {
+        calls.push(["finish", JSON.parse(JSON.stringify(input))]);
+        return finish;
+      },
+    }),
+    webAuthn: {
+      async createCredential() { throw new Error("unexpected"); },
+      async getCredential() { throw new Error("account-bound path must not run"); },
+      async getDiscoverableCredential() {
+        calls.push(["discoverable"]);
+        return nativeAuthenticationCredential({});
+      },
+    },
+    now: () => NOW,
+  });
+  const result = await client.authenticatePasskey({
+    apiVersion: 1,
+    operationId: "p341-auth",
+    accountSelection: "choose-another",
+  });
+  assert.deepEqual(calls.map(([kind]) => kind), ["begin", "discoverable", "finish"]);
+  assert.equal(calls[0][1].accountSelection, "choose-another");
+  assert.equal(result.bootstrap, true);
+  assert.equal(result.accountId, "selected-account");
+  assert.equal(result.prf.status, "not-requested");
+  assert.equal(Object.prototype.hasOwnProperty.call(result.prf, "outputBytes"), false);
+});

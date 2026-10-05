@@ -862,14 +862,24 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
       "apiVersion",
       "operationId",
       "accountLocator",
+      "accountSelection",
     ], ["apiVersion", "operationId"], code);
-    if (request.apiVersion !== POLICY.apiVersion) throw accountError(code);
+    if (request.apiVersion !== POLICY.apiVersion
+        || (request.accountSelection !== undefined
+          && request.accountSelection !== "choose-another")
+        || (request.accountSelection === "choose-another"
+          && request.accountLocator !== undefined)) {
+      throw accountError(code);
+    }
     const value = {
       apiVersion: POLICY.apiVersion,
       operationId: identifier(request.operationId, code),
     };
     if (request.accountLocator !== undefined) {
       value.accountLocator = identifier(request.accountLocator, code);
+    }
+    if (request.accountSelection !== undefined) {
+      value.accountSelection = "choose-another";
     }
     return freezeTree(value);
   }

@@ -838,16 +838,20 @@ function validateStoredRecord(collection, input, key) {
     case COLLECTIONS.ceremonies: {
       if (input.kind !== "pocket.sync.service-ceremony"
           || !["registration", "authentication"].includes(input.ceremonyType)
-          || !["account-bound", "create-new-account", "discoverable"].includes(input.mode)
+          || !["account-bound", "create-new-account", "discoverable", "reselect"].includes(input.mode)
           || input.operationId !== key
           || !DIGEST_PATTERN.test(input.requestDigest)) {
         throw serviceError("service-state-invalid", 500);
       }
+      const selectionMode = ["discoverable", "reselect"].includes(input.mode);
       identifier(input.operationId, "service-state-invalid");
       identifier(input.ceremonyId, "service-state-invalid");
-      if (input.mode === "discoverable") {
+      if (selectionMode) {
         if (input.ceremonyType !== "authentication" || input.accountId !== null
-            || input.priorSessionId !== null) throw serviceError("service-state-invalid", 500);
+            || (input.mode === "discoverable" && input.priorSessionId !== null)
+            || (input.mode === "reselect" && input.priorSessionId === null)) {
+          throw serviceError("service-state-invalid", 500);
+        }
       } else {
         if (input.mode === "create-new-account" && input.ceremonyType !== "registration") {
           throw serviceError("service-state-invalid", 500);
@@ -861,21 +865,21 @@ function validateStoredRecord(collection, input, key) {
         throw serviceError("service-state-invalid", 500);
       }
       canonicalBinary(input.challenge, { minimum: 32, maximum: 32 }, "service-state-invalid");
-      if (input.mode === "discoverable") {
+      if (selectionMode) {
         if (input.prfEvaluationInput !== null) throw serviceError("service-state-invalid", 500);
       } else {
         canonicalBinary(input.prfEvaluationInput, { minimum: 32, maximum: 32 }, "service-state-invalid");
       }
       isoTimestamp(input.expiresAt);
       const beginBody = validateBeginBody(input.beginBody,
-        input.mode === "discoverable" ? "authentication-bootstrap" : input.ceremonyType);
+        selectionMode ? "authentication-bootstrap" : input.ceremonyType);
       const options = input.ceremonyType === "registration"
         ? beginBody.publicKeyCreationOptions
         : beginBody.publicKeyRequestOptions;
       if (beginBody.operationId !== input.operationId
           || beginBody.ceremonyId !== input.ceremonyId
           || beginBody.expiresAt !== input.expiresAt
-          || (input.mode !== "discoverable" && beginBody.prfEvaluationInput !== input.prfEvaluationInput)
+          || (!selectionMode && beginBody.prfEvaluationInput !== input.prfEvaluationInput)
           || options.challenge !== input.challenge
           || (input.ceremonyType === "registration"
             && (options.user.name !== input.accountId
@@ -890,12 +894,14 @@ function validateStoredRecord(collection, input, key) {
       if (completed) {
         const completedResult = validateResultWrapper(
           input.completedResult,
-          input.mode === "discoverable" ? "authentication-bootstrap" : input.ceremonyType
+          selectionMode ? "authentication-bootstrap" : input.ceremonyType
         );
         if (completedResult.body.operationId !== input.operationId
             || completedResult.body.ceremonyId !== input.ceremonyId
-            || (input.mode !== "discoverable" && (completedResult.body.accountId !== input.accountId
-              || completedResult.body.prfEvaluationInput !== input.prfEvaluationInput))) {
+            || (!selectionMode && (completedResult.body.accountId !== input.accountId
+              || completedResult.body.prfEvaluationInput !== input.prfEvaluationInput))
+            || (input.mode === "reselect"
+              && completedResult.session.replaceSessionId !== input.priorSessionId)) {
           throw serviceError("service-state-invalid", 500);
         }
       }
@@ -1393,13 +1399,21 @@ function validateBeginAuthenticationRequest(input) {
     "apiVersion",
     "operationId",
     "accountLocator",
+    "accountSelection",
   ], ["apiVersion", "operationId"]);
-  if (value.apiVersion !== POLICY.apiVersion) throw serviceError("service-request-invalid");
+  if (value.apiVersion !== POLICY.apiVersion
+      || (value.accountSelection !== undefined
+        && value.accountSelection !== "choose-another")
+      || (value.accountSelection === "choose-another"
+        && value.accountLocator !== undefined)) {
+    throw serviceError("service-request-invalid");
+  }
   const result = {
     apiVersion: 1,
     operationId: identifier(value.operationId),
   };
   if (value.accountLocator !== undefined) result.accountLocator = identifier(value.accountLocator);
+  if (value.accountSelection !== undefined) result.accountSelection = "choose-another";
   return frozen(result);
 }
 
@@ -2260,27 +2274,30 @@ function createServiceCore(input) {
     if (ceremony.finishDigest !== digest) {
       throw serviceError("service-operation-reuse", 409);
     }
+    const selectionMode = ["discoverable", "reselect"].includes(ceremony.mode);
     const result = validateResultWrapper(
       ceremony.completedResult,
-      ceremony.mode === "discoverable" ? "authentication-bootstrap" : ceremony.ceremonyType
+      selectionMode ? "authentication-bootstrap" : ceremony.ceremonyType
     );
     const authorised = await authoriseSession(
       transaction,
       result.session.sessionId,
       atMilliseconds
     );
-    if ((ceremony.mode !== "discoverable" && authorised.account.accountId !== ceremony.accountId)
+    if ((!selectionMode && authorised.account.accountId !== ceremony.accountId)
         || authorised.account.accountId !== result.body.accountId
         || authorised.credential.credentialId !== result.body.credentialId
-        || (ceremony.mode !== "discoverable" && authorised.session.accountId !== ceremony.accountId)
-        || authorised.session.credentialId !== result.body.credentialId) {
+        || (!selectionMode && authorised.session.accountId !== ceremony.accountId)
+        || authorised.session.credentialId !== result.body.credentialId
+        || (ceremony.mode === "reselect"
+          && result.session.replaceSessionId !== ceremony.priorSessionId)) {
       throw serviceError("service-state-invalid", 500);
     }
     return result;
   }
 
-  function discoverableAuthenticationFailure(ceremony) {
-    if (ceremony.mode === "discoverable") {
+  function selectionAuthenticationFailure(ceremony) {
+    if (["discoverable", "reselect"].includes(ceremony.mode)) {
       return serviceError("service-authentication-failed", 400);
     }
     return null;
@@ -2474,7 +2491,13 @@ function createServiceCore(input) {
         if (Date.parse(existing.expiresAt) <= at) {
           throw serviceError("service-ceremony-expired", 410);
         }
-      if (context.sessionId !== null) {
+        if (existing.mode === "reselect") {
+          if (context.sessionId === null) throw serviceError("service-authentication-required", 401);
+          const authorised = await authoriseSession(transaction, context.sessionId, at);
+          if (authorised.session.sessionId !== existing.priorSessionId) {
+            throw serviceError("service-state-invalid", 500);
+          }
+        } else if (context.sessionId !== null) {
           const authorised = await authoriseSession(transaction, context.sessionId, at);
           if (authorised.account.accountId !== existing.accountId) {
             throw serviceError("service-state-invalid", 500);
@@ -2486,10 +2509,19 @@ function createServiceCore(input) {
         return frozen({ status: 200, body: existing.beginBody, session: null });
       }
 
-      const discoverable = context.sessionId === null && request.accountLocator === undefined;
+      const reselect = request.accountSelection === "choose-another";
+      const discoverable = !reselect
+        && context.sessionId === null
+        && request.accountLocator === undefined;
+      const selectionMode = discoverable || reselect;
       let account = null;
       let credentials = null;
-      if (context.sessionId !== null) {
+      if (reselect) {
+        if (context.sessionId === null) {
+          throw serviceError("service-authentication-required", 401, { clearSession: false });
+        }
+        await authoriseSession(transaction, context.sessionId, at);
+      } else if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
         account = authorised.account;
         credentials = authorised.credentials;
@@ -2502,11 +2534,13 @@ function createServiceCore(input) {
         if (account === null) throw serviceError("service-account-unresolved", 404);
         credentials = await loadAccountCredentials(transaction, account);
       }
-      if (!discoverable && credentials.length < 1) throw serviceError("service-account-unresolved", 404);
+      if (!selectionMode && credentials.length < 1) {
+        throw serviceError("service-account-unresolved", 404);
+      }
       const ceremonyId = randomToken();
       const challenge = randomToken();
       const expiresAt = expiry(at, ceremonyLifetimeMs);
-      const beginBody = discoverable ? frozen({
+      const beginBody = selectionMode ? frozen({
         apiVersion: 1,
         ok: true,
         operationId: request.operationId,
@@ -2527,7 +2561,7 @@ function createServiceCore(input) {
           credentials
         ),
       });
-      if (discoverable) validateDiscoverableAuthenticationOptions(
+      if (selectionMode) validateDiscoverableAuthenticationOptions(
         beginBody.publicKeyRequestOptions, "service-state-invalid"
       );
       else validateAuthenticationOptions(beginBody.publicKeyRequestOptions,
@@ -2537,15 +2571,15 @@ function createServiceCore(input) {
         schemaVersion: 1,
         storeVersion: 1,
         ceremonyType: "authentication",
-        mode: discoverable ? "discoverable" : "account-bound",
+        mode: reselect ? "reselect" : (discoverable ? "discoverable" : "account-bound"),
         operationId: request.operationId,
         ceremonyId,
         requestDigest: digest,
-        accountId: discoverable ? null : account.accountId,
+        accountId: selectionMode ? null : account.accountId,
         priorSessionId: context.sessionId,
         deviceId: null,
         challenge,
-        prfEvaluationInput: discoverable ? null : account.prfEvaluationInput,
+        prfEvaluationInput: selectionMode ? null : account.prfEvaluationInput,
         expiresAt,
         beginBody,
         finishDigest: null,
@@ -2636,7 +2670,7 @@ function createServiceCore(input) {
       credentialVersion: POLICY.credentialVersion,
       accountPolicyVersion: POLICY.accountPolicyVersion,
     };
-    if (ceremony.mode === "discoverable") {
+    if (["discoverable", "reselect"].includes(ceremony.mode)) {
       body.bootstrap = true;
     } else {
       body.prfEvaluationInput = ceremony.prfEvaluationInput;
@@ -2854,26 +2888,47 @@ function createServiceCore(input) {
         return frozen({ replay: await completedReplay(transaction, ceremony, digest, at) });
       }
       ensurePendingCeremony(ceremony, "authentication", request, context, digest, at);
+      const selectionMode = ["discoverable", "reselect"].includes(ceremony.mode);
       let account;
       let priorSession = null;
-      if (context.sessionId !== null) {
+      if (ceremony.mode === "reselect") {
+        const authorised = await authoriseSession(transaction, context.sessionId, at);
+        if (authorised.session.sessionId !== ceremony.priorSessionId) {
+          throw serviceError("service-ceremony-invalid", 400);
+        }
+        priorSession = authorised.session;
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
+          throw selectionAuthenticationFailure(ceremony);
+        }
+      } else if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, at);
         account = authorised.account;
         priorSession = authorised.session;
       } else if (ceremony.mode === "discoverable") {
-        const credential = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
-        if (credential === null) throw discoverableAuthenticationFailure(ceremony);
-        account = await readRecord(transaction, COLLECTIONS.accounts, credential.accountId);
-        if (account === null || !account.credentialIds.includes(credential.credentialId)) {
-          throw discoverableAuthenticationFailure(ceremony);
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
+          throw selectionAuthenticationFailure(ceremony);
         }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
         if (account === null) throw serviceError("service-state-invalid", 500);
       }
-      if ((ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
+      if ((!selectionMode && account.accountId !== ceremony.accountId)
           || !account.credentialIds.includes(request.credential.id)) {
-        throw discoverableAuthenticationFailure(ceremony)
+        throw selectionAuthenticationFailure(ceremony)
           || serviceError("service-authorisation-failed", 403);
       }
       const credential = await readRecord(
@@ -2882,7 +2937,7 @@ function createServiceCore(input) {
         request.credential.id
       );
       if (credential === null || credential.accountId !== account.accountId) {
-        throw discoverableAuthenticationFailure(ceremony)
+        throw selectionAuthenticationFailure(ceremony)
           || serviceError("service-authorisation-failed", 403);
       }
       return frozen({ ceremony, account, priorSession, credential, replay: null });
@@ -2901,7 +2956,7 @@ function createServiceCore(input) {
       });
       verified = validateAuthenticationVerifierResult(rawVerified);
     } catch (error) {
-      if (prepared.ceremony.mode === "discoverable"
+      if (["discoverable", "reselect"].includes(prepared.ceremony.mode)
           && error?.code === "service-webauthn-failed") {
         throw serviceError("service-authentication-failed", 400);
       }
@@ -2911,7 +2966,7 @@ function createServiceCore(input) {
         || verified.credentialId !== prepared.credential.credentialId
         || (prepared.credential.signCount > 0
           && verified.signCount <= prepared.credential.signCount)) {
-      throw discoverableAuthenticationFailure(prepared.ceremony)
+      throw selectionAuthenticationFailure(prepared.ceremony)
         || serviceError("service-webauthn-failed", 400);
     }
     const commitAt = clockMilliseconds();
@@ -2931,18 +2986,39 @@ function createServiceCore(input) {
         throw serviceError("service-transaction-conflict", 409, { retryable: true });
       }
 
+      const selectionMode = ["discoverable", "reselect"].includes(ceremony.mode);
       let account;
       let priorSession = null;
-      if (context.sessionId !== null) {
+      if (ceremony.mode === "reselect") {
+        const authorised = await authoriseSession(transaction, context.sessionId, commitAt);
+        if (authorised.session.sessionId !== ceremony.priorSessionId) {
+          throw serviceError("service-transaction-conflict", 409, { retryable: true });
+        }
+        priorSession = authorised.session;
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
+        account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
+        if (account === null || !account.credentialIds.includes(selected.credentialId)) {
+          throw selectionAuthenticationFailure(ceremony);
+        }
+      } else if (context.sessionId !== null) {
         const authorised = await authoriseSession(transaction, context.sessionId, commitAt);
         account = authorised.account;
         priorSession = authorised.session;
       } else if (ceremony.mode === "discoverable") {
-        const selected = await readRecord(transaction, COLLECTIONS.credentials, request.credential.id);
-        if (selected === null) throw discoverableAuthenticationFailure(ceremony);
+        const selected = await readRecord(
+          transaction,
+          COLLECTIONS.credentials,
+          request.credential.id
+        );
+        if (selected === null) throw selectionAuthenticationFailure(ceremony);
         account = await readRecord(transaction, COLLECTIONS.accounts, selected.accountId);
         if (account === null || !account.credentialIds.includes(selected.credentialId)) {
-          throw discoverableAuthenticationFailure(ceremony);
+          throw selectionAuthenticationFailure(ceremony);
         }
       } else {
         account = await readRecord(transaction, COLLECTIONS.accounts, ceremony.accountId);
@@ -2954,20 +3030,21 @@ function createServiceCore(input) {
         request.credential.id
       );
       if (credential === null
-          || (ceremony.mode !== "discoverable" && account.accountId !== ceremony.accountId)
+          || (!selectionMode && account.accountId !== ceremony.accountId)
           || credential.accountId !== account.accountId) {
-        throw discoverableAuthenticationFailure(ceremony)
+        throw selectionAuthenticationFailure(ceremony)
           || serviceError("service-transaction-conflict", 409, { retryable: true });
       }
       if (account.storeVersion !== prepared.account.storeVersion
           || credential.storeVersion !== prepared.credential.storeVersion
           || (prepared.priorSession !== null
             && (!priorSession
-              || priorSession.storeVersion !== prepared.priorSession.storeVersion))) {
+              || priorSession.storeVersion !== prepared.priorSession.storeVersion
+              || priorSession.sessionId !== prepared.priorSession.sessionId))) {
         throw serviceError("service-transaction-conflict", 409, { retryable: true });
       }
       if (credential.signCount > 0 && verified.signCount <= credential.signCount) {
-        throw discoverableAuthenticationFailure(ceremony)
+        throw selectionAuthenticationFailure(ceremony)
           || serviceError("service-webauthn-failed", 400);
       }
       let currentCredential = credential;

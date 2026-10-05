@@ -2030,3 +2030,205 @@ test("P052d rejects listed/downloaded PRF metadata drift before Device B mutatio
     assert.equal(mutations, 0, changed);
   }
 });
+
+
+test("P341 reselection intent reaches only the first additional-device authentication", async () => {
+  const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
+  context.window = context; context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(ROOT, "js/pocket-sync-additional-device.js"), "utf8"),
+    context
+  );
+
+  const authCalls = [];
+  let discoveryCalls = 0;
+  const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
+    crypto: {
+      FORMAT: { contentType: "portal.export.v1+json" },
+      generateDeviceWrappingKey() {}, deriveWrappingKey() {}, openMasterKeyBundle() {},
+      openContent() {}, sealContent() {},
+      encodeBase64Url() { return "p341-operation"; },
+      validateNonExtractableAesKey() {},
+    },
+    deviceStore: {
+      open() {}, readPocket() {}, createPocket() {}, replacePocket() {},
+      reservePocketEncryptionUsage() {},
+    },
+    accountClient: {
+      async authenticatePasskey(input) {
+        authCalls.push(JSON.parse(JSON.stringify(input)));
+        return authCalls.length === 1
+          ? {
+            ok: true, bootstrap: true, accountAuthenticated: true, contentUnlocked: false,
+            accountId: "account-selected", credentialId: "credential-selected",
+            prf: { status: "not-requested", evaluationInput: null },
+          }
+          : {
+            ok: true, accountAuthenticated: true, contentUnlocked: false,
+            accountId: "account-selected", credentialId: "credential-selected",
+            prf: { status: "unavailable" },
+          };
+      },
+    },
+    discoveryService: {
+      async readSyncedPocket() {
+        discoveryCalls += 1;
+        return { status: "ready", syncedPocketId: "pocket-selected" };
+      },
+    },
+    contentService: { async readRevision() {}, async downloadEncryptedRecord() {} },
+    envelopeService: { async listEnvelopes() {}, async downloadEnvelope() {}, async addEnvelope() {} },
+    randomBytes() { return new Uint8Array(32); },
+    now() { return 0; },
+  });
+  const dependencies = {
+    captureTarget: () => ({ ownerKind: "none", id: "p341-target" }),
+    isTargetCurrent: () => true,
+    validatePayload: () => true,
+    adoptOpenedPocket: async () => true,
+  };
+
+  const result = await opener.openExisting(
+    dependencies,
+    { accountSelection: "choose-another" }
+  );
+  assert.equal(result.reason, "recovery-required");
+  assert.equal(authCalls.length, 2);
+  assert.equal(authCalls[0].accountSelection, "choose-another");
+  assert.equal(Object.prototype.hasOwnProperty.call(authCalls[1], "accountSelection"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(authCalls[1], "accountLocator"), false);
+  assert.equal(discoveryCalls, 1);
+});
+
+test("P341 reselection keeps same-account continuity before discovery", async () => {
+  const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
+  context.window = context; context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(ROOT, "js/pocket-sync-additional-device.js"), "utf8"),
+    context
+  );
+
+  const authCalls = [];
+  let discoveryCalls = 0;
+  const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
+    crypto: {
+      FORMAT: { contentType: "portal.export.v1+json" },
+      generateDeviceWrappingKey() {}, deriveWrappingKey() {}, openMasterKeyBundle() {},
+      openContent() {}, sealContent() {},
+      encodeBase64Url() { return "p341-operation"; },
+      validateNonExtractableAesKey() {},
+    },
+    deviceStore: {
+      open() {}, readPocket() {}, createPocket() {}, replacePocket() {},
+      reservePocketEncryptionUsage() {},
+    },
+    accountClient: {
+      async authenticatePasskey(input) {
+        authCalls.push(JSON.parse(JSON.stringify(input)));
+        return authCalls.length === 1
+          ? {
+            ok: true, bootstrap: true, accountAuthenticated: true, contentUnlocked: false,
+            accountId: "account-a", credentialId: "credential-a",
+            prf: { status: "not-requested", evaluationInput: null },
+          }
+          : {
+            ok: true, accountAuthenticated: true, contentUnlocked: false,
+            accountId: "account-b", credentialId: "credential-b",
+            prf: { status: "available", outputBytes: new Uint8Array(32) },
+          };
+      },
+    },
+    discoveryService: {
+      async readSyncedPocket() {
+        discoveryCalls += 1;
+        return { status: "ready", syncedPocketId: "pocket" };
+      },
+    },
+    contentService: { async readRevision() {}, async downloadEncryptedRecord() {} },
+    envelopeService: { async listEnvelopes() {}, async downloadEnvelope() {}, async addEnvelope() {} },
+    randomBytes() { return new Uint8Array(32); },
+    now() { return 0; },
+  });
+
+  const result = await opener.openExisting({
+    captureTarget: () => ({ ownerKind: "none", id: "p341-target" }),
+    isTargetCurrent: () => true,
+    validatePayload: () => true,
+    adoptOpenedPocket: async () => true,
+  }, { accountSelection: "choose-another" });
+
+  assert.equal(result.reason, "additional-device-open-failed");
+  assert.equal(authCalls.length, 2);
+  assert.equal(authCalls[0].accountSelection, "choose-another");
+  assert.equal(Object.prototype.hasOwnProperty.call(authCalls[1], "accountSelection"), false);
+  assert.equal(discoveryCalls, 0);
+});
+
+
+test("P341 reselected unconfigured account retains the existing not-configured result", async () => {
+  const context = { Object, Array, Number, String, Boolean, Error, Promise, Uint8Array, Date };
+  context.window = context; context.globalThis = context;
+  vm.createContext(context);
+  vm.runInContext(
+    fs.readFileSync(path.join(ROOT, "js/pocket-sync-additional-device.js"), "utf8"),
+    context
+  );
+
+  const authCalls = [];
+  let discoveryCalls = 0;
+  const opener = context.PocketSyncAdditionalDevice.createAdditionalDeviceOpener({
+    crypto: {
+      FORMAT: { contentType: "portal.export.v1+json" },
+      generateDeviceWrappingKey() {}, deriveWrappingKey() {}, openMasterKeyBundle() {},
+      openContent() {}, sealContent() {},
+      encodeBase64Url() { return "p341-operation"; },
+      validateNonExtractableAesKey() {},
+    },
+    deviceStore: {
+      open() {}, readPocket() {}, createPocket() {}, replacePocket() {},
+      reservePocketEncryptionUsage() {},
+    },
+    accountClient: {
+      async authenticatePasskey(input) {
+        authCalls.push(JSON.parse(JSON.stringify(input)));
+        return authCalls.length === 1
+          ? {
+            ok: true, bootstrap: true, accountAuthenticated: true, contentUnlocked: false,
+            accountId: "account-3ok14", credentialId: "credential-selected",
+            prf: { status: "not-requested", evaluationInput: null },
+          }
+          : {
+            ok: true, accountAuthenticated: true, contentUnlocked: false,
+            accountId: "account-3ok14", credentialId: "credential-selected",
+            prf: { status: "available", outputBytes: new Uint8Array(32) },
+          };
+      },
+    },
+    discoveryService: {
+      async readSyncedPocket() {
+        discoveryCalls += 1;
+        return { status: "not-configured", syncedPocketId: null };
+      },
+    },
+    contentService: { async readRevision() {}, async downloadEncryptedRecord() {} },
+    envelopeService: { async listEnvelopes() {}, async downloadEnvelope() {}, async addEnvelope() {} },
+    randomBytes() { return new Uint8Array(32); },
+    now() { return 0; },
+  });
+
+  const result = await opener.openExisting({
+    captureTarget: () => ({ ownerKind: "none", id: "p341-target" }),
+    isTargetCurrent: () => true,
+    validatePayload: () => true,
+    adoptOpenedPocket: async () => true,
+  }, { accountSelection: "choose-another" });
+
+  assert.equal(result.reason, "synced-pocket-not-configured");
+  assert.equal(result.authenticatedAccountSuffix, "3ok14");
+  assert.equal(authCalls.length, 2);
+  assert.equal(authCalls[0].accountSelection, "choose-another");
+  assert.equal(Object.prototype.hasOwnProperty.call(authCalls[1], "accountSelection"), false);
+  assert.equal(discoveryCalls, 1);
+});
