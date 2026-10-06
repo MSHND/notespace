@@ -1,0 +1,38 @@
+name: P346j focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p346j-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p346j-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install
+        run: timeout 5m npm ci
+      - name: P346j same-node triple proof and P346e regression
+        run: |
+          timeout 5m node --test tests/p346j-starling-node-triple-concurrency.test.js
+          timeout 5m node --test tests/p346e-starling-node-pair-concurrency.test.js
+      - name: P172 semantic admission and accepted materialisation
+        run: |
+          timeout 8m node --test tests/p172-real-truth-cutover-admission.test.js
+          timeout 8m node --test tests/p172-real-p168-composition.test.js
+      - name: Current production Starling composition
+        run: timeout 8m node --test tests/p176-production-composition.test.js
+      - name: P190 production-shaped Save regression
+        run: timeout 8m node --test tests/p190-starling-save-observability-and-reentry.test.js
+      - name: P206 diagnostic regression
+        run: timeout 5m node --test tests/p206-starling-save-detail-observability.test.js
+      - name: Full Pocket check
+        run: timeout 5m npm run check
