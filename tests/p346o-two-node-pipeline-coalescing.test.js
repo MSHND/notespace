@@ -127,6 +127,9 @@ function graph(context, overrides = {}) {
     ["b", sequence([])],
     ["c", sequence([])],
     ["d", sequence([])],
+    ["bq", sequence([])],
+    ["cr", sequence([])],
+    ["ds", sequence([])],
   ]);
   const childrenRef = trie(logical, store, "children-trie", sequences);
   const childInfo = new Map();
@@ -220,7 +223,7 @@ function admissionRuntime() {
   assert.equal(ADMISSION.split(marker).length, 2, "private materializer exposure marker changed");
   const instrumented = ADMISSION.replace(
     marker,
-    "  global.__p346oMaterializeCandidate = materializeCandidate;\\n\\n" + marker
+    "  global.__p346oMaterializeCandidate = materializeCandidate;\n\n" + marker
   );
   vm.runInContext(instrumented, context, { filename: "js/pocket-starling-real-truth-admission.js" });
   assert.equal(typeof context.__p346oMaterializeCandidate, "function");
