@@ -76,11 +76,14 @@ function graph(context, overrides = {}) {
       items,
     });
   }
+  const emptySequence = sequence([]);
   const sequences = new Map([
     ["root", sequence(["a", "c"])],
     ["a", sequence(["b"])],
-    ["b", sequence([])],
-    ["c", sequence([])],
+    ["b", emptySequence],
+    ["bx", emptySequence],
+    ["c", emptySequence],
+    ["cy", emptySequence],
   ]);
   if (overrides.invalidChildSequence === "a") sequences.set("a", "invalid-sequence-ref");
   if (overrides.missingChildSequence === "a") {
