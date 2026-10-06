@@ -76,11 +76,11 @@ function trie(logical, store, kind, entries) {
   return encode(root);
 }
 
-function terminalValueRef(store, rootRef, key) {
+function terminalTrieRef(store, rootRef, key) {
   let ref = rootRef;
   for (let index = 0; ; index += 1) {
     const object = JSON.parse(store.get(ref));
-    if (index === key.length) return object.hasValue ? object.valueRef : null;
+    if (index === key.length) return object.hasValue ? ref : null;
     const edge = object.children.find((item) => item.key === key[index]);
     if (!edge) return null;
     ref = edge.ref;
@@ -131,7 +131,7 @@ function graph(context, overrides = {}) {
   const childrenRef = trie(logical, store, "children-trie", sequences);
   const childInfo = new Map();
   for (const nodeId of ids) {
-    const ref = terminalValueRef(store, childrenRef, nodeId);
+    const ref = terminalTrieRef(store, childrenRef, nodeId);
     if (ref) childInfo.set(ref, { nodeId, member: "children" });
   }
 
@@ -553,6 +553,7 @@ const STORAGE_SCRIPTS = [
   "js/pocket-state.js",
   "js/pocket-data.js",
   "js/pocket-outline-persistence-policy.js",
+  "js/pocket-node-content.js",
   "js/pocket-editor-metadata.js",
   "js/pocket-pe-import-preserve.js",
   "js/pocket-storage.js",
@@ -979,8 +980,12 @@ test("P346o source keeps the new concurrency dimension tightly bounded and seque
   assert.doesNotMatch(materializeSequence, /Promise\.all|Promise\.race/);
   assert.doesNotMatch(admissionSequence, /Promise\.all|Promise\.race/);
 
-  assert.match(STORAGE_SOURCE, /pendingLoads = new Map\(\)/);
-  assert.match(STORAGE_SOURCE, /pendingLoads\.get\(physicalRef\)/);
-  assert.match(STORAGE_SOURCE, /pendingLoads\.delete\(physicalRef\)/);
-  assert.doesNotMatch(STORAGE_SOURCE, /pendingLoads[\s\S]*global\./);
+  const resolverSource = STORAGE_SOURCE.slice(
+    STORAGE_SOURCE.indexOf("async function createResolver"),
+    STORAGE_SOURCE.indexOf("global.PocketStarlingStorageShadow")
+  );
+  assert.match(resolverSource, /pendingLoads = new Map\(\)/);
+  assert.match(resolverSource, /pendingLoads\.get\(physicalRef\)/);
+  assert.match(resolverSource, /pendingLoads\.delete\(physicalRef\)/);
+  assert.doesNotMatch(resolverSource, /global\./);
 });
