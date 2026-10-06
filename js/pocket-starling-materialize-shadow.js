@@ -83,29 +83,40 @@
       const owner = clone(logical, preservation.object.value);
       if (!owner) return fail("invalid-preservation");
       const nodes = [], current = new Set(), stack = [{ type: "parent", parentId: "root" }];
+      async function childrenFor(parentId) {
+        const located = await trieValue(root.object.childrenRef, "children-trie", parentId);
+        if (!located.ok) return located;
+        if (located.absent) return { ok: true, items: [] };
+        return sequenceItems(located.ref, root.object.capacity);
+      }
+      async function sessionRead(read) {
+        try { return { ok: true, value: await read() }; } catch (_error) { return { ok: false }; }
+      }
       while (stack.length) {
         const frame = stack.pop();
         if (frame.type === "parent") {
-          const located = await trieValue(root.object.childrenRef, "children-trie", frame.parentId);
-          if (!located.ok) return located;
-          if (located.absent) continue;
-          const sequence = await sequenceItems(located.ref, root.object.capacity);
-          if (!sequence.ok) return sequence;
-          for (let index = sequence.items.length - 1; index >= 0; index -= 1) stack.push({ type: "node", parentId: frame.parentId, nodeId: sequence.items[index], order: index });
+          const children = await childrenFor(frame.parentId);
+          if (!children.ok) return children;
+          for (let index = children.items.length - 1; index >= 0; index -= 1) stack.push({ type: "node", parentId: frame.parentId, nodeId: children.items[index], order: index });
           continue;
         }
         if (current.has(frame.nodeId)) return fail("duplicate-or-cyclic-current-node");
         current.add(frame.nodeId);
-        let placement, content;
-        try { [placement, content] = await Promise.all([
-          session.readPlacement(frame.nodeId), session.readContent(frame.nodeId),
-        ]); } catch (_error) { return fail("session-read-failed"); }
+        const [placementRead, contentRead, children] = await Promise.all([
+          sessionRead(() => session.readPlacement(frame.nodeId)),
+          sessionRead(() => session.readContent(frame.nodeId)),
+          childrenFor(frame.nodeId),
+        ]);
+        if (!placementRead.ok || !contentRead.ok) return fail("session-read-failed");
+        const placement = placementRead.value, content = contentRead.value;
         if (!placement || placement.ok !== true || placement.nodeId !== frame.nodeId || placement.parentId !== frame.parentId) return fail("placement-parent-disagreement");
         if (!content || content.ok !== true || content.nodeId !== frame.nodeId || !plainObject(content.payload)) return fail("invalid-content-record");
         if (["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key))) return fail("reserved-content-payload-key");
+        if (!children.ok) return children;
         const payload = clone(logical, content.payload);
         if (!payload || !plainObject(payload)) return fail("invalid-content-payload");
-        nodes.push({ id: frame.nodeId, parentId: frame.parentId, order: frame.order, ...payload }); stack.push({ type: "parent", parentId: frame.nodeId });
+        nodes.push({ id: frame.nodeId, parentId: frame.parentId, order: frame.order, ...payload });
+        for (let index = children.items.length - 1; index >= 0; index -= 1) stack.push({ type: "node", parentId: frame.nodeId, nodeId: children.items[index], order: index });
       }
       return Object.freeze({ ok: true, document: { schema: owner.source.schema, writtenAt: owner.source.writtenAt, nodes, tombstones: owner.tombstones, rootExtras: owner.rootExtras, dataExtras: owner.dataExtras } });
     } catch (_error) { return fail("materialize-failed"); }
