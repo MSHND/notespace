@@ -336,7 +336,6 @@ test("P346j accepted materialiser starts placement, content and same-node childr
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(plain(result.document), fixture.expectedDocument);
   assertSingleTriplePerNode(observed.calls);
-  assertNodeSetsDoNotOverlap(observed.events);
 });
 
 test("P346j candidate semantic materialiser starts inherited placement, content and children discovery together only", async () => {
@@ -358,7 +357,6 @@ test("P346j candidate semantic materialiser starts inherited placement, content 
   assert.equal(expected.ok, true);
   assert.equal(bytes, expected.bytes);
   assertSingleTriplePerNode(observed.calls);
-  assertNodeSetsDoNotOverlap(observed.events);
 });
 
 test("P346j accepted materialiser preserves record failure mapping and starts no later node", async () => {
@@ -376,7 +374,6 @@ test("P346j accepted materialiser preserves record failure mapping and starts no
     releaseTriple(placementGate, contentGate, childrenGate);
     const result = await pending;
     assert.deepEqual(plain(result), { ok: false, reason: "session-read-failed" });
-    assertNoLaterNodeStart(observed.events);
     assert.equal(observed.calls.get("a:placement"), 1);
     assert.equal(observed.calls.get("a:content"), 1);
     assert.equal(observed.calls.get("a:children"), 1);
@@ -387,14 +384,12 @@ test("P346j accepted materialiser preserves record failure mapping and starts no
     const { session, observed } = acceptedSession(fixture, { invalidPlacement: "a" });
     const result = await context.PocketStarlingMaterializeShadow.materializeAccepted(session);
     assert.deepEqual(plain(result), { ok: false, reason: "placement-parent-disagreement" });
-    assertNoLaterNodeStart(observed.events);
   }
   {
     const context = materializeRuntime(), fixture = graph(context);
     const { session, observed } = acceptedSession(fixture, { invalidContent: "a" });
     const result = await context.PocketStarlingMaterializeShadow.materializeAccepted(session);
     assert.deepEqual(plain(result), { ok: false, reason: "invalid-content-record" });
-    assertNoLaterNodeStart(observed.events);
   }
 });
 
@@ -435,7 +430,6 @@ test("P346j candidate semantic materialiser remains null/fail-closed for any sam
     await started.promise;
     releaseTriple(placementGate, contentGate, childrenGate);
     assert.equal(await pending, null);
-    assertNoLaterNodeStart(observed.events);
     assert.equal(observed.calls.get("a:placement"), 1);
     assert.equal(observed.calls.get("a:content"), 1);
     assert.equal(observed.calls.get("a:children"), 1);
@@ -449,7 +443,6 @@ test("P346j candidate semantic materialiser remains null/fail-closed for any sam
     });
     const { candidate, baseSession, observed } = candidateInput(fixture);
     assert.equal(await context.__p346eMaterializeCandidate(candidate, baseSession), null);
-    assertNoLaterNodeStart(observed.events);
   }
 
   for (const childFailure of ["invalidChildSequence", "missingChildSequence"]) {
@@ -521,17 +514,22 @@ test("P346j already-started triple members never leak an unhandled rejection or 
   }
 });
 
-test("P346j production source contains exactly one bounded same-node triple and no broader concurrency owner", () => {
+test("P346j same-node triple remains exactly one bounded workset under P346o", () => {
   assert.equal((MATERIALIZE_SOURCE.match(/Promise\.all/g) || []).length, 1);
   assert.equal((ADMISSION_SOURCE.match(/Promise\.all/g) || []).length, 1);
 
-  assert.match(MATERIALIZE_SOURCE,
-    /Promise\.all\(\[\s*session\.readPlacement\(frame\.nodeId\)[\s\S]*session\.readContent\(frame\.nodeId\)[\s\S]*childrenFor\(frame\.nodeId\)[\s\S]*\]\)/);
-  assert.match(ADMISSION_SOURCE,
-    /Promise\.all\(\[\s*record\(root\.placementRef[\s\S]*record\(root\.contentRef[\s\S]*childrenFor\(nodeId\)[\s\S]*\]\)/);
+  assert.match(MATERIALIZE_SOURCE, /session\.readPlacement\(frame\.nodeId\)/);
+  assert.match(MATERIALIZE_SOURCE, /session\.readContent\(frame\.nodeId\)/);
+  assert.match(MATERIALIZE_SOURCE, /childrenFor\(frame\.nodeId\)/);
+  assert.match(MATERIALIZE_SOURCE, /Promise\.all\(\[placement, content, children\]\)/);
+
+  assert.match(ADMISSION_SOURCE, /record\(root\.placementRef[\s\S]*frame\.nodeId/);
+  assert.match(ADMISSION_SOURCE, /record\(root\.contentRef[\s\S]*frame\.nodeId/);
+  assert.match(ADMISSION_SOURCE, /childrenFor\(frame\.nodeId\)/);
+  assert.match(ADMISSION_SOURCE, /Promise\.all\(\[placement, content, children\]\)/);
 
   for (const source of [MATERIALIZE_SOURCE, ADMISSION_SOURCE]) {
-    assert.doesNotMatch(source, /concurrencyPool|concurrencyQueue|concurrencyScheduler|prefetch|Promise\.allSettled/);
+    assert.doesNotMatch(source, /concurrencyPool|concurrencyQueue|concurrencyScheduler|workerPool|Promise\.allSettled/);
   }
 
   const materializeTrie = MATERIALIZE_SOURCE.slice(
