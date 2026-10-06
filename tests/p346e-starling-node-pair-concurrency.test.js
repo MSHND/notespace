@@ -336,8 +336,8 @@ test("P346e candidate semantic materialisation overlaps only the same-node inher
   assert.equal(bytes, expected.bytes, "semantic admission canonical bytes stay exact");
   assertSingleSuccessfulNodeReads(observed.calls);
   const firstB = observed.events.findIndex((entry) => entry.startsWith("b:") && entry.endsWith(":start"));
-  assert.ok(firstB > observed.events.indexOf("a:placement:end"));
-  assert.ok(firstB > observed.events.indexOf("a:content:end"));
+  assert.ok(firstB < observed.events.indexOf("a:placement:end"));
+  assert.ok(firstB < observed.events.indexOf("a:content:end"));
 });
 
 test("P346e accepted materialisation keeps paired rejections fail-closed without retries or unhandled rejection", async () => {
