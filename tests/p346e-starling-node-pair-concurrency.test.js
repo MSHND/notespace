@@ -302,9 +302,10 @@ test("P346e accepted materialisation overlaps only the same-node placement/conte
   const observed = acceptedSession(fixture, { started, placementGate, contentGate });
   const pending = context.PocketStarlingMaterializeShadow.materializeAccepted(observed.session);
   await started.promise;
-  assert.equal(observed.maxActive, 2);
-  assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false,
-    "later node must not start while current pair is unresolved");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(observed.maxActive >= 2 && observed.maxActive <= 4);
+  assert.equal(observed.events.some((entry) => entry.startsWith("b:") && entry.endsWith(":start")), true,
+    "P346o may start the exact next read-only node after child discovery");
   placementGate.resolve();
   contentGate.resolve();
   const result = await pending;
@@ -312,8 +313,8 @@ test("P346e accepted materialisation overlaps only the same-node placement/conte
   assert.deepEqual(plain(result.document), fixture.expectedDocument);
   assertSingleSuccessfulNodeReads(observed.calls);
   const firstB = observed.events.findIndex((entry) => entry.startsWith("b:") && entry.endsWith(":start"));
-  assert.ok(firstB > observed.events.indexOf("a:placement:end"));
-  assert.ok(firstB > observed.events.indexOf("a:content:end"));
+  assert.ok(firstB < observed.events.indexOf("a:placement:end"));
+  assert.ok(firstB < observed.events.indexOf("a:content:end"));
 });
 
 test("P346e candidate semantic materialisation overlaps only the same-node inherited record pair", async () => {
@@ -323,9 +324,10 @@ test("P346e candidate semantic materialisation overlaps only the same-node inher
   const observed = candidateInput(fixture, { started, placementGate, contentGate });
   const pending = context.__p346eMaterializeCandidate(observed.candidate, observed.baseSession);
   await started.promise;
-  assert.equal(observed.maxActive, 2);
-  assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false,
-    "later node must not start while current pair is unresolved");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(observed.maxActive >= 2 && observed.maxActive <= 4);
+  assert.equal(observed.events.some((entry) => entry.startsWith("b:") && entry.endsWith(":start")), true,
+    "P346o may start the exact next read-only node after child discovery");
   placementGate.resolve();
   contentGate.resolve();
   const bytes = await pending;
@@ -363,7 +365,6 @@ test("P346e accepted materialisation keeps paired rejections fail-closed without
       else placementGate.reject(new Error("paired late placement rejection"));
       await new Promise((resolve) => setImmediate(resolve));
       assert.deepEqual(unhandled, []);
-      assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false);
       assert.equal(observed.calls.get("a:placement"), 1);
       assert.equal(observed.calls.get("a:content"), 1);
     } finally {
@@ -378,7 +379,6 @@ test("P346e accepted materialisation preserves exact invalid-record failure mapp
     const observed = acceptedSession(fixture, { invalidPlacement: "a" });
     const result = await context.PocketStarlingMaterializeShadow.materializeAccepted(observed.session);
     assert.deepEqual(plain(result), { ok: false, reason: "placement-parent-disagreement" });
-    assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false);
     assert.equal(observed.calls.get("a:placement"), 1);
     assert.equal(observed.calls.get("a:content"), 1);
   }
@@ -387,7 +387,6 @@ test("P346e accepted materialisation preserves exact invalid-record failure mapp
     const observed = acceptedSession(fixture, { invalidContent: "a" });
     const result = await context.PocketStarlingMaterializeShadow.materializeAccepted(observed.session);
     assert.deepEqual(plain(result), { ok: false, reason: "invalid-content-record" });
-    assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false);
     assert.equal(observed.calls.get("a:placement"), 1);
     assert.equal(observed.calls.get("a:content"), 1);
   }
@@ -405,7 +404,6 @@ test("P346e candidate semantic materialisation remains null/fail-closed for eith
     assert.equal(await pending, null);
     assert.equal(observed.calls.get("a:placement"), 1);
     assert.equal(observed.calls.get("a:content"), 1);
-    assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false);
   }
   for (const invalid of ["placement", "content"]) {
     const context = admissionRuntime();
@@ -417,18 +415,15 @@ test("P346e candidate semantic materialisation remains null/fail-closed for eith
     assert.equal(await context.__p346eMaterializeCandidate(observed.candidate, observed.baseSession), null);
     assert.equal(observed.calls.get("a:placement"), 1);
     assert.equal(observed.calls.get("a:content"), 1);
-    assert.equal(observed.events.some((entry) => entry.startsWith("b:")), false);
   }
 });
 
-test("P346e production diff has one bounded Promise pair per full-document materialiser and no concurrency owner", () => {
+test("P346e same-node placement/content pair remains inside the bounded P346o workset", () => {
   assert.equal((ADMISSION.match(/Promise\.all/g) || []).length, 1);
   assert.equal((MATERIALIZE.match(/Promise\.all/g) || []).length, 1);
-  assert.match(ADMISSION,
-    /Promise\.all\(\[\s*record\(root\.placementRef[\s\S]*record\(root\.contentRef[\s\S]*\]\)/);
-  assert.match(MATERIALIZE,
-    /Promise\.all\(\[\s*session\.readPlacement\(frame\.nodeId\)[\s\S]*session\.readContent\(frame\.nodeId\)[\s\S]*\]\)/);
+  assert.match(ADMISSION, /record\(root\.placementRef[\s\S]*record\(root\.contentRef/);
+  assert.match(MATERIALIZE, /session\.readPlacement\(frame\.nodeId\)[\s\S]*session\.readContent\(frame\.nodeId\)/);
   for (const source of [ADMISSION, MATERIALIZE]) {
-    assert.doesNotMatch(source, /concurrencyPool|concurrencyQueue|prefetch|Promise\.allSettled/);
+    assert.doesNotMatch(source, /concurrencyPool|concurrencyQueue|workerPool|Promise\.allSettled/);
   }
 });
