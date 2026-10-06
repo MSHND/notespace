@@ -523,7 +523,7 @@ test("P346j production source contains exactly one bounded same-node triple and 
   assert.equal((ADMISSION_SOURCE.match(/Promise\.all/g) || []).length, 1);
 
   assert.match(MATERIALIZE_SOURCE,
-    /Promise\.all\(\[\s*sessionRead\(\(\) => session\.readPlacement\(frame\.nodeId\)\)[\s\S]*sessionRead\(\(\) => session\.readContent\(frame\.nodeId\)\)[\s\S]*childrenFor\(frame\.nodeId\)[\s\S]*\]\)/);
+    /Promise\.all\(\[\s*session\.readPlacement\(frame\.nodeId\)[\s\S]*session\.readContent\(frame\.nodeId\)[\s\S]*childrenFor\(frame\.nodeId\)[\s\S]*\]\)/);
   assert.match(ADMISSION_SOURCE,
     /Promise\.all\(\[\s*record\(root\.placementRef[\s\S]*record\(root\.contentRef[\s\S]*childrenFor\(nodeId\)[\s\S]*\]\)/);
 
