@@ -89,9 +89,6 @@
         if (located.absent) return { ok: true, items: [] };
         return sequenceItems(located.ref, root.object.capacity);
       }
-      async function sessionRead(read) {
-        try { return { ok: true, value: await read() }; } catch (_error) { return { ok: false }; }
-      }
       while (stack.length) {
         const frame = stack.pop();
         if (frame.type === "parent") {
@@ -102,13 +99,12 @@
         }
         if (current.has(frame.nodeId)) return fail("duplicate-or-cyclic-current-node");
         current.add(frame.nodeId);
-        const [placementRead, contentRead, children] = await Promise.all([
-          sessionRead(() => session.readPlacement(frame.nodeId)),
-          sessionRead(() => session.readContent(frame.nodeId)),
+        let placement, content, children;
+        try { [placement, content, children] = await Promise.all([
+          session.readPlacement(frame.nodeId),
+          session.readContent(frame.nodeId),
           childrenFor(frame.nodeId),
-        ]);
-        if (!placementRead.ok || !contentRead.ok) return fail("session-read-failed");
-        const placement = placementRead.value, content = contentRead.value;
+        ]); } catch (_error) { return fail("session-read-failed"); }
         if (!placement || placement.ok !== true || placement.nodeId !== frame.nodeId || placement.parentId !== frame.parentId) return fail("placement-parent-disagreement");
         if (!content || content.ok !== true || content.nodeId !== frame.nodeId || !plainObject(content.payload)) return fail("invalid-content-record");
         if (["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key))) return fail("reserved-content-payload-key");
