@@ -1,0 +1,36 @@
+name: P346o focused proof 2
+
+on:
+  push:
+    branches:
+      - candidate/p346o-proof2
+
+jobs:
+  p346o-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Focused P346o and direct regressions
+        run: >
+          timeout 300s node --test
+          tests/p346o-two-node-pipeline-coalescing.test.js
+          tests/p346j-starling-node-triple-concurrency.test.js
+          tests/p346e-starling-node-pair-concurrency.test.js
+          tests/p146-starling-accepted-document-materialize.test.js
+          tests/p172-real-truth-cutover-admission.test.js
+          tests/p172-real-p168-composition.test.js
+          tests/p124-starling-remote-open.test.js
+          tests/p125-starling-remote-edit.test.js
+          tests/p190-starling-save-observability-and-reentry.test.js
+          tests/p206-starling-save-detail-observability.test.js
+          tests/p112-starling-storage-shadow.test.js
+          tests/p113-starling-fresh-reuse-shadow.test.js
+      - name: Full test regression
+        run: timeout 900s node --test tests/*.test.js
+      - name: Full npm check
+        run: timeout 180s npm run check
