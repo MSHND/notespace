@@ -192,23 +192,88 @@
       if (!relation || relation.ok !== true || !relation.relation) return null;
       const byId = new Map(document.nodes.map((node) => [node.id, node]));
       if (byId.size !== document.nodes.length) return null;
-      const nodes = [], seen = new Set();
-      const visit = (parentId) => {
-        const children = relation.relation.children[parentId] || [];
-        for (let index = 0; index < children.length; index += 1) {
-          const nodeId = children[index], node = byId.get(nodeId);
-          if (!node || seen.has(nodeId)) return false;
-          seen.add(nodeId);
-          const nodePayload = {};
-          for (const key of Object.keys(node)) {
-            if (key !== "id" && key !== "parentId" && key !== "order") nodePayload[key] = node[key];
-          }
-          nodes.push({ id: nodeId, parentId, order: index, ...nodePayload });
-          if (!visit(nodeId)) return false;
+      const nodes = [], seen = new Set(), stack = [];
+      async function childrenFor(parentId) {
+        const located = await trieValue(root.childrenRef, "children-trie", parentId);
+        if (!located) return null;
+        if (!located.found) return [];
+        return sequenceItems(located.ref, root.capacity);
+      }
+      function guardedRead(reader) {
+        try { return Promise.resolve(reader()); }
+        catch (error) { return Promise.reject(error); }
+      }
+      function startWorkset(frame) {
+        const placement = guardedRead(() =>
+          record(root.placementRef, "placement-trie", "placement-record", frame.nodeId));
+        const content = guardedRead(() =>
+          record(root.contentRef, "content-trie", "content-record", frame.nodeId));
+        const children = guardedRead(() => childrenFor(frame.nodeId));
+        return {
+          frame,
+          children: children.then(
+            (value) => ({ settled: true, value }),
+            () => ({ settled: false }),
+          ),
+          settled: Promise.all([placement, content, children]).then(
+            (values) => ({ ok: true, values }),
+            () => ({ ok: false }),
+          ),
+        };
+      }
+      function sameFrame(left, right) {
+        return !!left && !!right && left.parentId === right.parentId
+          && left.nodeId === right.nodeId && left.order === right.order;
+      }
+      function exactNextFrame(frame, children) {
+        if (!Array.isArray(children)) return null;
+        if (children.length > 0) {
+          return { parentId: frame.nodeId, nodeId: children[0], order: 0 };
         }
-        return true;
-      };
-      if (!visit("root") || seen.size !== document.nodes.length) return null;
+        return stack.length > 0 ? stack[stack.length - 1] : null;
+      }
+      const rootChildren = await childrenFor("root");
+      if (!rootChildren) return null;
+      for (let index = rootChildren.length - 1; index >= 0; index -= 1)
+        stack.push({ parentId: "root", nodeId: rootChildren[index], order: index });
+      let lookahead = null;
+      while (stack.length) {
+        const frame = stack.pop();
+        if (seen.has(frame.nodeId)) return null;
+        seen.add(frame.nodeId);
+        const workset = lookahead && sameFrame(lookahead.frame, frame)
+          ? lookahead.workset : startWorkset(frame);
+        lookahead = null;
+        const first = await Promise.race([
+          workset.settled.then((result) => ({ kind: "settled", result })),
+          workset.children.then((result) => ({ kind: "children", result })),
+        ]);
+        let settled;
+        if (first.kind === "children") {
+          const childResult = first.result;
+          if (childResult.settled === true) {
+            const next = exactNextFrame(frame, childResult.value);
+            if (next && !seen.has(next.nodeId)) {
+              lookahead = { frame: next, workset: startWorkset(next) };
+            }
+          }
+          settled = await workset.settled;
+        } else settled = first.result;
+        if (!settled.ok) return null;
+        const [place, content, nodeChildren] = settled.values;
+        if (!place || !exact(place, ["schema", "kind", "nodeId", "parentId"])
+            || place.schema !== logical.OBJECT_SCHEMA || place.kind !== "placement-record"
+            || place.nodeId !== frame.nodeId || place.parentId !== frame.parentId
+            || !content || !exact(content, ["schema", "kind", "nodeId", "payload"])
+            || content.schema !== logical.OBJECT_SCHEMA || content.kind !== "content-record"
+            || content.nodeId !== frame.nodeId || !isObject(content.payload)
+            || ["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key)))
+          return null;
+        if (!nodeChildren) return null;
+        nodes.push({ id: frame.nodeId, parentId: frame.parentId, order: frame.order, ...content.payload });
+        for (let index = nodeChildren.length - 1; index >= 0; index -= 1)
+          stack.push({ parentId: frame.nodeId, nodeId: nodeChildren[index], order: index });
+      }
       const canonical = logical.canonical({
         schema: document.schema, writtenAt: document.writtenAt, nodes,
         tombstones: document.tombstones, rootExtras: document.rootExtras, dataExtras: document.dataExtras,
