@@ -578,6 +578,7 @@
       bindings = new Map(),
       logicalCache = new Map(),
       storageCache = new Map(),
+      pendingLoads = new Map(),
       stats = { physicalFetches: 0, decryptions: 0, cacheHits: 0 };
 
     function bind(capsule, physicalRef) {
@@ -599,16 +600,36 @@
           throw storageError("capsule-logical-mismatch");
         return cached;
       }
-      stats.physicalFetches += 1;
-      const record = await input.resolveStorage(physicalRef),
-        plaintext = await crypto.openObject(record, physicalRef, key, context),
-        capsule = validateCapsuleBytes(plaintext);
-      stats.decryptions += 1;
+
+      let pending = pendingLoads.get(physicalRef);
+      if (!pending) {
+        pending = (async () => {
+          stats.physicalFetches += 1;
+          const record = await input.resolveStorage(physicalRef),
+            plaintext = await crypto.openObject(record, physicalRef, key, context),
+            capsule = validateCapsuleBytes(plaintext);
+          stats.decryptions += 1;
+          bind(capsule, physicalRef);
+          storageCache.set(physicalRef, capsule);
+          logicalCache.set(capsule.logicalRef, capsule.logicalBytes);
+          return capsule;
+        })();
+        pendingLoads.set(physicalRef, pending);
+        pending.then(
+          () => {
+            if (pendingLoads.get(physicalRef) === pending)
+              pendingLoads.delete(physicalRef);
+          },
+          () => {
+            if (pendingLoads.get(physicalRef) === pending)
+              pendingLoads.delete(physicalRef);
+          },
+        );
+      }
+
+      const capsule = await pending;
       if (expectedLogicalRef && capsule.logicalRef !== expectedLogicalRef)
         throw storageError("capsule-logical-mismatch");
-      bind(capsule, physicalRef);
-      storageCache.set(physicalRef, capsule);
-      logicalCache.set(capsule.logicalRef, capsule.logicalBytes);
       return capsule;
     }
 
