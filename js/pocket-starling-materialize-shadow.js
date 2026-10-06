@@ -89,30 +89,88 @@
         if (located.absent) return { ok: true, items: [] };
         return sequenceItems(located.ref, root.object.capacity);
       }
+      function guardedRead(reader) {
+        try { return Promise.resolve(reader()); }
+        catch (error) { return Promise.reject(error); }
+      }
+      function startWorkset(frame) {
+        const placement = guardedRead(() => session.readPlacement(frame.nodeId));
+        const content = guardedRead(() => session.readContent(frame.nodeId));
+        const children = guardedRead(() => childrenFor(frame.nodeId));
+        return {
+          frame,
+          children: children.then(
+            (value) => ({ settled: true, value }),
+            () => ({ settled: false }),
+          ),
+          settled: Promise.all([placement, content, children]).then(
+            (values) => ({ ok: true, values }),
+            () => ({ ok: false }),
+          ),
+        };
+      }
+      function sameFrame(left, right) {
+        return !!left && !!right && left.type === "node" && right.type === "node"
+          && left.parentId === right.parentId && left.nodeId === right.nodeId
+          && left.order === right.order;
+      }
+      function exactNextFrame(frame, children) {
+        if (!children || children.ok !== true || !Array.isArray(children.items)) return null;
+        if (children.items.length > 0) {
+          return {
+            type: "node",
+            parentId: frame.nodeId,
+            nodeId: children.items[0],
+            order: 0,
+          };
+        }
+        const next = stack[stack.length - 1];
+        return next && next.type === "node" ? next : null;
+      }
+      let lookahead = null;
       while (stack.length) {
         const frame = stack.pop();
         if (frame.type === "parent") {
           const children = await childrenFor(frame.parentId);
           if (!children.ok) return children;
-          for (let index = children.items.length - 1; index >= 0; index -= 1) stack.push({ type: "node", parentId: frame.parentId, nodeId: children.items[index], order: index });
+          for (let index = children.items.length - 1; index >= 0; index -= 1)
+            stack.push({ type: "node", parentId: frame.parentId, nodeId: children.items[index], order: index });
           continue;
         }
         if (current.has(frame.nodeId)) return fail("duplicate-or-cyclic-current-node");
         current.add(frame.nodeId);
-        let placement, content, children;
-        try { [placement, content, children] = await Promise.all([
-          session.readPlacement(frame.nodeId),
-          session.readContent(frame.nodeId),
-          childrenFor(frame.nodeId),
-        ]); } catch (_error) { return fail("session-read-failed"); }
-        if (!placement || placement.ok !== true || placement.nodeId !== frame.nodeId || placement.parentId !== frame.parentId) return fail("placement-parent-disagreement");
-        if (!content || content.ok !== true || content.nodeId !== frame.nodeId || !plainObject(content.payload)) return fail("invalid-content-record");
-        if (["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key))) return fail("reserved-content-payload-key");
+        const workset = lookahead && sameFrame(lookahead.frame, frame)
+          ? lookahead.workset : startWorkset(frame);
+        lookahead = null;
+        const first = await Promise.race([
+          workset.settled.then((result) => ({ kind: "settled", result })),
+          workset.children.then((result) => ({ kind: "children", result })),
+        ]);
+        let settled;
+        if (first.kind === "children") {
+          const childResult = first.result;
+          if (childResult.settled === true) {
+            const next = exactNextFrame(frame, childResult.value);
+            if (next && !current.has(next.nodeId)) {
+              lookahead = { frame: next, workset: startWorkset(next) };
+            }
+          }
+          settled = await workset.settled;
+        } else settled = first.result;
+        if (!settled.ok) return fail("session-read-failed");
+        const [placement, content, children] = settled.values;
+        if (!placement || placement.ok !== true || placement.nodeId !== frame.nodeId || placement.parentId !== frame.parentId)
+          return fail("placement-parent-disagreement");
+        if (!content || content.ok !== true || content.nodeId !== frame.nodeId || !plainObject(content.payload))
+          return fail("invalid-content-record");
+        if (["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key)))
+          return fail("reserved-content-payload-key");
         if (!children.ok) return children;
         const payload = clone(logical, content.payload);
         if (!payload || !plainObject(payload)) return fail("invalid-content-payload");
         nodes.push({ id: frame.nodeId, parentId: frame.parentId, order: frame.order, ...payload });
-        for (let index = children.items.length - 1; index >= 0; index -= 1) stack.push({ type: "node", parentId: frame.nodeId, nodeId: children.items[index], order: index });
+        for (let index = children.items.length - 1; index >= 0; index -= 1)
+          stack.push({ type: "node", parentId: frame.nodeId, nodeId: children.items[index], order: index });
       }
       return Object.freeze({ ok: true, document: { schema: owner.source.schema, writtenAt: owner.source.writtenAt, nodes, tombstones: owner.tombstones, rootExtras: owner.rootExtras, dataExtras: owner.dataExtras } });
     } catch (_error) { return fail("materialize-failed"); }
