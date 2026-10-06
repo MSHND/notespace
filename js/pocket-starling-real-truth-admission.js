@@ -330,19 +330,23 @@
           || typeof owner.source.schema !== "string" || typeof owner.source.writtenAt !== "string"
           || !Array.isArray(owner.tombstones) || !isObject(owner.rootExtras) || !isObject(owner.dataExtras)) return null;
       const nodes = [], seen = new Set();
-      async function visit(parentId) {
+      async function childrenFor(parentId) {
         const located = await trieValue(root.childrenRef, "children-trie", parentId);
-        if (!located) return false;
-        if (!located.found) return true;
-        const children = await sequenceItems(located.ref, root.capacity);
+        if (!located) return null;
+        if (!located.found) return [];
+        return sequenceItems(located.ref, root.capacity);
+      }
+      async function visit(parentId, knownChildren) {
+        const children = knownChildren === undefined ? await childrenFor(parentId) : knownChildren;
         if (!children) return false;
         for (let index = 0; index < children.length; index += 1) {
           const nodeId = children[index];
           if (seen.has(nodeId)) return false;
           seen.add(nodeId);
-          const [place, content] = await Promise.all([
+          const [place, content, nodeChildren] = await Promise.all([
             record(root.placementRef, "placement-trie", "placement-record", nodeId),
             record(root.contentRef, "content-trie", "content-record", nodeId),
+            childrenFor(nodeId),
           ]);
           if (!place || !exact(place, ["schema", "kind", "nodeId", "parentId"])
               || place.schema !== logical.OBJECT_SCHEMA || place.kind !== "placement-record"
@@ -351,8 +355,9 @@
               || content.schema !== logical.OBJECT_SCHEMA || content.kind !== "content-record"
               || content.nodeId !== nodeId || !isObject(content.payload)
               || ["id", "parentId", "order"].some((key) => Object.prototype.hasOwnProperty.call(content.payload, key))) return false;
+          if (!nodeChildren) return false;
           nodes.push({ id: nodeId, parentId, order: index, ...content.payload });
-          if (!await visit(nodeId)) return false;
+          if (!await visit(nodeId, nodeChildren)) return false;
         }
         return true;
       }
