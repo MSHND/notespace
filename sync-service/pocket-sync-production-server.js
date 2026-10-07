@@ -54,6 +54,8 @@ const STARLING_BOOTSTRAP_TAG = STARLING_BOOTSTRAP_PATHS.map((modulePath) => (
 )).join("\n  ");
 const PRODUCTION_MODULE_TAG = `<script src="${ADDITIONAL_MODULE_PATH}"></script>\n  <script src="${RECOVERY_MODULE_PATH}"></script>\n  <script src="${LOCAL_MODULE_PATH}" data-service-root="%SERVICE_ROOT%"></script>\n  ${STARLING_BOOTSTRAP_TAG}\n  <script src="${PRODUCTION_BOOTSTRAP_PATH}"></script>`;
 
+const PROJECT_DOCUMENTS_PRODUCTION_ENABLED = false;
+
 function productionError() {
   const error = new Error("Pocket Sync production composition failed.");
   error.code = "sync-production-composition-failed";
@@ -216,16 +218,30 @@ function createProductionServer(input) {
   return Object.freeze({ listen, close, handler });
 }
 
+function createProductionProjectDocuments(input, dependencies = {}) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+      || typeof input.enabled !== "boolean") throw productionError();
+  if (!input.enabled) return null;
+  if (!input.environment || typeof input.environment !== "object" || Array.isArray(input.environment)
+      || !validServiceRoot(input.serviceRoot)
+      || !input.postgres || typeof input.postgres !== "object") throw productionError();
+  const createConfig = dependencies.createConfig || createProjectDocumentsConfig;
+  const createRuntime = dependencies.createRuntime || createProjectDocumentsRuntime;
+  if (typeof createConfig !== "function" || typeof createRuntime !== "function") throw productionError();
+  const projectDocumentsConfig = createConfig({ environment: input.environment });
+  if (!projectDocumentsConfig || projectDocumentsConfig.mcpRoot === input.serviceRoot) throw productionError();
+  return createRuntime({ config: projectDocumentsConfig, postgres: input.postgres });
+}
+
 async function startProductionServer() {
   const config = createProductionServerConfig({ environment: process.env });
   const application = createSyncServerApplication(config.runtime);
-  const projectDocumentsConfig = createProjectDocumentsConfig({ environment: process.env });
-  if (projectDocumentsConfig && projectDocumentsConfig.mcpRoot === config.runtime.serviceRoot) {
-    throw productionError();
-  }
-  const projectDocuments = projectDocumentsConfig
-    ? createProjectDocumentsRuntime({ config: projectDocumentsConfig, postgres: config.runtime.postgres })
-    : null;
+  const projectDocuments = createProductionProjectDocuments({
+    enabled: PROJECT_DOCUMENTS_PRODUCTION_ENABLED,
+    environment: process.env,
+    postgres: config.runtime.postgres,
+    serviceRoot: config.runtime.serviceRoot,
+  });
   const server = createProductionServer({
     application, browserRoot: BROWSER_ROOT, serviceRoot: config.runtime.serviceRoot, listen: config.listen,
     privateAlpha: Object.freeze({
@@ -249,7 +265,9 @@ async function startProductionServer() {
 if (require.main === module) startProductionServer().catch(() => { process.exitCode = 1; });
 
 module.exports = Object.freeze({
+  PROJECT_DOCUMENTS_PRODUCTION_ENABLED,
   createProductionIntegrationHandler,
+  createProductionProjectDocuments,
   createProductionReleaseManifest,
   createProductionRequestHandler,
   createProductionServer,
