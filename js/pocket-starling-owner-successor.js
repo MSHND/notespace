@@ -71,6 +71,22 @@ into a user-facing failure.
       && left.revision === right.revision && left.sealRef === right.sealRef;
   }
 
+  function validSemanticFingerprint(value) {
+    return typeof value === "string" && /^sha256:[A-Za-z0-9_-]{43}$/.test(value);
+  }
+
+  function proveBoundedCommittedCandidate(opened, candidateHead, witness) {
+    const descriptor = witness?.descriptor;
+    return !!opened && opened.outcome === "opened" && !!opened.session
+      && !!opened.session.semanticBaseProof
+      && sameHead(opened.head, candidateHead)
+      && !!descriptor && sameHead(descriptor.expectedHead, witness.expectedHead)
+      && candidateHead.revision === witness.expectedHead.revision + 1
+      && candidateHead.sealRef === descriptor.candidateSealStorageRef
+      && validSemanticFingerprint(descriptor.semanticFingerprint)
+      && descriptor.semanticFingerprint === witness.targetFingerprint;
+  }
+
   function currentScriptServiceRoot() {
     const value = global.document?.currentScript?.dataset?.serviceRoot;
     return typeof value === "string" && value.startsWith("/") && !value.startsWith("//")
@@ -1263,7 +1279,13 @@ into a user-facing failure.
         sealRef: witness.descriptor.candidateSealStorageRef });
       if (!candidateHead) return false;
       const opened = await freshOpen();
-      if (!await proveOpened(opened, candidateHead, witness.targetFingerprint, expectedBytes)) return false;
+      const hasSemanticFingerprint = Object.prototype.hasOwnProperty.call(
+        witness.descriptor, "semanticFingerprint"
+      );
+      const proved = hasSemanticFingerprint
+        ? proveBoundedCommittedCandidate(opened, candidateHead, witness)
+        : await proveOpened(opened, candidateHead, witness.targetFingerprint, expectedBytes);
+      if (!proved) return false;
       const receipt = witness.deleteContinuity && witness.deleteRetention
         ? freeze({ schema: DELETE_RECEIPT_SCHEMA, syncedPocketId: currentPrivate()?.owner.syncedPocketId,
           nodeId: witness.deleteContinuity.nodeId, retainedIndex: witness.deleteRetention.retainedIndex,
