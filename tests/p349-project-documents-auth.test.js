@@ -13,7 +13,7 @@ const {
   createProjectDocumentsConfig,
 } = require("../sync-service/pocket-project-documents-config.js");
 
-function environment() {
+function environment(overrides = {}) {
   return {
     POCKET_PROJECT_DOCS_MCP_ROOT: "/project-docs/mcp",
     POCKET_PROJECT_DOCS_RESOURCE_URL: "https://pocket.example/project-docs/mcp",
@@ -22,6 +22,7 @@ function environment() {
     POCKET_PROJECT_DOCS_OAUTH_JWKS_URL: "https://auth.example/.well-known/jwks.json",
     POCKET_PROJECT_DOCS_OAUTH_READ_SCOPE: "pocket.project-documents.read",
     POCKET_PROJECT_DOCS_OAUTH_WRITE_SCOPE: "pocket.project-documents.write",
+    ...overrides,
   };
 }
 
@@ -68,13 +69,48 @@ test("P349 project-document configuration is optional but partial configuration 
     config.resourceMetadataUrl,
     "https://pocket.example/.well-known/oauth-protected-resource/project-docs/mcp"
   );
+  assert.equal(config.issuer, "https://auth.example/");
   assert.notEqual(config.readScope, config.writeScope);
+
+  const auth0WithSlash = createProjectDocumentsConfig({ environment: environment({
+    POCKET_PROJECT_DOCS_OAUTH_ISSUER: "https://tenant.example.auth0.com/",
+  }) });
+  const auth0WithoutSlash = createProjectDocumentsConfig({ environment: environment({
+    POCKET_PROJECT_DOCS_OAUTH_ISSUER: "https://tenant.example.auth0.com",
+  }) });
+  assert.equal(auth0WithSlash.issuer, "https://tenant.example.auth0.com/");
+  assert.equal(auth0WithoutSlash.issuer, "https://tenant.example.auth0.com/");
+
+  const pathWithSlash = createProjectDocumentsConfig({ environment: environment({
+    POCKET_PROJECT_DOCS_OAUTH_ISSUER: "https://issuer.example/oauth/",
+  }) });
+  const pathWithoutSlash = createProjectDocumentsConfig({ environment: environment({
+    POCKET_PROJECT_DOCS_OAUTH_ISSUER: "https://issuer.example/oauth",
+  }) });
+  assert.equal(pathWithSlash.issuer, "https://issuer.example/oauth/");
+  assert.equal(pathWithoutSlash.issuer, "https://issuer.example/oauth");
+
+  for (const issuer of [
+    "http://auth.example/",
+    " https://auth.example/",
+    "https://auth.example/?tenant=one",
+    "https://auth.example/#fragment",
+    "https://user@auth.example/",
+  ]) {
+    assert.throws(
+      () => createProjectDocumentsConfig({ environment: environment({
+        POCKET_PROJECT_DOCS_OAUTH_ISSUER: issuer,
+      }) }),
+      (error) => error?.code === "project-documents-config-invalid"
+    );
+  }
 });
 
 test("P349 injected token verifier enforces issuer, audience, expiry and scopes", async () => {
   const config = createProjectDocumentsConfig({ environment: environment() });
+  assert.equal(config.issuer, "https://auth.example/");
   const base = {
-    iss: config.issuer,
+    iss: "https://auth.example/",
     aud: config.audience,
     exp: Math.floor(Date.now() / 1000) + 300,
     sub: "project-client",
@@ -91,7 +127,9 @@ test("P349 injected token verifier enforces issuer, audience, expiry and scopes"
   assert.equal(info.resource.href, config.resourceUrl);
 
   for (const payload of [
-    { ...base, iss: "https://other.example" },
+    { ...base, iss: "https://auth.example" },
+    { ...base, iss: " https://auth.example/" },
+    { ...base, iss: "https://other.example/" },
     { ...base, aud: "wrong-audience" },
     { ...base, exp: Math.floor(Date.now() / 1000) - 1 },
   ]) {
@@ -120,7 +158,8 @@ test("P349 protected-resource metadata is public and bounded while MCP requires 
   assert.equal(metadataResponse.statusCode, 200);
   const metadata = JSON.parse(metadataResponse.body.toString("utf8"));
   assert.equal(metadata.resource, config.resourceUrl);
-  assert.deepEqual(metadata.authorization_servers, [config.issuer]);
+  assert.equal(config.issuer, "https://auth.example/");
+  assert.deepEqual(metadata.authorization_servers, ["https://auth.example/"]);
   assert.deepEqual(metadata.scopes_supported, [config.readScope, config.writeScope]);
   assert.equal(calls.count, 0);
 
