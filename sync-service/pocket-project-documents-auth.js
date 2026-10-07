@@ -1,0 +1,113 @@
+"use strict";
+
+function projectDocumentsAuthError(code = "project-documents-auth-invalid") {
+  const error = new Error("Pocket project documents authentication failed.");
+  error.code = code;
+  return error;
+}
+
+function isObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function cleanScopes(payload) {
+  const raw = typeof payload.scope === "string"
+    ? payload.scope.split(/\s+/).filter(Boolean)
+    : (Array.isArray(payload.scp)
+      ? payload.scp
+      : (typeof payload.scp === "string" ? payload.scp.split(/\s+/).filter(Boolean) : []));
+  if (raw.length > 128 || raw.some((item) => typeof item !== "string" || item.length < 1 || item.length > 160)) {
+    throw projectDocumentsAuthError();
+  }
+  return Object.freeze([...new Set(raw)]);
+}
+
+function authInfoFromPayload(token, payload, config) {
+  if (typeof token !== "string" || token.length < 1 || token.length > 16384
+      || !isObject(payload) || !Number.isFinite(payload.exp)
+      || payload.exp <= Math.floor(Date.now() / 1000)) {
+    throw projectDocumentsAuthError();
+  }
+  const clientId = typeof payload.client_id === "string" && payload.client_id.length > 0
+    ? payload.client_id
+    : (typeof payload.sub === "string" && payload.sub.length > 0 ? payload.sub : null);
+  if (!clientId || clientId.length > 512) throw projectDocumentsAuthError();
+  return Object.freeze({
+    token,
+    clientId,
+    scopes: cleanScopes(payload),
+    expiresAt: payload.exp,
+    resource: new URL(config.resourceUrl),
+  });
+}
+
+function validateConfig(config) {
+  if (!isObject(config)
+      || typeof config.issuer !== "string" || typeof config.audience !== "string"
+      || typeof config.jwksUrl !== "string" || typeof config.resourceUrl !== "string") {
+    throw projectDocumentsAuthError("project-documents-auth-config-invalid");
+  }
+  return config;
+}
+
+function createProjectDocumentsTokenVerifier(input) {
+  if (!isObject(input) || Object.keys(input).length !== 2
+      || !Object.hasOwn(input, "config") || !Object.hasOwn(input, "verifyJwt")
+      || typeof input.verifyJwt !== "function") {
+    throw projectDocumentsAuthError("project-documents-auth-config-invalid");
+  }
+  const config = validateConfig(input.config);
+  return Object.freeze({
+    async verifyAccessToken(token) {
+      if (typeof token !== "string" || token.length < 1 || token.length > 16384) {
+        throw projectDocumentsAuthError();
+      }
+      let payload;
+      try {
+        payload = await input.verifyJwt(token, config);
+      } catch (_error) {
+        throw projectDocumentsAuthError();
+      }
+      return authInfoFromPayload(token, payload, config);
+    },
+  });
+}
+
+function createProjectDocumentsJwtTokenVerifier(configInput) {
+  const config = validateConfig(configInput);
+  let verifier = null;
+  return createProjectDocumentsTokenVerifier({
+    config,
+    async verifyJwt(token) {
+      let jose;
+      try { jose = await import("jose"); } catch (_error) {
+        throw projectDocumentsAuthError("project-documents-auth-verifier-unavailable");
+      }
+      if (!verifier) {
+        let jwksUrl;
+        try { jwksUrl = new URL(config.jwksUrl); } catch (_error) {
+          throw projectDocumentsAuthError("project-documents-auth-config-invalid");
+        }
+        verifier = jose.createRemoteJWKSet(jwksUrl);
+      }
+      const verified = await jose.jwtVerify(token, verifier, {
+        issuer: config.issuer,
+        audience: config.audience,
+      });
+      if (!verified || !isObject(verified.payload)) throw projectDocumentsAuthError();
+      return verified.payload;
+    },
+  });
+}
+
+function hasScope(authInfo, requiredScope) {
+  return !!authInfo && Array.isArray(authInfo.scopes)
+    && typeof requiredScope === "string" && authInfo.scopes.includes(requiredScope);
+}
+
+module.exports = Object.freeze({
+  createProjectDocumentsJwtTokenVerifier,
+  createProjectDocumentsTokenVerifier,
+  hasScope,
+  projectDocumentsAuthError,
+});
