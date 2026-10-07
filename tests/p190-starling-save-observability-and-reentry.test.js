@@ -197,7 +197,7 @@ test("P190 production-shaped ordinary post-reentry Main Save advances H2 to remo
   assert.ok(saveRequests.slice(casIndex + 1).some((entry) => entry.url.endsWith("/pockets/head/read")),
     "accepted Save must re-read remote Head after CAS for proof");
   assert.ok(saveRequests.slice(casIndex + 1).some((entry) => entry.url.endsWith("/pockets/objects/get")),
-    "accepted Save must re-open/materialise remote H3 objects after CAS");
+    "accepted Save must freshly re-open authenticated remote H3 objects after CAS");
 
   const remote = await h.readRemoteState();
   assert.equal(remote.revision, 1, "legacy whole-record R1 remains rollback-only");
@@ -225,15 +225,19 @@ test("P190 production-shaped ordinary post-reentry Main Save advances H2 to remo
   );
   assert.deepEqual(
     DETAIL_ELAPSED_KEYS.filter((key) => diagnostic.detailElapsedMs[key] !== null),
-    DETAIL_ELAPSED_KEYS,
+    DETAIL_ELAPSED_KEYS.filter((key) => key !== "proofMaterialized"),
+    "bounded committed-head acceptance must not fabricate full post-CAS materialisation",
   );
+  assert.equal(diagnostic.detailElapsedMs.proofMaterialized, null);
   const reachedStageTimes = STAGE_ELAPSED_KEYS
     .map((key) => diagnostic.stageElapsedMs[key])
     .filter((value) => value !== null);
   reachedStageTimes.forEach((value, index) => {
     if (index > 0) assert.ok(value >= reachedStageTimes[index - 1]);
   });
-  const reachedDetailTimes = DETAIL_ELAPSED_KEYS.map((key) => diagnostic.detailElapsedMs[key]);
+  const reachedDetailTimes = DETAIL_ELAPSED_KEYS
+    .map((key) => diagnostic.detailElapsedMs[key])
+    .filter((value) => value !== null);
   reachedDetailTimes.forEach((value, index) => {
     if (index > 0) assert.ok(value >= reachedDetailTimes[index - 1]);
   });
