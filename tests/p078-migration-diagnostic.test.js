@@ -26,6 +26,12 @@ function loadMigration(dependencies) {
         safeSchemaComponent: dependencies.safeSchemaComponent,
       };
     }
+    if (name === "./pocket-project-documents-postgres-schema.js") {
+      return {
+        verifyPocketProjectDocumentsSchema: dependencies.verifyPocketProjectDocumentsSchema,
+        safeProjectDocumentsSchemaComponent: dependencies.safeProjectDocumentsSchemaComponent,
+      };
+    }
     return originalLoad.call(this, name, parent, isMain);
   };
   delete require.cache[MIGRATION_PATH];
@@ -49,6 +55,10 @@ function successfulDependencies() {
     readDatabaseConnection() { return "postgres://test-only"; },
     async verifyPocketSyncSchema() { return true; },
     safeSchemaComponent(error) {
+      return ["columns-contract", "unknown"].includes(error?.component) ? error.component : "unknown";
+    },
+    async verifyPocketProjectDocumentsSchema() { return true; },
+    safeProjectDocumentsSchemaComponent(error) {
       return ["columns-contract", "unknown"].includes(error?.component) ? error.component : "unknown";
     },
   };
