@@ -137,6 +137,8 @@ test("P349 production server remains startable with project documents absent", a
     createServer(handler) {
       assert.equal(typeof handler, "function");
       return {
+        once() {},
+        off() {},
         listen(port, host, callback) {
           calls.push(["listen", port, host]);
           callback();
