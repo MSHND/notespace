@@ -180,15 +180,32 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
 
     async function ensureObjects(descriptorInput) {
       const descriptor = validateDescriptor(descriptorInput);
-      for (let index = 0; index < descriptor.newRecords.length; index += 1) {
-        const entry = descriptor.newRecords[index];
-        await service.putOpaqueObject({
-          apiVersion: API_VERSION,
-          operationId: freshOperationId("durable-put-object", index),
-          syncedPocketId: descriptor.syncedPocketId,
-          storageRef: entry.storageRef,
-          record: entry.record,
+      for (let start = 0; start < descriptor.newRecords.length; start += 2) {
+        const pair = descriptor.newRecords.slice(start, start + 2).map((entry, offset) => {
+          const index = start + offset;
+          return {
+            entry,
+            index,
+            operationId: freshOperationId("durable-put-object", index),
+          };
         });
+        const attempts = pair.map(({ entry, index, operationId }) => {
+          try {
+            return Promise.resolve(service.putOpaqueObject({
+              apiVersion: API_VERSION,
+              operationId,
+              syncedPocketId: descriptor.syncedPocketId,
+              storageRef: entry.storageRef,
+              record: entry.record,
+            }));
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        });
+        const settled = await Promise.allSettled(attempts);
+        for (let offset = 0; offset < settled.length; offset += 1) {
+          if (settled[offset].status === "rejected") throw settled[offset].reason;
+        }
       }
       await provePresence(descriptor, "durable-object");
       return Object.freeze({ outcome: "objects-present" });
