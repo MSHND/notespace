@@ -11,6 +11,8 @@ const {
   createReviewedStaticManifest,
 } = require("./pocket-sync-static-assets.js");
 const surfaceDependencies = require("../js/pocket-surface-dependencies.js");
+const { createProjectDocumentsConfig } = require("./pocket-project-documents-config.js");
+const { createProjectDocumentsRuntime } = require("./pocket-project-documents-runtime.js");
 
 const BROWSER_ROOT = path.resolve(__dirname, "..");
 const LOCAL_MODULE_PATH = "/js/pocket-sync-local-integration.js";
@@ -109,10 +111,42 @@ function createProductionIntegrationHandler(input) {
   };
 }
 
+function validProjectDocumentsApplication(value) {
+  return value === null || value === undefined || (
+    value && typeof value === "object" && !Array.isArray(value)
+    && ["matches", "handle", "preflight", "close"].every((name) => typeof value[name] === "function")
+  );
+}
+
+function createProductionRequestHandler(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some((key) => ![
+        "application", "browserRoot", "serviceRoot", "privateAlpha", "projectDocuments",
+      ].includes(key))
+      || !["application", "browserRoot", "serviceRoot", "privateAlpha"].every((field) => Object.hasOwn(input, field))
+      || !validProjectDocumentsApplication(input.projectDocuments)) throw productionError();
+  const integrationHandler = createProductionIntegrationHandler({
+    application: input.application, browserRoot: input.browserRoot, serviceRoot: input.serviceRoot,
+  });
+  const privateAlphaHandler = createPrivateAlphaGate({
+    accessSecret: input.privateAlpha.accessSecret,
+    trustedOrigin: input.privateAlpha.trustedOrigin,
+    serviceRoot: input.serviceRoot,
+    handler: integrationHandler,
+  });
+  const projectDocuments = input.projectDocuments || null;
+  return async function productionRequestHandler(request, response) {
+    if (projectDocuments && projectDocuments.matches(request)) {
+      return projectDocuments.handle(request, response);
+    }
+    return privateAlphaHandler(request, response);
+  };
+}
+
 function createProductionServer(input) {
   const fields = Object.keys(input || {});
   if (!input || typeof input !== "object" || Array.isArray(input)
-      || fields.some((key) => !["application", "browserRoot", "serviceRoot", "listen", "http", "privateAlpha"].includes(key))
+      || fields.some((key) => !["application", "browserRoot", "serviceRoot", "listen", "http", "privateAlpha", "projectDocuments"].includes(key))
       || !["application", "browserRoot", "serviceRoot", "listen", "privateAlpha"].every((field) => Object.hasOwn(input, field))
       || !input.application || typeof input.application.handle !== "function"
       || typeof input.application.preflight !== "function" || typeof input.application.close !== "function"
@@ -123,19 +157,18 @@ function createProductionServer(input) {
       || (input.http !== undefined && (!input.http || typeof input.http.createServer !== "function"))
       || !input.privateAlpha || typeof input.privateAlpha !== "object" || Array.isArray(input.privateAlpha)
       || Object.keys(input.privateAlpha).length !== 2
-      || !Object.hasOwn(input.privateAlpha, "accessSecret") || !Object.hasOwn(input.privateAlpha, "trustedOrigin")) {
+      || !Object.hasOwn(input.privateAlpha, "accessSecret") || !Object.hasOwn(input.privateAlpha, "trustedOrigin")
+      || !validProjectDocumentsApplication(input.projectDocuments)) {
     throw productionError();
   }
-  const integrationHandler = createProductionIntegrationHandler({
-    application: input.application, browserRoot: input.browserRoot, serviceRoot: input.serviceRoot,
-  });
-  const privateAlphaHandler = createPrivateAlphaGate({
-    accessSecret: input.privateAlpha.accessSecret,
-    trustedOrigin: input.privateAlpha.trustedOrigin,
+  const requestHandler = createProductionRequestHandler({
+    application: input.application,
+    browserRoot: input.browserRoot,
     serviceRoot: input.serviceRoot,
-    handler: integrationHandler,
+    privateAlpha: input.privateAlpha,
+    ...(input.projectDocuments ? { projectDocuments: input.projectDocuments } : {}),
   });
-  const handler = createProductionSecurityPolicy(privateAlphaHandler);
+  const handler = createProductionSecurityPolicy(requestHandler);
   const server = (input.http || http).createServer(handler);
   if (!server || typeof server.listen !== "function" || typeof server.close !== "function") throw productionError();
   let started = false;
@@ -144,6 +177,7 @@ function createProductionServer(input) {
   async function listen() {
     if (started || closing) throw productionError();
     await input.application.preflight();
+    if (input.projectDocuments) await input.projectDocuments.preflight();
     try {
       await new Promise((resolve, reject) => {
         const failed = () => { server.off("error", failed); reject(productionError()); };
@@ -172,7 +206,10 @@ function createProductionServer(input) {
       await closeServer();
       started = false;
       serverMayBeOpen = false;
-      await input.application.close();
+      try { await input.application.close(); }
+      finally {
+        if (input.projectDocuments) await input.projectDocuments.close();
+      }
     })();
     return closing;
   }
@@ -182,12 +219,20 @@ function createProductionServer(input) {
 async function startProductionServer() {
   const config = createProductionServerConfig({ environment: process.env });
   const application = createSyncServerApplication(config.runtime);
+  const projectDocumentsConfig = createProjectDocumentsConfig({ environment: process.env });
+  if (projectDocumentsConfig && projectDocumentsConfig.mcpRoot === config.runtime.serviceRoot) {
+    throw productionError();
+  }
+  const projectDocuments = projectDocumentsConfig
+    ? createProjectDocumentsRuntime({ config: projectDocumentsConfig, postgres: config.runtime.postgres })
+    : null;
   const server = createProductionServer({
     application, browserRoot: BROWSER_ROOT, serviceRoot: config.runtime.serviceRoot, listen: config.listen,
     privateAlpha: Object.freeze({
       accessSecret: config.productionShell.alphaAccessSecret,
       trustedOrigin: config.runtime.trustedOrigin,
     }),
+    ...(projectDocuments ? { projectDocuments } : {}),
   });
   try {
     await server.listen();
@@ -206,6 +251,7 @@ if (require.main === module) startProductionServer().catch(() => { process.exitC
 module.exports = Object.freeze({
   createProductionIntegrationHandler,
   createProductionReleaseManifest,
+  createProductionRequestHandler,
   createProductionServer,
   startProductionServer,
 });
