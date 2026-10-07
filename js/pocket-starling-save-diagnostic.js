@@ -207,7 +207,10 @@ substage timing around already-existing steady-Starling operations.
     latest = projection(active, outcome, failureCode);
   }
 
-  function detailPredecessor(name) {
+  function detailPredecessor(active, name) {
+    if (name === "proofVerified"
+        && active?.detailElapsedMs?.proofMaterialized === null
+        && active?.detailElapsedMs?.proofOpened !== null) return "proofOpened";
     const index = DETAIL_ELAPSED_FIELDS.indexOf(name);
     return index > 0 ? DETAIL_ELAPSED_FIELDS[index - 1] : null;
   }
@@ -215,7 +218,7 @@ substage timing around already-existing steady-Starling operations.
   function recordFirstDetailElapsed(active, name) {
     if (!active || currentDetailActive !== active || !active.detailElapsedMs
         || !DETAIL_ELAPSED_FIELDS.includes(name) || active.detailElapsedMs[name] !== null) return;
-    const predecessor = detailPredecessor(name);
+    const predecessor = detailPredecessor(active, name);
     if (predecessor && active.detailElapsedMs[predecessor] === null) return;
     const elapsed = boundedElapsed(active.startedAt);
     const floor = safeElapsed(active.lastDetailElapsedMs);
@@ -260,7 +263,8 @@ substage timing around already-existing steady-Starling operations.
                 if (!active || result?.outcome !== "opened" || !result.session || active.payload === null) {
                   return result;
                 }
-                if (active.detailElapsedMs?.headCommitted !== null) {
+                if (active.detailElapsedMs?.headCommitted !== null
+                    || active.stageElapsedMs?.casAmbiguous !== null) {
                   safelyRecordDetail(active, "proofOpened");
                 } else if (active.stageElapsedMs?.captured === null) {
                   safelyRecordDetail(active, "sourceAccepted");
