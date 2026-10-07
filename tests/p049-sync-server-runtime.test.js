@@ -515,6 +515,12 @@ test("P049 keeps the migration explicit, fixed-path and safely closed", async ()
   }
   Module._load = function patchedLoad(name, parent, isMain) {
     if (name === "pg") return { Pool };
+    if (name === "./pocket-project-documents-postgres-schema.js") {
+      return {
+        async verifyPocketProjectDocumentsSchema() { return true; },
+        safeProjectDocumentsSchemaComponent() { return "unknown"; },
+      };
+    }
     return originalLoad.call(this, name, parent, isMain);
   };
   delete require.cache[MIGRATION_PATH];
@@ -525,6 +531,7 @@ test("P049 keeps the migration explicit, fixed-path and safely closed", async ()
     assert.equal(calls[1], source("sync-service/migrations/001-pocket-sync-store.sql"));
     assert.equal(calls[2], source("sync-service/migrations/002-pocket-sync-object-head-store.sql"));
     assert.equal(calls[3], source("sync-service/migrations/003-pocket-sync-persistence-authority.sql"));
+    assert.equal(calls[4], source("sync-service/migrations/004-pocket-project-documents.sql"));
     assert.equal(ended, 1);
     Pool.prototype.query = async () => { throw new Error("native connection detail"); };
     await assert.rejects(applyLocalMigration("postgres://operator:secret@127.0.0.1/pocket"),
