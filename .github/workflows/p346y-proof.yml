@@ -1,0 +1,37 @@
+name: P346y proof
+
+on:
+  push:
+    branches:
+      - candidate/p346y-proof
+
+jobs:
+  p346y-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Focused P346y authority proof
+        run: |
+          timeout 900s node --test \
+            tests/p346y-bounded-post-cas-acceptance.test.js \
+            tests/p164-starling-successor-mirror.test.js \
+            tests/p168-starling-reentry.test.js \
+            tests/p172-real-p168-composition.test.js \
+            tests/p172-real-truth-cutover-admission.test.js \
+            tests/p190-starling-save-observability-and-reentry.test.js \
+            tests/p190b-semantic-admission-negative.test.js \
+            tests/p113-starling-fresh-reuse-shadow.test.js \
+            tests/p124-starling-remote-open.test.js \
+            tests/p132i-starling-semantic-authority.test.js \
+            tests/p133-starling-fresh-logical-delete-shadow.test.js \
+            tests/p134-starling-remote-delete-save.test.js \
+            tests/p135-starling-fresh-logical-restore-shadow.test.js \
+            tests/p136-starling-remote-restore-save.test.js \
+            tests/p206-starling-save-detail-observability.test.js
+      - name: Full Pocket check
+        run: timeout 600s npm run check
