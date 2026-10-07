@@ -22,10 +22,19 @@ function cleanScopes(payload) {
   return Object.freeze([...new Set(raw)]);
 }
 
+function audienceMatches(value, expected) {
+  if (typeof value === "string") return value === expected;
+  return Array.isArray(value) && value.length > 0
+    && value.every((item) => typeof item === "string")
+    && value.includes(expected);
+}
+
 function authInfoFromPayload(token, payload, config) {
   if (typeof token !== "string" || token.length < 1 || token.length > 16384
       || !isObject(payload) || !Number.isFinite(payload.exp)
-      || payload.exp <= Math.floor(Date.now() / 1000)) {
+      || payload.exp <= Math.floor(Date.now() / 1000)
+      || payload.iss !== config.issuer
+      || !audienceMatches(payload.aud, config.audience)) {
     throw projectDocumentsAuthError();
   }
   const clientId = typeof payload.client_id === "string" && payload.client_id.length > 0
