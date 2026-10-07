@@ -15,7 +15,10 @@
     "sync:retention:expired": "node sync-service/pocket-sync-expired-record-retention-command.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@simplewebauthn/server": "13.3.2",
-    "pg": "8.22.0"
+    "jose": "6.2.12",
+    "pg": "8.22.0",
+    "zod": "4.6.5"
   }
 }
