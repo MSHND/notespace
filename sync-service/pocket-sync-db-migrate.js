@@ -5,14 +5,19 @@ const path = require("node:path");
 const { Pool } = require("pg");
 const { readDatabaseConnection } = require("./pocket-sync-server-config.js");
 const { verifyPocketSyncSchema, safeSchemaComponent } = require("./pocket-sync-postgres-schema.js");
+const {
+  verifyPocketProjectDocumentsSchema,
+  safeProjectDocumentsSchemaComponent,
+} = require("./pocket-project-documents-postgres-schema.js");
 
 const MIGRATION_PATHS = Object.freeze([
   path.join(__dirname, "migrations", "001-pocket-sync-store.sql"),
   path.join(__dirname, "migrations", ["002", "pocket", "sync", "object", "head", "store.sql"].join("-")),
   path.join(__dirname, "migrations", ["003", "pocket", "sync", "persistence", "authority.sql"].join("-")),
+  path.join(__dirname, "migrations", ["004", "pocket", "project", "documents.sql"].join("-")),
 ]);
 const MIGRATION_STAGES = Object.freeze([
-  "configuration", "migration-file", "migration-apply", "schema-verify", "unknown",
+  "configuration", "migration-file", "migration-apply", "schema-verify", "project-documents-schema-verify", "unknown",
 ]);
 
 function migrationError(stage = "unknown", component = "unknown") {
@@ -27,6 +32,10 @@ function migrationError(stage = "unknown", component = "unknown") {
     enumerable: false,
     value: safeSchemaComponent({ component }),
   });
+  if (safe === "project-documents-schema-verify") Object.defineProperty(error, "component", {
+    enumerable: false,
+    value: safeProjectDocumentsSchemaComponent({ component }),
+  });
   return error;
 }
 
@@ -37,7 +46,8 @@ function safeStage(error) {
 
 function migrationDiagnostic(error) {
   const stage = safeStage(error);
-  const component = stage === "schema-verify" ? `/${safeSchemaComponent(error)}` : "";
+  const component = stage === "schema-verify" ? `/${safeSchemaComponent(error)}`
+    : (stage === "project-documents-schema-verify" ? `/${safeProjectDocumentsSchemaComponent(error)}` : "");
   return `Pocket Sync migration failed: ${stage}${component}\n`;
 }
 
@@ -71,6 +81,11 @@ async function applyLocalMigration(connectionString) {
     } catch (error) {
       throw migrationError("schema-verify", safeSchemaComponent(error));
     }
+    try {
+      await verifyPocketProjectDocumentsSchema(pool);
+    } catch (error) {
+      throw migrationError("project-documents-schema-verify", safeProjectDocumentsSchemaComponent(error));
+    }
   } finally {
     try { await pool.end(); } catch (_error) {}
   }
@@ -83,7 +98,8 @@ async function runMigration() {
   try { await applyLocalMigration(connectionString); }
   catch (error) {
     const stage = safeStage(error);
-    throw migrationError(stage, stage === "schema-verify" ? safeSchemaComponent(error) : "unknown");
+    throw migrationError(stage, stage === "schema-verify" ? safeSchemaComponent(error)
+      : (stage === "project-documents-schema-verify" ? safeProjectDocumentsSchemaComponent(error) : "unknown"));
   }
 }
 
