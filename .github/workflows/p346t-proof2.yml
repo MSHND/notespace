@@ -1,0 +1,33 @@
+name: P346t bounded publication proof 2
+
+on:
+  push:
+    branches:
+      - candidate/p346t-proof2
+
+jobs:
+  p346t-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Focused P346t and authority regressions
+        run: >
+          timeout 480s node --test
+          tests/p346t-durable-publication-pipeline.test.js
+          tests/p164-starling-successor-mirror.test.js
+          tests/p168-authority-adoption.test.js
+          tests/p168-starling-reentry.test.js
+          tests/p172-real-truth-cutover-admission.test.js
+          tests/p172-real-p168-composition.test.js
+          tests/p190-starling-save-observability-and-reentry.test.js
+          tests/p206-starling-save-detail-observability.test.js
+          tests/p346e-starling-node-pair-concurrency.test.js
+          tests/p346j-starling-node-triple-concurrency.test.js
+          tests/p346o-two-node-pipeline-coalescing.test.js
+      - name: Full npm check
+        run: timeout 180s npm run check
