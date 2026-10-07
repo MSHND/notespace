@@ -125,7 +125,7 @@ function createProjectDocumentsApplication(input) {
   async function handle(request, response) {
     const path = requestPath(request);
     if (path === metadataPath) {
-      if (!["GET", "HEAD"].includes(request.method)) return empty(response, 405);
+      if (!["GET", "HEAD"].includes(request.method)) {\n        empty(response, 405);\n        return true;\n      }
       response.setHeader("Access-Control-Allow-Origin", "*");
       return json(response, 200, {
         resource: config.resourceUrl,
