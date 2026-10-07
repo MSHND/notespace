@@ -318,6 +318,13 @@ test("P346y preserves legacy full-proof fallback and reentry full reconstruction
   assert.match(owner,
     /const proved = hasSemanticFingerprint\s*\? proveBoundedCommittedCandidate\(opened, candidateHead, witness\)\s*:\s*await proveOpened\(/,
     "descriptor without P172 semanticFingerprint must retain proveOpened fallback");
+  const acceptStart = owner.indexOf("async function proveAndAcceptAuthoritative");
+  const acceptEnd = owner.indexOf("\n    async function completeAuthoritativeSave", acceptStart);
+  assert.ok(acceptStart >= 0 && acceptEnd > acceptStart, "proveAndAcceptAuthoritative boundary must remain");
+  const acceptance = owner.slice(acceptStart, acceptEnd);
+  assert.ok(acceptance.indexOf("if (!proved) return false;") >= 0);
+  assert.ok(acceptance.indexOf("if (!proved) return false;") < acceptance.indexOf("const receipt ="),
+    "Delete receipt must remain downstream of exact committed-candidate proof");
   const start = owner.indexOf("async function rebuildStarlingReentry");
   const end = owner.indexOf("\n    async function adoptSyncedOwner", start);
   assert.ok(start >= 0 && end > start, "rebuildStarlingReentry boundary must remain");
