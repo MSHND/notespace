@@ -125,14 +125,18 @@ function createProjectDocumentsApplication(input) {
   async function handle(request, response) {
     const path = requestPath(request);
     if (path === metadataPath) {
-      if (!["GET", "HEAD"].includes(request.method)) {\n        empty(response, 405);\n        return true;\n      }
+      if (!["GET", "HEAD"].includes(request.method)) {
+        empty(response, 405);
+        return true;
+      }
       response.setHeader("Access-Control-Allow-Origin", "*");
-      return json(response, 200, {
+      json(response, 200, {
         resource: config.resourceUrl,
         authorization_servers: [config.issuer],
         scopes_supported: [config.readScope, config.writeScope],
         bearer_methods_supported: ["header"],
       }, request.method === "HEAD");
+      return true;
     }
     if (path !== config.mcpRoot) return false;
 
