@@ -84,7 +84,7 @@ function createProjectDocumentsConfig(input) {
     mcpRoot,
     resourceUrl: resource.href,
     resourceMetadataUrl: protectedResourceMetadataUrl(resource),
-    issuer: issuer.href.replace(/\/$/, ""),
+    issuer: issuer.href,
     audience,
     jwksUrl: jwks.href,
     readScope,
