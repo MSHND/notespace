@@ -82,10 +82,31 @@ test("P190b controlled post-reentry semantic mismatch is rejected by unchanged P
   assert.equal(remote.revision, 1);
   assert.equal(remote.head.revision, 2);
   const diagnostic = h.context.PocketStarlingSaveDiagnostic.getLatest();
-  assert.deepEqual(plain(diagnostic), {
-    outcome: "failed",
-    highestStage: "captured",
-    failureCode: "starling-save-unsettled",
-    elapsedMs: diagnostic.elapsedMs,
+  assert.equal(diagnostic.outcome, "failed");
+  assert.equal(diagnostic.highestStage, "captured");
+  assert.equal(diagnostic.failureCode, "starling-save-unsettled");
+  assert.equal(Number.isSafeInteger(diagnostic.elapsedMs), true);
+  assert.deepEqual(plain(diagnostic.stageElapsedMs), {
+    captured: diagnostic.stageElapsedMs.captured,
+    prepared: null,
+    objectsPresent: null,
+    casAmbiguous: null,
+    conflict: null,
+    remoteProved: null,
+    accepted: null,
   });
+  assert.equal(Number.isSafeInteger(diagnostic.stageElapsedMs.captured), true);
+  assert.deepEqual(plain(diagnostic.detailElapsedMs), {
+    sourceAccepted: diagnostic.detailElapsedMs.sourceAccepted,
+    prepareSourceAccepted: diagnostic.detailElapsedMs.prepareSourceAccepted,
+    workingSetPrepared: null,
+    descriptorPrepared: null,
+    objectsEnsured: null,
+    headCommitted: null,
+    proofOpened: null,
+    proofMaterialized: null,
+    proofVerified: null,
+  });
+  assert.equal(Number.isSafeInteger(diagnostic.detailElapsedMs.sourceAccepted), true);
+  assert.equal(Number.isSafeInteger(diagnostic.detailElapsedMs.prepareSourceAccepted), true);
 });
