@@ -54,7 +54,7 @@ const STARLING_BOOTSTRAP_TAG = STARLING_BOOTSTRAP_PATHS.map((modulePath) => (
 )).join("\n  ");
 const PRODUCTION_MODULE_TAG = `<script src="${ADDITIONAL_MODULE_PATH}"></script>\n  <script src="${RECOVERY_MODULE_PATH}"></script>\n  <script src="${LOCAL_MODULE_PATH}" data-service-root="%SERVICE_ROOT%"></script>\n  ${STARLING_BOOTSTRAP_TAG}\n  <script src="${PRODUCTION_BOOTSTRAP_PATH}"></script>`;
 
-const PROJECT_DOCUMENTS_PRODUCTION_ENABLED = false;
+const PROJECT_DOCUMENTS_PRODUCTION_ENABLED = true;
 
 function productionError() {
   const error = new Error("Pocket Sync production composition failed.");
