@@ -1,0 +1,21 @@
+name: P349k focused proof
+
+on:
+  push:
+    branches:
+      - candidate/p349k-proof
+
+jobs:
+  focused-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Focused P349/P349c activation proof
+        run: timeout 5m node --test tests/p349-project-documents-auth.test.js tests/p349-project-documents-mcp.test.js tests/p349-project-documents-production-composition.test.js tests/p349-project-documents-schema.test.js tests/p349-project-documents-store.test.js tests/p349c-project-documents-production-dormancy.test.js
+      - name: Pocket check
+        run: npm run check
