@@ -26,13 +26,13 @@ function validEnvironment() {
   };
 }
 
-test("P349c production source owns one explicit project-document activation gate and keeps it OFF", () => {
-  assert.equal(PROJECT_DOCUMENTS_PRODUCTION_ENABLED, false);
+test("P349k production source owns one explicit project-document activation gate and keeps it ON", () => {
+  assert.equal(PROJECT_DOCUMENTS_PRODUCTION_ENABLED, true);
   const source = fs.readFileSync(
     path.join(ROOT, "sync-service", "pocket-sync-production-server.js"),
     "utf8"
   );
-  assert.match(source, /const PROJECT_DOCUMENTS_PRODUCTION_ENABLED = false;/);
+  assert.match(source, /const PROJECT_DOCUMENTS_PRODUCTION_ENABLED = true;/);
   assert.match(source, /enabled: PROJECT_DOCUMENTS_PRODUCTION_ENABLED,/);
 });
 
