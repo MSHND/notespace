@@ -29,6 +29,29 @@ function audienceMatches(value, expected) {
     && value.includes(expected);
 }
 
+// Only the dormant, explicitly opted-in handover observer consumes this
+// canonicalisation. Legacy OAuth/MCP audience validation is deliberately unchanged.
+function handoverAudience(payload, config, scopes) {
+  if (payload.aud === config.audience) return config.audience;
+  const audiences = payload.aud;
+  if (!Array.isArray(audiences) || audiences.length !== 2
+      || audiences.some(value => typeof value !== "string" || value.length === 0)
+      || audiences[0] === audiences[1] || !scopes.includes("openid")) return null;
+
+  // No token-supplied domain, alternative issuer, or arbitrary second audience:
+  // the /userinfo URL must be derived solely from the EXACT verified issuer.
+  let issuer;
+  try { issuer = new URL(config.issuer); } catch (_error) { return null; }
+  if (payload.iss !== config.issuer || issuer.href !== config.issuer
+      || issuer.protocol !== "https:" || issuer.pathname !== "/"
+      || issuer.username || issuer.password || issuer.search || issuer.hash) return null;
+  const userinfo = new URL("/userinfo", issuer).href;
+  if (config.audience === userinfo) return null;
+  return (audiences[0] === config.audience && audiences[1] === userinfo)
+    || (audiences[1] === config.audience && audiences[0] === userinfo)
+    ? config.audience : null;
+}
+
 function authInfoFromPayload(token, payload, config) {
   if (typeof token !== "string" || token.length < 1 || token.length > 16384
       || !isObject(payload) || !Number.isFinite(payload.exp)
@@ -88,8 +111,9 @@ function createProjectDocumentsTokenVerifier(input) {
           input.verifiedSubjectObserver(authInfo, Object.freeze({
             issuer: payload.iss,
             subject: typeof payload.sub === "string" ? payload.sub : null,
-            // For release authority, multi-audience JWTs are not exact-bound.
-            audience: typeof payload.aud === "string" ? payload.aud : null,
+            // Restricted Auth0 Custom API + same verified-issuer /userinfo form;
+            // legacy authInfo/scopes are unchanged even when this is null.
+            audience: handoverAudience(payload, config, authInfo.scopes),
             resourceUrl: config.resourceUrl,
             expiresAt: payload.exp,
           }));
