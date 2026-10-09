@@ -116,6 +116,10 @@ function createSinglePrincipalPublishReceiptModel({
       });
       const key = fingerprint(proof);
       if (claimedIntents.has(key)) denied("intent-already-used");
+      // Reserve the EXACT intent before awaiting owner confirmation: a second
+      // authInfo session must never initiate a parallel approval ceremony.
+      // Failed confirmations retain a terminal reservation; no silent reuse.
+      claimedIntents.set(key, receipt);
       const challenge = randomBytes(32).toString("hex");
       const request = Object.freeze({ ...proof, challenge });
       // This is a deliberately distinct TRUSTED confirmation channel, not a
@@ -130,7 +134,6 @@ function createSinglePrincipalPublishReceiptModel({
       receipt.proof = proof;
       receipt.expiresAtMs = expiresAtMs;
       receipt.status = "approved";
-      claimedIntents.set(key, receipt);
       record("confirm", "approved");
       return Object.freeze({ confirmed: true, expiresAtMs });
     } catch (_error) {
