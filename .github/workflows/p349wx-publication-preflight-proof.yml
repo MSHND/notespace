@@ -1,0 +1,24 @@
+name: P349wx isolated publication preflight proof
+
+on:
+  push:
+    branches:
+      - candidate/p349wx-proof
+      - candidate/p349wx-proof-repair
+
+permissions:
+  contents: read
+
+jobs:
+  publication-preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Publish-last and existing isolated witness proofs
+        run: timeout 90s node --test tests/p349wx-handover-publication-preflight.test.js tests/p349wt-handover-minimum-release-witness.test.js tests/p349wq-handover-release-witness.test.js
+      - name: Normal repository check
+        run: timeout 90s npm run check
