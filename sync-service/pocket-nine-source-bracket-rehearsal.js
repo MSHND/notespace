@@ -40,12 +40,16 @@ function createNineSourceBracketRehearsal({ attemptId, expectedSources, readPass
       || expectedSources.length !== NAMES.length ||
       typeof readPass !== "function") throw new TypeError("Synthetic bracket inputs invalid");
   // Freeze independent copies: callback/test edits cannot repin expected truth.
+  // Nine named sources must be nine DISTINCT Google documents, not aliases.
+  const seenDocuments = new Set();
   const pins = expectedSources.map((p, i) => {
     if (!exactKeys(p, ["name", "documentId", "tabId", "revisionId"])
         || p.name !== NAMES[i] || !id(p.documentId)
-        || !id(p.tabId) || !id(p.revisionId)) {
+        || !id(p.tabId) || !id(p.revisionId)
+        || seenDocuments.has(p.documentId)) {
       throw new TypeError("Synthetic nine-source identity pins invalid");
     }
+    seenDocuments.add(p.documentId);
     return Object.freeze({ name: p.name, documentId: p.documentId,
       tabId: p.tabId, revisionId: p.revisionId });
   });
