@@ -23,6 +23,8 @@ function denied() {
 }
 function safeVerifiedClaims(claims) {
   if (!object(claims) || !identityText(claims.subject)
+      // Auth0's documented client-credentials subject class is not a user.
+      || claims.subject.endsWith("@clients")
       || !identityText(claims.issuer) || !identityText(claims.audience)
       || !identityText(claims.resourceUrl)
       || !Number.isSafeInteger(claims.expiresAt)
