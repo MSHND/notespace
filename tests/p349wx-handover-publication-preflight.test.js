@@ -246,9 +246,10 @@ test("grant is distinct, exact scope, approved, unexpired, unrevoked and single 
   ];
   for(const mutate of mutations){
     const f=fixture();mutate(f);
-    const mismatchSource = f.grant.allowedSources.length===3
-      && f.grant.allowedSources.some(x => x.digest !== f.sources[x.name]?.digest
-        || x.revisionId !== f.sources[x.name]?.revisionId);
+    const mismatchSource = f.grant.sourceReaderPrincipal !== "google-reader"
+      || (f.grant.allowedSources.length===3
+        && f.grant.allowedSources.some(x => x.digest !== f.sources[x.name]?.digest
+          || x.revisionId !== f.sources[x.name]?.revisionId));
     await denied(f, mismatchSource?"source-invalid-or-stale":"publisher-grant-invalid");
     assert.equal(f.calls.stage.length,0);
   }
