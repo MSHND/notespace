@@ -60,9 +60,11 @@ function validateConfig(config) {
 }
 
 function createProjectDocumentsTokenVerifier(input) {
-  if (!isObject(input) || Object.keys(input).length !== 2
+  const withObserver = isObject(input) && Object.hasOwn(input, "verifiedSubjectObserver");
+  if (!isObject(input) || Object.keys(input).length !== (withObserver ? 3 : 2)
       || !Object.hasOwn(input, "config") || !Object.hasOwn(input, "verifyJwt")
-      || typeof input.verifyJwt !== "function") {
+      || typeof input.verifyJwt !== "function"
+      || (withObserver && typeof input.verifiedSubjectObserver !== "function")) {
     throw projectDocumentsAuthError("project-documents-auth-config-invalid");
   }
   const config = validateConfig(input.config);
@@ -77,16 +79,39 @@ function createProjectDocumentsTokenVerifier(input) {
       } catch (_error) {
         throw projectDocumentsAuthError();
       }
-      return authInfoFromPayload(token, payload, config);
+      const authInfo = authInfoFromPayload(token, payload, config);
+      // Opt-in server-only observer: verified claims are passed once from THIS
+      // verifier after signature/issuer/audience/expiry validation. Never decode
+      // the raw bearer token again, and never mutate legacy authInfo shape.
+      if (withObserver) {
+        try {
+          input.verifiedSubjectObserver(authInfo, Object.freeze({
+            issuer: payload.iss,
+            subject: typeof payload.sub === "string" ? payload.sub : null,
+            // For release authority, multi-audience JWTs are not exact-bound.
+            audience: typeof payload.aud === "string" ? payload.aud : null,
+            resourceUrl: config.resourceUrl,
+            expiresAt: payload.exp,
+          }));
+        } catch (_error) {
+          throw projectDocumentsAuthError();
+        }
+      }
+      return authInfo;
     },
   });
 }
 
-function createProjectDocumentsJwtTokenVerifier(configInput) {
+function createProjectDocumentsJwtTokenVerifier(configInput, options = null) {
   const config = validateConfig(configInput);
+  if (options !== null && (!isObject(options) || Object.keys(options).length !== 1
+      || typeof options.verifiedSubjectObserver !== "function")) {
+    throw projectDocumentsAuthError("project-documents-auth-config-invalid");
+  }
   let verifier = null;
   return createProjectDocumentsTokenVerifier({
     config,
+    ...(options ? { verifiedSubjectObserver: options.verifiedSubjectObserver } : {}),
     async verifyJwt(token) {
       let jose;
       try { jose = await import("jose"); } catch (_error) {
