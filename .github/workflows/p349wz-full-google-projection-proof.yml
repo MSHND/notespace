@@ -1,0 +1,24 @@
+name: P349wz full Google source projection proof
+
+on:
+  push:
+    branches:
+      - candidate/p349wz-proof
+      - candidate/p349wz-proof-repair
+
+permissions:
+  contents: read
+
+jobs:
+  projection-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Complete projection and existing witness checks
+        run: timeout 90s node --test tests/p349wz-google-full-source-projection.test.js tests/p349wx-handover-publication-preflight.test.js tests/p349wt-handover-minimum-release-witness.test.js tests/p349wq-handover-release-witness.test.js
+      - name: Repository check
+        run: timeout 90s npm run check
