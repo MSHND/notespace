@@ -216,6 +216,9 @@ test("P349xs two simultaneous authInfo sessions with SAME intent reserve exactly
   assert.equal(a.clientId, b.clientId);
   const left = f.confirmPublish(a);
   const right = f.confirmPublish(b);
+  // Attach both handlers immediately: the loser SHOULD reject before the
+  // first ceremony gate opens, and Node must not see an unhandled rejection.
+  const settledPromise = Promise.allSettled([left, right]);
   let settled;
   try {
     await entered; // One real callback is now suspended before it can approve.
@@ -229,7 +232,7 @@ test("P349xs two simultaneous authInfo sessions with SAME intent reserve exactly
   } finally {
     releaseCallback(); // Never strand the pending synthetic ceremony on fail.
   }
-  settled = await Promise.allSettled([left, right]);
+  settled = await settledPromise;
   assert.equal(settled.filter(x => x.status === "fulfilled" && x.value.confirmed).length, 1);
   assert.equal(settled.filter(x => x.status === "rejected"
     && x.reason?.code === "handover-single-principal-denied"
