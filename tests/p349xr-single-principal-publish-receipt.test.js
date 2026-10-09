@@ -37,7 +37,7 @@ const manifest = (releaseId = "r1") => JSON.stringify({
     name, releaseId, digest: "a".repeat(64),
   })),
 });
-function fixture({ confirm = "approve", resultError = false } = {}) {
+function fixture({ confirm = "approve", resultError = false, approvalGate = null } = {}) {
   let clock = Date.now(), current = payload(), confirmation = confirm, uncertain = resultError;
   let policy = { version: 1, approved: true, revoked: false,
     bindings: [row(), row("user-other", "owner-other")] };
@@ -88,6 +88,7 @@ function fixture({ confirm = "approve", resultError = false } = {}) {
     pool, resolvePrincipal: bridge.resolvePrincipal, nowMs: () => clock,
     async confirmOwner(request) {
       confirmations.push(request);
+      if (approvalGate) await approvalGate();
       if (confirmation === "none") return null;
       if (confirmation === "wrong") return { ...request,
         confirmed: true, digest: "b".repeat(64) };
@@ -200,6 +201,86 @@ test("P349xr same intent from distinct authInfo cannot mint duplicate approval",
   assert.equal(f.confirmations().length, 1);
   assert.equal(pointerWrites(f).length, 0);
 });
+test("P349xs two simultaneous authInfo sessions with SAME intent reserve exactly one confirmation", { timeout: 5000 }, async () => {
+  let enteredCallback;
+  const entered = new Promise(resolve => { enteredCallback = resolve; });
+  let releaseCallback;
+  const gate = new Promise(resolve => { releaseCallback = resolve; });
+  const f = fixture({ approvalGate: async () => {
+    enteredCallback();
+    await gate;
+  } });
+  // Distinct frozen verified authInfo objects, same trusted subject/policy.
+  const a = await f.auth(payload()), b = await f.auth(payload());
+  assert.notStrictEqual(a, b);
+  assert.equal(a.clientId, b.clientId);
+  const left = f.confirmPublish(a);
+  const right = f.confirmPublish(b);
+  let settled;
+  try {
+    await entered; // One real callback is now suspended before it can approve.
+    // Allow both already-launched confirm() continuations to cross the
+    // requireOwner await while the first callback remains deliberately gated.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.confirmations().length, 1,
+      "same-intent overlap must not initiate a second confirmation ceremony");
+    assert.equal(pointerWrites(f).length, 0,
+      "neither confirmation may touch publisher pointer SQL");
+  } finally {
+    releaseCallback(); // Never strand the pending synthetic ceremony on fail.
+  }
+  settled = await Promise.allSettled([left, right]);
+  assert.equal(settled.filter(x => x.status === "fulfilled" && x.value.confirmed).length, 1);
+  assert.equal(settled.filter(x => x.status === "rejected"
+    && x.reason?.code === "handover-single-principal-denied"
+    && x.reason?.reason === "confirmation-denied").length, 1);
+  assert.equal(f.confirmations().length, 1);
+  assert.equal(pointerWrites(f).length, 0);
+  const winnerAuth = settled[0].status === "fulfilled" ? a : b;
+  const loserAuth = winnerAuth === a ? b : a;
+  assert.equal((await f.publish(winnerAuth)).ok, true);
+  assert.equal(pointerWrites(f).length, 1);
+  await denied(() => f.publish(winnerAuth), "receipt-absent-or-used");
+  await denied(() => f.publish(loserAuth), "receipt-absent-or-used");
+  await denied(() => f.confirmPublish(loserAuth), "confirmation-already-started");
+  assert.equal(pointerWrites(f).length, 1);
+  assert.equal(f.confirmations().length, 1);
+});
+
+test("P349xs same session cannot overlap while owner ceremony awaits, nor re-confirm", { timeout: 5000 }, async () => {
+  let enteredCallback;
+  const entered = new Promise(resolve => { enteredCallback = resolve; });
+  let releaseCallback;
+  const gate = new Promise(resolve => { releaseCallback = resolve; });
+  const f = fixture({ approvalGate: async () => { enteredCallback(); await gate; } });
+  const a = await f.auth(payload());
+  const first = f.confirmPublish(a);
+  try {
+    await entered;
+    await denied(() => f.confirmPublish(a), "confirmation-already-started");
+    assert.equal(f.confirmations().length, 1);
+    assert.equal(pointerWrites(f).length, 0);
+  } finally {
+    releaseCallback();
+  }
+  assert.equal((await first).confirmed, true);
+  await denied(() => f.confirmPublish(a), "confirmation-already-started");
+  assert.equal((await f.publish(a)).ok, true);
+  assert.equal(pointerWrites(f).length, 1);
+});
+
+test("P349xs failed first ceremony leaves exact-intent reservation terminal across authInfo", async () => {
+  const f = fixture({ confirm: "none" });
+  const a = await f.auth(payload()), b = await f.auth(payload());
+  await denied(() => f.confirmPublish(a), "confirmation-denied");
+  await denied(() => f.confirmPublish(b), "confirmation-denied");
+  assert.equal(f.confirmations().length, 1,
+    "a failed ceremony must not silently reopen a second callback");
+  assert.equal(pointerWrites(f).length, 0);
+  await denied(() => f.publish(a), "receipt-absent-or-used");
+  await denied(() => f.publish(b), "receipt-absent-or-used");
+});
+
 test("P349xr cancellation and expiry deny without pointer access", async () => {
   const f = fixture(), a = await f.auth(payload());
   await f.confirmPublish(a);
