@@ -1,0 +1,23 @@
+name: P349wq isolated witness proof
+
+on:
+  push:
+    branches:
+      - candidate/p349wq-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p349wq-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Isolated nine-record witness rejection proof
+        run: timeout 90s node --test tests/p349wq-handover-release-witness.test.js
+      - name: Existing repository health check
+        run: timeout 90s npm run check
