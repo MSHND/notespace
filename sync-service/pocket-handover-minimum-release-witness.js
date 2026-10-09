@@ -97,9 +97,16 @@ function taskIdentity(content) {
 function stateIdentity(content) {
   if (typeof content !== "string") return null;
   const lines = content.split("\n");
-  if (lines[0] !== "POCKET — CURRENT STATE & DEVELOPMENT PATH"
-      || !lines[1]?.startsWith("FAST RESUME — ") || !lines[2]) return null;
-  const found = [...lines[2].matchAll(/\bNEXT\s+(P[0-9]+[a-z]*)\b/g)];
+  if (lines[0] !== "POCKET — CURRENT STATE & DEVELOPMENT PATH") return null;
+  // Full Google projection retains blank structural paragraphs after the heading.
+  // Skip only blank separators; never search the historical body for an old NEXT.
+  let i = 1;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (!lines[i]?.startsWith("FAST RESUME — ")) return null;
+  i++;
+  while (i < lines.length && lines[i].trim() === "") i++;
+  if (!lines[i]) return null;
+  const found = [...lines[i].matchAll(/\bNEXT\s+(P[0-9]+[a-z]*)\b/g)];
   return found.length === 1 ? found[0][1] : null;
 }
 
