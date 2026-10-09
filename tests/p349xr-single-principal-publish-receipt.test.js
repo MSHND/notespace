@@ -282,7 +282,8 @@ test("P349xr wrong verified issuer/audience/resource blocks confirmation, withou
   const f = fixture(), policy = f.getPolicy();
   policy.bindings[0].resourceUrl = "https://wrong.synthetic.test/resource";
   f.setPolicy(policy);
-  await denied(() => f.confirmPublish(await f.auth(payload())));
+  const wrongResourceAuth = await f.auth(payload());
+  await denied(() => f.confirmPublish(wrongResourceAuth));
   assert.equal(pointerWrites(f).length, 0);
 });
 test("P349xr stale pointer consumes the exact one-attempt receipt, no implicit replay", async () => {
