@@ -1,0 +1,21 @@
+name: P349xr corrected isolated one-principal receipt proof
+on:
+  push:
+    branches: [candidate/p349xr-proof2]
+jobs:
+  single-principal-receipt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        timeout-minutes: 3
+      - name: P349xr corrected synthetic and prior regressions
+        run: node --test tests/p349xr-single-principal-publish-receipt.test.js tests/p349xn-auth0-multi-audience.test.js tests/p349xh-verified-subject-binding.test.js tests/p349xf-handover-release-safety-store.test.js tests/p349-project-documents-auth.test.js tests/p349-project-documents-mcp.test.js tests/p349-project-documents-store.test.js
+        timeout-minutes: 3
+      - name: Normal Pocket check
+        run: npm run check
+        timeout-minutes: 3
