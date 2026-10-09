@@ -267,6 +267,7 @@ test("P349xy supplied expected pins must be ALL nine unique ordered IDs/revision
     p=>p.pop(),p=>p.push({...p[0]}),
     p=>{p[3]={...p[2]};},
     p=>{p[0].documentId="";},
+    p=>{p[4].documentId=p[0].documentId;},
     p=>{p[0].revisionId="";},
     p=>{p[0].tabId="";},
   ]) {
