@@ -1,0 +1,22 @@
+name: P349xv isolated native paragraph fidelity proof
+on:
+  push:
+    branches: [candidate/p349xv-proof]
+jobs:
+  native-fidelity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci
+        timeout-minutes: 3
+      - name: P349xv synthetic fidelity plus accepted full-source and witness tests
+        run: node --test tests/p349xv-google-native-paragraph-projection.test.js tests/p349wz-google-full-source-projection.test.js tests/p349xr-single-principal-publish-receipt.test.js
+        timeout-minutes: 3
+      - name: Normal Pocket check
+        run: npm run check
+        timeout-minutes: 3
