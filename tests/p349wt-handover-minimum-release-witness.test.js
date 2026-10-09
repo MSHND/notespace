@@ -58,11 +58,11 @@ function fixture({ taskClass = "INVESTIGATION", dependencies = [], receipts = []
   f.readDocument = async name => {
     calls.document.push(name);
     if (HISTORICAL.includes(name)) calls.historical++;
-    return structuredClone(f.documents[name]);
+    return f.documents[name] === undefined ? undefined : structuredClone(f.documents[name]);
   };
   f.readIndependentEvidence = async r => {
     calls.evidence.push(r.id);
-    return structuredClone(f.checked[r.id]);
+    return f.checked[r.id] === undefined ? undefined : structuredClone(f.checked[r.id]);
   };
   f.executeStoredTask = () => { calls.execute++; };
   return f;
@@ -316,7 +316,5 @@ test("inaccessible records/evidence/policy and ambiguous failures terminate with
     assert.equal(called, 1);
   }
   const f = fixture(); f.readManifest = async () => null;
-  await reject(f, "task-policy-invalid" /* overridden below */).catch(() => {});
-  // Null manifest still must reject; the exact specific reason is manifest-invalid.
-  assert.deepEqual(await verify(f), { eligible: false, reason: "manifest-invalid" });
+  await reject(f, "manifest-invalid");
 });
