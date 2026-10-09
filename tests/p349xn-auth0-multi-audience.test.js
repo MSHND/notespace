@@ -167,6 +167,11 @@ test("P349xn non-root issuer cannot manufacture /userinfo audience; string still
   const nestedPayload = { ...payload([config.audience, userinfo]), iss: nested };
   await deniedBeforeSql(f, nestedPayload);
   assert.equal(f.getClaims()[0].audience, null);
+  // Direct-string audience is valid, but still requires a separately approved
+  // policy bound to the SAME non-root issuer; the old issuer must not match.
+  const policy = structuredClone(f.policy());
+  for (const record of policy.bindings) record.issuer = nested;
+  f.setPolicy(policy);
   const direct = await f.auth({ ...nestedPayload, aud: config.audience });
   assert.equal((await f.stage(direct)).ok, true);
 });
