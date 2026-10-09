@@ -118,7 +118,7 @@ test("P349xn trusted verified scp array also supplies openid for exact two-audie
 test("P349xn documented two-audience form without verified openid remains legacy-valid but handover-denied", async () => {
   for (const scope of ["pocket.project-documents.write", "", undefined]) {
     const f = fixture();
-    const p = payload([config.audience, userinfo], "user-alpha", scope);
+    const p = { ...payload([config.audience, userinfo]), scope };
     await deniedBeforeSql(f, p);
     assert.equal(f.getClaims()[0].audience, null);
   }
@@ -176,7 +176,7 @@ test("P349xn missing subject, M2M @clients subject (even approved), and unknown 
   p.bindings.push(row("service-id@clients", "owner-machine"));
   f.setPolicy(p);
   for (const sub of [undefined, "", "service-id@clients", "unapproved-human"]) {
-    await deniedBeforeSql(f, payload([userinfo, config.audience], sub));
+    await deniedBeforeSql(f, { ...payload([userinfo, config.audience]), sub });
   }
   assert.equal(f.getCalls().length, 0);
 });
