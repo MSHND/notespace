@@ -76,10 +76,12 @@ function makeHarness(options = {}) {
   const ctx = browser.context;
   let serverAccount = options.serverAccount || ACCOUNT;
   let serverPocket = options.serverPocket || POCKET;
+  let serverStatus = options.serverStatus || "ready";
   let authenticatedAccount = options.authenticatedAccount || ACCOUNT;
   let serverTag = TAG_A, expiry = FUTURE;
   let serial = 0, attestationCount = 0, authentications = 0;
   let visible = false, adoptionCount = 0, deviceEnrolments = 0;
+  let recordReads = 0, recordCreates = 0;
   let afterRead = null, attestationHook = null, failAuth = false, failAttestationNumber = null;
   const requests = [];
   const masterKey = Object.freeze({ kind: "nonextractable-synthetic-master-key" });
@@ -94,7 +96,9 @@ function makeHarness(options = {}) {
         envelopeId: "envelope-a", kind: "device", version: 1, kdf: "none" },
       record: { kind: "sealed-master" },
     },
-    activationDraft: null, additionalDeviceDraft: null, recoveryDraft: null,
+    activationDraft: null,
+    additionalDeviceDraft: options.incompleteRecord ? { stage: "preparing" } : null,
+    recoveryDraft: null,
     remote: { confirmedRevision: 1, pending: null, conflict: null },
     content: { context: { syncedPocketId: POCKET, revision: 1,
       contentType: "portal.export.v1+json" }, record: payload },
@@ -116,10 +120,11 @@ function makeHarness(options = {}) {
   const deviceStore = {
     async open() {},
     async readPocket(id) {
+      recordReads++;
       if (options.noCompletedRecord) return null;
       return id === POCKET ? record : null;
     },
-    async createPocket() {},
+    async createPocket() { recordCreates++; },
     async replacePocket() { return record; },
     async reservePocketEncryptionUsage() { return record; },
     async readRecoveryAttempt() { return null; },
@@ -208,8 +213,9 @@ function makeHarness(options = {}) {
       }
       return {
         apiVersion: 1, ok: true, operationId: request.operationId,
-        status: "ready", syncedPocketId: serverPocket,
-        ...(request.ownerContinuity === SCHEMA ? {
+        status: serverStatus, syncedPocketId: serverStatus === "ready" ? serverPocket : null,
+        ...(request.ownerContinuity === SCHEMA && serverStatus === "ready"
+          && !(options.missingFirstWitness && attestationCount === 1) ? {
           ownerContinuity: { schema: SCHEMA, accountId: serverAccount,
             sessionTag: serverTag, expiresAt: expiry },
         } : {}),
@@ -262,6 +268,7 @@ function makeHarness(options = {}) {
     browser, ctx, opener, openerConfiguration, controller, boundary,
     setAccount(value) { serverAccount = value; },
     setPocket(value) { serverPocket = value; },
+    setStatus(value) { serverStatus = value; },
     setAuthenticatedAccount(value) { authenticatedAccount = value; },
     setTag(value) { serverTag = value; },
     setExpiry(value) { expiry = value; },
@@ -276,6 +283,8 @@ function makeHarness(options = {}) {
     get adoptionCount() { return adoptionCount; },
     get visible() { return visible; },
     get deviceEnrolments() { return deviceEnrolments; },
+    get recordReads() { return recordReads; },
+    get recordCreates() { return recordCreates; },
   };
 }
 
@@ -294,7 +303,7 @@ test("P355e completes actual enrolled-device Open, verified account client, real
     { ok: true, reason: "owner-continuity-current" });
   assert.equal(h.attestationCount, 3);
   assert.deepEqual(h.requests.map(x => x.ownerContinuity || "ordinary"),
-    ["ordinary", SCHEMA, SCHEMA, SCHEMA]);
+    [SCHEMA, SCHEMA, SCHEMA]);
   assert.equal(JSON.stringify(h.opener).includes(TAG_A), false);
   assert.equal(JSON.stringify(opened).includes(ACCOUNT), false);
   assert.equal(Object.hasOwn(opened, "export"), false);
@@ -463,7 +472,8 @@ test("P355e correct Pocket with wrong account, or correct account with wrong att
   assert.equal(mismatch.adoptionCount, 0);
   const wrongDiscovery = makeHarness({ serverPocket: "pocket-other" });
   assert.equal((await wrongDiscovery.opener.openExisting()).ok, false);
-  assert.equal(wrongDiscovery.attestationCount, 0);
+  assert.equal(wrongDiscovery.attestationCount, 1);
+  assert.equal(wrongDiscovery.recordReads, 1);
 });
 
 test("P355e current same-account session before initial attestation may bind, between witnesses may not", async () => {
@@ -507,11 +517,11 @@ test("P355e failed authentication, cancelled Open and stale target do not issue 
 
   const interrupted = makeHarness();
   interrupted.onDiscovery(request => {
-    if (request.ownerContinuity === undefined) interrupted.browser.changeLocal();
+    if (request.ownerContinuity === SCHEMA) interrupted.browser.changeLocal();
   });
   assert.equal((await interrupted.opener.openExisting()).ok, false);
   assert.equal(interrupted.adoptionCount, 0);
-  assert.equal(interrupted.attestationCount, 0);
+  assert.equal(interrupted.attestationCount, 1);
 });
 
 test("P355e partial visible content or controller without save boundary never creates binding", async () => {
@@ -576,9 +586,11 @@ test("P355e new-device entry shares normal Open doorway but does not gain the co
   const opened = await h.opener.openExisting();
   assert.equal(opened.ok, false);
   assert.equal(h.adoptionCount, 0);
-  assert.equal(h.attestationCount, 0);
+  assert.equal(h.attestationCount, 1);
+  assert.equal(h.recordReads, 1);
   assert.equal((await h.opener.revalidate()).ok, false);
   assert.equal(h.deviceEnrolments, 0);
+  assert.equal(h.recordCreates, 0);
 });
 
 test("P355e account reselection uses only its own ceremony, never a prior result", async () => {
@@ -625,6 +637,146 @@ test("P355e dirty target and concurrent Open cannot fabricate a trusted second j
   assert.equal((await first).ok, true);
   assert.equal(h.authentications, 1);
   assert.equal(h.adoptionCount, 1);
+});
+
+test("P355fc completes with exactly two witnessed discoveries and no duplicate initial read", async () => {
+  const h = makeHarness();
+  assert.deepEqual(plain(await h.opener.openExisting()),
+    { ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1 });
+  assert.equal(h.recordReads > 0, true);
+  assert.equal(h.adoptionCount, 1);
+  assert.equal(h.attestationCount, 2);
+  assert.deepEqual(h.requests.map(x => x.ownerContinuity), [SCHEMA, SCHEMA]);
+  assert.equal((await h.opener.revalidate()).ok, true);
+  assert.deepEqual(h.requests.map(x => x.ownerContinuity), [SCHEMA, SCHEMA, SCHEMA]);
+});
+
+test("P355fc blocks account-switched first discovery before local record lookup", async () => {
+  const h = makeHarness();
+  h.onAttestation(n => { if (n === 1) h.setAccount("account-b"); });
+  assert.equal((await h.opener.openExisting()).ok, false);
+  assert.equal(h.attestationCount, 1);
+  assert.equal(h.recordReads, 0);
+  assert.equal(h.adoptionCount, 0);
+  assert.equal(h.deviceEnrolments, 0);
+  assert.equal((await h.opener.revalidate()).ok, false);
+});
+
+test("P355fc first witness network, malformed, missing, expired, mismatch and remote errors fail closed", async () => {
+  for (const mode of ["unavailable", "missing", "invalid-tag", "expired", "wrong-account",
+    "remote-401", "remote-403", "remote-503", "unknown"]) {
+    const h = makeHarness(mode === "missing" ? { missingFirstWitness: true } : {});
+    if (mode === "unavailable") h.failAttestation(1);
+    if (mode === "invalid-tag") h.setTag("invalid");
+    if (mode === "expired") h.setExpiry("2000-01-01T00:00:00.000Z");
+    if (mode === "wrong-account") h.setAccount("account-b");
+    if (mode.startsWith("remote-") || mode === "unknown") {
+      h.onAttestation(() => {
+        const error = new Error("synthetic remote rejection");
+        if (mode !== "unknown") {
+          error.code = mode === "remote-401" ? "remote-authentication-required"
+            : mode === "remote-403" ? "remote-authorisation-failed" : "remote-unavailable";
+        }
+        throw error;
+      });
+    }
+    const opened = await h.opener.openExisting();
+    assert.equal(opened.ok, false, mode);
+    assert.equal(h.attestationCount, 1, mode);
+    assert.equal(h.recordReads, 0, mode);
+    assert.equal(h.adoptionCount, 0, mode);
+    assert.equal(h.deviceEnrolments, 0, mode);
+    assert.equal((await h.opener.revalidate()).ok, false, mode);
+  }
+});
+
+test("P355fc not-configured never fabricates a witnessed-account suffix", async () => {
+  const h = makeHarness({ serverStatus: "not-configured" });
+  const opened = await h.opener.openExisting();
+  assert.deepEqual(plain(opened),
+    { ok: false, reason: "synced-pocket-not-configured", adopted: false });
+  assert.equal(h.recordReads, 0);
+  assert.equal(h.adoptionCount, 0);
+  assert.equal(h.attestationCount, 1);
+  assert.equal(Object.hasOwn(opened, "authenticatedAccountSuffix"), false);
+});
+
+test("P355fc completed-only missing/draft record never enters PRF-based enrolment", async () => {
+  for (const options of [{ noCompletedRecord: true }, { incompleteRecord: true }]) {
+    const h = makeHarness(options);
+    const opened = await h.opener.openExisting();
+    assert.deepEqual(plain(opened),
+      { ok: false, reason: "additional-device-completed-only", adopted: false });
+    assert.equal(h.attestationCount, 1);
+    assert.equal(h.recordReads, 1);
+    assert.equal(h.adoptionCount, 0);
+    assert.equal(h.deviceEnrolments, 0);
+    assert.equal(h.recordCreates, 0);
+    assert.equal((await h.opener.revalidate()).ok, false);
+  }
+});
+
+test("P355fc account/session and owner races preserve initial provenance and owner currentness", async () => {
+  const sameAccount = makeHarness();
+  sameAccount.onAttestation(n => { if (n === 1) sameAccount.setTag(TAG_B); });
+  assert.equal((await sameAccount.opener.openExisting()).ok, true);
+  assert.equal((await sameAccount.opener.revalidate()).ok, true);
+
+  const switchedAfter = makeHarness();
+  switchedAfter.onAttestation(n => {
+    if (n === 2) { switchedAfter.setAccount("account-b"); switchedAfter.setTag(TAG_B); }
+  });
+  assert.equal((await switchedAfter.opener.openExisting()).ok, true);
+  assert.equal((await switchedAfter.opener.revalidate()).ok, false);
+  assert.equal(switchedAfter.adoptionCount, 1);
+
+  const replacedTarget = makeHarness();
+  replacedTarget.onAttestation(n => { if (n === 1) replacedTarget.browser.changeLocal(); });
+  assert.equal((await replacedTarget.opener.openExisting()).ok, false);
+  assert.equal(replacedTarget.adoptionCount, 0);
+
+  const replacedController = makeHarness();
+  replacedController.onAttestation(async n => {
+    if (n === 1) {
+      const masterKey = (await replacedController.openerConfiguration.crypto.openMasterKeyBundle()).masterKey;
+      await replacedController.controller.adoptSyncedOwner({
+        syncedPocketId: POCKET, masterKey,
+      });
+    }
+  });
+  assert.equal((await replacedController.opener.openExisting()).ok, false);
+  assert.equal(replacedController.adoptionCount, 0);
+  assert.equal((await replacedController.opener.revalidate()).ok, false);
+
+  const replacedBoundary = makeHarness();
+  replacedBoundary.onAttestation(async n => {
+    if (n === 1) {
+      const masterKey = (await replacedBoundary.openerConfiguration.crypto.openMasterKeyBundle()).masterKey;
+      await replacedBoundary.controller.adoptSyncedOwner({ syncedPocketId: POCKET, masterKey });
+      replacedBoundary.boundary.installSyncedOwnerForSave(replacedBoundary.controller);
+    }
+  });
+  assert.equal((await replacedBoundary.opener.openExisting()).ok, false);
+  assert.equal(replacedBoundary.adoptionCount, 0);
+});
+
+test("P355fc strict isolation does not alter standard non-opted not-configured projection", async () => {
+  const h = makeHarness({ serverStatus: "not-configured" });
+  const ordinary = h.ctx.PocketSyncAdditionalDevice.createAdditionalDeviceOpener(
+    h.openerConfiguration
+  );
+  const deps = {
+    captureTarget: () => ({ ownerKind: h.browser.local().kind, continuityId: String(h.browser.local().id) }),
+    isTargetCurrent: () => true,
+    validatePayload: () => true,
+    adoptOpenedPocket: async () => ({ ok: true }),
+  };
+  const result = await ordinary.openExisting(deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "synced-pocket-not-configured");
+  assert.equal(result.authenticatedAccountSuffix, ACCOUNT.slice(-5));
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0].ownerContinuity, undefined);
 });
 
 test("P355e preserves standard opener: ordinary discovery and successful ordinary ownership no opt-in", async () => {
