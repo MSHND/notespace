@@ -58,7 +58,7 @@ jobs:
         run: node --test tests/p355fe-disposable-release.test.js
       - name: P034 service core regressions with one named obsolete package-inventory assertion excluded
         run: |
-          node --test --test-name-pattern='^(?!package and production loader boundaries retain the P048/P049 server-only dependencies$).*' tests/p034-sync-service-core.test.js
+          node --test --test-skip-pattern='package and production loader boundaries retain the P048/P049 server-only dependencies' tests/p034-sync-service-core.test.js
       - name: Verify documented P034 package-inventory mismatch is bounded
         run: |
           node -e 'const a=require("node:assert/strict"),p=require("./package.json");a.equal(p.dependencies["@modelcontextprotocol/sdk"],"1.32.1");a.equal(p.dependencies.jose,"6.2.12");a.equal(p.dependencies.zod,"4.6.5");a.equal(p.dependencies.pg,"8.22.0");a.equal(p.dependencies["@simplewebauthn/server"],"13.3.2");console.log("Known P034 historical dependency inventory assertion is outdated; production packages verified")'
