@@ -147,6 +147,105 @@ function buildCanonicalPocketPayload(norm, options = {}) {
   };
 }
 
+/* Pure P352 compatibility seam. A caller supplies materialised logical data;
+   this function neither authenticates an accepted Head nor touches storage. */
+function buildPortablePocketSnapshot(logical, options = {}) {
+  const fail = (reason) => Object.freeze({ ok: false, reason });
+  const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const same = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a) || Array.isArray(b)) {
+      return Array.isArray(a) && Array.isArray(b) && a.length === b.length
+        && a.every((value, index) => same(value, b[index]));
+    }
+    if (!object(a) || !object(b)) return false;
+    const keys = Object.keys(a).sort();
+    const other = Object.keys(b).sort();
+    return keys.length === other.length && keys.every((key, index) =>
+      key === other[index] && same(a[key], b[key]));
+  };
+  try {
+    if (!object(logical) || !object(options)
+        || Object.keys(logical).sort().join(",") !== "dataExtras,nodes,rootExtras,schema,tombstones,writtenAt"
+        || Object.keys(options).join(",") !== "writtenAt"
+        || !["portal.mtt.web.v1", "portal.sync.v1", "portal.export.v1"].includes(logical.schema)
+        || typeof options.writtenAt !== "string"
+        || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(options.writtenAt)
+        || !Number.isFinite(Date.parse(options.writtenAt))
+        || new Date(options.writtenAt).toISOString() !== options.writtenAt
+        || logical.writtenAt !== options.writtenAt
+        || !Array.isArray(logical.nodes) || !Array.isArray(logical.tombstones)
+        || !object(logical.rootExtras) || !object(logical.dataExtras)) {
+      return fail("invalid-logical-document-or-timestamp");
+    }
+    if (typeof normaliseInput !== "function" || typeof normaliseRootExtras !== "function") {
+      return fail("import-contract-unavailable");
+    }
+    // Verify one coherent current tree, not merely an importer's best-effort subset.
+    const nodes = new Map(), siblings = new Map();
+    for (const node of logical.nodes) {
+      if (!object(node) || typeof node.id !== "string" || !node.id || node.id === "root"
+          || nodes.has(node.id) || typeof node.parentId !== "string" || !node.parentId
+          || !Number.isSafeInteger(node.order) || node.order < 0) return fail("invalid-node-identity-or-order");
+      nodes.set(node.id, node);
+      const group = siblings.get(node.parentId) || [];
+      group.push(node.order);
+      siblings.set(node.parentId, group);
+    }
+    for (const node of logical.nodes) {
+      if (node.parentId !== "root" && !nodes.has(node.parentId)) return fail("missing-node-parent");
+    }
+    for (const orders of siblings.values()) {
+      orders.sort((a, b) => a - b);
+      if (!orders.every((order, index) => order === index)) return fail("noncanonical-sibling-order");
+    }
+    // Iterative path verification also rejects cycles without recursive traversal.
+    const settled = new Set();
+    for (const id of nodes.keys()) {
+      const path = new Set();
+      let cursor = id;
+      while (cursor !== "root" && !settled.has(cursor)) {
+        if (path.has(cursor)) return fail("cyclic-node-parent");
+        path.add(cursor);
+        cursor = nodes.get(cursor).parentId;
+      }
+      for (const visited of path) settled.add(visited);
+    }
+    const payload = buildCanonicalPocketPayload(logical, { writtenAt: options.writtenAt });
+    if (!payload || payload.schema !== "portal.export.v1"
+        || payload.writtenAt !== options.writtenAt
+        || payload.exportedAt !== options.writtenAt
+        || !object(payload.data) || !Array.isArray(payload.mainThoughtTree)
+        || !Array.isArray(payload.data.mainThoughtTree)
+        || !Array.isArray(payload.mainThoughtTreeTombstones)
+        || !Array.isArray(payload.data.mainThoughtTreeTombstones)
+        || !same(payload.mainThoughtTree, payload.data.mainThoughtTree)
+        || !same(payload.mainThoughtTreeTombstones, payload.data.mainThoughtTreeTombstones)) {
+      return fail("ambiguous-canonical-payload");
+    }
+    const json = JSON.stringify(payload);
+    if (typeof json !== "string") return fail("nonserialisable-snapshot");
+    const parsed = JSON.parse(json);
+    const imported = normaliseInput(parsed);
+    // Existing portal.export.v1 import contract intentionally does not collect
+    // dataExtras from its top-level tree path. Preserve them from payload.data.
+    const restored = {
+      nodes: imported.nodes,
+      tombstones: imported.tombstones,
+      rootExtras: imported.rootExtras || {},
+      dataExtras: normaliseRootExtras(parsed.data) || {},
+    };
+    if (imported.schema !== "portal.export.v1" || imported.writtenAt !== options.writtenAt
+        || !same(restored, {
+          nodes: logical.nodes, tombstones: logical.tombstones,
+          rootExtras: logical.rootExtras, dataExtras: logical.dataExtras,
+        })) return fail("semantic-round-trip-loss");
+    return Object.freeze({ ok: true, json });
+  } catch (_error) {
+    return fail("unsupported-or-malformed-logical-material");
+  }
+}
+
 function buildPocketPayload(writtenAt = nowIso()) {
   const pocketGuard = {
     schema: "pocket.guard.v1",
