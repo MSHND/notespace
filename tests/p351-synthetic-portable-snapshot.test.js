@@ -197,13 +197,13 @@ async function produceSnapshot(fixture, options = {}) {
     options.session || session);
   if (!materialised.ok) throw Error("materialisation-rejected:" + materialised.reason);
   const document = clone(materialised.document);
-  const payload = invoke(c,
-    "buildCanonicalPocketPayload(__p351Argument, {writtenAt:'" + DATE + "'})",
+  const result = invoke(c,
+    "buildPortablePocketSnapshot(__p351Argument, {writtenAt:'" + DATE + "'})",
     document);
-  if (!payload) throw Error("canonical-export-rejected");
-  const json = JSON.stringify(payload);
-  // Fail closed BEFORE exposing snapshot bytes if production import would
-  // truncate, drop, or transform any supported/preserved semantic material.
+  if (!result.ok) throw Error("unsupported or altered semantic material: " + result.reason);
+  const json = result.json;
+  // Independently reconstruct with the existing import contract, in addition
+  // to the checks now enforced by the production-owned pure helper.
   assertLossless(expectedFromMaterialised(document), decodeWithExistingImport(c, json));
   return { json, materialised: document, expected: expectedFromMaterialised(document) };
 }
@@ -305,6 +305,55 @@ test("P351 rejects unsupported loss, preserved-metadata corruption and ambiguous
   wrongRevision.exportedAt = "2026-10-11T00:00:00.000Z";
   assert.throws(() => decodeWithExistingImport(independent, JSON.stringify(wrongRevision)),
     /ambiguous-portable-representation/);
+});
+
+
+test("P352 pure owner works directly on materialised in-memory Pocket data", async () => {
+  const f = syntheticFixture(runtime(true));
+  const materialised = await f.c.PocketStarlingMaterializeShadow.materializeAccepted(f.session);
+  assert.equal(materialised.ok, true);
+  const input = clone(materialised.document);
+  const original = clone(input);
+  const first = invoke(f.c,
+    "buildPortablePocketSnapshot(__p351Argument,{writtenAt:'" + DATE + "'})", input);
+  const second = invoke(f.c,
+    "buildPortablePocketSnapshot(__p351Argument,{writtenAt:'" + DATE + "'})", input);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.deepStrictEqual(clone(first), clone(second));
+  assert.deepStrictEqual(input, original, "pure contract must not mutate input");
+  const offline = runtime(false);
+  assertLossless(expectedFromMaterialised(input), decodeWithExistingImport(offline, first.json));
+  assert.equal(offline.PocketStarlingMaterializeShadow, undefined);
+});
+
+test("P352 pure owner rejects ambiguous, truncated and malformed inputs without JSON", () => {
+  const c = runtime(false);
+  const base = representative();
+  // A fixed-time pure helper must reject incomplete, unsupported and lossy inputs.
+  const apply = (modify) => {
+    const input = clone(base);
+    modify(input);
+    const output = invoke(c,
+      "buildPortablePocketSnapshot(__p351Argument,{writtenAt:'" + DATE + "'})", input);
+    assert.equal(output.ok, false, "invalid input unexpectedly exported");
+    assert.deepStrictEqual(Object.keys(output).sort(), ["ok", "reason"]);
+  };
+  apply((x) => { delete x.dataExtras; });
+  apply((x) => { x.dataExtras.futureData.nested = ["x".repeat(12001)]; });
+  apply((x) => { x.nodes[0].futureNode = "x".repeat(1201); });
+  apply((x) => { x.nodes[0].label = "x".repeat(221); });
+  apply((x) => { x.nodes.push({ ...x.nodes[0] }); });
+  apply((x) => { x.nodes.find(n => n.id === "anchor").parentId = "grandchild"; });
+  apply((x) => { x.nodes.find(n => n.id === "grandchild").parentId = "missing"; });
+  apply((x) => { x.nodes.find(n => n.id === "sibling").order = 0; });
+  apply((x) => { x.rootExtras.schema = "future.schema"; });
+  apply((x) => { x.nodes[0].editor.outline[0].text = "x".repeat(9000); });
+  apply((x) => { x.nodes[0].newField = undefined; });
+  apply((x) => { x.writtenAt = "2026-10-11T00:00:00.000Z"; });
+  const invalidTime = invoke(c,
+    "buildPortablePocketSnapshot(__p351Argument,{writtenAt:'invalid'})", clone(base));
+  assert.equal(invalidTime.ok, false);
+  assert.deepStrictEqual(Object.keys(invalidTime).sort(), ["ok", "reason"]);
 });
 
 test("P351 remains purely a synthetic, memory-only compatibility proof", async () => {
