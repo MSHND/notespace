@@ -264,12 +264,42 @@
   // The retained guard callback must see only a one-use slot. The original
   // completed-Open descriptor (payload + master-key reference) is cleared
   // synchronously when consumed and again when installation settles.
-  function transientCompletedInstallation(slot, current, isCurrent, adopt) {
-    function run() {
+  function ordinaryAdoptionFailure(result) {
+    if (!object(result) || result.ok !== false) return FAILURE;
+    // Only existing, bounded ordinary failure fields survive; never retain
+    // arbitrary adopter output or the decrypted Open argument.
+    return Object.freeze({
+      ok: false,
+      ...(typeof result.reason === "string" && result.reason.length <= 160
+        ? { reason: result.reason } : {}),
+      ...(result.partialState === "visible-payload-committed-detached"
+        ? { partialState: result.partialState } : {}),
+    });
+  }
+
+  function transientCompletedInstallation(slot, current, isCurrent, adopt, observed, captureInstalled) {
+    async function run() {
       const installing = slot.opened;
       slot.opened = null;
       if (!installing || !isCurrent(current)) return FAILURE;
-      return adopt(installing);
+      observed.invoked = true;
+      try {
+        const result = await adopt(installing);
+        observed.settled = true;
+        observed.accepted = result === true || (object(result) && result.ok === true);
+        if (observed.accepted) {
+          observed.owner = captureInstalled(
+            observed.beforeOwner, observed.beforeController, observed.syncedPocketId
+          );
+        } else {
+          observed.failure = ordinaryAdoptionFailure(result);
+        }
+        return result;
+      } catch (_error) {
+        observed.settled = true;
+        observed.failure = FAILURE;
+        return FAILURE;
+      }
     }
     function release() {
       slot.opened = null;
@@ -384,6 +414,33 @@
       return journey === value && !value.closed;
     }
 
+    // A separate read-only observation of the SAME existing owner boundaries.
+    // Used only to distinguish a completed ordinary installation from a failed
+    // optional final witness. Does not create or restore either owner.
+    function currentInstalledOwner(snapshot) {
+      if (!validSession(snapshot) || snapshot.controller !== config.controller) return false;
+      try {
+        return config.boundary.isOwnerSaveSessionCurrent(snapshot) === true
+          && config.controller.isSyncedOwnerSaveSessionCurrent(snapshot.controllerSession) === true
+          && sameOwner(snapshot, config.boundary.captureOwnerSaveSession())
+          && sameController(snapshot.controllerSession,
+            config.controller.captureSyncedOwnerSaveSession());
+      } catch (_error) { return false; }
+    }
+
+    function captureNewInstalledOwner(beforeOwner, beforeController, pocketId) {
+      let installed;
+      try { installed = config.boundary.captureOwnerSaveSession(); }
+      catch (_error) { return null; }
+      if (!currentInstalledOwner(installed)
+          || installed.controllerSession.syncedPocketId !== pocketId
+          || (beforeController !== null
+            && sameController(beforeController, installed.controllerSession))
+          || (beforeOwner !== null
+            && sameLocal(beforeOwner.localSession, installed.localSession))) return null;
+      return installed;
+    }
+
     async function installCompletedOpenedPocket(opened) {
       const current = journey;
       if (!current || current.closed || current.phase !== "authenticated"
@@ -397,11 +454,22 @@
         accountId: current.accountId,
         syncedPocketId: current.discoveredPocketId,
       });
+      let beforeOwner, beforeController;
+      try {
+        beforeOwner = config.boundary.captureOwnerSaveSession();
+        beforeController = config.controller.captureSyncedOwnerSaveSession();
+      } catch (_error) { return FAILURE; }
+      const observed = {
+        invoked: false, settled: false, accepted: false, owner: null, failure: null,
+        beforeOwner, beforeController, syncedPocketId: trusted.syncedPocketId,
+      };
       const pendingInstallation = transientCompletedInstallation(
         { opened },
         current,
         currentCompletedJourney,
-        config.dependencies.adoptOpenedPocket
+        config.dependencies.adoptOpenedPocket,
+        observed,
+        captureNewInstalledOwner
       );
       try {
         const guard = createGuard({
@@ -411,9 +479,19 @@
           performTrustedInstallation: pendingInstallation.run,
         }, trusted);
         const result = await guard.installWithContinuity();
-        if (journey !== current || current.closed || result.ok !== true) return FAILURE;
-        boundGuard = guard;
-        return Object.freeze({ ok: true });
+        if (journey !== current || current.closed) return FAILURE;
+        if (observed.invoked && observed.settled && observed.accepted
+            && observed.owner !== null && currentInstalledOwner(observed.owner)) {
+          // Open was genuinely installed. A failed final optional witness must
+          // not turn that successful ordinary Open into a reported failure.
+          // Only the fully successful guard may retain continuity binding.
+          if (result.ok === true) boundGuard = guard;
+          return Object.freeze({ ok: true });
+        }
+        // Preserve genuine ordinary failure details; no fallback, second
+        // adoption, or claimed success for a merely detached/controller owner.
+        return observed.invoked && observed.settled && !observed.accepted
+          ? observed.failure || FAILURE : FAILURE;
       } finally {
         // Also covers rejection before adoption and failures after adoption.
         // The guard retains run(), whose slot is now empty, not opened.
