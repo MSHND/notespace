@@ -261,6 +261,22 @@
     "controller", "boundary", "remoteContract", "nextOperationId", "now",
   ]);
 
+  // The retained guard callback must see only a one-use slot. The original
+  // completed-Open descriptor (payload + master-key reference) is cleared
+  // synchronously when consumed and again when installation settles.
+  function transientCompletedInstallation(slot, isCurrent, adopt) {
+    function run() {
+      const installing = slot.opened;
+      slot.opened = null;
+      if (!installing || !isCurrent()) return FAILURE;
+      return adopt(installing);
+    }
+    function release() {
+      slot.opened = null;
+    }
+    return Object.freeze({ run, release });
+  }
+
   // Entirely dormant; production browser-runtime Open never constructs this.
   // An authenticated account is captured only from the trusted account-client
   // completion in the SAME openExisting call, not from an input option/draft.
@@ -375,19 +391,27 @@
         accountId: current.accountId,
         syncedPocketId: current.discoveredPocketId,
       });
-      const guard = createGuard({
-        controller: config.controller, boundary: config.boundary,
-        discoveryService: normalDiscovery, remoteContract: config.remoteContract,
-        nextOperationId: config.nextOperationId, now: config.now,
-        performTrustedInstallation: () => {
-          if (journey !== current || current.closed) return FAILURE;
-          return config.dependencies.adoptOpenedPocket(opened);
-        },
-      }, trusted);
-      const result = await guard.installWithContinuity();
-      if (journey !== current || current.closed || result.ok !== true) return FAILURE;
-      boundGuard = guard;
-      return Object.freeze({ ok: true });
+      const pendingInstallation = transientCompletedInstallation(
+        { opened },
+        () => journey === current && !current.closed,
+        config.dependencies.adoptOpenedPocket
+      );
+      try {
+        const guard = createGuard({
+          controller: config.controller, boundary: config.boundary,
+          discoveryService: normalDiscovery, remoteContract: config.remoteContract,
+          nextOperationId: config.nextOperationId, now: config.now,
+          performTrustedInstallation: pendingInstallation.run,
+        }, trusted);
+        const result = await guard.installWithContinuity();
+        if (journey !== current || current.closed || result.ok !== true) return FAILURE;
+        boundGuard = guard;
+        return Object.freeze({ ok: true });
+      } finally {
+        // Also covers rejection before adoption and failures after adoption.
+        // The guard retains run(), whose slot is now empty, not opened.
+        pendingInstallation.release();
+      }
     }
 
     async function openExisting(options = {}) {
