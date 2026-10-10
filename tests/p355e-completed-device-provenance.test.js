@@ -78,11 +78,12 @@ function makeHarness(options = {}) {
   let serverPocket = options.serverPocket || POCKET;
   let serverStatus = options.serverStatus || "ready";
   let authenticatedAccount = options.authenticatedAccount || ACCOUNT;
-  let serverTag = TAG_A, expiry = FUTURE;
+  let serverTag = TAG_A, expiry = FUTURE, nowMs = NOW;
   let serial = 0, attestationCount = 0, authentications = 0;
   let visible = false, adoptionCount = 0, deviceEnrolments = 0;
   let recordReads = 0, recordCreates = 0;
-  let afterRead = null, attestationHook = null, failAuth = false, failAttestationNumber = null;
+  let afterRead = null, attestationHook = null, envelopeHook = null,
+    failAuth = false, failAttestationNumber = null;
   const requests = [];
   const masterKey = Object.freeze({ kind: "nonextractable-synthetic-master-key" });
   const payload = Object.freeze({ schema: "portal.export.v1", notes: ["P355e-only-synthetic"] });
@@ -142,6 +143,7 @@ function makeHarness(options = {}) {
   };
   const envelopeService = {
     async listEnvelopes() {
+      if (envelopeHook) await envelopeHook();
       return { keySetVersion: 1, envelopes: [{
         status: "active", envelopeKind: "device", envelopeId: "envelope-a",
         envelopeVersion: 1, deviceId: "device-a", credentialId: null,
@@ -198,7 +200,7 @@ function makeHarness(options = {}) {
     accountService,
     webAuthn: { async createCredential() { throw new Error("not a registration"); },
       async getCredential() { return fixtures.nativeAuthenticationCredential(); } },
-    now: () => NOW,
+    now: () => nowMs,
   });
   const discoveryService = {
     async readSyncedPocket(request) {
@@ -255,14 +257,14 @@ function makeHarness(options = {}) {
     crypto, deviceStore, accountClient, discoveryService,
     contentService, envelopeService,
     randomBytes(length) { serial++; return Uint8Array.from({ length }, (_, n) => (serial + n) & 255); },
-    now: () => NOW,
+    now: () => nowMs,
   };
   const opener = ctx.PocketSyncOwnerContinuityGuard.createDormantCompletedDeviceOpener({
     additionalDeviceApi: ctx.PocketSyncAdditionalDevice,
     openerConfiguration, dependencies, controller, boundary,
     remoteContract: ctx.PocketSyncRemoteClient,
     nextOperationId() { serial++; return "p355e-attestation-" + serial; },
-    now: () => NOW,
+    now: () => nowMs,
   });
   return {
     browser, ctx, opener, openerConfiguration, controller, boundary,
@@ -275,6 +277,8 @@ function makeHarness(options = {}) {
     onAttestation(hook) { attestationHook = hook; },
     failAttestation(n) { failAttestationNumber = n; },
     onDiscovery(hook) { afterRead = hook; },
+    onEnvelope(hook) { envelopeHook = hook; },
+    setNow(value) { nowMs = value; },
     failAuth(value) { failAuth = value; },
     get requests() { return requests; },
     get authRequests() { return authRequests; },
@@ -758,6 +762,37 @@ test("P355fc account/session and owner races preserve initial provenance and own
   });
   assert.equal((await replacedBoundary.opener.openExisting()).ok, false);
   assert.equal(replacedBoundary.adoptionCount, 0);
+});
+
+test("P355fc witness expiry during completed preparation stops before ordinary adoption", async () => {
+  const h = makeHarness();
+  h.onEnvelope(() => h.setNow(Date.parse("2041-01-01T00:00:00.000Z")));
+  const opened = await h.opener.openExisting();
+  assert.equal(opened.ok, false);
+  assert.equal(h.attestationCount, 1, "final attestation must not be attempted");
+  assert.equal(h.adoptionCount, 0, "expired witness must never authorise adoption");
+  assert.equal((await h.opener.revalidate()).ok, false);
+});
+
+test("P355fc normal non-opted missing-device flow remains the original PRF enrolment route", async () => {
+  const h = makeHarness({ noCompletedRecord: true });
+  const ordinary = h.ctx.PocketSyncAdditionalDevice.createAdditionalDeviceOpener(
+    h.openerConfiguration
+  );
+  const deps = {
+    captureTarget: () => ({ ownerKind: h.browser.local().kind, continuityId: String(h.browser.local().id) }),
+    isTargetCurrent: () => true,
+    validatePayload: () => true,
+    adoptOpenedPocket: async () => ({ ok: true }),
+  };
+  const opened = await ordinary.openExisting(deps);
+  assert.equal(opened.ok, false);
+  assert.equal(opened.reason, "recovery-required");
+  assert.equal(h.recordReads, 1);
+  assert.equal(h.attestationCount, 0);
+  assert.equal(h.requests.length, 1);
+  assert.equal(h.requests[0].ownerContinuity, undefined);
+  assert.equal(h.adoptionCount, 0);
 });
 
 test("P355fc strict isolation does not alter standard non-opted not-configured projection", async () => {
