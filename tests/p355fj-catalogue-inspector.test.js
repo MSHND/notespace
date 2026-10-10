@@ -380,7 +380,7 @@ test("P355fja forged ROLLBACK exception prevents success and emits only rollback
 });
 
 test("P355fja forged close exception prevents success and emits only close-failed", async () => {
-  const probe=instrument();
+  const probe=instrument(function(_sql,next) { return next(); });
   const makeClient=config=>{
     const client=probe.makeClient(config);
     const originalEnd=client.end.bind(client);
