@@ -1,0 +1,33 @@
+name: P355b owner-session synthetic proof
+
+on:
+  push:
+    branches:
+      - candidate/p355b-proof
+
+jobs:
+  owner-session-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax of changed contract and tests
+        run: |
+          node --check sync-service/pocket-sync-service-core.js
+          node --check js/pocket-sync-remote-client.js
+          node --check tests/p034-sync-service-core.test.js
+          node --check tests/p032-sync-remote-client.test.js
+          node --check tests/p046-sync-http-adapter.test.js
+      - name: Direct contracts and session regressions
+        # Pre-existing P034 package-boundary expectation predates added project dependencies.
+        run: |
+          node --test --test-skip-pattern="package and production loader boundaries retain" tests/p034-sync-service-core.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js tests/p045-browser-sync-runtime.test.js tests/p031-sync-account-client.test.js tests/p049-sync-server-runtime.test.js
+      - name: Selected additional-device Open compatibility
+        # Other P052 full-browser tests currently fail on an unrelated missing PocketNodeContent fixture.
+        run: |
+          node --test --test-name-pattern="P052[a-d]|P052i1" tests/p052-additional-device.test.js
+      - name: Repository check
+        run: npm run check
