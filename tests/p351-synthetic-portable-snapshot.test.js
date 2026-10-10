@@ -12,7 +12,7 @@ const ROOT = path.resolve(__dirname, "..");
 const DATE = "2026-10-10T00:00:00.000Z";
 const CODEC = [
   "js/pocket-state.js", "js/pocket-data.js",
-  "js/pocket-outline-persistence-policy.js", "js/pocket-editor-metadata.js",
+  "js/pocket-outline-persistence-policy.js", "js/pocket-node-content.js", "js/pocket-editor-metadata.js",
   "js/pocket-pe-import-preserve.js", "js/pocket-storage.js", "js/pocket-import.js",
 ];
 const STARLING = [
@@ -87,7 +87,7 @@ function representative() {
       {
         id: "child-a", parentId: "anchor", order: 0,
         label: "First child", source: "import", updatedAt: DATE,
-        details: "Child details", status: { kind: "future-test" },
+        details: "Child details", status: { completed: true, completedAt: DATE },
       },
       {
         id: "child-b", parentId: "anchor", order: 1,
