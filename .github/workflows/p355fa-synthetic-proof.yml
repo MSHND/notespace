@@ -1,0 +1,34 @@
+name: P355fa dormant completed Open outcome synthetic proof
+
+on:
+  push:
+    branches:
+      - candidate/p355fa-proof
+
+jobs:
+  p355fa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install checked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: P355fa source and regression syntax
+        run: |
+          node --check js/pocket-sync-owner-continuity-guard.js
+          node --check tests/p355e-completed-device-provenance.test.js
+      - name: P355fa, P355e/P355c and controller, boundary, discovery regressions
+        run: |
+          node --test tests/p355e-completed-device-provenance.test.js tests/p355c-owner-continuity-guard.test.js tests/p042-synced-owner-controller.test.js tests/p043-owner-aware-save-boundary.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js
+      - name: Existing P031 authenticated account-client regressions
+        run: node --test tests/p031-sync-account-client.test.js
+      - name: Bounded P052 existing completed-device, discard and reselection regressions
+        run: |
+          node --test --test-name-pattern="P052d reopens an enrolled Device B without PRF output|P052d refuses a completed Device B whose active server envelope disappeared|P052i1 rejects a bootstrap account mismatch|P341 reselection intent reaches only the first additional-device authentication|P341 reselection keeps same-account continuity|P341 reselected unconfigured account|P104i preserves JSON safety across early|P052c production browser adoption keeps visible truth and authority coherent" tests/p052-additional-device.test.js
+      - name: Neighbouring production composition, owner-aware Save and Open projection regressions
+        run: |
+          node --test tests/p076-production-browser-boundary.test.js tests/p176-production-composition.test.js tests/p331-open-diagnostic-projection.test.js
+      - name: Standard Pocket check
+        run: npm run check
