@@ -292,3 +292,143 @@ test("P355fj CLI failure output is bounded; never echoes a connection string", (
   assert(!p.stderr.includes("synthetic-private"));
   assert(!p.stderr.includes(" at "));
 });
+
+
+// P355fja: hostile dependency exceptions must never establish trusted code provenance.
+const HOSTILE_SECRET="synthetic-private://disposable-only/credential?token=fictional";
+const HOSTILE_TEXT="wrong-database\n"+HOSTILE_SECRET+"\u0001\u0007"+"\u001b[31m"+
+  "HOSTILE".repeat(1800);
+function hostileDependencyError(safeCode="wrong-database") {
+  const error=new Error("synthetic-private dependency message\n"+HOSTILE_SECRET);
+  error.safeCode=safeCode;
+  error.code=HOSTILE_TEXT;
+  error.cause=new Error(HOSTILE_TEXT);
+  error.connectionString=HOSTILE_SECRET;
+  error.details={untrustedSQL:"synthetic-private SELECT secret",payload:HOSTILE_TEXT};
+  return error;
+}
+async function expectCleanFailure(options, code) {
+  let caught;
+  try {
+    await runInspector({environment,...options});
+  } catch(error) {
+    caught=error;
+  }
+  assert(caught, "inspection must reject; it may never report success");
+  assert.equal(caught.message,"P355fj catalogue inspection failed");
+  assert.equal(caught.safeCode,code);
+  const observable=String(caught)+"\n"+JSON.stringify(caught)+
+    "\n"+String(caught.safeCode);
+  assert(!observable.includes(HOSTILE_SECRET));
+  assert(!observable.includes("synthetic-private"));
+  assert(!observable.includes("\u0001"));
+  assert(!observable.includes("\u001b"));
+  assert(observable.length<256);
+  assert.match(String(caught.safeCode),/^[a-z][a-z-]{0,63}$/);
+}
+
+test("P355fja forged legitimate safeCode on connection failure becomes inspection-failed", async () => {
+  const probe=instrument();
+  const makeClient=config=>{
+    const client=probe.makeClient(config);
+    client.connect=async ()=>{
+      probe.tally.connect++;
+      throw hostileDependencyError("wrong-database");
+    };
+    return client;
+  };
+  await expectCleanFailure({makeClient},"inspection-failed");
+  assert.equal(probe.tally.made,1);
+  assert.equal(probe.tally.connect,1);
+  assert.equal(probe.tally.begin,0);
+  assert.equal(probe.tally.rollback,0);
+  assert.equal(probe.tally.end,1);
+});
+
+test("P355fja catalogue dependency safeCode with newline, control chars and excessive length is not trusted", async () => {
+  const probe=instrument(function(sql,next) {
+    if(sql.includes("FROM pg_catalog.pg_stat_activity")) {
+      const err=hostileDependencyError(HOSTILE_TEXT);
+      // The handler must not even read a hostile getter.
+      Object.defineProperty(err,"safeCode",{
+        get(){throw new Error("synthetic-private getter access");},
+        configurable:true,
+      });
+      throw err;
+    }
+    return next();
+  });
+  await expectCleanFailure({makeClient:probe.makeClient},"inspection-failed");
+  assert(probe.tally.calls.some(x=>x.includes("FROM public.pocket_sync_schema")));
+  assert.equal(probe.tally.made,1);
+  assert.equal(probe.tally.connect,1);
+  assert.equal(probe.tally.rollback,1);
+  assert.equal(probe.tally.end,1);
+});
+
+test("P355fja forged ROLLBACK exception prevents success and emits only rollback-failed", async () => {
+  const probe=instrument(function(sql,next) {
+    if(sql==="ROLLBACK") throw hostileDependencyError(HOSTILE_TEXT);
+    return next();
+  });
+  await expectCleanFailure({makeClient:probe.makeClient},"rollback-failed");
+  assert.equal(probe.tally.made,1);
+  assert.equal(probe.tally.connect,1);
+  assert.equal(probe.tally.rollback,1);
+  assert.equal(probe.tally.end,1);
+  assert(probe.tally.calls.some(x=>x.includes("FROM pg_catalog.pg_stat_activity")));
+});
+
+test("P355fja forged close exception prevents success and emits only close-failed", async () => {
+  const probe=instrument();
+  const makeClient=config=>{
+    const client=probe.makeClient(config);
+    const originalEnd=client.end.bind(client);
+    client.end=async ()=>{
+      await originalEnd();
+      throw hostileDependencyError("wrong-database");
+    };
+    return client;
+  };
+  await expectCleanFailure({makeClient},"close-failed");
+  assert.equal(probe.tally.made,1);
+  assert.equal(probe.tally.connect,1);
+  assert.equal(probe.tally.rollback,1);
+  assert.equal(probe.tally.end,1);
+  assert(probe.tally.calls.some(x=>x.includes("FROM pg_catalog.pg_stat_activity")));
+});
+
+test("P355fja real CLI entrypoint emits one fixed line under forged dependency exception", () => {
+  const os=require("node:os");
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),"p355fja-disposable-"));
+  const preload=path.join(directory,"preload-synthetic.js");
+  try {
+    // Test-only preload file exists only inside the disposable CI runner.
+    // It replaces the pg connect method before the unmodified CLI main executes.
+    fs.writeFileSync(preload,
+      "const {Client}=require("+JSON.stringify(require.resolve("pg"))+");\n"+
+      "Client.prototype.connect=async function(){\n"+
+      "  const e=new Error("+JSON.stringify(HOSTILE_TEXT)+");\n"+
+      "  e.safeCode="+JSON.stringify(HOSTILE_TEXT)+";\n"+
+      "  e.connectionString="+JSON.stringify(HOSTILE_SECRET)+";\n"+
+      "  e.cause=new Error("+JSON.stringify(HOSTILE_TEXT)+";\n"+
+      "  throw e;\n"+
+      "};\n");
+    const p=spawnSync(process.execPath,[
+      "--require",preload,"tools/p355fj-catalogue-inspector.js"
+    ],{
+      cwd:ROOT,encoding:"utf8",
+      env:{...process.env,POCKET_SYNC_DATABASE_URL:URL},
+      timeout:15000,
+    });
+    assert.equal(p.error,undefined);
+    assert.equal(p.status,1);
+    assert.equal(p.stdout,"");
+    assert.equal(p.stderr,"P355fj inspector FAILED [inspection-failed]\n");
+    assert(!p.stderr.includes(HOSTILE_SECRET));
+    assert(!p.stderr.includes("\u001b"));
+    assert.equal(p.stderr.split("\n").length,2);
+  } finally {
+    fs.rmSync(directory,{recursive:true,force:true});
+  }
+});
