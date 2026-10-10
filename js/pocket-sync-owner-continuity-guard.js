@@ -264,11 +264,11 @@
   // The retained guard callback must see only a one-use slot. The original
   // completed-Open descriptor (payload + master-key reference) is cleared
   // synchronously when consumed and again when installation settles.
-  function transientCompletedInstallation(slot, isCurrent, adopt) {
+  function transientCompletedInstallation(slot, current, isCurrent, adopt) {
     function run() {
       const installing = slot.opened;
       slot.opened = null;
-      if (!installing || !isCurrent()) return FAILURE;
+      if (!installing || !isCurrent(current)) return FAILURE;
       return adopt(installing);
     }
     function release() {
@@ -378,6 +378,12 @@
       Object.assign({}, config.openerConfiguration, { accountClient, discoveryService })
     );
 
+    // Defined outside the opened-argument frame: the retained installer cannot
+    // reach the completed-Open descriptor through this currentness callback.
+    function currentCompletedJourney(value) {
+      return journey === value && !value.closed;
+    }
+
     async function installCompletedOpenedPocket(opened) {
       const current = journey;
       if (!current || current.closed || current.phase !== "authenticated"
@@ -393,7 +399,8 @@
       });
       const pendingInstallation = transientCompletedInstallation(
         { opened },
-        () => journey === current && !current.closed,
+        current,
+        currentCompletedJourney,
         config.dependencies.adoptOpenedPocket
       );
       try {

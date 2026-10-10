@@ -226,6 +226,7 @@ function makeHarness(options = {}) {
     async adoptOpenedPocket(opened) {
       adoptionCount++;
       if (options.detachedVisible) visible = true;
+      if (options.throwAdoption) throw new Error("synthetic adoption interruption");
       if (options.failAdoption) return { ok: false };
       const adopted = await controller.adoptSyncedOwner({
         syncedPocketId: opened.syncedPocketId, masterKey: opened.masterKey,
@@ -302,7 +303,12 @@ test("P355ea releases the one-use completed-Open slot while keeping real owner a
   assert.match(callback, /const installing = slot\.opened;\s*slot\.opened = null;/);
   assert.match(callback, /function release\(\)\s*\{\s*slot\.opened = null;/);
   assert.match(callback, /return adopt\(installing\);/);
+  assert.match(callback, /!isCurrent\(current\)/);
   assert.doesNotMatch(callback, /adopt\(opened\)|masterKey|\.payload/);
+  const journeyChecker = code.indexOf("    function currentCompletedJourney(value)");
+  const openArgumentFrame = code.indexOf("    async function installCompletedOpenedPocket(opened)");
+  assert.ok(journeyChecker >= 0 && journeyChecker < openArgumentFrame);
+  assert.match(code, /\{ opened \},\s*current,\s*currentCompletedJourney,/);
   assert.match(code, /performTrustedInstallation: pendingInstallation\.run,/);
   assert.match(code, /finally\s*\{[^}]*pendingInstallation\.release\(\);/);
   assert.doesNotMatch(code, /performTrustedInstallation:\s*\(\)\s*=>\s*\{[^}]*adoptOpenedPocket\(opened\)/);
@@ -327,6 +333,11 @@ test("P355ea early rejection, partial installation and final-attestation rejecti
   assert.equal((await early.opener.openExisting()).ok, false);
   assert.equal(early.adoptionCount, 0);
   assert.equal((await early.opener.revalidate()).ok, false);
+
+  const interrupted = makeHarness({ throwAdoption: true });
+  assert.equal((await interrupted.opener.openExisting()).ok, false);
+  assert.equal(interrupted.adoptionCount, 1);
+  assert.equal((await interrupted.opener.revalidate()).ok, false);
 
   const partial = makeHarness({ onlyController: true });
   assert.equal((await partial.opener.openExisting()).ok, false);
