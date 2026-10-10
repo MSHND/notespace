@@ -55,7 +55,10 @@
       && sameLocal(left.localSession, right.localSession);
   }
 
-  function createDormantGuard(configuration) {
+  // Private identity comes only from the real account-client result captured by
+  // createDormantCompletedDeviceOpener. The original synthetic factory has no
+  // ceremony provenance and MUST NOT bind an owner by itself.
+  function createGuard(configuration, trustedJourney) {
     if (!object(configuration) || Object.keys(configuration).length !== CONFIG_KEYS.length
         || CONFIG_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(configuration, key))) {
       throw new Error("owner-continuity-configuration-invalid");
@@ -172,10 +175,17 @@
         const beforeController = readController();
         if (before !== null && !object(before)) return FAILURE;
         if (beforeController !== null && !object(beforeController)) return FAILURE;
-        if (!initialCurrent(before, beforeController)) return FAILURE;
+        if (!initialCurrent(before, beforeController)
+            || !trustedJourney
+            || typeof trustedJourney.accountId !== "string"
+            || !/^[A-Za-z0-9_-]{1,160}$/.test(trustedJourney.accountId)
+            || typeof trustedJourney.syncedPocketId !== "string"
+            || trustedJourney.syncedPocketId.length < 1) return FAILURE;
 
         const initialEvidence = await serverEvidence();
-        if (!initialEvidence || !initialCurrent(before, beforeController)
+        if (!initialEvidence || initialEvidence.accountId !== trustedJourney.accountId
+            || initialEvidence.syncedPocketId !== trustedJourney.syncedPocketId
+            || !initialCurrent(before, beforeController)
             || attempt !== lifetime) return FAILURE;
 
         // The injected callback must be a trusted composition's actual adoption
@@ -192,12 +202,15 @@
               && sameController(beforeController, after.controllerSession))
             || (before !== null
               && sameLocal(before.localSession, after.localSession))
+            || after.controllerSession.syncedPocketId !== trustedJourney.syncedPocketId
             || after.controllerSession.syncedPocketId !== initialEvidence.syncedPocketId
             || attempt !== lifetime) return FAILURE;
 
         // A second fresh, server-authorised read excludes session swaps during adoption.
         const verified = await serverEvidence();
         if (!ownerCurrent(after) || !sameEvidence(initialEvidence, verified)
+            || verified?.accountId !== trustedJourney.accountId
+            || verified?.syncedPocketId !== trustedJourney.syncedPocketId
             || attempt !== lifetime) return FAILURE;
 
         bound = Object.freeze({ owner: after, evidence: initialEvidence });
@@ -237,6 +250,185 @@
     return Object.freeze({ installWithContinuity, revalidate });
   }
 
-  // Dormant: this factory is intentionally NOT loaded or called by production.
-  global.PocketSyncOwnerContinuityGuard = Object.freeze({ createDormantGuard });
+  // Synthetic P355c factory retains its shape but can no longer mint unproven
+  // authority: no account ceremony is available to this API.
+  function createDormantGuard(configuration) {
+    return createGuard(configuration, null);
+  }
+
+  const COMPLETED_FACTORY = Object.freeze([
+    "additionalDeviceApi", "openerConfiguration", "dependencies",
+    "controller", "boundary", "remoteContract", "nextOperationId", "now",
+  ]);
+
+  // Entirely dormant; production browser-runtime Open never constructs this.
+  // An authenticated account is captured only from the trusted account-client
+  // completion in the SAME openExisting call, not from an input option/draft.
+  function createDormantCompletedDeviceOpener(configuration) {
+    if (!object(configuration) || Object.keys(configuration).length !== COMPLETED_FACTORY.length
+        || COMPLETED_FACTORY.some((key) => !Object.prototype.hasOwnProperty.call(configuration, key))) {
+      throw new Error("completed-device-continuity-configuration-invalid");
+    }
+    const config = configuration;
+    if (!object(config.additionalDeviceApi)
+        || typeof config.additionalDeviceApi.createAdditionalDeviceOpener !== "function"
+        || !object(config.openerConfiguration)
+        || !object(config.openerConfiguration.accountClient)
+        || typeof config.openerConfiguration.accountClient.authenticatePasskey !== "function"
+        || !object(config.openerConfiguration.discoveryService)
+        || typeof config.openerConfiguration.discoveryService.readSyncedPocket !== "function"
+        || !object(config.dependencies)
+        || Object.keys(config.dependencies).length !== 4
+        || ["captureTarget", "isTargetCurrent", "validatePayload", "adoptOpenedPocket"]
+          .some((name) => typeof config.dependencies[name] !== "function")) {
+      throw new Error("completed-device-continuity-configuration-invalid");
+    }
+
+    let journey = null;
+    let boundGuard = null;
+    const expectedAccountClient = config.openerConfiguration.accountClient;
+    const normalDiscovery = config.openerConfiguration.discoveryService;
+
+    const accountClient = Object.freeze({
+      async authenticatePasskey(request) {
+        const current = journey;
+        if (!current || current.closed || current.phase === "invalid"
+            || current.phase === "authenticated") {
+          throw new Error("completed-device-journey-invalid");
+        }
+        let authenticated;
+        try {
+          // The real client validates the WebAuthn/server finish before returning.
+          // Do not use its private onAuthenticated consumer here: that consumes
+          // PRF bytes needed by the distinct new-device path.
+          authenticated = await expectedAccountClient.authenticatePasskey(request);
+        } catch (error) {
+          current.phase = "invalid";
+          throw error;
+        }
+        if (journey !== current || current.closed
+            || !object(authenticated) || authenticated.ok !== true
+            || authenticated.accountAuthenticated !== true
+            || authenticated.contentUnlocked !== false
+            || typeof authenticated.accountId !== "string"
+            || !/^[A-Za-z0-9_-]{1,160}$/.test(authenticated.accountId)
+            || typeof authenticated.credentialId !== "string"
+            || authenticated.credentialId.length < 1
+            || typeof authenticated.bootstrap !== "boolean") {
+          current.phase = "invalid";
+          throw new Error("completed-device-authentication-invalid");
+        }
+        if (authenticated.bootstrap === true) {
+          if (current.phase !== "fresh") {
+            current.phase = "invalid";
+            throw new Error("completed-device-bootstrap-invalid");
+          }
+          current.phase = "bootstrap";
+          current.bootstrapAccountId = authenticated.accountId;
+        } else {
+          if (current.phase === "bootstrap"
+              && current.bootstrapAccountId !== authenticated.accountId) {
+            current.phase = "invalid";
+            throw new Error("completed-device-account-mismatch");
+          }
+          current.accountId = authenticated.accountId;
+          current.phase = "authenticated";
+        }
+        return authenticated;
+      },
+    });
+
+    const discoveryService = Object.freeze({
+      async readSyncedPocket(request) {
+        const current = journey;
+        if (!current || current.closed || current.phase !== "authenticated"
+            || request?.ownerContinuity !== undefined || current.discoveredPocketId !== null) {
+          throw new Error("completed-device-discovery-invalid");
+        }
+        const result = await normalDiscovery.readSyncedPocket(request);
+        if (journey !== current || current.closed || current.phase !== "authenticated") {
+          throw new Error("completed-device-journey-stale");
+        }
+        if (result?.ok === true && result.status === "ready"
+            && typeof result.syncedPocketId === "string"
+            && result.syncedPocketId.length > 0) {
+          current.discoveredPocketId = result.syncedPocketId;
+        }
+        return result;
+      },
+    });
+
+    const opener = config.additionalDeviceApi.createAdditionalDeviceOpener(
+      Object.assign({}, config.openerConfiguration, { accountClient, discoveryService })
+    );
+
+    async function installCompletedOpenedPocket(opened) {
+      const current = journey;
+      if (!current || current.closed || current.phase !== "authenticated"
+          || typeof opened?.syncedPocketId !== "string"
+          || opened.syncedPocketId !== current.discoveredPocketId
+          || current.installAttempted) {
+        return FAILURE;
+      }
+      current.installAttempted = true;
+      const trusted = Object.freeze({
+        accountId: current.accountId,
+        syncedPocketId: current.discoveredPocketId,
+      });
+      const guard = createGuard({
+        controller: config.controller, boundary: config.boundary,
+        discoveryService: normalDiscovery, remoteContract: config.remoteContract,
+        nextOperationId: config.nextOperationId, now: config.now,
+        performTrustedInstallation: () => {
+          if (journey !== current || current.closed) return FAILURE;
+          return config.dependencies.adoptOpenedPocket(opened);
+        },
+      }, trusted);
+      const result = await guard.installWithContinuity();
+      if (journey !== current || current.closed || result.ok !== true) return FAILURE;
+      boundGuard = guard;
+      return Object.freeze({ ok: true });
+    }
+
+    async function openExisting(options = {}) {
+      if (journey !== null) {
+        return Object.freeze({ ok: false, reason: "additional-device-open-failed", adopted: false });
+      }
+      boundGuard = null;
+      const current = {
+        phase: "fresh", bootstrapAccountId: null,
+        accountId: null, discoveredPocketId: null,
+        closed: false, installAttempted: false,
+      };
+      journey = current;
+      try {
+        // The optional adopter is reached ONLY from openCompletedDevice().
+        // The new-device path still uses the original adopter, without binding.
+        return await opener.openExisting({
+          captureTarget: config.dependencies.captureTarget,
+          isTargetCurrent: config.dependencies.isTargetCurrent,
+          validatePayload: config.dependencies.validatePayload,
+          adoptOpenedPocket: config.dependencies.adoptOpenedPocket,
+          adoptCompletedOpenedPocket: installCompletedOpenedPocket,
+        }, options);
+      } finally {
+        current.closed = true;
+        current.accountId = null;
+        current.bootstrapAccountId = null;
+        current.discoveredPocketId = null;
+        journey = null;
+      }
+    }
+
+    async function revalidate() {
+      return boundGuard ? boundGuard.revalidate() : FAILURE;
+    }
+
+    return Object.freeze({ openExisting, revalidate });
+  }
+
+  // Both factories remain unused by all production boot paths.
+  global.PocketSyncOwnerContinuityGuard = Object.freeze({
+    createDormantGuard, createDormantCompletedDeviceOpener,
+  });
 })(typeof window !== "undefined" ? window : globalThis);

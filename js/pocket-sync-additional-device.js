@@ -6,6 +6,8 @@
   const FACTORY = ["crypto", "deviceStore", "accountClient", "discoveryService", "contentService", "envelopeService", "randomBytes", "now"];
   const AUTHORITY_FACTORY = ["persistenceAuthorityService", "objectHeadService"];
   const DEPENDENCIES = ["captureTarget", "isTargetCurrent", "validatePayload", "adoptOpenedPocket"];
+  // Dormant P355e-only; never passed by the ordinary browser Open composition.
+  const COMPLETED_CONTINUITY_DEPENDENCY = "adoptCompletedOpenedPocket";
   const ACTIVATION_DRAFT_FIELDS = Object.freeze([
     "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
     "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
@@ -123,8 +125,10 @@
   }
 
   function validDependencies(value) {
-    if (!object(value) || Object.keys(value).length !== DEPENDENCIES.length
-        || DEPENDENCIES.some((key) => typeof value[key] !== "function")) return null;
+    if (!object(value) || Object.keys(value).some((key) => ![...DEPENDENCIES, COMPLETED_CONTINUITY_DEPENDENCY].includes(key))
+        || DEPENDENCIES.some((key) => typeof value[key] !== "function")
+        || (Object.prototype.hasOwnProperty.call(value, COMPLETED_CONTINUITY_DEPENDENCY)
+          && typeof value[COMPLETED_CONTINUITY_DEPENDENCY] !== "function")) return null;
     return value;
   }
 
@@ -444,7 +448,8 @@
       record = await config.deviceStore.replacePocket(syncedPocketId, current.storeRevision, refreshed);
     }
     if (dependencies.isTargetCurrent() !== true) return fail("additional-device-target-stale");
-    const adopted = await dependencies.adoptOpenedPocket({ syncedPocketId, masterKey, payload: latest.payload,
+    const completedAdopter = dependencies.adoptCompletedOpenedPocket || dependencies.adoptOpenedPocket;
+    const adopted = await completedAdopter({ syncedPocketId, masterKey, payload: latest.payload,
       confirmedRemoteRevision: latest.revision, target: captured });
     if (adopted === true || adopted?.ok === true) {
       return freeze({ ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: latest.revision });

@@ -91,9 +91,13 @@ function makeHarness(options = {}) {
   const service = {
     async readSyncedPocket(request) {
       reads++;
-      assert.deepEqual(plain(request), {
-        apiVersion: 1, operationId: request.operationId, ownerContinuity: SCHEMA,
-      });
+      if (request.ownerContinuity !== undefined) {
+        assert.deepEqual(plain(request), {
+          apiVersion: 1, operationId: request.operationId, ownerContinuity: SCHEMA,
+        });
+      } else {
+        assert.equal(Object.hasOwn(request, "ownerContinuity"), false);
+      }
       assert.match(request.operationId, /^p355c-op-[0-9]+$/);
       if (rejectRead) throw new Error(SENSITIVE);
       if (delay) {
@@ -105,7 +109,7 @@ function makeHarness(options = {}) {
         apiVersion: 1, ok: true, operationId: request.operationId,
         status: server.status,
         syncedPocketId: server.status === "ready" ? server.syncedPocketId : null,
-        ...(server.status === "ready" ? {
+        ...(request.ownerContinuity === SCHEMA && server.status === "ready" ? {
           ownerContinuity: {
             schema: SCHEMA, accountId: server.accountId,
             sessionTag: server.sessionTag, expiresAt: server.expiresAt,
@@ -114,18 +118,49 @@ function makeHarness(options = {}) {
       };
     },
   };
-  const guard = context.PocketSyncOwnerContinuityGuard.createDormantGuard({
-    controller, boundary, discoveryService: service, remoteContract,
-    nextOperationId() { serial++; return "p355c-op-" + serial; },
-    async performTrustedInstallation() {
-      installCalls++;
-      if (installMode === "fail") return false;
-      controller.install(server.syncedPocketId);
-      if (installMode === "partial") return true;
-      return boundary.installSyncedOwnerForSave(controller);
+  const installed = async () => {
+    installCalls++;
+    if (installMode === "fail") return false;
+    controller.install(server.syncedPocketId);
+    if (installMode === "partial") return true;
+    return boundary.installSyncedOwnerForSave(controller);
+  };
+  // Synthetic trusted ceremony fixture for the P355c race contract; P355e
+  // exercises the actual additional-device opener separately.
+  const composition = context.PocketSyncOwnerContinuityGuard.createDormantCompletedDeviceOpener({
+    additionalDeviceApi: {
+      createAdditionalDeviceOpener(config) {
+        return { async openExisting(deps) {
+          await config.accountClient.authenticatePasskey({ apiVersion: 1, operationId: "p355c-auth" });
+          const found = await config.discoveryService.readSyncedPocket({
+            apiVersion: 1, operationId: "p355c-op-0",
+          });
+          if (found.status !== "ready") return { ok: false };
+          return deps.adoptCompletedOpenedPocket({ syncedPocketId: found.syncedPocketId });
+        } };
+      },
     },
+    openerConfiguration: {
+      accountClient: { async authenticatePasskey() {
+        return { ok: true, accountAuthenticated: true, contentUnlocked: false,
+          accountId: "account-a", credentialId: "credential-a", bootstrap: false };
+      } },
+      discoveryService: service,
+    },
+    dependencies: {
+      captureTarget: () => ({ ownerKind: "json", continuityId: "synthetic" }),
+      isTargetCurrent: () => true,
+      validatePayload: () => true,
+      adoptOpenedPocket: installed,
+    },
+    controller, boundary, remoteContract,
+    nextOperationId() { serial++; return "p355c-op-" + serial; },
     now() { return nowValue; },
   });
+  const guard = {
+    installWithContinuity: () => composition.openExisting(),
+    revalidate: () => composition.revalidate(),
+  };
   return {
     guard, controller, boundary, context,
     state(value) { server = { ...server, ...value }; },
@@ -157,9 +192,10 @@ test("P355c is dormant, exports only a constructor and no arbitrary witness sett
   assert.doesNotMatch(read("sw.js"), /pocket-sync-owner-continuity-guard\.js/);
   const source = read(GUARD);
   assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|document\.cookie|console\./);
-  assert.doesNotMatch(source, /exportTree|download|saveAs|passkey|credentialId|rawSessionId/);
+  assert.doesNotMatch(source, /exportTree|download|saveAs|rawSessionId|document\.cookie/);
   const h = makeHarness();
-  assert.deepEqual(Object.keys(h.context.PocketSyncOwnerContinuityGuard), ["createDormantGuard"]);
+  assert.deepEqual(Object.keys(h.context.PocketSyncOwnerContinuityGuard),
+    ["createDormantGuard", "createDormantCompletedDeviceOpener"]);
   assert.deepEqual(Object.keys(h.guard), ["installWithContinuity", "revalidate"]);
   assert.equal(Object.isFrozen(h.guard), true);
   assert.equal(Object.hasOwn(h.guard, "bind"), false);
@@ -171,14 +207,13 @@ test("P355c binds only across a new two-owner installation and revalidates the s
   assert.deepEqual(plain(await h.guard.revalidate()),
     { ok: false, reason: "owner-continuity-unavailable" });
   assert.equal(h.readCount, 0);
-  assert.deepEqual(plain(await h.guard.installWithContinuity()),
-    { ok: true, reason: "owner-continuity-bound" });
-  assert.equal(h.readCount, 2);
+  assert.deepEqual(plain(await h.guard.installWithContinuity()), { ok: true });
+  assert.equal(h.readCount, 3);
   assert.equal(h.installCalls, 1);
   assert.equal(h.boundary.hasSyncedOwner(), true);
   assert.deepEqual(plain(await h.guard.revalidate()),
     { ok: true, reason: "owner-continuity-current" });
-  assert.equal(h.readCount, 3);
+  assert.equal(h.readCount, 4);
   assert.equal(JSON.stringify(h.guard).includes(TAG_A), false);
   assert.equal(JSON.stringify(h.guard).includes(SENSITIVE), false);
   assert.equal(Object.hasOwn(h.guard, "ownerContinuity"), false);
