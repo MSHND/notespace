@@ -1,0 +1,19 @@
+name: P351 synthetic portable snapshot targeted proof
+on:
+  push:
+    branches: [candidate/p351-proof]
+  workflow_dispatch:
+jobs:
+  p351-targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --ignore-scripts
+      - name: P351 targeted and historical guards
+        run: node --test tests/p351-synthetic-portable-snapshot.test.js tests/p106-starling-shadow-roundtrip.test.js tests/p146-starling-accepted-document-materialize.test.js tests/p164-starling-successor-mirror.test.js tests/p172-real-p168-composition.test.js
