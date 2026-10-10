@@ -1994,8 +1994,9 @@ test("P355b replacement, concurrent devices, revoked/expired sessions and Pocket
     deviceId: "p355b-other-device",
   });
   assert.equal((await read("p355b-other-unbound", another.sessionId)).body.status, "not-configured");
-  await assert.rejects(harness.core.readRevision(call({
-    apiVersion: 1, operationId: "p355b-cross-account", syncedPocketId: "pocket-opaque",
+  await assert.rejects(harness.core.downloadEncryptedRecord(call({
+    apiVersion: 1, operationId: "p355b-cross-account",
+    syncedPocketId: "pocket-opaque", revision: 1,
   }, another.sessionId)), errorCode("service-authorisation-failed"));
 
   harness.setTime(Date.parse(rotated.finish.session.expiresAt));
