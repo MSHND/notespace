@@ -21,7 +21,7 @@ jobs:
           node --check tests/p355e-completed-device-provenance.test.js
       - name: P355fa, P355e/P355c and controller, boundary, discovery regressions
         run: |
-          node --test tests/p355e-completed-device-provenance.test.js tests/p355c-owner-continuity-guard.test.js tests/p042-synced-owner-controller.test.js tests/p043-owner-aware-save-boundary.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js
+          node --test --test-concurrency=1 tests/p355e-completed-device-provenance.test.js tests/p355c-owner-continuity-guard.test.js tests/p042-synced-owner-controller.test.js tests/p043-owner-aware-save-boundary.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js
       - name: Existing P031 authenticated account-client regressions
         run: node --test tests/p031-sync-account-client.test.js
       - name: Bounded P052 existing completed-device, discard and reselection regressions
