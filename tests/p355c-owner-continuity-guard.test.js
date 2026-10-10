@@ -208,12 +208,12 @@ test("P355c binds only across a new two-owner installation and revalidates the s
     { ok: false, reason: "owner-continuity-unavailable" });
   assert.equal(h.readCount, 0);
   assert.deepEqual(plain(await h.guard.installWithContinuity()), { ok: true });
-  assert.equal(h.readCount, 3);
+  assert.equal(h.readCount, 2); // Unified first witness + fresh final witness.
   assert.equal(h.installCalls, 1);
   assert.equal(h.boundary.hasSyncedOwner(), true);
   assert.deepEqual(plain(await h.guard.revalidate()),
     { ok: true, reason: "owner-continuity-current" });
-  assert.equal(h.readCount, 4);
+  assert.equal(h.readCount, 3); // Revalidate still performs a fresh witnessed read.
   assert.equal(JSON.stringify(h.guard).includes(TAG_A), false);
   assert.equal(JSON.stringify(h.guard).includes(SENSITIVE), false);
   assert.equal(Object.hasOwn(h.guard, "ownerContinuity"), false);
