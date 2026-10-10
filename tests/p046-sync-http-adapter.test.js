@@ -433,3 +433,71 @@ test("P046 errors never echo readable or session-like sentinels", async () => {
     assert.equal([...response.headers.values()].join(" ").includes(value), false);
   });
 });
+
+
+test("P355b real HTTP bridge keeps ordinary discovery intact and attests only the cookie-authorised session", async () => {
+  const { adapter } = createCoreHarness();
+  const { api } = loadBrowserClient();
+  const bridge = browserFetchBridge(adapter);
+  const transport = api.createBrowserJsonTransport({ serviceRoot: SERVICE_ROOT, fetch: bridge.fetch });
+  const begin = await transport.request("beginRegistration", {
+    apiVersion: 1, operationId: "p355b-http-register",
+    accountIntent: "create-or-add-credential", deviceId: "device-http",
+  });
+  const finish = await transport.request("finishRegistration", {
+    apiVersion: 1, operationId: "p355b-http-register", ceremonyId: begin.body.ceremonyId,
+    deviceId: "device-http", credential: registrationCredential(),
+  });
+  const cookie = bridge.sessionCookie;
+  const sessionId = cookie.split("=")[1];
+  const discovery = api.createPocketDiscoveryService({ transport });
+  const optedUnbound = await discovery.readSyncedPocket({
+    apiVersion: 1, operationId: "p355b-http-unbound",
+    ownerContinuity: "pocket.sync.owner-session.v1",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(optedUnbound)), {
+    apiVersion: 1, ok: true, operationId: "p355b-http-unbound",
+    status: "not-configured", syncedPocketId: null,
+  });
+  await transport.request("conditionalUpload", {
+    apiVersion: 1, syncedPocketId: "pocket-opaque", expectedRevision: 0,
+    operationId: "p355b-http-upload", logicalChangeId: "p355b-http-change",
+    attemptKind: "new-change", encryptedRecord: encryptedRecord(),
+  });
+  const ordinary = await discovery.readSyncedPocket({
+    apiVersion: 1, operationId: "p355b-http-ordinary",
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(ordinary)), {
+    apiVersion: 1, ok: true, operationId: "p355b-http-ordinary",
+    status: "ready", syncedPocketId: "pocket-opaque",
+  });
+  const attested = await discovery.readSyncedPocket({
+    apiVersion: 1, operationId: "p355b-http-opt",
+    ownerContinuity: "pocket.sync.owner-session.v1",
+  });
+  assert.equal(attested.ownerContinuity.accountId, finish.body.accountId);
+  assert.match(attested.ownerContinuity.sessionTag, /^[a-f0-9]{64}$/);
+  assert.match(attested.ownerContinuity.expiresAt, /^\d{4}-\d\d-\d\dT/);
+  for (const secret of [sessionId, finish.body.credentialId, "Set-Cookie"]) {
+    assert.equal(JSON.stringify(attested).includes(secret), false);
+  }
+  assert.equal(bridge.sessionCookie, cookie);
+  assert.equal(bridge.seenClientOptions.at(-1).credentials, "same-origin");
+  assert.equal(bridge.seenClientOptions.at(-1).cache, "no-store");
+  assert.equal(Object.hasOwn(bridge.seenClientOptions.at(-1).headers, "Cookie"), false);
+  const before = attested.ownerContinuity.sessionTag;
+  const auth = await transport.request("beginAuthentication", {
+    apiVersion: 1, operationId: "p355b-http-auth",
+  });
+  await transport.request("finishAuthentication", {
+    apiVersion: 1, operationId: "p355b-http-auth",
+    ceremonyId: auth.body.ceremonyId, credential: authenticationCredential(),
+  });
+  assert.notEqual(bridge.sessionCookie, cookie);
+  const later = await discovery.readSyncedPocket({
+    apiVersion: 1, operationId: "p355b-http-after",
+    ownerContinuity: "pocket.sync.owner-session.v1",
+  });
+  assert.notEqual(later.ownerContinuity.sessionTag, before);
+  assert.equal(later.ownerContinuity.accountId, attested.ownerContinuity.accountId);
+});

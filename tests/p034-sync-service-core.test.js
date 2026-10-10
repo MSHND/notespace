@@ -1895,3 +1895,110 @@ test("P341 cancelled failed and expired reselection leave the exact prior sessio
     assert.equal(snapshot.sessions[accountA.sessionId].replacedBy, null);
   }
 });
+
+
+test("P355b discovery attestations bind only the server-authorised ready owner session", async () => {
+  const harness = createHarness();
+  const registered = await register(harness, { operationId: "p355b-register" });
+  const request = (operationId, witness = false) => ({
+    apiVersion: 1, operationId,
+    ...(witness ? { ownerContinuity: "pocket.sync.owner-session.v1" } : {}),
+  });
+  const ordinaryUnbound = await harness.core.readSyncedPocket(call(request("p355b-unbound"), registered.sessionId));
+  const attestedUnbound = await harness.core.readSyncedPocket(call(request("p355b-unbound-opt", true), registered.sessionId));
+  assert.deepEqual(plain(ordinaryUnbound.body), {
+    apiVersion: 1, ok: true, operationId: "p355b-unbound",
+    status: "not-configured", syncedPocketId: null,
+  });
+  assert.deepEqual(plain(attestedUnbound.body), {
+    apiVersion: 1, ok: true, operationId: "p355b-unbound-opt",
+    status: "not-configured", syncedPocketId: null,
+  });
+
+  await harness.core.conditionalUpload(call(uploadBody("p355b-upload"), registered.sessionId));
+  const before = harness.driver.snapshot();
+  const plainRead = await harness.core.readSyncedPocket(call(request("p355b-default"), registered.sessionId));
+  assert.deepEqual(plain(plainRead.body), {
+    apiVersion: 1, ok: true, operationId: "p355b-default",
+    status: "ready", syncedPocketId: "pocket-opaque",
+  });
+  const opted = await harness.core.readSyncedPocket(call(request("p355b-opt", true), registered.sessionId));
+  const witness = opted.body.ownerContinuity;
+  const schema = "pocket.sync.owner-session.v1";
+  const expectedDigest = require("node:crypto").createHash("sha256")
+    .update(JSON.stringify([schema, registered.sessionId]), "utf8").digest("hex");
+  assert.deepEqual(plain(witness), {
+    schema, accountId: registered.accountId, sessionTag: expectedDigest,
+    expiresAt: registered.finish.session.expiresAt,
+  });
+  assert.match(witness.sessionTag, /^[0-9a-f]{64}$/);
+  assert.equal(Object.isFrozen(witness), true);
+  assert.deepEqual(plain((await harness.core.readSyncedPocket(
+    call(request("p355b-repeat", true), registered.sessionId)
+  )).body.ownerContinuity), plain(witness));
+  for (const secret of [registered.sessionId, registered.credentialId, "__Host-pocket-sync-session"]) {
+    assert.equal(JSON.stringify(opted.body).includes(secret), false);
+  }
+  assert.deepEqual(harness.driver.snapshot(), before);
+
+  for (const extra of [
+    { accountId: registered.accountId }, { sessionId: registered.sessionId },
+    { sessionTag: witness.sessionTag }, { ownerContinuity: null },
+    { ownerContinuity: "unrecognised-mode" },
+    { ownerContinuity: schema, epoch: "claimed" },
+  ]) {
+    await assert.rejects(harness.core.readSyncedPocket(call({
+      ...request("p355b-invalid"), ...extra,
+    }, registered.sessionId)), errorCode("service-request-invalid"));
+  }
+  for (const sessionId of [null, "unknown-session"]) {
+    await assert.rejects(harness.core.readSyncedPocket(call(request("p355b-no-session", true),
+      sessionId)), errorCode(sessionId === null
+        ? "service-authentication-required" : "service-session-invalid"));
+  }
+});
+
+test("P355b replacement, concurrent devices, revoked/expired sessions and Pocket authority", async () => {
+  const harness = createHarness();
+  const registered = await register(harness, { operationId: "p355b-registered" });
+  await harness.core.conditionalUpload(call(uploadBody("p355b-upload-two"), registered.sessionId));
+  const schema = "pocket.sync.owner-session.v1";
+  const read = (id, sessionId) => harness.core.readSyncedPocket(call({
+    apiVersion: 1, operationId: id, ownerContinuity: schema,
+  }, sessionId));
+  const original = (await read("p355b-original", registered.sessionId)).body.ownerContinuity;
+  // A separate legitimate account-bound session does not revoke this device.
+  const concurrent = await authenticate(harness, registered, {
+    operationId: "p355b-concurrent", sessionId: null,
+  });
+  const alongside = (await read("p355b-alongside", concurrent.sessionId)).body.ownerContinuity;
+  assert.equal(alongside.accountId, original.accountId);
+  assert.notEqual(alongside.sessionTag, original.sessionTag);
+  assert.equal((await read("p355b-still-current", registered.sessionId))
+    .body.ownerContinuity.sessionTag, original.sessionTag);
+
+  const rotated = await authenticate(harness, registered, {
+    operationId: "p355b-replace", sessionId: registered.sessionId,
+  });
+  await assert.rejects(read("p355b-revoked", registered.sessionId),
+    errorCode("service-session-invalid"));
+  const replaced = (await read("p355b-replaced", rotated.sessionId)).body.ownerContinuity;
+  assert.equal(replaced.accountId, original.accountId);
+  assert.notEqual(replaced.sessionTag, original.sessionTag);
+  // Other device's session remains independently valid.
+  assert.equal((await read("p355b-concurrent-remains", concurrent.sessionId))
+    .body.ownerContinuity.sessionTag, alongside.sessionTag);
+
+  const another = await register(harness, {
+    operationId: "p355b-other-register", credentialId: credentialId(191),
+    deviceId: "p355b-other-device",
+  });
+  assert.equal((await read("p355b-other-unbound", another.sessionId)).body.status, "not-configured");
+  await assert.rejects(harness.core.readRevision(call({
+    apiVersion: 1, operationId: "p355b-cross-account", syncedPocketId: "pocket-opaque",
+  }, another.sessionId)), errorCode("service-authorisation-failed"));
+
+  harness.setTime(Date.parse(rotated.finish.session.expiresAt));
+  await assert.rejects(read("p355b-expired", rotated.sessionId),
+    errorCode("service-session-expired"));
+});

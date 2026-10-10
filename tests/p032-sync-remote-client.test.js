@@ -990,3 +990,83 @@ test("P341 remote account service forwards only the bounded reselection intent",
   );
   assert.equal(calls.length, 1);
 });
+
+
+test("P355b discovery witness mode is opt-in, exact and immutable", async () => {
+  const { api } = loadProduction();
+  const schema = "pocket.sync.owner-session.v1";
+  const basic = { apiVersion: 1, operationId: "p355b-normal" };
+  const opted = { apiVersion: 1, operationId: "p355b-opt", ownerContinuity: schema };
+  const witness = {
+    schema, accountId: "server-account", sessionTag: "a".repeat(64),
+    expiresAt: "2032-01-31T00:00:00.000Z",
+  };
+  const sent = [];
+  const service = api.createPocketDiscoveryService({ transport: validTransport((route, body) => {
+    sent.push([route, plain(body)]);
+    return { status: 200, body: {
+      apiVersion: 1, ok: true, operationId: body.operationId,
+      status: "ready", syncedPocketId: "server-pocket",
+      ...(body.ownerContinuity === schema ? { ownerContinuity: witness } : {}),
+    } };
+  }) });
+  const ordinary = await service.readSyncedPocket(basic);
+  assert.deepEqual(plain(ordinary), {
+    apiVersion: 1, ok: true, operationId: "p355b-normal",
+    status: "ready", syncedPocketId: "server-pocket",
+  });
+  const attested = await service.readSyncedPocket(opted);
+  assert.deepEqual(plain(attested.ownerContinuity), witness);
+  assert.equal(Object.isFrozen(attested), true);
+  assert.equal(Object.isFrozen(attested.ownerContinuity), true);
+  assert.deepEqual(sent, [
+    ["readSyncedPocket", basic],
+    ["readSyncedPocket", opted],
+  ]);
+  for (const extra of [
+    { accountId: "claimed" }, { sessionId: "claimed" }, { sessionTag: "claimed" },
+    { ownerContinuity: false }, { ownerContinuity: null },
+    { ownerContinuity: "other-v1" }, { epoch: 2 },
+  ]) {
+    await assert.rejects(service.readSyncedPocket({ ...basic, ...extra }),
+      remoteErrorCode("remote-request-invalid"));
+  }
+  assert.equal(sent.length, 2);
+
+  const baseResponse = {
+    apiVersion: 1, ok: true, operationId: opted.operationId,
+    status: "ready", syncedPocketId: "server-pocket", ownerContinuity: witness,
+  };
+  const rejects = [
+    { ...baseResponse, extra: "unsafe" },
+    { ...baseResponse, ownerContinuity: undefined },
+    { ...baseResponse, ownerContinuity: null },
+    { ...baseResponse, ownerContinuity: { ...witness, schema: "other" } },
+    { ...baseResponse, ownerContinuity: { ...witness, accountId: "bad account" } },
+    { ...baseResponse, ownerContinuity: { ...witness, sessionTag: "A".repeat(64) } },
+    { ...baseResponse, ownerContinuity: { ...witness, sessionTag: "a".repeat(63) } },
+    { ...baseResponse, ownerContinuity: { ...witness, sessionTag: "g".repeat(64) } },
+    { ...baseResponse, ownerContinuity: { ...witness, expiresAt: "2032-01-31" } },
+    { ...baseResponse, ownerContinuity: { ...witness, expiresAt: "2032-02-30T00:00:00.000Z" } },
+    { ...baseResponse, ownerContinuity: { ...witness, extra: 1 } },
+    { ...baseResponse, operationId: "wrong-op" },
+    { ...baseResponse, status: "not-configured", syncedPocketId: null },
+  ];
+  for (const response of rejects) {
+    assert.throws(() => api.validateReadSyncedPocketResponse(response, opted),
+      remoteErrorCode("remote-response-invalid"));
+  }
+  assert.throws(() => api.validateReadSyncedPocketResponse(baseResponse, basic),
+    remoteErrorCode("remote-response-invalid"));
+  assert.deepEqual(plain(api.validateReadSyncedPocketResponse({
+    apiVersion: 1, ok: true, operationId: opted.operationId,
+    status: "not-configured", syncedPocketId: null,
+  }, opted)), {
+    apiVersion: 1, ok: true, operationId: opted.operationId,
+    status: "not-configured", syncedPocketId: null,
+  });
+  assert.throws(() => api.validateReadSyncedPocketResponse({
+    apiVersion: 1, ok: true, operationId: opted.operationId,
+    status: "not-configured", syncedPocketId: null, ownerContinuity: witness,
+  }, opted), remoteErrorCode("remote-response-invalid"));
+});

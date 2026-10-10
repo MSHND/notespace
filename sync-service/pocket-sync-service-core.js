@@ -1465,10 +1465,24 @@ function validateReadRevisionRequest(input) {
   });
 }
 
+// Optional, non-bearer attestation of the CURRENT server-authorised session.
+// Default discovery stays byte/schema-compatible with all existing callers.
+const OWNER_CONTINUITY_SCHEMA = "pocket.sync.owner-session.v1";
+
 function validateReadSyncedPocketRequest(input) {
-  const value = exactObject(input, ["apiVersion", "operationId"], ["apiVersion", "operationId"]);
-  if (value.apiVersion !== 1) throw serviceError("service-request-invalid");
-  return frozen({ apiVersion: 1, operationId: identifier(value.operationId) });
+  const value = exactObject(input, ["apiVersion", "operationId", "ownerContinuity"],
+    ["apiVersion", "operationId"]);
+  if (value.apiVersion !== 1
+      || (Object.prototype.hasOwnProperty.call(value, "ownerContinuity")
+        && value.ownerContinuity !== OWNER_CONTINUITY_SCHEMA)) {
+    throw serviceError("service-request-invalid");
+  }
+  return frozen({
+    apiVersion: 1,
+    operationId: identifier(value.operationId),
+    ...(value.ownerContinuity === OWNER_CONTINUITY_SCHEMA
+      ? { ownerContinuity: OWNER_CONTINUITY_SCHEMA } : {}),
+  });
 }
 
 function validateDownloadRequest(input) {
@@ -3146,11 +3160,21 @@ function createServiceCore(input) {
     const request = validateReadSyncedPocketRequest(body);
     const at = clockMilliseconds();
     return transact("readonly", async (transaction) => {
-      const { account } = await authoriseSession(transaction, context.sessionId, at);
+      const { account, session } = await authoriseSession(transaction, context.sessionId, at);
+      const ready = account.syncedPocketId !== null;
       return frozen({ status: 200, body: {
         apiVersion: 1, ok: true, operationId: request.operationId,
-        status: account.syncedPocketId === null ? "not-configured" : "ready",
+        status: ready ? "ready" : "not-configured",
         syncedPocketId: account.syncedPocketId,
+        ...(ready && request.ownerContinuity === OWNER_CONTINUITY_SCHEMA ? {
+          ownerContinuity: {
+            schema: OWNER_CONTINUITY_SCHEMA,
+            accountId: account.accountId,
+            // One-way comparison evidence only; never a bearer credential.
+            sessionTag: sha256([OWNER_CONTINUITY_SCHEMA, session.sessionId]),
+            expiresAt: isoTimestamp(session.expiresAt),
+          },
+        } : {}),
       }, session: null });
     });
   }

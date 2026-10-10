@@ -559,17 +559,32 @@ persisting session state, retrying work, or changing a Pocket owner.
     });
   }
 
+  const OWNER_CONTINUITY_SCHEMA = "pocket.sync.owner-session.v1";
+
   function validateReadSyncedPocketRequest(input) {
-    const value = exactObject(input, ["apiVersion", "operationId"],
+    const value = exactObject(input, ["apiVersion", "operationId", "ownerContinuity"],
       ["apiVersion", "operationId"], "remote-request-invalid");
-    if (value.apiVersion !== POLICY.apiVersion) throw remoteError("remote-request-invalid");
-    return frozen({ apiVersion: 1, operationId: identifier(value.operationId) });
+    if (value.apiVersion !== POLICY.apiVersion
+        || (Object.prototype.hasOwnProperty.call(value, "ownerContinuity")
+          && value.ownerContinuity !== OWNER_CONTINUITY_SCHEMA)) {
+      throw remoteError("remote-request-invalid");
+    }
+    return frozen({
+      apiVersion: 1,
+      operationId: identifier(value.operationId),
+      ...(value.ownerContinuity === OWNER_CONTINUITY_SCHEMA
+        ? { ownerContinuity: OWNER_CONTINUITY_SCHEMA } : {}),
+    });
   }
 
   function validateReadSyncedPocketResponse(input, requestInput) {
     const request = validateReadSyncedPocketRequest(requestInput);
-    const response = exactObject(input, ["apiVersion", "ok", "operationId", "status", "syncedPocketId"],
-      ["apiVersion", "ok", "operationId", "status", "syncedPocketId"]);
+    const optedIn = request.ownerContinuity === OWNER_CONTINUITY_SCHEMA;
+    const baseFields = ["apiVersion", "ok", "operationId", "status", "syncedPocketId"];
+    const hasEvidence = optedIn && input?.status === "ready";
+    const response = exactObject(input,
+      hasEvidence ? [...baseFields, "ownerContinuity"] : baseFields,
+      hasEvidence ? [...baseFields, "ownerContinuity"] : baseFields);
     if (response.apiVersion !== 1 || response.ok !== true || response.operationId !== request.operationId
         || !["ready", "not-configured"].includes(response.status)
         || (response.status === "ready" && typeof response.syncedPocketId !== "string")
@@ -577,6 +592,23 @@ persisting session state, retrying work, or changing a Pocket owner.
       throw remoteError("remote-response-invalid");
     }
     if (response.syncedPocketId !== null) identifier(response.syncedPocketId, "remote-response-invalid");
+    if (hasEvidence) {
+      const witness = exactObject(response.ownerContinuity,
+        ["schema", "accountId", "sessionTag", "expiresAt"],
+        ["schema", "accountId", "sessionTag", "expiresAt"]);
+      if (witness.schema !== OWNER_CONTINUITY_SCHEMA
+          || typeof witness.accountId !== "string"
+          || !/^[A-Za-z0-9_-]{1,160}$/.test(witness.accountId)
+          || typeof witness.sessionTag !== "string"
+          || !/^[0-9a-f]{64}$/.test(witness.sessionTag)
+          || typeof witness.expiresAt !== "string"
+          || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(witness.expiresAt)
+          || !Number.isFinite(Date.parse(witness.expiresAt))
+          || new Date(witness.expiresAt).toISOString() !== witness.expiresAt) {
+        throw remoteError("remote-response-invalid");
+      }
+    }
+    // Server-reported comparison evidence; never authentication or export permission.
     return frozen(response);
   }
 
