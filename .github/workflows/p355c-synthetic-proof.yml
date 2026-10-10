@@ -1,0 +1,25 @@
+name: P355c dormant owner continuity synthetic proof
+
+on:
+  push:
+    branches:
+      - candidate/p355c-proof
+
+jobs:
+  owner-continuity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: P355c syntax
+        run: |
+          node --check js/pocket-sync-owner-continuity-guard.js
+          node --check tests/p355c-owner-continuity-guard.test.js
+      - name: P355c synthetic and owner/discovery regressions
+        run: |
+          node --test tests/p355c-owner-continuity-guard.test.js tests/p042-synced-owner-controller.test.js tests/p043-owner-aware-save-boundary.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js
+      - name: Pocket standard check
+        run: npm run check
