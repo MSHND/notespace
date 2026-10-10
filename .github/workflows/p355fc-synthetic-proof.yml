@@ -1,0 +1,34 @@
+name: P355fc unified witnessed discovery synthetic proof
+
+on:
+  push:
+    branches:
+      - candidate/p355fc-proof
+
+jobs:
+  p355fc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install checked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Syntax check
+        run: |
+          node --check js/pocket-sync-owner-continuity-guard.js
+          node --check js/pocket-sync-additional-device.js
+          node --check tests/p355e-completed-device-provenance.test.js
+          node --check tests/p355c-owner-continuity-guard.test.js
+      - name: Unified witness, provenance, controller, Save and remote contract regressions
+        run: |
+          node --test --test-concurrency=1 tests/p355e-completed-device-provenance.test.js tests/p355c-owner-continuity-guard.test.js tests/p031-sync-account-client.test.js tests/p032-sync-remote-client.test.js tests/p042-synced-owner-controller.test.js tests/p043-owner-aware-save-boundary.test.js tests/p046-sync-http-adapter.test.js
+      - name: Bounded P052 completed and new-device, reselection and adoption regressions
+        run: |
+          node --test --test-name-pattern="P052d reopens an enrolled Device B without PRF output|P052d refuses a completed Device B whose active server envelope disappeared|P052i1 rejects a bootstrap account mismatch|P341 reselection intent reaches only the first additional-device authentication|P341 reselection keeps same-account continuity|P341 reselected unconfigured account|P052c production browser adoption keeps visible truth and authority coherent" tests/p052-additional-device.test.js
+      - name: Production boundary and reselection isolation
+        run: |
+          node --test --test-concurrency=1 tests/p076-production-browser-boundary.test.js tests/p176-production-composition.test.js tests/p331-open-diagnostic-projection.test.js tests/p341-account-reselection-foundation.test.js
+      - name: Standard Pocket check
+        run: npm run check
