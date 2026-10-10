@@ -23,5 +23,10 @@ jobs:
       - name: P355e, P355c and owner/discovery regressions
         run: |
           node --test tests/p355e-completed-device-provenance.test.js tests/p355c-owner-continuity-guard.test.js tests/p042-synced-owner-controller.test.js tests/p043-owner-aware-save-boundary.test.js tests/p032-sync-remote-client.test.js tests/p046-sync-http-adapter.test.js
+      - name: Real P031 authentication-client regressions
+        run: node --test tests/p031-sync-account-client.test.js
+      - name: Bounded P052 completed-device, bootstrap and account reselection regressions
+        run: |
+          node --test --test-name-pattern="P052d reopens an enrolled Device B without PRF output|P052d refuses a completed Device B whose active server envelope disappeared|P052i1 rejects a bootstrap account mismatch|P341 reselection intent reaches only the first additional-device authentication|P341 reselection keeps same-account continuity|P341 reselected unconfigured account" tests/p052-additional-device.test.js
       - name: Standard Pocket check
         run: npm run check
