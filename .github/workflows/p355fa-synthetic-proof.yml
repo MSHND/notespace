@@ -26,7 +26,7 @@ jobs:
         run: node --test tests/p031-sync-account-client.test.js
       - name: Bounded P052 existing completed-device, discard and reselection regressions
         run: |
-          node --test --test-name-pattern="P052d reopens an enrolled Device B without PRF output|P052d refuses a completed Device B whose active server envelope disappeared|P052i1 rejects a bootstrap account mismatch|P341 reselection intent reaches only the first additional-device authentication|P341 reselection keeps same-account continuity|P341 reselected unconfigured account|P104i preserves JSON safety across early|P052c production browser adoption keeps visible truth and authority coherent" tests/p052-additional-device.test.js
+          node --test --test-name-pattern="P052d reopens an enrolled Device B without PRF output|P052d refuses a completed Device B whose active server envelope disappeared|P052i1 rejects a bootstrap account mismatch|P341 reselection intent reaches only the first additional-device authentication|P341 reselection keeps same-account continuity|P341 reselected unconfigured account|P052c production browser adoption keeps visible truth and authority coherent" tests/p052-additional-device.test.js
       - name: Neighbouring production composition, owner-aware Save and Open projection regressions
         run: |
           node --test tests/p076-production-browser-boundary.test.js tests/p176-production-composition.test.js tests/p331-open-diagnostic-projection.test.js
