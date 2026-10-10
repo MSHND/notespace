@@ -260,7 +260,7 @@ test("P355fe actual PostgreSQL 18 migration, seed, idempotency and bounded conte
     const seeded = state.find(x => x.collection === "persistenceAuthorities" &&
       x.record_key === "synthetic-missing");
     assert(seeded);
-    assert.equal(seeded.store_version, "1" === typeof seeded.store_version ? 1 : seeded.store_version);
+    assert.equal(Number(seeded.store_version), 1, "backfilled authority must have version 1");
     assert.equal(seeded.record.currentMode, "whole-record");
     assert.equal(seeded.record.accountId, "synthetic-account");
     const unchanged = state.find(x => x.collection === "persistenceAuthorities" &&
@@ -279,6 +279,7 @@ test("P355fe actual PostgreSQL 18 migration, seed, idempotency and bounded conte
       migration(DB_MIG, { fail: true });
       const elapsed = Date.now() - started;
       assert(elapsed < 10000, "lock failure must be bounded");
+      console.log("P355fe disposable migration 003 contention: lock_timeout=" + LOCK_TIMEOUT + ", elapsed_ms=" + elapsed + ", runner failed explicitly");
       const marker = await db.query("SELECT 1 FROM public.pocket_sync_schema WHERE schema_name=$1",
         ["pocket-sync-object-head-store"]);
       assert.equal(marker.rowCount, 1, "earlier migration steps can commit before 003 fails");
