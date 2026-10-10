@@ -411,7 +411,7 @@ test("P355fja real CLI entrypoint emits one fixed line under forged dependency e
       "  const e=new Error("+JSON.stringify(HOSTILE_TEXT)+");\n"+
       "  e.safeCode="+JSON.stringify(HOSTILE_TEXT)+";\n"+
       "  e.connectionString="+JSON.stringify(HOSTILE_SECRET)+";\n"+
-      "  e.cause=new Error("+JSON.stringify(HOSTILE_TEXT)+";\n"+
+      "  e.cause=new Error("+JSON.stringify(HOSTILE_TEXT)+");\n"+
       "  throw e;\n"+
       "};\n");
     const p=spawnSync(process.execPath,[
