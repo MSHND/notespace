@@ -80,7 +80,7 @@ function makeHarness(options = {}) {
   let serverTag = TAG_A, expiry = FUTURE;
   let serial = 0, attestationCount = 0, authentications = 0;
   let visible = false, adoptionCount = 0, deviceEnrolments = 0;
-  let afterRead = null, attestationHook = null, failAuth = false;
+  let afterRead = null, attestationHook = null, failAuth = false, failAttestationNumber = null;
   const requests = [];
   const masterKey = Object.freeze({ kind: "nonextractable-synthetic-master-key" });
   const payload = Object.freeze({ schema: "portal.export.v1", notes: ["P355e-only-synthetic"] });
@@ -202,6 +202,9 @@ function makeHarness(options = {}) {
       if (request.ownerContinuity === SCHEMA) {
         attestationCount++;
         if (attestationHook) await attestationHook(attestationCount);
+        if (attestationCount === failAttestationNumber) {
+          throw new Error("synthetic optional witness failure");
+        }
       }
       return {
         apiVersion: 1, ok: true, operationId: request.operationId,
@@ -228,6 +231,9 @@ function makeHarness(options = {}) {
       if (options.detachedVisible) visible = true;
       if (options.throwAdoption) throw new Error("synthetic adoption interruption");
       if (options.failAdoption) return { ok: false };
+      if (options.adoptFailureReason) return { ok: false, reason: options.adoptFailureReason };
+      if (options.adoptPartial) return { ok: false,
+        partialState: "visible-payload-committed-detached" };
       const adopted = await controller.adoptSyncedOwner({
         syncedPocketId: opened.syncedPocketId, masterKey: opened.masterKey,
       });
@@ -260,6 +266,7 @@ function makeHarness(options = {}) {
     setTag(value) { serverTag = value; },
     setExpiry(value) { expiry = value; },
     onAttestation(hook) { attestationHook = hook; },
+    failAttestation(n) { failAttestationNumber = n; },
     onDiscovery(hook) { afterRead = hook; },
     failAuth(value) { failAuth = value; },
     get requests() { return requests; },
@@ -302,13 +309,17 @@ test("P355ea releases the one-use completed-Open slot while keeping real owner a
   const callback = code.slice(start, finish);
   assert.match(callback, /const installing = slot\.opened;\s*slot\.opened = null;/);
   assert.match(callback, /function release\(\)\s*\{\s*slot\.opened = null;/);
-  assert.match(callback, /return adopt\(installing\);/);
+  assert.match(callback, /const result = await adopt\(installing\);/);
+  assert.match(callback, /observed\.invoked = true;/);
+  assert.match(callback, /observed\.settled = true;/);
   assert.match(callback, /!isCurrent\(current\)/);
   assert.doesNotMatch(callback, /adopt\(opened\)|masterKey|\.payload/);
   const journeyChecker = code.indexOf("    function currentCompletedJourney(value)");
   const openArgumentFrame = code.indexOf("    async function installCompletedOpenedPocket(opened)");
   assert.ok(journeyChecker >= 0 && journeyChecker < openArgumentFrame);
   assert.match(code, /\{ opened \},\s*current,\s*currentCompletedJourney,/);
+  assert.match(code, /observed,\s*captureNewInstalledOwner/);
+  assert.match(code, /currentInstalledOwner\(observed\.owner\)/);
   assert.match(code, /performTrustedInstallation: pendingInstallation\.run,/);
   assert.match(code, /finally\s*\{[^}]*pendingInstallation\.release\(\);/);
   assert.doesNotMatch(code, /performTrustedInstallation:\s*\(\)\s*=>\s*\{[^}]*adoptOpenedPocket\(opened\)/);
@@ -347,13 +358,90 @@ test("P355ea early rejection, partial installation and final-attestation rejecti
 
   const late = makeHarness();
   late.onAttestation(n => { if (n === 2) late.setTag(TAG_B); });
-  assert.equal((await late.opener.openExisting()).ok, false);
+  const opened = await late.opener.openExisting();
+  assert.deepEqual(plain(opened),
+    { ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1 });
   assert.equal(late.adoptionCount, 1);
   const owner = late.boundary.captureOwnerSaveSession();
   assert.equal(owner.ownerKind, "synced");
   assert.equal(late.boundary.isOwnerSaveSessionCurrent(owner), true);
   assert.equal((await late.opener.revalidate()).ok, false);
   assert.equal(late.adoptionCount, 1); // No replay through a stale guard.
+});
+
+test("P355fa final witness failure preserves exact installed ordinary Open but cannot bind", async () => {
+  for (const finalWitness of ["unavailable", "new-session", "new-account", "new-pocket"]) {
+    const h = makeHarness();
+    if (finalWitness === "unavailable") h.failAttestation(2);
+    if (finalWitness === "new-session") h.onAttestation(n => { if (n === 2) h.setTag(TAG_B); });
+    if (finalWitness === "new-account") h.onAttestation(n => { if (n === 2) h.setAccount("account-b"); });
+    if (finalWitness === "new-pocket") h.onAttestation(n => { if (n === 2) h.setPocket("pocket-b"); });
+    const opened = await h.opener.openExisting();
+    assert.deepEqual(plain(opened),
+      { ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1 },
+      finalWitness);
+    assert.equal(h.adoptionCount, 1);
+    assert.equal(h.boundary.hasSyncedOwner(), true);
+    const owner = h.boundary.captureOwnerSaveSession();
+    assert.equal(owner.ownerKind, "synced");
+    assert.equal(owner.controller, h.controller);
+    assert.equal(owner.controllerSession.syncedPocketId, POCKET);
+    assert.equal(h.boundary.isOwnerSaveSessionCurrent(owner), true);
+    assert.equal((await h.opener.revalidate()).ok, false);
+    assert.equal(h.adoptionCount, 1, "revalidation must never replay adoption");
+    assert.equal(Object.hasOwn(opened, "ownerContinuity"), false);
+    assert.equal(Object.hasOwn(opened, "export"), false);
+  }
+});
+
+test("P355fa final owner replacement invalidates ordinary success despite earlier adoption", async () => {
+  for (const replace of [
+    h => h.browser.changeLocal(),
+    h => h.controller.releaseSyncedOwner(),
+    h => h.boundary.retireSyncedOwner(),
+  ]) {
+    const h = makeHarness();
+    h.onAttestation(n => { if (n === 2) replace(h); });
+    const opened = await h.opener.openExisting();
+    assert.deepEqual(plain(opened), { ok: false, reason: "owner-adoption-failed" });
+    assert.equal(h.adoptionCount, 1);
+    assert.equal((await h.opener.revalidate()).ok, false);
+    assert.equal(h.attestationCount, 2);
+  }
+});
+
+test("P355fa initial optional witness rejection never invokes the real adopter or falls back", async () => {
+  for (const mode of ["unavailable", "wrong-account", "wrong-pocket"]) {
+    const h = makeHarness();
+    if (mode === "unavailable") h.failAttestation(1);
+    if (mode === "wrong-account") h.setAccount("account-b");
+    if (mode === "wrong-pocket") h.onAttestation(n => { if (n === 1) h.setPocket("pocket-b"); });
+    assert.equal((await h.opener.openExisting()).ok, false, mode);
+    assert.equal(h.adoptionCount, 0);
+    assert.equal(h.attestationCount, 1);
+    assert.equal(h.boundary.hasSyncedOwner(), false);
+    assert.equal((await h.opener.revalidate()).ok, false);
+  }
+});
+
+test("P355fa preserves actual adopter failures and partial-state shape without success inflation", async () => {
+  for (const [options, expected] of [
+    [{ failAdoption: true }, { ok: false, reason: "owner-adoption-failed" }],
+    [{ adoptFailureReason: "additional-device-target-stale" },
+      { ok: false, reason: "additional-device-target-stale" }],
+    [{ adoptFailureReason: "additional-device-target-dirty" },
+      { ok: false, reason: "additional-device-target-dirty" }],
+    [{ adoptPartial: true }, { ok: false, reason: "owner-adoption-failed",
+      partialState: "visible-payload-committed-detached" }],
+    [{ onlyController: true }, { ok: false, reason: "owner-adoption-failed" }],
+    [{ throwAdoption: true }, { ok: false, reason: "owner-adoption-failed" }],
+  ]) {
+    const h = makeHarness(options);
+    assert.deepEqual(plain(await h.opener.openExisting()), expected, JSON.stringify(options));
+    assert.equal(h.adoptionCount, 1);
+    assert.equal(h.attestationCount, 1);
+    assert.equal((await h.opener.revalidate()).ok, false);
+  }
 });
 
 test("P355e fails binding when authenticated account and attested account disagree", async () => {
@@ -386,7 +474,8 @@ test("P355e current same-account session before initial attestation may bind, be
 
   const between = makeHarness();
   between.onAttestation((n) => { if (n === 2) between.setTag(TAG_B); });
-  assert.equal((await between.opener.openExisting()).ok, false);
+  assert.deepEqual(plain(await between.opener.openExisting()),
+    { ok: true, reason: "synced-pocket-opened", confirmedRemoteRevision: 1 });
   assert.equal(between.attestationCount, 2);
   assert.equal(between.boundary.hasSyncedOwner(), true);
   assert.equal((await between.opener.revalidate()).ok, false);
