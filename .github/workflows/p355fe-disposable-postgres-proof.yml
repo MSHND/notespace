@@ -1,0 +1,72 @@
+name: P355fe disposable PostgreSQL server-release proof
+
+on:
+  push:
+    branches:
+      - candidate/p355fe-proof
+
+jobs:
+  disposable-postgres-release-proof:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: p355fe
+          POSTGRES_DB: p355fe_root
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U p355fe -d p355fe_root"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout proof-only source at triggering SHA
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout exact recorded Render LIVE source
+        uses: actions/checkout@v4
+        with:
+          ref: d0e68fea885bafb5c92cf4ba0be0a91b38dbffa2
+          path: p355fe-old-source
+          persist-credentials: false
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact source identities
+        shell: bash
+        run: |
+          test "$(git -C p355fe-old-source rev-parse HEAD)" = "d0e68fea885bafb5c92cf4ba0be0a91b38dbffa2"
+          test "$(git rev-parse 04c60ffaa22e3278ded12ec037f3741f34009c11)" = "04c60ffaa22e3278ded12ec037f3741f34009c11"
+          test "$(git merge-base 04c60ffaa22e3278ded12ec037f3741f34009c11 HEAD)" = "04c60ffaa22e3278ded12ec037f3741f34009c11"
+          echo "Pinned accepted main, live source and proof-only ancestry verified"
+      - name: Install accepted dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare only disposable PostgreSQL 18 databases
+        run: |
+          node -e 'const {Client}=require("pg");(async()=>{const c=new Client({connectionString:"postgres://p355fe@127.0.0.1:5432/p355fe_root"});await c.connect();for(const n of ["p355fe_migrations","p355fe_rollback"])await c.query("CREATE DATABASE "+n);await c.end()})().catch(e=>{process.stderr.write("Synthetic database setup failed\n");process.exitCode=1})'
+      - name: Proof syntax and disposable PostgreSQL 18 server version
+        run: |
+          node --check tests/p355fe-disposable-release.test.js
+          node -e 'const {Client}=require("pg");(async()=>{const c=new Client({connectionString:"postgres://p355fe@127.0.0.1:5432/p355fe_root"});await c.connect();const v=(await c.query("SHOW server_version_num")).rows[0].server_version_num;await c.end();if(Math.floor(Number(v)/10000)!==18)throw Error("PostgreSQL major version must be 18");console.log("Disposable PostgreSQL major version: 18")})().catch(()=>process.exit(1))'
+      - name: Actual PostgreSQL migrations lock failure and executable old/new rollback
+        run: node --test tests/p355fe-disposable-release.test.js
+      - name: Accepted server and release-neighbour regressions
+        run: |
+          node --test --test-concurrency=1 \
+            tests/p032-sync-remote-client.test.js \
+            tests/p034-sync-service-core.test.js \
+            tests/p046-sync-http-adapter.test.js \
+            tests/p074-production-composition.test.js \
+            tests/p076-production-browser-boundary.test.js \
+            tests/p077-render-blueprint-contract.test.js \
+            tests/p078-migration-diagnostic.test.js \
+            tests/p349-project-documents-auth.test.js \
+            tests/p349c-project-documents-production-dormancy.test.js
+      - name: Accepted standard Pocket check
+        run: npm run check
