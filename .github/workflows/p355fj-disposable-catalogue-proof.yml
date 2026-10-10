@@ -1,0 +1,83 @@
+name: P355fj disposable catalogue-inspector proof
+
+on:
+  push:
+    branches:
+      - candidate/p355fj-proof
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-postgres-catalogue-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: synthetic_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      P355FJ_DISPOSABLE_POSTGRES_URL: postgres://postgres:synthetic_only@127.0.0.1:5432/pocket_postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact accepted base and only approved proof files
+        shell: bash
+        run: |
+          set -euo pipefail
+          MAIN=04c60ffaa22e3278ded12ec037f3741f34009c11
+          LIVE=d0e68fea885bafb5c92cf4ba0be0a91b38dbffa2
+          test "$(git merge-base HEAD "$MAIN")" = "$MAIN"
+          test "$(git diff --name-only "$MAIN"...HEAD | sort)" = "$(printf '%s\n' \
+            '.github/workflows/p355fj-disposable-catalogue-proof.yml' \
+            'tests/p355fj-catalogue-inspector.test.js' \
+            'tools/p355fj-catalogue-inspector.js' | sort)"
+          git diff --exit-code "$LIVE" "$MAIN" -- \
+            sync-service/pocket-sync-db-migrate.js \
+            sync-service/migrations/001-pocket-sync-store.sql \
+            sync-service/migrations/002-pocket-sync-object-head-store.sql \
+            sync-service/migrations/003-pocket-sync-persistence-authority.sql \
+            sync-service/migrations/004-pocket-project-documents.sql
+          test "$(git show "$MAIN:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).dependencies.pg")" = "8.22.0"
+          echo "P355fj proof base and file boundaries exact"
+      - name: Install Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install accepted dependencies, no scripts
+        run: npm ci --ignore-scripts
+      - name: Create disposable PostgreSQL 18 database only
+        env:
+          PGPASSWORD: synthetic_only
+        run: |
+          set -euo pipefail
+          psql -h 127.0.0.1 -p 5432 -U postgres -d postgres \
+            -v ON_ERROR_STOP=1 -c 'CREATE DATABASE pocket_postgres'
+      - name: Syntax checks
+        run: |
+          node --check tools/p355fj-catalogue-inspector.js
+          node --check tests/p355fj-catalogue-inspector.test.js
+      - name: Actual disposable PostgreSQL 18 catalogue safety proof
+        run: node --test tests/p355fj-catalogue-inspector.test.js
+      - name: Accepted production-dormancy regressions
+        run: |
+          node --test \
+            tests/p074-production-composition.test.js \
+            tests/p076-production-browser-boundary.test.js \
+            tests/p077-render-blueprint-contract.test.js \
+            tests/p349c-project-documents-production-dormancy.test.js
+      - name: Accepted standard Pocket check
+        run: npm run check
