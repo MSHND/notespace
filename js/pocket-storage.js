@@ -170,7 +170,7 @@ function buildPortablePocketSnapshot(logical, options = {}) {
         || Object.keys(options).join(",") !== "writtenAt"
         || !["portal.mtt.web.v1", "portal.sync.v1", "portal.export.v1"].includes(logical.schema)
         || typeof options.writtenAt !== "string"
-        || !/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$/.test(options.writtenAt)
+        || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(options.writtenAt)
         || !Number.isFinite(Date.parse(options.writtenAt))
         || new Date(options.writtenAt).toISOString() !== options.writtenAt
         || logical.writtenAt !== options.writtenAt
