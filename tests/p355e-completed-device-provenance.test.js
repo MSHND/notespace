@@ -152,27 +152,40 @@ function makeHarness(options = {}) {
     async finishRegistration() { throw new Error("not a registration"); },
     async beginAuthentication(request) {
       authRequests.push(plain(request));
+      const bootstrap = options.bootstrap === true && authRequests.length === 1;
       return {
         apiVersion: 1, ok: true, operationId: request.operationId,
         ceremonyId: "p355e-ceremony-" + authRequests.length,
-        expiresAt: FUTURE, prfEvaluationInput: PRF_INPUT,
-        publicKeyRequestOptions: {
-          challenge: CHALLENGE, timeout: 120000, rpId: "pocket.example",
-          allowCredentials: [{ type: "public-key", id: CREDENTIAL_ID, transports: ["internal"] }],
-          userVerification: "required", extensions: {
-            prf: { eval: { first: PRF_INPUT } },
+        expiresAt: FUTURE,
+        ...(bootstrap ? {
+          bootstrap: true,
+          publicKeyRequestOptions: {
+            challenge: CHALLENGE, timeout: 120000, rpId: "pocket.example",
+            userVerification: "required",
           },
-        },
+        } : {
+          prfEvaluationInput: PRF_INPUT,
+          publicKeyRequestOptions: {
+            challenge: CHALLENGE, timeout: 120000, rpId: "pocket.example",
+            allowCredentials: [{ type: "public-key", id: CREDENTIAL_ID, transports: ["internal"] }],
+            userVerification: "required", extensions: {
+              prf: { eval: { first: PRF_INPUT } },
+            },
+          },
+        }),
       };
     },
     async finishAuthentication(request) {
       authentications++;
       if (failAuth) throw new Error("synthetic authentication unavailable");
+      const bootstrap = options.bootstrap === true && request.ceremonyId === "p355e-ceremony-1";
       return {
         apiVersion: 1, ok: true, operationId: request.operationId,
-        ceremonyId: request.ceremonyId, accountId: authenticatedAccount,
+        ceremonyId: request.ceremonyId,
+        accountId: bootstrap ? (options.bootstrapAccount || ACCOUNT) : authenticatedAccount,
         credentialId: request.credential.id, credentialVersion: 1,
-        accountPolicyVersion: 1, prfEvaluationInput: PRF_INPUT,
+        accountPolicyVersion: 1,
+        ...(bootstrap ? { bootstrap: true } : { prfEvaluationInput: PRF_INPUT }),
       };
     },
   };
@@ -207,7 +220,8 @@ function makeHarness(options = {}) {
   const dependencies = {
     captureTarget: () => ({ ownerKind: browser.local().kind,
       continuityId: String(browser.local().id) }),
-    isTargetCurrent: () => ["none", "detached", "json", "vault"].includes(browser.local().kind),
+    isTargetCurrent: () => options.targetDirty !== true
+      && ["none", "detached", "json", "vault"].includes(browser.local().kind),
     validatePayload: data => data?.schema === "portal.export.v1",
     async adoptOpenedPocket(opened) {
       adoptionCount++;
@@ -421,6 +435,43 @@ test("P355e account reselection uses only its own ceremony, never a prior result
   assert.equal(h.authRequests[0].accountSelection, "choose-another");
   assert.equal(h.authRequests.length, 1);
   assert.equal((await h.opener.revalidate()).ok, true);
+});
+
+test("P355e bootstrap must finish account-bound authentication, and mismatched account fails", async () => {
+  const matched = makeHarness({ bootstrap: true });
+  assert.equal((await matched.opener.openExisting()).ok, true);
+  assert.equal(matched.authentications, 2);
+  assert.equal(matched.authRequests.length, 2);
+  assert.equal(matched.attestationCount, 2);
+
+  const different = makeHarness({ bootstrap: true, bootstrapAccount: "account-b" });
+  assert.equal((await different.opener.openExisting()).ok, false);
+  assert.equal(different.authentications, 2);
+  assert.equal(different.attestationCount, 0);
+  assert.equal(different.adoptionCount, 0);
+
+  const noBound = makeHarness({ bootstrap: true });
+  noBound.failAuth(true);
+  assert.equal((await noBound.opener.openExisting()).ok, false);
+  assert.equal(noBound.attestationCount, 0);
+});
+
+test("P355e dirty target and concurrent Open cannot fabricate a trusted second journey", async () => {
+  const dirty = makeHarness({ targetDirty: true });
+  assert.equal((await dirty.opener.openExisting()).ok, false);
+  assert.equal(dirty.authentications, 0);
+  assert.equal(dirty.attestationCount, 0);
+
+  const h = makeHarness();
+  const gate = deferred();
+  h.onAttestation(async n => { if (n === 1) await gate.promise; });
+  const first = h.opener.openExisting();
+  // First journey begins synchronously before the first await.
+  assert.equal((await h.opener.openExisting()).ok, false);
+  gate.resolve();
+  assert.equal((await first).ok, true);
+  assert.equal(h.authentications, 1);
+  assert.equal(h.adoptionCount, 1);
 });
 
 test("P355e preserves standard opener: ordinary discovery and successful ordinary ownership no opt-in", async () => {
