@@ -522,7 +522,8 @@
       }
       const discovery = await config.discoveryService.readSyncedPocket({ apiVersion: 1, operationId: randomId(config) });
       if (!discovery || discovery.status !== "ready" || !id(discovery.syncedPocketId)) {
-        if (discovery?.status === "not-configured") {
+        if (discovery?.status === "not-configured"
+            && !dependencies.adoptCompletedOpenedPocket) {
           const suffix = authentication.accountId.slice(-5);
           if (/^[A-Za-z0-9_-]{5}$/.test(suffix)) {
             return fail("synced-pocket-not-configured", { authenticatedAccountSuffix: suffix });
@@ -534,6 +535,13 @@
       let record;
       try { record = await config.deviceStore.readPocket(discovery.syncedPocketId); }
       catch (_error) { return fail("additional-device-state-invalid"); }
+      // The existing private completed adopter seam marks a completed-only
+      // journey. Never fall through into PRF enrolment from this dormant route.
+      // The ordinary opener has no such seam and is completely unaffected.
+      if (dependencies.adoptCompletedOpenedPocket
+          && (!record || record.additionalDeviceDraft !== null)) {
+        return fail("additional-device-completed-only");
+      }
       if (record && record.additionalDeviceDraft === null) {
         if (await strandedActivationDraft(config, record, discovery.syncedPocketId)) {
           return fail("local-activation-attention", { sourceOwnerPreserved: true });
