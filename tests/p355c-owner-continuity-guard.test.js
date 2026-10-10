@@ -157,10 +157,10 @@ function makeHarness(options = {}) {
     nextOperationId() { serial++; return "p355c-op-" + serial; },
     now() { return nowValue; },
   });
-  const guard = {
+  const guard = Object.freeze({
     installWithContinuity: () => composition.openExisting(),
     revalidate: () => composition.revalidate(),
-  };
+  });
   return {
     guard, controller, boundary, context,
     state(value) { server = { ...server, ...value }; },
