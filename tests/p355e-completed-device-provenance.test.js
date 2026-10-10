@@ -403,7 +403,7 @@ test("P355fa final owner replacement invalidates ordinary success despite earlie
     const h = makeHarness();
     h.onAttestation(n => { if (n === 2) replace(h); });
     const opened = await h.opener.openExisting();
-    assert.deepEqual(plain(opened), { ok: false, reason: "owner-adoption-failed" });
+    assert.deepEqual(plain(opened), { ok: false, reason: "owner-adoption-failed", adopted: false });
     assert.equal(h.adoptionCount, 1);
     assert.equal((await h.opener.revalidate()).ok, false);
     assert.equal(h.attestationCount, 2);
@@ -426,15 +426,15 @@ test("P355fa initial optional witness rejection never invokes the real adopter o
 
 test("P355fa preserves actual adopter failures and partial-state shape without success inflation", async () => {
   for (const [options, expected] of [
-    [{ failAdoption: true }, { ok: false, reason: "owner-adoption-failed" }],
+    [{ failAdoption: true }, { ok: false, reason: "owner-adoption-failed", adopted: false }],
     [{ adoptFailureReason: "additional-device-target-stale" },
-      { ok: false, reason: "additional-device-target-stale" }],
+      { ok: false, reason: "additional-device-target-stale", adopted: false }],
     [{ adoptFailureReason: "additional-device-target-dirty" },
-      { ok: false, reason: "additional-device-target-dirty" }],
+      { ok: false, reason: "additional-device-target-dirty", adopted: false }],
     [{ adoptPartial: true }, { ok: false, reason: "owner-adoption-failed",
-      partialState: "visible-payload-committed-detached" }],
-    [{ onlyController: true }, { ok: false, reason: "owner-adoption-failed" }],
-    [{ throwAdoption: true }, { ok: false, reason: "owner-adoption-failed" }],
+      adopted: false, partialState: "visible-payload-committed-detached" }],
+    [{ onlyController: true }, { ok: false, reason: "owner-adoption-failed", adopted: false }],
+    [{ throwAdoption: true }, { ok: false, reason: "owner-adoption-failed", adopted: false }],
   ]) {
     const h = makeHarness(options);
     assert.deepEqual(plain(await h.opener.openExisting()), expected, JSON.stringify(options));
