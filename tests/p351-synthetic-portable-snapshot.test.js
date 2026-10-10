@@ -347,7 +347,16 @@ test("P352 pure owner rejects ambiguous, truncated and malformed inputs without 
   apply((x) => { x.nodes.find(n => n.id === "grandchild").parentId = "missing"; });
   apply((x) => { x.nodes.find(n => n.id === "sibling").order = 0; });
   apply((x) => { x.rootExtras.schema = "future.schema"; });
-  apply((x) => { x.nodes[0].editor.outline[0].text = "x".repeat(9000); });
+  // Opaque editor material is intentionally retained by the current import
+  // contract; large supported editor content must not be rejected arbitrarily.
+  const supportedEditor = clone(base);
+  supportedEditor.nodes[0].editor.outline[0].text = "x".repeat(9000);
+  const supported = invoke(c,
+    "buildPortablePocketSnapshot(__p351Argument,{writtenAt:'" + DATE + "'})",
+    supportedEditor);
+  assert.equal(supported.ok, true, JSON.stringify(supported));
+  assert.equal(decodeWithExistingImport(runtime(false), supported.json)
+    .nodes[0].editor.outline[0].text.length, 9000);
   apply((x) => { x.nodes[0].newField = undefined; });
   apply((x) => { x.writtenAt = "2026-10-11T00:00:00.000Z"; });
   const invalidTime = invoke(c,
