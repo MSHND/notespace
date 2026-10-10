@@ -75,9 +75,25 @@ const QUERIES = Object.freeze([
     GROUP BY state,wait_event_type
     ORDER BY state NULLS FIRST,wait_event_type NULLS FIRST LIMIT 51`}),
 ]);
+// Only locally minted errors carry trusted codes. External exceptions cannot forge this WeakMap.
+const TRUSTED_CODES = new Set([
+  "identity-unavailable", "wrong-database", "wrong-postgres-version",
+  "not-read-only", "timeout-not-enforced", "unexpected-settings-shape",
+  "unexpected-result-shape", "unbounded-result", "unbounded-output",
+  "unsupported-arguments", "missing-runtime-configuration",
+  "invalid-client", "missing-session-identity", "changed-session",
+  "rollback-failed", "close-failed", "inspection-failed",
+]);
+const ownedErrorCodes=new WeakMap();
 function safeError(code) {
+  const ownedCode=TRUSTED_CODES.has(code)?code:"inspection-failed";
   const error=new Error("P355fj catalogue inspection failed");
-  error.safeCode=code; return error;
+  Object.defineProperty(error,"safeCode",{value:ownedCode,enumerable:false});
+  ownedErrorCodes.set(error,ownedCode);
+  return error;
+}
+function ownedFailureCode(error) {
+  return ownedErrorCodes.get(error)||"inspection-failed";
 }
 function milliseconds(value) {
   if(typeof value!=="string") return null;
@@ -191,7 +207,7 @@ async function runInspector(options={}) {
     if(Buffer.byteLength(JSON.stringify(result),"utf8")>65536)
       throw safeError("unbounded-output");
   } catch(error) {
-    failure=error?.safeCode||"inspection-failed";
+    failure=ownedFailureCode(error);
   } finally {
     if(client) {
       // Never reconnect or retry, including on transaction failure.
@@ -211,7 +227,7 @@ if(require.main===module) {
     safe=>process.stdout.write(JSON.stringify(safe)+"\n"),
     error=>{
       process.stderr.write("P355fj inspector FAILED ["+
-        (error?.safeCode||"inspection-failed")+"]\n");
+        ownedFailureCode(error)+"]\n");
       process.exitCode=1;
     }
   );
