@@ -292,6 +292,59 @@ test("P355e completes actual enrolled-device Open, verified account client, real
   assert.equal(Object.hasOwn(opened, "export"), false);
 });
 
+test("P355ea releases the one-use completed-Open slot while keeping real owner and revalidation", async () => {
+  // Deterministic source-contract proof: no GC scheduling or public inspector.
+  const code = fs.readFileSync(path.join(ROOT, "js/pocket-sync-owner-continuity-guard.js"), "utf8");
+  const start = code.indexOf("  function transientCompletedInstallation(");
+  const finish = code.indexOf("  // Entirely dormant;", start);
+  assert.ok(start >= 0 && finish > start);
+  const callback = code.slice(start, finish);
+  assert.match(callback, /const installing = slot\.opened;\s*slot\.opened = null;/);
+  assert.match(callback, /function release\(\)\s*\{\s*slot\.opened = null;/);
+  assert.match(callback, /return adopt\(installing\);/);
+  assert.doesNotMatch(callback, /adopt\(opened\)|masterKey|\.payload/);
+  assert.match(code, /performTrustedInstallation: pendingInstallation\.run,/);
+  assert.match(code, /finally\s*\{[^}]*pendingInstallation\.release\(\);/);
+  assert.doesNotMatch(code, /performTrustedInstallation:\s*\(\)\s*=>\s*\{[^}]*adoptOpenedPocket\(opened\)/);
+
+  const h = makeHarness();
+  assert.equal((await h.opener.openExisting()).ok, true);
+  assert.equal(h.adoptionCount, 1);
+  const owner = h.boundary.captureOwnerSaveSession();
+  assert.equal(owner.ownerKind, "synced");
+  assert.equal(h.boundary.isOwnerSaveSessionCurrent(owner), true);
+  assert.equal(h.controller.isSyncedOwnerSaveSessionCurrent(owner.controllerSession), true);
+  assert.deepEqual(plain(await h.opener.revalidate()),
+    { ok: true, reason: "owner-continuity-current" });
+  assert.equal(h.adoptionCount, 1); // Retained check cannot replay installation.
+  assert.equal(h.boundary.isOwnerSaveSessionCurrent(owner), true);
+  assert.deepEqual(Object.keys(h.opener), ["openExisting", "revalidate"]);
+  assert.equal(Object.hasOwn(h.opener, "dispose"), false);
+});
+
+test("P355ea early rejection, partial installation and final-attestation rejection never leave binding", async () => {
+  const early = makeHarness({ serverAccount: "wrong-account" });
+  assert.equal((await early.opener.openExisting()).ok, false);
+  assert.equal(early.adoptionCount, 0);
+  assert.equal((await early.opener.revalidate()).ok, false);
+
+  const partial = makeHarness({ onlyController: true });
+  assert.equal((await partial.opener.openExisting()).ok, false);
+  assert.equal(partial.adoptionCount, 1);
+  assert.equal(partial.boundary.hasSyncedOwner(), false);
+  assert.equal((await partial.opener.revalidate()).ok, false);
+
+  const late = makeHarness();
+  late.onAttestation(n => { if (n === 2) late.setTag(TAG_B); });
+  assert.equal((await late.opener.openExisting()).ok, false);
+  assert.equal(late.adoptionCount, 1);
+  const owner = late.boundary.captureOwnerSaveSession();
+  assert.equal(owner.ownerKind, "synced");
+  assert.equal(late.boundary.isOwnerSaveSessionCurrent(owner), true);
+  assert.equal((await late.opener.revalidate()).ok, false);
+  assert.equal(late.adoptionCount, 1); // No replay through a stale guard.
+});
+
 test("P355e fails binding when authenticated account and attested account disagree", async () => {
   for (const value of ["account-b", "account-c"]) {
     const h = makeHarness({ serverAccount: value });
