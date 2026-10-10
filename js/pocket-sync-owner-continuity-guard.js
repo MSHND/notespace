@@ -55,10 +55,32 @@
       && sameLocal(left.localSession, right.localSession);
   }
 
+  // The only accepted witness is a strictly remote-validated, current P355b
+  // result. It carries four small identity fields, never the Pocket payload.
+  function evidenceFromValidated(validated, time) {
+    if (!object(validated) || validated.status !== "ready"
+        || !object(validated.ownerContinuity)
+        || validated.ownerContinuity.schema !== SCHEMA
+        || typeof validated.syncedPocketId !== "string"
+        || validated.syncedPocketId.length < 1
+        || typeof validated.ownerContinuity.accountId !== "string"
+        || !/^[A-Za-z0-9_-]{1,160}$/.test(validated.ownerContinuity.accountId)
+        || typeof validated.ownerContinuity.sessionTag !== "string"
+        || !/^[0-9a-f]{64}$/.test(validated.ownerContinuity.sessionTag)) return null;
+    const until = Date.parse(validated.ownerContinuity.expiresAt);
+    if (!Number.isFinite(time) || !Number.isFinite(until) || until <= time) return null;
+    return Object.freeze({
+      accountId: validated.ownerContinuity.accountId,
+      syncedPocketId: validated.syncedPocketId,
+      sessionTag: validated.ownerContinuity.sessionTag,
+      expiresAt: validated.ownerContinuity.expiresAt,
+    });
+  }
+
   // Private identity comes only from the real account-client result captured by
   // createDormantCompletedDeviceOpener. The original synthetic factory has no
   // ceremony provenance and MUST NOT bind an owner by itself.
-  function createGuard(configuration, trustedJourney) {
+  function createGuard(configuration, trustedJourney, initialWitness = null) {
     if (!object(configuration) || Object.keys(configuration).length !== CONFIG_KEYS.length
         || CONFIG_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(configuration, key))) {
       throw new Error("owner-continuity-configuration-invalid");
@@ -137,21 +159,7 @@
         const response = await discoveryService.readSyncedPocket(request);
         // Preserve the exact P355b server-client boundary; do not trust ad-hoc fixture shapes.
         const validated = remoteContract.validateReadSyncedPocketResponse(response, request);
-        if (!object(validated) || validated.status !== "ready"
-            || !object(validated.ownerContinuity)
-            || validated.ownerContinuity.schema !== SCHEMA
-            || typeof validated.syncedPocketId !== "string"
-            || typeof validated.ownerContinuity.accountId !== "string"
-            || !/^[0-9a-f]{64}$/.test(validated.ownerContinuity.sessionTag)) return null;
-        const until = Date.parse(validated.ownerContinuity.expiresAt);
-        const time = clock();
-        if (time === null || !Number.isFinite(until) || until <= time) return null;
-        return Object.freeze({
-          accountId: validated.ownerContinuity.accountId,
-          syncedPocketId: validated.syncedPocketId,
-          sessionTag: validated.ownerContinuity.sessionTag,
-          expiresAt: validated.ownerContinuity.expiresAt,
-        });
+        return evidenceFromValidated(validated, clock());
       } catch (_error) { return null; }
     }
 
@@ -180,11 +188,26 @@
             || typeof trustedJourney.accountId !== "string"
             || !/^[A-Za-z0-9_-]{1,160}$/.test(trustedJourney.accountId)
             || typeof trustedJourney.syncedPocketId !== "string"
-            || trustedJourney.syncedPocketId.length < 1) return FAILURE;
+            || trustedJourney.syncedPocketId.length < 1
+            // A controller/Save-boundary replacement during discovery, auth
+            // or content selection cannot be accepted as the original target.
+            || !initialCurrent(trustedJourney.beforeOwner, trustedJourney.beforeController)) {
+          return FAILURE;
+        }
 
-        const initialEvidence = await serverEvidence();
-        if (!initialEvidence || initialEvidence.accountId !== trustedJourney.accountId
+        // One P355b discovery already selected and attested this Pocket.
+        // This is NOT an arbitrary public witness: only the private validated
+        // discovery wrapper inside the current authenticated journey provides it.
+        const initialEvidence = initialWitness;
+        const freshUntil = initialEvidence && Date.parse(initialEvidence.expiresAt);
+        const time = clock();
+        if (!initialEvidence || !Object.isFrozen(initialEvidence)
+            || initialEvidence.accountId !== trustedJourney.accountId
             || initialEvidence.syncedPocketId !== trustedJourney.syncedPocketId
+            || typeof initialEvidence.sessionTag !== "string"
+            || !/^[0-9a-f]{64}$/.test(initialEvidence.sessionTag)
+            || !Number.isFinite(freshUntil) || time === null
+            || freshUntil <= time
             || !initialCurrent(before, beforeController)
             || attempt !== lifetime) return FAILURE;
 
@@ -388,19 +411,45 @@
       async readSyncedPocket(request) {
         const current = journey;
         if (!current || current.closed || current.phase !== "authenticated"
-            || request?.ownerContinuity !== undefined || current.discoveredPocketId !== null) {
+            || request?.ownerContinuity !== undefined || current.discoveredPocketId !== null
+            || current.initialWitness !== null) {
           throw new Error("completed-device-discovery-invalid");
         }
-        const result = await normalDiscovery.readSyncedPocket(request);
+        // This is the opener's ONE initial discovery, opted into existing P355b.
+        // Same server call supplies both Pocket selection and account provenance.
+        const witnessedRequest = Object.freeze({
+          apiVersion: request.apiVersion, operationId: request.operationId,
+          ownerContinuity: SCHEMA,
+        });
+        const result = await normalDiscovery.readSyncedPocket(witnessedRequest);
+        const validated = config.remoteContract.validateReadSyncedPocketResponse(
+          result, witnessedRequest
+        );
         if (journey !== current || current.closed || current.phase !== "authenticated") {
           throw new Error("completed-device-journey-stale");
         }
-        if (result?.ok === true && result.status === "ready"
-            && typeof result.syncedPocketId === "string"
-            && result.syncedPocketId.length > 0) {
-          current.discoveredPocketId = result.syncedPocketId;
+        if (validated.status === "not-configured") {
+          // A valid protocol status, but no witnessed account: the completed-only
+          // branch must not project the authenticated account suffix.
+          return Object.freeze({
+            apiVersion: 1, ok: true, operationId: request.operationId,
+            status: "not-configured", syncedPocketId: null,
+          });
         }
-        return result;
+        let time;
+        try { time = config.now(); } catch (_error) { time = null; }
+        const initial = evidenceFromValidated(validated, time);
+        if (!initial || initial.accountId !== current.accountId) {
+          current.phase = "invalid";
+          throw new Error("completed-device-witness-mismatch");
+        }
+        current.initialWitness = initial;
+        current.discoveredPocketId = initial.syncedPocketId;
+        // Only the ordinary discovery projection crosses into the real opener.
+        return Object.freeze({
+          apiVersion: 1, ok: true, operationId: request.operationId,
+          status: "ready", syncedPocketId: initial.syncedPocketId,
+        });
       },
     });
 
@@ -450,9 +499,14 @@
         return FAILURE;
       }
       current.installAttempted = true;
+      const initialWitness = current.initialWitness;
+      current.initialWitness = null; // One-use private provenance.
+      if (!initialWitness) return FAILURE;
       const trusted = Object.freeze({
         accountId: current.accountId,
         syncedPocketId: current.discoveredPocketId,
+        beforeOwner: current.beforeOwner,
+        beforeController: current.beforeController,
       });
       let beforeOwner, beforeController;
       try {
@@ -477,7 +531,7 @@
           discoveryService: normalDiscovery, remoteContract: config.remoteContract,
           nextOperationId: config.nextOperationId, now: config.now,
           performTrustedInstallation: pendingInstallation.run,
-        }, trusted);
+        }, trusted, initialWitness);
         const result = await guard.installWithContinuity();
         if (journey !== current || current.closed) return FAILURE;
         if (observed.invoked && observed.settled && observed.accepted
@@ -506,11 +560,14 @@
       boundGuard = null;
       const current = {
         phase: "fresh", bootstrapAccountId: null,
-        accountId: null, discoveredPocketId: null,
+        accountId: null, discoveredPocketId: null, initialWitness: null,
+        beforeOwner: null, beforeController: null,
         closed: false, installAttempted: false,
       };
       journey = current;
       try {
+        current.beforeOwner = config.boundary.captureOwnerSaveSession();
+        current.beforeController = config.controller.captureSyncedOwnerSaveSession();
         // The optional adopter is reached ONLY from openCompletedDevice().
         // The new-device path still uses the original adopter, without binding.
         return await opener.openExisting({
@@ -525,6 +582,9 @@
         current.accountId = null;
         current.bootstrapAccountId = null;
         current.discoveredPocketId = null;
+        current.initialWitness = null;
+        current.beforeOwner = null;
+        current.beforeController = null;
         journey = null;
       }
     }
