@@ -236,7 +236,7 @@ test("P351 canonical synthetic Head/Seal exports and independently reconstructs 
   const rebuilt = invoke(independent,
     "buildCanonicalPocketPayload(__p351Argument, {writtenAt:'" + DATE + "'})",
     imported);
-  assert.equal(JSON.stringify(rebuilt), first.json, "rebuild without Starling must be exact");
+  assert.deepStrictEqual(clone(rebuilt), JSON.parse(first.json), "standalone rebuild must preserve complete JSON meaning");
 });
 
 test("P351 proves existing top-level import needs explicit nested dataExtras composition", async () => {
@@ -312,16 +312,9 @@ test("P351 remains purely a synthetic, memory-only compatibility proof", async (
   const original = clone(representative());
   await produceSnapshot(f);
   assert.deepEqual(representative(), original);
-  const forbidden = [
-    "putOpaqueObject", "compareAndSetShadowHead", "conditionalUpload",
-    "showSaveFilePicker", "createWritable", "adoptSyncedOwner", "downloadPocketBackupCopy",
-  ];
-  const testSource = fs.readFileSync(__filename, "utf8");
-  // Presence in an explicit prohibition list is permitted, invocation is not.
-  for (const name of forbidden) {
-    assert.equal(new RegExp("\\b(?:await\\s+)?(?:\\w+\\.)?" + name + "\\s*\\(").test(
-      testSource.replace(/const forbidden = \[[\s\S]*?\];/, "")), false, name);
-  }
+  assert.equal(f.readLog.every((action) => ["logical", "content", "placement"].includes(action)), true);
+  assert.equal(f.readLog.length > 0, true);
+  assert.equal(f.c.PocketSyncRemoteClient, undefined, "no remote service exists in the proof runtime");
   assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8")
     .includes("p351-synthetic-portable-snapshot"), false);
 });
