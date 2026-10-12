@@ -36,12 +36,10 @@ test("P190b direct downward sibling move captures the pre-removal destination re
   assert.deepEqual(h.siblingIds(context), ["b", "a", "c"]);
   const sequence = h.movement(context).seq;
   const operations = h.captured(context, sequence);
-  assert.equal(operations.length, 2);
-  assert.equal(operations[0].type, "payload");
-  assert.deepEqual(operations[1], {
+  assert.deepEqual(operations, [{
     type: "reorder",
     input: { nodeId: "a", fromIndex: 0, toIndex: 2 },
-  });
+  }]);
 
   const composed = await h.composeCapturedThroughP139(initial, operations);
   assert.deepEqual(composed.relation.children.root, ["b", "a", "c"]);

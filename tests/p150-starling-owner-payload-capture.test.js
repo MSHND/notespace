@@ -1,6 +1,6 @@
 "use strict";
 
-const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm");
+const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"), { createRequire } = require("node:module");
 const ROOT = path.resolve(__dirname, ".."), files = {
   shadow: "js/pocket-starling-owner-working-set-shadow.js",
   history: "js/pocket-history-status.js",
@@ -12,6 +12,18 @@ const ROOT = path.resolve(__dirname, ".."), files = {
 
 function plain(value) { return value === undefined ? undefined : JSON.parse(JSON.stringify(value)); }
 function source(file) { return fs.readFileSync(path.join(ROOT, file), "utf8"); }
+
+function loadP151Composition() {
+  const p151 = path.join(__dirname, "p151-starling-owner-move-reorder-capture.test.js");
+  let code = fs.readFileSync(p151, "utf8");
+  const declaration = 'const test = require("node:test"), assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"), { webcrypto } = require("node:crypto"), { semanticBase } = require("./helpers/starling-semantic-test.js");';
+  assert.ok(code.includes(declaration), "P151 harness declaration changed");
+  code = code.replace(declaration, 'const test = () => {}, assert = require("node:assert/strict"), fs = require("node:fs"), path = require("node:path"), vm = require("node:vm"), { webcrypto } = require("node:crypto"), { semanticBase } = require("./helpers/starling-semantic-test.js");');
+  code += "\nmodule.exports = { composeCapturedThroughP139 };\n";
+  const moduleRecord = { exports: {} };
+  new Function("require", "module", "exports", "__filename", "__dirname", code)(createRequire(p151), moduleRecord, moduleRecord.exports, p151, __dirname);
+  return moduleRecord.exports.composeCapturedThroughP139;
+}
 
 function runtime(options = {}) {
   class HTMLElement { focus() {} select() {} }
@@ -181,10 +193,11 @@ test("P150 captures changed PE payloads but rejects stale applies and discards a
   assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(99).operations), before);
 });
 
-test("P358 composes a Main placement-only reorder with a later real PE content save", () => {
+test("P358 composes a Main placement-only reorder with a later real PE content save", async () => {
   const context = runtime({ node: { id: "a", parentId: "root", order: 1001, label: "A", updatedAt: "2026-09-02T00:00:00.000Z" } });
   const moved = { id: "b", parentId: "root", order: 1002, label: "B", details: "Before", editor: { schema: "pocket.nodeEditor.v2", text: "Before" }, updatedAt: "2026-09-02T00:00:00.000Z" };
   context.state.nodes.push(moved, { id: "c", parentId: "root", order: 1003, label: "C", updatedAt: "2026-09-02T00:00:00.000Z" });
+  const initial = plain(context.state.nodes);
   context.moveNodeWithinSiblings("b", 1);
   const move = context.state.ops.at(-1);
   assert.equal(moved.updatedAt, "2026-09-02T00:00:00.000Z");
@@ -195,6 +208,19 @@ test("P358 composes a Main placement-only reorder with a later real PE content s
   assert.deepEqual(operations.map((operation) => operation.type), ["reorder", "payload"]);
   assert.equal(operations[1].input.payload.details, "After\n  child");
   assert.deepEqual(operations[1].input.payload.editor, { schema: "pocket.nodeEditor.v2", text: "After\n  child" });
+  const composed = await loadP151Composition()(initial, operations);
+  assert.deepEqual(composed.relation.children.root, ["a", "c", "b"]);
+  assert.equal(composed.relation.parents.b, "root");
+  assert.deepEqual(plain(composed.context.PocketStarlingRootShadow.getContent(composed.candidate, "b")), {
+    nodeId: "b",
+    payload: { label: "B", details: "After\n  child", editor: { schema: "pocket.nodeEditor.v2", text: "After\n  child" }, updatedAt: applied.nodeUpdatedAt },
+  });
+  assert.deepEqual(plain(composed.context.PocketStarlingRootShadow.getContent(composed.candidate, "a")), {
+    nodeId: "a", payload: { label: "A", updatedAt: "2026-09-02T00:00:00.000Z" },
+  });
+  assert.deepEqual(plain(composed.context.PocketStarlingRootShadow.getContent(composed.candidate, "c")), {
+    nodeId: "c", payload: { label: "C", updatedAt: "2026-09-02T00:00:00.000Z" },
+  });
 });
 
 test("P150 production seams remain payload-only and do not add Starling authority calls", () => {
