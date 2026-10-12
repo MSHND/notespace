@@ -41,9 +41,8 @@ function graph(extra = 0) {
     { id: "unrelated", parentId: "root", order: 2, label: "Unrelated" },
     { id: "first", parentId: "source", order: 0, label: "First" },
     { id: "branch", parentId: "source", order: 1, label: "Branch",
-      details: "Keep body", pe: { schema: "pocket.pe.v1", title: "Branch",
-        mode: "text", text: "Live PE text", outline: [],
-        updatedAt: "2026-09-01T00:00:00.000Z" } },
+      details: "Bounded details projection", editor: {
+        schema: "pocket.nodeEditor.v2", text: "Live canonical PE text\n  Canonical child" } },
     { id: "last", parentId: "source", order: 2, label: "Last" },
     { id: "child", parentId: "branch", order: 0, label: "Child" },
     { id: "grandchild", parentId: "child", order: 0, label: "Grandchild" },
@@ -142,6 +141,9 @@ test("P356 Move: stable identity, content, descendants, unrelated refs, bounded 
     const auditedOriginal = c.PocketStarlingObjectSealShadow.auditCandidateSeal(staged.accepted.sealRef, baseRead);
     assert.equal(auditedOriginal.ok, true);
     const originalBranch = plain(c.PocketStarlingRootShadow.getContent(auditedOriginal.candidate, "branch"));
+    assert.deepEqual(originalBranch.payload.editor, {
+      schema: "pocket.nodeEditor.v2", text: "Live canonical PE text\n  Canonical child",
+    });
     const result = await api.move(await open(c, staged), "branch", 1, "destination", 1);
     assert.equal(result.ok, true, JSON.stringify(result));
     const moved = inspect(c, staged, result.candidate);
@@ -211,8 +213,7 @@ test("P356 content and placement are distinct; working-set composition does not 
     base = await open(c, staged), original = staged.accepted.rootObject,
     edited = await api.editPayload(base, "branch", {
       label: "Edited", details: "new body",
-      pe: { schema: "pocket.pe.v1", title: "Edited", mode: "text",
-        text: "different text", outline: [], updatedAt: "2026-09-01T00:00:00.000Z" },
+      editor: { schema: "pocket.nodeEditor.v2", text: "Edited canonical PE text\n  Edited child" },
     });
   assert.equal(edited.ok, true, JSON.stringify(edited));
   const editedRoot = JSON.parse(resolve(staged, edited.candidate)(edited.candidate.rootRef));
