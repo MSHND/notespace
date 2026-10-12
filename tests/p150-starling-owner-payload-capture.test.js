@@ -198,11 +198,13 @@ test("P358 composes a Main placement-only reorder with a later real PE content s
   const moved = { id: "b", parentId: "root", order: 1002, label: "B", details: "Before", editor: { schema: "pocket.nodeEditor.v2", text: "Before" }, updatedAt: "2026-09-02T00:00:00.000Z" };
   context.state.nodes.push(moved, { id: "c", parentId: "root", order: 1003, label: "C", updatedAt: "2026-09-02T00:00:00.000Z" });
   const initial = plain(context.state.nodes);
+  const openedPayload = editorPayload(moved, { body: "After\n  child" });
+  assert.equal(openedPayload.originalUpdatedAt, "2026-09-02T00:00:00.000Z");
   context.moveNodeWithinSiblings("b", 1);
   const move = context.state.ops.at(-1);
   assert.equal(moved.updatedAt, "2026-09-02T00:00:00.000Z");
   assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(move.seq).operations), [{ type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 3 } }]);
-  const applied = context.PocketNodePopoutEditor.apply(editorPayload(moved, { body: "After\n  child" }), { returnDetails: true });
+  const applied = context.PocketNodePopoutEditor.apply(openedPayload, { returnDetails: true });
   assert.equal(applied.ok, true);
   const operations = plain(context.freezePocketStarlingOwnerWorkingSetThrough(applied && context.state.ops.at(-1).seq).operations);
   assert.deepEqual(operations.map((operation) => operation.type), ["reorder", "payload"]);
@@ -221,6 +223,9 @@ test("P358 composes a Main placement-only reorder with a later real PE content s
   assert.deepEqual(plain(composed.context.PocketStarlingRootShadow.getContent(composed.candidate, "c")), {
     nodeId: "c", payload: { label: "C", updatedAt: "2026-09-02T00:00:00.000Z" },
   });
+  const stale = context.PocketNodePopoutEditor.apply(openedPayload, { returnDetails: true });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.reason, "node-revision-changed");
 });
 
 test("P150 production seams remain payload-only and do not add Starling authority calls", () => {

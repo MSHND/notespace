@@ -34,7 +34,6 @@ function runtime(nodes) {
 
 function siblingIds(context, parentId = "root") { return context.sortNodesForParent(parentId).map((entry) => entry.id); }
 function captured(context, sequence) { return plain(context.freezePocketStarlingOwnerWorkingSetThrough(sequence).operations); }
-function capturedForSequence(context, sequence) { return captured(context, sequence).slice(-1); }
 function movement(context) { return context.state.ops.at(-1); }
 function assertStructureOnly(operations, expected) {
   assert.deepEqual(operations, [expected]);
@@ -87,26 +86,28 @@ test("P151 captures actual same-parent reorder and its witnessed inverse undo un
   assert.equal(JSON.stringify(context.lastMoveUndoSnapshot).includes("forwardSemanticCaptured"), false);
   assert.equal(JSON.stringify(context.state.ops).includes("forwardSemanticCaptured"), false);
   assert.deepEqual(siblingIds(context), ["b", "a", "c"]);
-  assertStructureOnly(capturedForSequence(context, forward.seq), { type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 0 } });
+  assertStructureOnly(captured(context, forward.seq), { type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 0 } });
   assert.equal(context.undoLastMoveAction(), undefined);
   const undo = movement(context);
   assert.equal(undo.type, "undo_move_up");
   assert.deepEqual(siblingIds(context), ["a", "b", "c"]);
-  assert.equal(captured(context, undo.seq).length, 2);
-  assertStructureOnly(capturedForSequence(context, undo.seq), { type: "reorder", input: { nodeId: "b", fromIndex: 0, toIndex: 2 } });
+  assert.deepEqual(captured(context, undo.seq), [
+    { type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 0 } },
+    { type: "reorder", input: { nodeId: "b", fromIndex: 0, toIndex: 2 } },
+  ]);
 });
 
 test("P151 captures actual indent and outdent from local sibling positions without descendant operations", () => {
   const indent = runtime([node("a", "root", 1001), node("b", "root", 1002), node("b-child", "b", 1001)]);
   indent.indentNodeById("b");
   const indentOperation = movement(indent);
-  assertStructureOnly(capturedForSequence(indent, indentOperation.seq), { type: "move", input: { nodeId: "b", fromIndex: 1, newParentId: "a", toIndex: 0 } });
-  assert.equal(capturedForSequence(indent, indentOperation.seq).some((operation) => operation.input?.nodeId === "b-child"), false);
+  assertStructureOnly(captured(indent, indentOperation.seq), { type: "move", input: { nodeId: "b", fromIndex: 1, newParentId: "a", toIndex: 0 } });
+  assert.equal(captured(indent, indentOperation.seq).some((operation) => operation.input?.nodeId === "b-child"), false);
 
   const outdent = runtime([node("a", "root", 1001), node("parent", "root", 1002), node("child-a", "parent", 1001), node("child-b", "parent", 1002), node("later", "root", 1003)]);
   outdent.outdentNodeById("child-b");
   const outdentOperation = movement(outdent);
-  assertStructureOnly(capturedForSequence(outdent, outdentOperation.seq), { type: "move", input: { nodeId: "child-b", fromIndex: 1, newParentId: "root", toIndex: 2 } });
+  assertStructureOnly(captured(outdent, outdentOperation.seq), { type: "move", input: { nodeId: "child-b", fromIndex: 1, newParentId: "root", toIndex: 2 } });
 });
 
 test("P151 classifies actual before/inside/after branch drops by final parent and emits root-only work", () => {
@@ -114,19 +115,21 @@ test("P151 classifies actual before/inside/after branch drops by final parent an
   assert.equal(sameParent.moveTreeBranchByDrop("c", "a", "before"), true);
   const reorder = movement(sameParent);
   assert.deepEqual(siblingIds(sameParent), ["c", "a", "b"]);
-  assertStructureOnly(capturedForSequence(sameParent, reorder.seq), { type: "reorder", input: { nodeId: "c", fromIndex: 2, toIndex: 0 } });
+  assertStructureOnly(captured(sameParent, reorder.seq), { type: "reorder", input: { nodeId: "c", fromIndex: 2, toIndex: 0 } });
 
   const crossParent = runtime([node("parent", "root", 1001), node("branch", "root", 1002), node("branch-child", "branch", 1001), node("branch-grandchild", "branch-child", 1001)]);
   assert.equal(crossParent.moveTreeBranchByDrop("branch", "parent", "inside"), true);
   const move = movement(crossParent);
-  const operations = capturedForSequence(crossParent, move.seq);
+  const operations = captured(crossParent, move.seq);
   assertStructureOnly(operations, { type: "move", input: { nodeId: "branch", fromIndex: 1, newParentId: "parent", toIndex: 0 } });
   assert.equal(operations.some((operation) => operation.input?.nodeId === "branch-child" || operation.input?.nodeId === "branch-grandchild"), false);
   assert.equal(crossParent.undoLastMoveAction(), undefined);
   const undo = movement(crossParent);
   assert.deepEqual(siblingIds(crossParent), ["parent", "branch"]);
-  assert.equal(captured(crossParent, undo.seq).length, 2);
-  assertStructureOnly(capturedForSequence(crossParent, undo.seq), { type: "move", input: { nodeId: "branch", fromIndex: 0, newParentId: "root", toIndex: 1 } });
+  assert.deepEqual(captured(crossParent, undo.seq), [
+    { type: "move", input: { nodeId: "branch", fromIndex: 1, newParentId: "parent", toIndex: 0 } },
+    { type: "move", input: { nodeId: "branch", fromIndex: 0, newParentId: "root", toIndex: 1 } },
+  ]);
 });
 
 test("P358 translates downward same-parent branch drops to Starling pre-removal reorder indices", async () => {
@@ -136,7 +139,7 @@ test("P358 translates downward same-parent branch drops to Starling pre-removal 
   }), node("c", "root", 1003)], context = runtime(nodes);
   const before = plain(context.nodeMap().get("b"));
   assert.equal(context.moveTreeBranchByDrop("b", "c", "after"), true);
-  const operation = movement(context), operations = capturedForSequence(context, operation.seq);
+  const operation = movement(context), operations = captured(context, operation.seq);
   assert.deepEqual(siblingIds(context), ["a", "c", "b"]);
   assertStructureOnly(operations, { type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 3 } });
   const after = plain(context.nodeMap().get("b"));
