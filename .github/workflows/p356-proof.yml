@@ -1,0 +1,39 @@
+name: P356 offline Move proof (non-adoptable)
+
+on:
+  push:
+    branches:
+      - candidate/p356-proof
+
+permissions:
+  contents: read
+
+jobs:
+  p356-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Static repository check
+        run: npm run check
+      - name: P356 syntax
+        run: node --check tests/p356-starling-canonical-move-contract.test.js
+      - name: Focused Move and neighbour regression proof
+        run: |
+          timeout 480s node --test \
+            tests/p356-starling-canonical-move-contract.test.js \
+            tests/p115-starling-fresh-logical-move-shadow.test.js \
+            tests/p116-starling-fresh-logical-reorder-shadow.test.js \
+            tests/p139-starling-logical-working-set-compose.test.js \
+            tests/p151-starling-owner-move-reorder-capture.test.js \
+            tests/p159-starling-owner-completed-move-capture.test.js \
+            tests/p160-starling-owner-save-preparation.test.js \
+            tests/p190b-downward-reorder-capture.test.js \
+            tests/p236-main-local-reorder-projection.test.js \
+            tests/p198-unified-pe-document.test.js \
+            tests/p206-starling-save-detail-observability.test.js
