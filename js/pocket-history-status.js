@@ -102,6 +102,12 @@ function capturePocketStarlingNodePayloadAndStructure(sequence, node, structural
   return capturePocketStarlingOwnerWorkingOperations(target, [payloadOperation, structuralOperation]);
 }
 
+function capturePocketStarlingStructure(sequence, structuralOperation) {
+  const target = currentPocketStarlingOperationSequence(sequence);
+  if (!target || !validPocketStarlingStructuralOperation(structuralOperation)) return false;
+  return capturePocketStarlingOwnerWorkingOperations(target, [structuralOperation]);
+}
+
 function capturePocketStarlingCompletedMove(sequence, node, bucket, completion) {
   try {
     const target = currentPocketStarlingOperationSequence(sequence);
@@ -747,7 +753,7 @@ function restoreTreeUndoSnapshot(snapshot, acceptedRestoreOperation = null) {
           },
         }
         : { type: "move", input: { nodeId: restoredNode.id, fromIndex: currentMovePlacement.index, newParentId: moveUndoWitness.parentId, toIndex: moveUndoWitness.index } };
-      capturePocketStarlingNodePayloadAndStructure(undoOperation?.seq, restoredNode, structuralOperation);
+      capturePocketStarlingStructure(undoOperation?.seq, structuralOperation);
     }
   }
   refreshMeta();

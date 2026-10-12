@@ -291,7 +291,6 @@ function indentNodeById(nodeId) {
   lastTreeUndoKind = "move";
   node.parentId = previousSibling.id;
   node.order = maxSiblingOrder(previousSibling.id) + 1;
-  node.updatedAt = nowIso();
   renumberChildren(parentId);
   renumberChildren(previousSibling.id);
   state.selectedId = node.id;
@@ -299,8 +298,8 @@ function indentNodeById(nodeId) {
   const indentOperation = recordOp({ type: "indent", id: node.id, newParentId: previousSibling.id });
   const toIndex = sortNodesForParent(previousSibling.id).findIndex((sibling) => sibling.id === node.id);
   let forwardSemanticCaptured = false;
-  if (toIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
-    forwardSemanticCaptured = capturePocketStarlingNodePayloadAndStructure(indentOperation?.seq, node, {
+  if (toIndex >= 0 && typeof capturePocketStarlingStructure === "function") {
+    forwardSemanticCaptured = capturePocketStarlingStructure(indentOperation?.seq, {
       type: "move",
       input: { nodeId: node.id, fromIndex: index, newParentId: previousSibling.id, toIndex },
     });
@@ -339,7 +338,6 @@ function outdentNodeById(nodeId) {
   lastTreeUndoKind = "move";
   node.parentId = grandParentId;
   node.order = Number.isFinite(parent.order) ? parent.order + 0.5 : maxSiblingOrder(grandParentId) + 1;
-  node.updatedAt = nowIso();
   renumberChildren(parentId);
   renumberChildren(grandParentId);
   state.selectedId = node.id;
@@ -347,8 +345,8 @@ function outdentNodeById(nodeId) {
   const outdentOperation = recordOp({ type: "outdent", id: node.id, newParentId: grandParentId, afterId: parent.id });
   const toIndex = sortNodesForParent(grandParentId).findIndex((sibling) => sibling.id === node.id);
   let forwardSemanticCaptured = false;
-  if (sourceIndex >= 0 && toIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
-    forwardSemanticCaptured = capturePocketStarlingNodePayloadAndStructure(outdentOperation?.seq, node, {
+  if (sourceIndex >= 0 && toIndex >= 0 && typeof capturePocketStarlingStructure === "function") {
+    forwardSemanticCaptured = capturePocketStarlingStructure(outdentOperation?.seq, {
       type: "move",
       input: { nodeId: node.id, fromIndex: sourceIndex, newParentId: grandParentId, toIndex },
     });
@@ -392,14 +390,13 @@ function moveNodeWithinSiblings(nodeId, direction) {
   siblings.forEach((item, i) => {
     item.order = 1001 + i;
   });
-  node.updatedAt = nowIso();
   state.selectedId = node.id;
   const reorderOperation = recordOp({ type: direction < 0 ? "move_up" : "move_down", id: node.id, parentId, toIndex: targetIndex });
   const finalIndex = sortNodesForParent(parentId).findIndex((sibling) => sibling.id === node.id);
   const semanticToIndex = finalIndex + (index < finalIndex ? 1 : 0);
   let forwardSemanticCaptured = false;
-  if (finalIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
-    forwardSemanticCaptured = capturePocketStarlingNodePayloadAndStructure(reorderOperation?.seq, node, {
+  if (finalIndex >= 0 && typeof capturePocketStarlingStructure === "function") {
+    forwardSemanticCaptured = capturePocketStarlingStructure(reorderOperation?.seq, {
       type: "reorder",
       input: { nodeId: node.id, fromIndex: index, toIndex: semanticToIndex },
     });
@@ -464,7 +461,6 @@ function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
     const targetOrder = Number.isFinite(target.order) ? target.order : maxSiblingOrder(nextParentId) + 1;
     node.order = targetOrder + (position === "before" ? -0.5 : 0.5);
   }
-  node.updatedAt = nowIso();
   renumberChildren(previousParentId);
   if (nextParentId !== previousParentId) renumberChildren(nextParentId);
   state.selectedId = node.id;
@@ -473,11 +469,12 @@ function moveTreeBranchByDrop(nodeId, targetId, position = "inside") {
   const finalParentId = node.parentId || "root";
   const finalIndex = sortNodesForParent(finalParentId).findIndex((sibling) => sibling.id === node.id);
   let forwardSemanticCaptured = false;
-  if (sourceIndex >= 0 && finalIndex >= 0 && typeof capturePocketStarlingNodePayloadAndStructure === "function") {
+  if (sourceIndex >= 0 && finalIndex >= 0 && typeof capturePocketStarlingStructure === "function") {
+    const semanticToIndex = finalIndex + (finalParentId === previousParentId && sourceIndex < finalIndex ? 1 : 0);
     const structuralOperation = finalParentId === previousParentId
-      ? { type: "reorder", input: { nodeId: node.id, fromIndex: sourceIndex, toIndex: finalIndex } }
+      ? { type: "reorder", input: { nodeId: node.id, fromIndex: sourceIndex, toIndex: semanticToIndex } }
       : { type: "move", input: { nodeId: node.id, fromIndex: sourceIndex, newParentId: finalParentId, toIndex: finalIndex } };
-    forwardSemanticCaptured = capturePocketStarlingNodePayloadAndStructure(dragOperation?.seq, node, structuralOperation);
+    forwardSemanticCaptured = capturePocketStarlingStructure(dragOperation?.seq, structuralOperation);
   }
   bindP151MoveUndoWitness(lastMoveUndoSnapshot, dragOperation?.seq, forwardSemanticCaptured);
   if (typeof refreshSaveState === "function") refreshSaveState();

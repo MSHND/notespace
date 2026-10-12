@@ -4,6 +4,7 @@ const test = require("node:test"), assert = require("node:assert/strict"), fs = 
 const ROOT = path.resolve(__dirname, ".."), files = {
   shadow: "js/pocket-starling-owner-working-set-shadow.js",
   history: "js/pocket-history-status.js",
+  actions: "js/pocket-tree-actions.js",
   details: "js/pocket-editor-copy.js",
   handoff: "js/pocket-editor-handoff.js",
   popout: "js/pocket-node-popout-editor.js",
@@ -36,6 +37,8 @@ function runtime(options = {}) {
     nowIso() { return "2026-09-02T01:00:00.000Z"; },
     cleanText(value, maximum = Number.MAX_SAFE_INTEGER) { return String(value || "").trim().slice(0, maximum); },
     nodeMap() { return new Map(context.state.nodes.map((node) => [node.id, node])); }, getPath(id) { return id; },
+    compareSiblingOrder(left, right) { return (Number(left.order) || 0) - (Number(right.order) || 0) || String(left.label || "").localeCompare(String(right.label || "")); },
+    sortNodesForParent(parentId) { return context.state.nodes.filter((node) => (node.parentId || "root") === (parentId || "root")).sort(context.compareSiblingOrder); },
     normaliseDetails(value) { return String(value || "").replace(/\r/g, "").trim(); }, normaliseUrgentFlag(value) { return value === true; }, normaliseCopyContextFlag(value) { return value === true; },
     parseUrgentDetailsBody(value) { return { details: String(value || "").trim(), urgent: false }; }, hasCompletionTag() { return false; }, stripCompletionTags(value) { return value; },
     isManagedSystemBucketNode() { return false; }, isCompletedSystemBucketNode() { return false; }, moveNodeIntoCompletedSystemBucket() { return { moved: false, bucketId: "" }; },
@@ -57,8 +60,8 @@ function runtime(options = {}) {
     __storage: storage,
   };
   context.window = context; context.globalThis = context; vm.createContext(context);
-  for (const file of [files.shadow, files.history, files.details, files.handoff, files.popout]) vm.runInContext(source(file), context, { filename: file });
-  context.refreshMeta = () => {}; context.renderTree = () => {}; context.persistPipSnapshot = () => {}; context.refocusTreeNavigation = () => {}; context.focusRowByNodeId = () => {}; context.setStatus = () => {}; context.PocketDetailDirtyState = { refresh() {} };
+  for (const file of [files.shadow, files.history, files.actions, files.details, files.handoff, files.popout]) vm.runInContext(source(file), context, { filename: file });
+  context.refreshMeta = () => {}; context.refreshSaveState = () => {}; context.renderTree = () => {}; context.persistPipSnapshot = () => {}; context.refocusTreeNavigation = () => {}; context.focusRowByNodeId = () => {}; context.setStatus = () => {}; context.PocketDetailDirtyState = { refresh() {} };
   return context;
 }
 
@@ -176,6 +179,22 @@ test("P150 captures changed PE payloads but rejects stale applies and discards a
   assert.equal(rollback.reason, "large-outline-safety-copy-failed");
   assert.equal(context.state.ops.length, 1);
   assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(99).operations), before);
+});
+
+test("P358 composes a Main placement-only reorder with a later real PE content save", () => {
+  const context = runtime({ node: { id: "a", parentId: "root", order: 1001, label: "A", updatedAt: "2026-09-02T00:00:00.000Z" } });
+  const moved = { id: "b", parentId: "root", order: 1002, label: "B", details: "Before", editor: { schema: "pocket.nodeEditor.v2", text: "Before" }, updatedAt: "2026-09-02T00:00:00.000Z" };
+  context.state.nodes.push(moved, { id: "c", parentId: "root", order: 1003, label: "C", updatedAt: "2026-09-02T00:00:00.000Z" });
+  context.moveNodeWithinSiblings("b", 1);
+  const move = context.state.ops.at(-1);
+  assert.equal(moved.updatedAt, "2026-09-02T00:00:00.000Z");
+  assert.deepEqual(plain(context.freezePocketStarlingOwnerWorkingSetThrough(move.seq).operations), [{ type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 3 } }]);
+  const applied = context.PocketNodePopoutEditor.apply(editorPayload(moved, { body: "After\n  child" }), { returnDetails: true });
+  assert.equal(applied.ok, true);
+  const operations = plain(context.freezePocketStarlingOwnerWorkingSetThrough(applied && context.state.ops.at(-1).seq).operations);
+  assert.deepEqual(operations.map((operation) => operation.type), ["reorder", "payload"]);
+  assert.equal(operations[1].input.payload.details, "After\n  child");
+  assert.deepEqual(operations[1].input.payload.editor, { schema: "pocket.nodeEditor.v2", text: "After\n  child" });
 });
 
 test("P150 production seams remain payload-only and do not add Starling authority calls", () => {

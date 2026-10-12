@@ -504,7 +504,7 @@ function createHarness({ unrelatedCount = 0, collapsed = [] } = {}) {
 
   function capturedForSequence(sequence) {
     const frozen = context.freezePocketStarlingOwnerWorkingSetThrough(sequence);
-    return plain(frozen?.operations || []).slice(-2);
+    return plain(frozen?.operations || []).slice(-1);
   }
 
   return {
@@ -626,10 +626,8 @@ test("P236 actual moveNodeWithinSiblings move-up uses one bounded branch move an
     forwardSemanticCaptured: true,
   });
   const captured = h.capturedForSequence(forward.seq);
-  assert.equal(captured.length, 2);
-  assert.equal(captured[0].type, "payload");
-  assert.equal(captured[0].input.nodeId, "B");
-  assert.deepEqual(captured[1], {
+  assert.equal(captured.length, 1);
+  assert.deepEqual(captured[0], {
     type: "reorder",
     input: { nodeId: "B", fromIndex: 1, toIndex: 0 },
   });
@@ -655,7 +653,7 @@ test("P236 actual moveNodeWithinSiblings move-down uses the same bounded project
   assert.equal(forward.type, "move_down");
   assert.equal(forward.toIndex, 2);
   const captured = h.capturedForSequence(forward.seq);
-  assert.deepEqual(captured[1], {
+  assert.deepEqual(captured[0], {
     type: "reorder",
     input: { nodeId: "B", fromIndex: 1, toIndex: 3 },
   });
@@ -696,7 +694,7 @@ test("P236 retains P151 forward capture and full-render inverse undo semantics",
   h.context.moveNodeWithinSiblings("B", -1);
   const forward = plain(h.context.state.ops.at(-1));
 
-  assert.deepEqual(h.capturedForSequence(forward.seq)[1], {
+  assert.deepEqual(h.capturedForSequence(forward.seq)[0], {
     type: "reorder",
     input: { nodeId: "B", fromIndex: 1, toIndex: 0 },
   });
@@ -708,7 +706,7 @@ test("P236 retains P151 forward capture and full-render inverse undo semantics",
   assert.equal(undo.type, "undo_move_up");
   assert.deepEqual(h.siblingIds("Parent"), ["A", "B", "C"]);
   assert.equal(h.counters.fullRender, 1, "undo remains on accepted full-render path in P236");
-  assert.deepEqual(h.capturedForSequence(undo.seq)[1], {
+  assert.deepEqual(h.capturedForSequence(undo.seq)[0], {
     type: "reorder",
     input: { nodeId: "B", fromIndex: 0, toIndex: 2 },
   });
