@@ -63,16 +63,7 @@ function loadP190Helpers() {
 }
 
 function installScaleTree(context, count) {
-  const timestamp = "2044-01-01T00:00:00.000Z";
-  context.__p180BaselineNodes = Array.from({ length: count }, (_unused, index) => ({
-    id: `p364-${String(index).padStart(4, "0")}`,
-    parentId: "root",
-    order: index,
-    label: `P364 node ${index}`,
-    details: `offline baseline ${index}`,
-    updatedAt: timestamp,
-    source: "manual",
-  }));
+  context.__p180BaselineNodes = Array.from({ length: count }, (_unused, index) => scaleNode(index));
   vm.runInContext(
     "state.nodes=__p180BaselineNodes;state.tombstones=[];state.rootExtras={};state.dataExtras={};"
       + "state.ops=[];state.operationHighWater=0;state.operationDocumentAnchor=null;"
@@ -80,6 +71,76 @@ function installScaleTree(context, count) {
     context
   );
   context.__p180State = vm.runInContext("state", context);
+}
+
+function scaleNode(index, order = index) {
+  const timestamp = "2044-01-01T00:00:00.000Z";
+  return {
+    id: `p364-${String(index).padStart(4, "0")}`,
+    parentId: "root",
+    order,
+    label: `P364 node ${index}`,
+    details: `offline baseline ${index}`,
+    updatedAt: timestamp,
+    source: "manual",
+  };
+}
+
+function expectedNodes(expectedOrder) {
+  return expectedOrder.map((id, order) => scaleNode(Number(id.slice("p364-".length)), order));
+}
+
+function moveExpectedLeft(expectedOrder, id) {
+  const index = expectedOrder.indexOf(id);
+  assert.ok(index > 0, `expected movable node ${id}`);
+  [expectedOrder[index - 1], expectedOrder[index]] = [expectedOrder[index], expectedOrder[index - 1]];
+}
+
+async function verifyAcceptedRemoteTruth(h, count, expectedOrder, expectedHeadRevision) {
+  const baseMaterialize = h.context.PocketStarlingMaterializeShadow;
+  const documents = [];
+  h.context.PocketStarlingMaterializeShadow = Object.freeze({
+    ...baseMaterialize,
+    async materializeAccepted(...args) {
+      const result = await baseMaterialize.materializeAccepted(...args);
+      if (result?.ok === true) documents.push(plain(result.document));
+      return result;
+    },
+  });
+  try {
+    assert.equal(h.context.PocketOwnerSaveBoundary.retireSyncedOwner(), true,
+      "verification reads through a fresh accepted remote owner");
+    h.context.setPocketFileSession(null, "", { ownerKind: "none" });
+    vm.runInContext(
+      "state.nodes=[];state.tombstones=[];state.rootExtras={};state.dataExtras={};"
+        + "state.ops=[];state.operationHighWater=0;state.operationDocumentAnchor=null;"
+        + "state.activeSaveOperationCeiling=0;",
+      h.context
+    );
+    const reopened = await h.context.PocketSyncActiveIntegration.openExisting();
+    assert.equal(reopened.ok, true, JSON.stringify(reopened));
+  } finally {
+    h.context.PocketStarlingMaterializeShadow = baseMaterialize;
+  }
+  const expected = expectedNodes(expectedOrder);
+  assert.ok(documents.length >= 1, "fresh remote re-entry materialises accepted truth");
+  for (const document of documents) {
+    assert.equal(document.nodes.length, count, "no accepted nodes missing or added");
+    assert.equal(new Set(document.nodes.map((node) => node.id)).size, count,
+      "accepted node identities are unique");
+    assert.deepEqual(document.nodes.map((node) => node.id), expectedOrder,
+      "accepted root sibling order matches the declared workload");
+    assert.ok(document.nodes.every((node) => node.parentId === "root"),
+      "accepted parent relationships remain root-owned");
+    assert.deepEqual(document.nodes, expected,
+      "accepted node identity, order and unchanged content match the independent witness");
+  }
+  assert.equal(h.context.__p180State.nodes.length, count, "fresh re-entry projects every accepted node");
+  assert.equal(h.context.__p180State.ops.length, 0, "verification re-entry has no local dirty operation");
+  const remote = await h.readRemoteState();
+  assert.equal(remote.authority.currentMode, "starling");
+  assert.equal(remote.head.revision, expectedHeadRevision, "accepted Head progression");
+  return { materializations: documents.length, headRevision: remote.head.revision };
 }
 
 async function readyPostReentry(count) {
@@ -159,7 +220,7 @@ function observeSave(context) {
   const baseStorage = context.PocketStarlingStorageShadow;
   const baseDurable = context.PocketStarlingDurablePublication;
   const baseSeal = context.PocketStarlingObjectSealShadow;
-  context.PocketStarlingLogicalEditShadow = Object.freeze({
+  const logical = Object.freeze({
     ...baseLogical,
     async compose(...args) {
       const result = await elapsedAsync(measures, "p139ComposeMs", () => baseLogical.compose(...args));
@@ -167,7 +228,7 @@ function observeSave(context) {
       return result;
     },
   });
-  context.PocketStarlingStorageShadow = Object.freeze({
+  const storage = Object.freeze({
     ...baseStorage,
     async stageCandidate(...args) {
       const result = await elapsedAsync(measures, "changedObjectStageMs", () => baseStorage.stageCandidate(...args));
@@ -175,7 +236,7 @@ function observeSave(context) {
       return result;
     },
   });
-  context.PocketStarlingDurablePublication = Object.freeze({
+  const durable = Object.freeze({
     ...baseDurable,
     createCoordinator(...args) {
       const coordinator = baseDurable.createCoordinator(...args);
@@ -189,7 +250,7 @@ function observeSave(context) {
       });
     },
   });
-  context.PocketStarlingObjectSealShadow = Object.freeze({
+  const seal = Object.freeze({
     ...baseSeal,
     canonical(value) {
       if (value?.schema === "portal.mtt.web.v1" && Array.isArray(value.nodes)) {
@@ -199,36 +260,68 @@ function observeSave(context) {
       return baseSeal.canonical(value);
     },
   });
-  return { measures, counts };
+  context.PocketStarlingLogicalEditShadow = logical;
+  context.PocketStarlingStorageShadow = storage;
+  context.PocketStarlingDurablePublication = durable;
+  context.PocketStarlingObjectSealShadow = seal;
+  return {
+    measures, counts,
+    restore() {
+      assert.strictEqual(context.PocketStarlingLogicalEditShadow, logical, "P364 observer remains single-layered");
+      assert.strictEqual(context.PocketStarlingStorageShadow, storage, "P364 observer remains single-layered");
+      assert.strictEqual(context.PocketStarlingDurablePublication, durable, "P364 observer remains single-layered");
+      assert.strictEqual(context.PocketStarlingObjectSealShadow, seal, "P364 observer remains single-layered");
+      context.PocketStarlingLogicalEditShadow = baseLogical;
+      context.PocketStarlingStorageShadow = baseStorage;
+      context.PocketStarlingDurablePublication = baseDurable;
+      context.PocketStarlingObjectSealShadow = baseSeal;
+      return true;
+    },
+  };
 }
 
-function issueMoves(context, start, amount) {
+function issueMoves(context, expectedOrder, start, amount) {
+  const ids = [];
   for (let index = start; index < start + amount; index += 1) {
-    context.moveNodeWithinSiblings(`p364-${String(index).padStart(4, "0")}`, -1);
+    const id = `p364-${String(index).padStart(4, "0")}`;
+    context.moveNodeWithinSiblings(id, -1);
+    moveExpectedLeft(expectedOrder, id);
+    ids.push(id);
   }
   assert.equal(context.__p180State.ops.length, amount, `D=${amount} is retained before Save`);
+  return ids;
 }
 
-async function saveCase(h, count, d, start) {
-  issueMoves(h.context, start, d);
+async function saveCase(h, count, d, start, expectedOrder) {
+  const mutationIds = issueMoves(h.context, expectedOrder, start, d);
   const observed = observeSave(h.context);
   const requestsBefore = h.requests.length;
   const wholeBefore = h.routeCount("/pockets/content/conditional-upload");
   const totalStarted = performance.now();
-  const saved = await h.context.exportTree({ returnDetails: true, downloadFallback: false });
-  const totalMs = performance.now() - totalStarted;
+  let saved;
+  let totalMs;
+  try {
+    saved = await h.context.exportTree({ returnDetails: true, downloadFallback: false });
+    totalMs = performance.now() - totalStarted;
+  } finally {
+    assert.equal(observed.restore(), true, "P364 restores all timed observer surfaces before verification");
+  }
   const requests = h.requests.slice(requestsBefore);
   assert.equal(saved.ok, true, JSON.stringify(saved));
   assert.equal(h.context.__p180State.ops.length, 0, `D=${d} is accepted`);
   assert.equal(h.routeCount("/pockets/content/conditional-upload"), wholeBefore, "no whole-record fallback");
-  const remote = await h.readRemoteState();
-  assert.equal(remote.authority.currentMode, "starling");
-  assert.equal(remote.head.revision, d === 1 ? 3 : 4);
+  const expectedHeadRevision = d === 1 ? 3 : 4;
+  const truth = await verifyAcceptedRemoteTruth(h, count, expectedOrder, expectedHeadRevision);
   return {
     N: count,
     D: d,
     userMutations: d,
     operationRecords: d,
+    workload: d === 1
+      ? "sequential series: starts from accepted H2"
+      : "sequential series: starts after accepted D=1 at H3",
+    mutationIds,
+    acceptedTruth: truth,
     logicalObjectsRequested: null,
     bytesResolved: null,
     reusedRefs: null,
@@ -273,8 +366,10 @@ async function oneRun(count) {
     decryptionsAndValidations: null,
     limitations: ["transport does not expose per-read response-byte totals", "cryptographic validation events are not individually surfaced by this harness"],
   };
-  const d1 = await saveCase(h, count, 1, 10);
-  const d10 = await saveCase(h, count, 10, 20);
+  const expectedOrder = Array.from({ length: count }, (_unused, index) => `p364-${String(index).padStart(4, "0")}`);
+  moveExpectedLeft(expectedOrder, "p364-0001");
+  const d1 = await saveCase(h, count, 1, 10, expectedOrder);
+  const d10 = await saveCase(h, count, 10, 20, expectedOrder);
   return { open, saves: [d1, d10] };
 }
 
@@ -288,7 +383,7 @@ function medianRow(rows) {
   return base;
 }
 
-test("P364 measures accepted offline Open/re-entry and ordinary Save scaling without changing production", { timeout: 300000 }, async () => {
+test("P364 measures accepted offline Open/re-entry and ordinary Save scaling without changing production", { timeout: 420000 }, async () => {
   const samples = [];
   for (const count of SIZES) {
     for (let repeat = 0; repeat < REPEATS; repeat += 1) samples.push(await oneRun(count));
