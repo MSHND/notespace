@@ -1,0 +1,50 @@
+name: P364d Node 24 Proof
+
+on:
+  push:
+    branches:
+      - candidate/p364d-proof
+    paths:
+      - .github/workflows/p364d-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 00a1d35e417b5f1ffaeb00288994e738ef0ec9eb
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify checked-out P364b candidate identity and clean tree
+        run: |
+          test "$(git rev-parse HEAD)" = "00a1d35e417b5f1ffaeb00288994e738ef0ec9eb"
+          test -z "$(git status --porcelain)"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run committed P364 offline benchmark
+        run: node --test tests/p364-offline-open-save-scaling-baseline.test.js
+
+      - name: Run static checks
+        run: npm run check
+
+      - name: Run P364 regression coverage
+        run: >-
+          node --test
+          tests/p160-starling-owner-save-preparation.test.js
+          tests/p172-real-p168-composition.test.js
+          tests/p172-real-truth-cutover-admission.test.js
+          tests/p190-starling-save-observability-and-reentry.test.js
+          tests/p346y-bounded-post-cas-acceptance.test.js
+          tests/p139-starling-logical-working-set-compose.test.js
+          tests/p146-starling-accepted-document-materialize.test.js
