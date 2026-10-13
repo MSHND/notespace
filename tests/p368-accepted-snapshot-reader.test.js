@@ -48,6 +48,20 @@ async function childSequenceRef(session, childrenRef, parentId) {
   }
 }
 
+function injectedReader(c, fixtureValue, ref, kind, bytes) {
+  const base = c.PocketStarlingObjectSealShadow, forced = new Map([[`${kind}\u0000${bytes}`, ref]]);
+  c.PocketStarlingObjectSealShadow = Object.freeze({ ...base,
+    refFor(actualKind, actualBytes) { return forced.get(`${actualKind}\u0000${actualBytes}`) || base.refFor(actualKind, actualBytes); },
+  });
+  return { ...fixtureValue.session, async resolveLogical(requested) { return requested === ref ? bytes : fixtureValue.session.resolveLogical(requested); } };
+}
+
+async function rootReferences(fixtureValue) {
+  const seal = JSON.parse(await fixtureValue.session.resolveLogical(fixtureValue.sealRef));
+  const root = JSON.parse(await fixtureValue.session.resolveLogical(seal.rootRef));
+  return { root, rootChildren: await childSequenceRef(fixtureValue.session, root.childrenRef, "root") };
+}
+
 test("P368 shares accepted validation for complete and explicitly incomplete scoped reads", async () => {
   const c = runtime(), f = fixture(c), api = c.PocketStarlingMaterializeShadow;
   const full = await api.materializeAccepted(f.session);
@@ -74,6 +88,22 @@ test("P368 rejects bad scoped expansions atomically and keeps other reached trut
   assert.equal((await scoped.readReachedNode("visible")).node.id, "visible");
   const broken = { ...f.session, async resolveLogical(ref) { return ref === f.sealRef ? "{" : f.session.resolveLogical(ref); } };
   assert.deepEqual(plain(await c.PocketStarlingMaterializeShadow.createAcceptedSnapshotReader(broken)), { ok: false, reason: "logical-ref-mismatch" });
+});
+
+test("P368 scoped reader directly rejects malformed structural input without committing a frontier", async () => {
+  const cases = [
+    { name: "missing child page", build: async (c, f, refs) => ({ session: { ...f.session, async resolveLogical(ref) { return ref === refs.rootChildren ? undefined : f.session.resolveLogical(ref); } }, reason: "missing-logical-object" }) },
+    { name: "wrong kind child page", build: async (c, f, refs) => { const bytes = await f.session.resolveLogical(refs.root.childrenRef); return { session: injectedReader(c, f, refs.rootChildren, "sequence-leaf", bytes), reason: "invalid-sequence-object" }; } },
+    { name: "invalid sequence count", build: async (c, f, refs) => { const page = JSON.parse(await f.session.resolveLogical(refs.rootChildren)); const bytes = c.PocketStarlingObjectSealShadow.canonical({ ...page, count: page.count + 1 }).bytes; return { session: injectedReader(c, f, refs.rootChildren, "sequence-leaf", bytes), reason: "invalid-sequence-object" }; } },
+    { name: "duplicate sibling", build: async (c, f, refs) => { const page = JSON.parse(await f.session.resolveLogical(refs.rootChildren)); const bytes = c.PocketStarlingObjectSealShadow.canonical({ ...page, items: ["visible", "visible"], count: 2 }).bytes; return { session: injectedReader(c, f, refs.rootChildren, "sequence-leaf", bytes), reason: "duplicate-or-cyclic-current-node" }; } },
+    { name: "malformed trie", build: async (c, f, refs) => { const trie = JSON.parse(await f.session.resolveLogical(refs.root.childrenRef)); const bytes = c.PocketStarlingObjectSealShadow.canonical({ ...trie, children: [{ key: "x", ref: 1 }] }).bytes; return { session: injectedReader(c, f, refs.root.childrenRef, "children-trie", bytes), reason: "invalid-trie-object" }; } },
+  ];
+  for (const entry of cases) {
+    const c = runtime(), f = fixture(c), refs = await rootReferences(f), built = await entry.build(c, f, refs);
+    const scoped = await c.PocketStarlingMaterializeShadow.createAcceptedSnapshotReader(built.session);
+    assert.deepEqual(plain(await scoped.readChildren("root")), { ok: false, reason: built.reason }, entry.name);
+    assert.deepEqual(plain(await scoped.readReachedNode("visible")), { ok: false, reason: "unreachable-node" }, entry.name);
+  }
 });
 
 test("P368 full materialisation retains accepted placement/content failure precedence over concurrent children failure", async () => {
