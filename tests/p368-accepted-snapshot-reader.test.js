@@ -36,7 +36,16 @@ function fixture(c, count = 4, badNode = null) {
   const rootRef = put("pocket-root", { schema: logical.ROOT_SCHEMA, kind: "pocket-root", capacity: 4, contentRef: empty, placementRef: placement, childrenRef, preservationRef });
   const sealRef = put("candidate-seal", { schema: logical.SEAL_SCHEMA, kind: "candidate-seal", rootRef, previousSealRef: null });
   const session = { acceptedSealRef: sealRef, async resolveLogical(ref) { calls.push(ref); return store.get(ref); }, async readContent(nodeId) { return { ok: true, nodeId, payload: { label: nodeId } }; }, async readPlacement(nodeId) { return { ok: true, nodeId, parentId: nodeId === badNode ? "wrong" : nodeId.startsWith("bulk-") ? (nodeId === "bulk-0" ? "unrelated" : `bulk-${Number(nodeId.slice(5)) - 1}`) : nodeId.startsWith("visible-") ? "visible" : "root" }; } };
-  return { session, calls, sealRef };
+  return { session, calls, sealRef, store };
+}
+
+async function childSequenceRef(session, childrenRef, parentId) {
+  let ref = childrenRef;
+  for (let index = 0; ; index += 1) {
+    const trie = JSON.parse(await session.resolveLogical(ref));
+    if (index === parentId.length) return trie.valueRef;
+    ref = trie.children.find((edge) => edge.key === parentId[index]).ref;
+  }
 }
 
 test("P368 shares accepted validation for complete and explicitly incomplete scoped reads", async () => {
@@ -65,6 +74,18 @@ test("P368 rejects bad scoped expansions atomically and keeps other reached trut
   assert.equal((await scoped.readReachedNode("visible")).node.id, "visible");
   const broken = { ...f.session, async resolveLogical(ref) { return ref === f.sealRef ? "{" : f.session.resolveLogical(ref); } };
   assert.deepEqual(plain(await c.PocketStarlingMaterializeShadow.createAcceptedSnapshotReader(broken)), { ok: false, reason: "logical-ref-mismatch" });
+});
+
+test("P368 full materialisation retains accepted placement/content failure precedence over concurrent children failure", async () => {
+  const c = runtime(), f = fixture(c);
+  const seal = JSON.parse(await f.session.resolveLogical(f.sealRef));
+  const root = JSON.parse(await f.session.resolveLogical(seal.rootRef));
+  const visibleChildrenRef = await childSequenceRef(f.session, root.childrenRef, "visible");
+  const competing = { ...f.session,
+    async resolveLogical(ref) { return ref === visibleChildrenRef ? undefined : f.session.resolveLogical(ref); },
+    async readPlacement(nodeId) { return nodeId === "visible" ? { ok: true, nodeId, parentId: "wrong" } : f.session.readPlacement(nodeId); },
+  };
+  assert.deepEqual(plain(await c.PocketStarlingMaterializeShadow.materializeAccepted(competing)), { ok: false, reason: "placement-parent-disagreement" });
 });
 
 test("P368 scoped frontier is bounded across unrelated 100, 500, and 2000-node tails", async () => {
