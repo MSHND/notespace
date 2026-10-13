@@ -1,0 +1,63 @@
+name: P366c Node 24 Snapshot Cursor Proof
+
+on:
+  push:
+    branches:
+      - candidate/p366c-proof
+    paths:
+      - .github/workflows/p366c-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a407b6135b4101719038b290a1e2cc32e4af18a6
+          persist-credentials: false
+
+      - name: Verify immutable candidate identity
+        run: |
+          test "$(git rev-parse HEAD)" = "a407b6135b4101719038b290a1e2cc32e4af18a6"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Node 24
+        run: |
+          node --version
+          case "$(node --version)" in
+            v24.*) ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run P366 regression suite
+        id: regression
+        continue-on-error: true
+        run: |
+          node --test \
+            tests/p160-starling-owner-save-preparation.test.js \
+            tests/p172-real-p168-composition.test.js \
+            tests/p172-real-truth-cutover-admission.test.js \
+            tests/p190-starling-save-observability-and-reentry.test.js \
+            tests/p346y-bounded-post-cas-acceptance.test.js \
+            tests/p139-starling-logical-working-set-compose.test.js \
+            tests/p146-starling-accepted-document-materialize.test.js \
+            tests/p366-authenticated-snapshot-cursor.test.js
+
+      - name: Run Pocket static check
+        if: ${{ always() && (steps.regression.outcome == 'success' || steps.regression.outcome == 'failure') }}
+        run: npm run check
+
+      - name: Preserve regression failure
+        if: ${{ steps.regression.outcome == 'failure' }}
+        run: exit 1
