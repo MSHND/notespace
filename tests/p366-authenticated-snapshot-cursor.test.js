@@ -390,3 +390,45 @@ test("P366 cursor remains bound to one authenticated Open session, not the lates
   assert.equal(cursor.diagnostics().rootRef,
     JSON.parse(await openedA.session.resolveLogical(openedA.session.acceptedSealRef)).rootRef);
 });
+
+test("P368 production reader stays pinned to authenticated sessions and keeps resolver caches isolated", async () => {
+  const writer = runtime(), stage = await stageFixture(writer, 100), remoteState = remote();
+  await publish(writer, stage, remoteState, []);
+  const readerA = runtime(), callsA = [], openedA = await open(readerA, stage, remoteState, callsA);
+  const apiA = readerA.PocketStarlingMaterializeShadow;
+  let materializeCalls = 0;
+  readerA.PocketStarlingMaterializeShadow = Object.freeze({ ...apiA,
+    async materializeAccepted() { materializeCalls += 1; throw Error("scoped reader must not materialise"); },
+  });
+  const scopedA = await apiA.createAcceptedSnapshotReader(openedA.session);
+  assert.equal(scopedA.ok, true);
+  const openGets = getCount(callsA), beforeA = getCount(callsA);
+  const rootA = await scopedA.readChildren("root"), visibleA = await scopedA.readChildren("visible");
+  const afterA = getCount(callsA), beforeRepeat = getCount(callsA);
+  assert.equal(rootA.scope, "incomplete");
+  assert.deepEqual(plain(rootA.nodes.map((node) => node.id)), ["visible", "unrelated"]);
+  assert.deepEqual(plain(visibleA.nodes.map((node) => node.id)), ["visible-first", "visible-second"]);
+  await scopedA.readChildren("visible");
+  assert.equal(getCount(callsA) - beforeRepeat, 0, "repeat uses this reader cache");
+  assert.equal(materializeCalls, 0);
+  const acceptedA = openedA.session.acceptedSealRef;
+  const readerFresh = runtime(), callsFresh = [], openedFresh = await open(readerFresh, stage, remoteState, callsFresh);
+  const scopedFresh = await readerFresh.PocketStarlingMaterializeShadow.createAcceptedSnapshotReader(openedFresh.session);
+  const beforeFresh = getCount(callsFresh);
+  assert.equal((await scopedFresh.readChildren("root")).ok, true);
+  assert.ok(getCount(callsFresh) > beforeFresh, "fresh authenticated resolver performs its own reads");
+  assert.equal(openedFresh.session.acceptedSealRef, acceptedA, "synthetic later Head was not a valid authenticated B");
+  remoteState.head = { ...remoteState.head, revision: remoteState.head.revision + 1, sealRef: "later-head-not-adopted" };
+  assert.equal((await scopedA.readReachedNode("visible-second")).node.id, "visible-second");
+  assert.equal(scopedA.diagnostics().acceptedSealRef, acceptedA);
+  assert.equal(writeRoutes(callsA).length, 0);
+
+  const failing = await apiA.createAcceptedSnapshotReader(Object.freeze({ ...openedA.session,
+    async readPlacement(nodeId) { const value = await openedA.session.readPlacement(nodeId); return nodeId === "visible-first" ? { ...value, parentId: "wrong" } : value; },
+  }));
+  assert.equal((await failing.readChildren("root")).ok, true);
+  assert.equal((await failing.readChildren("visible")).reason, "placement-parent-disagreement");
+  assert.equal((await failing.readReachedNode("visible-first")).reason, "unreachable-node");
+  assert.equal((await scopedFresh.readReachedNode("visible")).node.id, "visible");
+  assert.ok(openGets >= 2 && afterA > beforeA);
+});
