@@ -1,0 +1,51 @@
+name: P364h Node 24 Regression Proof
+
+on:
+  push:
+    branches:
+      - candidate/p364h-proof
+    paths:
+      - .github/workflows/p364h-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  regression-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 714e4b48fbb4b341ec145929385b73d620f3017c
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify exact P364g checkout, clean tree, and Node 24
+        run: |
+          test "$(git rev-parse HEAD)" = "714e4b48fbb4b341ec145929385b73d620f3017c"
+          test -z "$(git status --porcelain)"
+          node --version
+          test "$(node --version | cut -d. -f1)" = "v24"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run P364 regression suite
+        id: regression
+        run: |
+          node --test \
+            tests/p160-starling-owner-save-preparation.test.js \
+            tests/p172-real-p168-composition.test.js \
+            tests/p172-real-truth-cutover-admission.test.js \
+            tests/p190-starling-save-observability-and-reentry.test.js \
+            tests/p346y-bounded-post-cas-acceptance.test.js \
+            tests/p139-starling-logical-working-set-compose.test.js \
+            tests/p146-starling-accepted-document-materialize.test.js
+
+      - name: Run static checks
+        if: ${{ always() && (steps.regression.outcome == 'success' || steps.regression.outcome == 'failure') }}
+        run: npm run check
