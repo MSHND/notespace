@@ -1,0 +1,75 @@
+name: P370 Node 24 Immutable Progressive-Knowledge Proof
+
+on:
+  push:
+    branches:
+      - candidate/p370-proof
+    paths:
+      - .github/workflows/p370-proof.yml
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact immutable P370 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 27028cc78bfd13596e603709ed1e47b684e3cdef
+          persist-credentials: false
+
+      - name: Verify pinned SHA, clean tree and authorised two-file diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "27028cc78bfd13596e603709ed1e47b684e3cdef"
+          test -z "$(git status --porcelain)"
+          git diff --check 593299b63f81eb5a766054d25903a999a9425b42 27028cc78bfd13596e603709ed1e47b684e3cdef
+          git diff --name-only 593299b63f81eb5a766054d25903a999a9425b42 27028cc78bfd13596e603709ed1e47b684e3cdef > /tmp/p370-actual-files
+          printf '%s\n' js/pocket-progressive-open-state.js tests/p370-progressive-open-state.test.js > /tmp/p370-expected-files
+          diff -u /tmp/p370-expected-files /tmp/p370-actual-files
+          ! grep -Fq 'pocket-progressive-open-state.js' index.html
+
+      - name: Establish Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify Node 24
+        run: |
+          node --version
+          case "$(node --version)" in
+            v24.*) ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: P370 and accepted regression suites under Node 24
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=15s 900s node --test \
+            tests/p370-progressive-open-state.test.js \
+            tests/p139-starling-logical-working-set-compose.test.js \
+            tests/p146-starling-accepted-document-materialize.test.js \
+            tests/p160-starling-owner-save-preparation.test.js \
+            tests/p172-real-p168-composition.test.js \
+            tests/p172-real-truth-cutover-admission.test.js \
+            tests/p190-starling-save-observability-and-reentry.test.js \
+            tests/p346o-two-node-pipeline-coalescing.test.js \
+            tests/p346y-bounded-post-cas-acceptance.test.js \
+            tests/p366-authenticated-snapshot-cursor.test.js \
+            tests/p368-accepted-snapshot-reader.test.js
+
+      - name: Pocket static check
+        run: npm run check
+
+      - name: Final candidate whitespace and scope check
+        run: |
+          git diff --check 593299b63f81eb5a766054d25903a999a9425b42 27028cc78bfd13596e603709ed1e47b684e3cdef
+          test -z "$(git status --porcelain)"
