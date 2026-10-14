@@ -218,29 +218,70 @@ test("P379 real same-target runtime Open B BUSY while A held in authentication; 
 });
 
 test("P379 genuine new-device ENROLMENT window keeps competing runtime Open B completely outside",async()=>{
-  const entered=gate(),release=gate();let first=true;
+  const entered=gate(),release=gate();let first=true,forwarded=false;
+  let aSettled=false,attempts=0,retirements=0,attemptCurrent=null;
   const j=await createBrowserJourney({skipOpenExisting:true,
+    observerFactory({isAttemptCurrent}){
+      attempts++;attemptCurrent=isAttemptCurrent;
+      return {onScopedStarlingReader(){throw Error("whole-record must not invoke Starling observer");},
+        retire(){retirements++;}};
+    },
     async beforeBRequest(route){
       if(route==="addEnvelope"&&first){
         first=false;entered.release();await release.promise;
+        forwarded=true;
       }
     }});
-  const a=j.runtime.openExisting();await entered.promise;
-  const auth=routeCount(j,"beginAuthentication"),writes=j.idb.writes.length;
-  const grants=routeCount(j,"addEnvelope");
-  assert.ok(auth>0);assert.equal(grants,0);
+  const a=j.runtime.openExisting();
+  void a.then(()=>{aSettled=true;},()=>{aSettled=true;});
+  await entered.promise;
+  assert.equal(forwarded,false,"A's held enrolment was not forwarded");
+  assert.equal(aSettled,false,"A remains held");
+  assert.equal(attempts,1);
+  assert.equal(retirements,0);
+  assert.equal(attemptCurrent(),true);
+  const authenticationBaseline=routeCount(j,"beginAuthentication");
+  const enrolmentBaseline=routeCount(j,"addEnvelope");
+  const localWriteBaseline=j.idb.writes.length;
+  const documentCommitBaseline=j.commits;
+  const ownerBaseline=j.ownerKind;
+  assert.ok(authenticationBaseline>0);
+
   const b=await j.runtime.openExisting();
+  assert.equal(b.ok,false);
   assert.equal(b.reason,"additional-device-open-busy");
-  assert.equal(routeCount(j,"beginAuthentication"),auth);
-  assert.equal(routeCount(j,"addEnvelope"),grants);
-  assert.equal(j.idb.writes.length,writes);
+  const authenticationDeltaDuringB=routeCount(j,"beginAuthentication")-authenticationBaseline;
+  const enrolmentDeltaDuringB=routeCount(j,"addEnvelope")-enrolmentBaseline;
+  const localWriteDeltaDuringB=j.idb.writes.length-localWriteBaseline;
+  const documentCommitDeltaDuringB=j.commits-documentCommitBaseline;
+  assert.equal(authenticationDeltaDuringB,0);
+  assert.equal(enrolmentDeltaDuringB,0);
+  assert.equal(localWriteDeltaDuringB,0);
+  assert.equal(documentCommitDeltaDuringB,0);
+  assert.equal(j.ownerKind,ownerBaseline,"B must not change document authority");
+  assert.equal(aSettled,false,"B must not settle A");
+  assert.equal(forwarded,false,"B must not release A's enrolment gate");
+  assert.equal(attempts,1,"B must not create another runtime attempt observer");
+  assert.equal(retirements,0,"B must not retire A's observer");
+  assert.equal(attemptCurrent(),true,"B must not release or replace A's flight");
+
   release.release();
-  const opened=await a;assert.equal(opened.ok,true,JSON.stringify(opened));
-  assert.equal(routeCount(j,"addEnvelope"),1);
+  const opened=await a;
+  assert.equal(opened.ok,true,JSON.stringify(opened));
+  assert.equal(opened.reason,"synced-pocket-opened");
+  assert.equal(forwarded,true,"A must forward its own original addEnvelope request");
+  const legitimateEnrolmentIncrement=routeCount(j,"addEnvelope")-enrolmentBaseline;
+  assert.equal(legitimateEnrolmentIncrement,1);
   assert.equal(j.ownerKind,"synced");
-  assert.notEqual((await j.runtime.openExisting()).reason,"additional-device-open-busy");
-  console.log("P379_ENROLMENT "+JSON.stringify({busy:b.reason,authenticationDelta:0,
-    enrolmentDelta:0,originalGrants:routeCount(j,"addEnvelope"),finalOwner:j.ownerKind}));
+  assert.equal(retirements,1,"A retires its observer at settlement");
+  assert.equal(attemptCurrent(),false,"A's runtime flight is retired");
+  assert.notEqual((await j.runtime.openExisting()).reason,"additional-device-open-busy",
+    "a subsequent eligible Open must not be blocked by the completed flight");
+  console.log("P379_ENROLMENT "+JSON.stringify({
+    enrolmentBaseline,busyReason:b.reason,authenticationDeltaDuringB,
+    enrolmentDeltaDuringB,localWriteDeltaDuringB,documentCommitDeltaDuringB,
+    legitimateEnrolmentIncrement,finalOwner:j.ownerKind
+  }));
 });
 
 test("P379 real final owner-adoption awaited window holds one runtime flight until success",async()=>{
