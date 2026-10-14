@@ -8,6 +8,8 @@
   const DEPENDENCIES = ["captureTarget", "isTargetCurrent", "validatePayload", "adoptOpenedPocket"];
   // Dormant P355e-only; never passed by the ordinary browser Open composition.
   const COMPLETED_CONTINUITY_DEPENDENCY = "adoptCompletedOpenedPocket";
+  // Dormant P375-only scoped observer; absent from the ordinary browser Open.
+  const SCOPED_READER_DEPENDENCY = "onScopedStarlingReader";
   const ACTIVATION_DRAFT_FIELDS = Object.freeze([
     "kind", "schemaVersion", "activationId", "stage", "sourceOwnerKind",
     "sourceContinuityId", "syncedPocketId", "deviceId", "ids", "content",
@@ -125,10 +127,12 @@
   }
 
   function validDependencies(value) {
-    if (!object(value) || Object.keys(value).some((key) => ![...DEPENDENCIES, COMPLETED_CONTINUITY_DEPENDENCY].includes(key))
+    if (!object(value) || Object.keys(value).some((key) => ![...DEPENDENCIES, COMPLETED_CONTINUITY_DEPENDENCY, SCOPED_READER_DEPENDENCY].includes(key))
         || DEPENDENCIES.some((key) => typeof value[key] !== "function")
         || (Object.prototype.hasOwnProperty.call(value, COMPLETED_CONTINUITY_DEPENDENCY)
-          && typeof value[COMPLETED_CONTINUITY_DEPENDENCY] !== "function")) return null;
+          && typeof value[COMPLETED_CONTINUITY_DEPENDENCY] !== "function")
+        || (Object.prototype.hasOwnProperty.call(value, SCOPED_READER_DEPENDENCY)
+          && typeof value[SCOPED_READER_DEPENDENCY] !== "function")) return null;
     return value;
   }
 
@@ -254,7 +258,7 @@
   }
 
   async function readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority,
-    dependencies, authority) {
+    dependencies, authority, captured) {
     const remoteOpen = global.PocketStarlingRemoteOpenShadow;
     const materialize = global.PocketStarlingMaterializeShadow;
     if (!semanticAuthority || !remoteOpen || typeof remoteOpen.createRemoteOpener !== "function"
@@ -269,6 +273,31 @@
     if (!opened || opened.outcome !== "opened" || !opened.session
         || !object(opened.head) || opened.head.schema !== "pocket.starling.head.v1"
         || !Number.isSafeInteger(opened.head.revision) || opened.head.revision < 1) return null;
+    if (dependencies.onScopedStarlingReader) {
+      // Only this opted-in path constructs scoped knowledge, using the same
+      // authenticated session/Head that normal complete Open already selected.
+      if (!captured || !sameTarget(dependencies, captured)
+          || typeof materialize.createAcceptedSnapshotReader !== "function") return null;
+      let reader;
+      try { reader = await materialize.createAcceptedSnapshotReader(opened.session); }
+      catch (_error) { return null; }
+      if (!reader || reader.ok !== true || reader.scope !== "incomplete"
+          || reader.acceptedSealRef !== opened.session.acceptedSealRef
+          || typeof reader.readChildren !== "function"
+          || typeof reader.readReachedNode !== "function"
+          || !sameTarget(dependencies, captured)) return null;
+      const source = freeze({
+        syncedPocketId,
+        authorityRevision: authority.authorityRevision,
+        headRevision: opened.head.revision,
+        headSealStorageRef: opened.head.sealRef,
+        acceptedSealRef: opened.session.acceptedSealRef,
+      });
+      const isCurrent = freeze(() => sameTarget(dependencies, captured));
+      try { await dependencies.onScopedStarlingReader(reader, source, isCurrent); }
+      catch (_error) { return null; }
+      if (!sameTarget(dependencies, captured)) return null;
+    }
     let materialized;
     try { materialized = await materialize.materializeAccepted(opened.session); }
     catch (_error) { return null; }
@@ -280,7 +309,7 @@
       revision: rollback.revision, head: opened.head, authorityRevision: authority.authorityRevision });
   }
 
-  async function selectCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies) {
+  async function selectCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, captured) {
     const authority = await readAuthority(config, syncedPocketId);
     if (!authority) return null;
     if (authority.mode === "legacy") {
@@ -288,7 +317,7 @@
       return current ? freeze({ kind: "whole-record", ...current }) : null;
     }
     if (authority.mode === "starling") {
-      return readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, authority);
+      return readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, authority, captured);
     }
     if (authority.mode !== "whole-record") return null;
     const current = await readCurrent(config, syncedPocketId, randomId(config), masterKey, dependencies);
@@ -296,7 +325,7 @@
     const after = await readAuthority(config, syncedPocketId);
     if (!after) return null;
     if (after.mode === "starling") {
-      return readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, after);
+      return readStarlingCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, after, captured);
     }
     if (after.mode !== "whole-record" || after.authorityRevision !== authority.authorityRevision) return null;
     return freeze({ kind: "whole-record", ...current });
@@ -428,7 +457,7 @@
   }
 
   async function adoptOpened(config, dependencies, captured, syncedPocketId, record, masterKey, semanticAuthority = null) {
-    const latest = await selectCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies);
+    const latest = await selectCurrent(config, syncedPocketId, masterKey, semanticAuthority, dependencies, captured);
     if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
     if (latest.kind === "starling" && latest.revision !== record.remote.confirmedRevision) {
       return fail("additional-device-state-invalid");
@@ -583,7 +612,7 @@
       try { config.crypto.validateNonExtractableAesKey(opened?.masterKey); }
       catch (_error) { return fail("additional-device-open-failed"); }
       const current = await selectCurrent(config, discovery.syncedPocketId, opened.masterKey,
-        opened.semanticAuthority || null, dependencies);
+        opened.semanticAuthority || null, dependencies, captured);
       if (!current) return fail("remote-content-invalid");
       let draft;
       let envelope;
@@ -660,7 +689,7 @@
         );
       config.crypto.validateNonExtractableAesKey(durableBundle?.masterKey);
       const latest = await selectCurrent(config, discovery.syncedPocketId, durableBundle.masterKey,
-        durableBundle.semanticAuthority || null, dependencies);
+        durableBundle.semanticAuthority || null, dependencies, captured);
       if (!latest || !sameTarget(dependencies, captured)) return fail("additional-device-target-stale");
       if (latest.kind === "starling" && latest.revision !== current.revision) {
         return fail("additional-device-state-invalid");
