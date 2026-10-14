@@ -696,3 +696,198 @@ function deleteSelected() {
   }
   deleteNodeById(state.selectedId);
 }
+
+// P373 dormant, read-only projection of authenticated P370 knowledge.
+// It is never a document model, command target, Open conductor or Save source.
+const progressiveMainMountOwners = new WeakMap();
+
+function createProgressiveMainPresentation({ knowledge, mount, isCurrent } = {}) {
+  if (!knowledge || typeof knowledge.inspect !== "function"
+      || !mount || typeof mount.appendChild !== "function"
+      || typeof mount.removeChild !== "function"
+      || typeof mount.setAttribute !== "function"
+      || typeof mount.ownerDocument?.createElement !== "function"
+      || typeof isCurrent !== "function") {
+    throw new TypeError("Progressive Main presentation requires knowledge, DOM mount and current-session guard.");
+  }
+  const first = knowledge.inspect("root");
+  if (!first || first.scope !== "incomplete" || first.reached !== true
+      || first.id !== "root" || first.node !== null
+      || typeof first.acceptedSealRef !== "string" || !first.acceptedSealRef) {
+    throw new TypeError("Progressive Main presentation requires a P370 incomplete root.");
+  }
+
+  const seal = first.acceptedSealRef;
+  const documentOwner = mount.ownerDocument;
+  const token = {};
+  const mounted = new Map();
+  let disposed = false;
+  progressiveMainMountOwners.set(mount, token);
+
+  function current() {
+    if (disposed || progressiveMainMountOwners.get(mount) !== token) return false;
+    try { return isCurrent() === true; } catch (_) { return false; }
+  }
+  function fail(reason) {
+    return Object.freeze({ ok: false, scope: "incomplete", acceptedSealRef: seal, reason });
+  }
+  function validDescription(value, id) {
+    return !!value && value.scope === "incomplete"
+      && value.acceptedSealRef === seal && value.reached === true
+      && value.id === id
+      && (id === "root" ? value.node === null
+        : !!value.node && value.node.id === id)
+      && ["unresolved", "pending", "ready", "failed"].includes(value.childrenState)
+      && (value.childrenState === "ready"
+        ? Array.isArray(value.childIds) : value.childIds === null)
+      && (value.childrenState !== "failed"
+        || (typeof value.failureReason === "string" && value.failureReason.length > 0));
+  }
+  function read(parentId) {
+    let parent;
+    try { parent = knowledge.inspect(parentId); } catch (_) { return null; }
+    if (!validDescription(parent, parentId)) return null;
+    const children = [];
+    if (parent.childrenState === "ready") {
+      const ids = new Set();
+      for (let i = 0; i < parent.childIds.length; i += 1) {
+        const id = parent.childIds[i];
+        if (typeof id !== "string" || !id || ids.has(id)) return null;
+        ids.add(id);
+        let child;
+        try { child = knowledge.inspect(id); } catch (_) { return null; }
+        // Identity/parent agreement is an interface guard, not a second
+        // validator of P368's authenticated structural records.
+        if (!validDescription(child, id) || child.node.parentId !== parentId
+            || child.node.order !== i) return null;
+        children.push(child);
+      }
+    }
+    return { parent, children };
+  }
+  function status(value) {
+    switch (value.childrenState) {
+      case "unresolved": return "Children not loaded";
+      case "pending": return "Loading children…";
+      case "failed": return "Could not load children: " + value.failureReason;
+      case "ready": return value.childIds.length ? "Children ready" : "No children (validated)";
+      default: return "";
+    }
+  }
+  function setStatus(badge, value) {
+    if (!badge) return;
+    badge.setAttribute("data-children-state", value.childrenState);
+    badge.textContent = status(value);
+  }
+  function createStatusRow(value) {
+    const li = documentOwner.createElement("li");
+    li.className = "treeEmptyHint";
+    const badge = documentOwner.createElement("span");
+    badge.className = "emptyStateText";
+    setStatus(badge, value);
+    li.appendChild(badge);
+    return { branch: li, badge };
+  }
+  function createBranch(value) {
+    const li = documentOwner.createElement("li");
+    li.className = "treeNode";
+    const row = documentOwner.createElement("div");
+    row.className = "row";
+    row.tabIndex = -1;
+    row.setAttribute("data-node-id", value.id);
+    row.setAttribute("aria-disabled", "true");
+    const label = documentOwner.createElement("div");
+    label.className = "label";
+    label.textContent = String(value.node.label ?? "");
+    const badge = documentOwner.createElement("span");
+    badge.className = "detailBadge";
+    setStatus(badge, value);
+    const group = documentOwner.createElement("ul");
+    group.className = "children groupedChildBlock";
+    row.appendChild(label);
+    row.appendChild(badge);
+    li.appendChild(row);
+    li.appendChild(group);
+    return { branch: li, row, badge, group, state: value.childrenState,
+      ids: null };
+  }
+  // Staging finishes before replacing exactly the owning child list.
+  function replaceGroup(group, branches) {
+    while (group.firstChild) group.removeChild(group.firstChild);
+    for (const branch of branches) group.appendChild(branch);
+  }
+  function refresh(parentId) {
+    if (!current()) return fail("stale-session");
+    if (typeof parentId !== "string" || !parentId) return fail("invalid-parent");
+    if (parentId !== "root" && !mounted.has(parentId)) return fail("unmounted-parent");
+    const reached = read(parentId);
+    if (!reached) return fail("incompatible-knowledge");
+    const { parent, children } = reached;
+    const prior = mounted.get(parentId);
+    if (prior?.state === "ready") {
+      if (parent.childrenState !== "ready"
+          || prior.ids.length !== children.length
+          || prior.ids.some((id, i) => id !== children[i].id)) {
+        return fail("ready-list-changed");
+      }
+      return Object.freeze({ ok: true, scope: "incomplete",
+        acceptedSealRef: seal, parentId, childrenState: "ready", changed: false });
+    }
+
+    let staged = null;
+    let placeholder = null;
+    try {
+      if (parent.childrenState === "ready") {
+        staged = children.map(createBranch);
+      } else if (parentId === "root" && !prior) {
+        placeholder = createStatusRow(parent);
+      }
+    } catch (_) { return fail("mount-staging-failed"); }
+    if (!current()) return fail("stale-session");
+
+    if (parentId === "root" && !prior) {
+      mount.setAttribute("data-pocket-scope", "incomplete");
+      mount.setAttribute("data-accepted-seal-ref", seal);
+      if (staged && staged.length) {
+        replaceGroup(mount, staged.map(x => x.branch));
+        mounted.set("root", { group: mount, badge: null, state: "ready",
+          ids: children.map(x => x.id) });
+        for (let i = 0; i < staged.length; i += 1) mounted.set(children[i].id, staged[i]);
+      } else {
+        const display = placeholder || createStatusRow(parent);
+        replaceGroup(mount, [display.branch]);
+        mounted.set("root", { group: mount, badge: display.badge,
+          state: parent.childrenState, ids: parent.childrenState === "ready" ? [] : null });
+      }
+    } else if (parent.childrenState === "ready") {
+      if (!prior) return fail("unmounted-parent");
+      if (parentId === "root" && !staged.length) {
+        if (prior.badge) setStatus(prior.badge, parent);
+        else {
+          const display = createStatusRow(parent);
+          replaceGroup(mount, [display.branch]);
+          prior.badge = display.badge;
+        }
+      } else {
+        replaceGroup(prior.group, staged.map(x => x.branch));
+        if (prior.badge) setStatus(prior.badge, parent);
+        for (let i = 0; i < staged.length; i += 1) mounted.set(children[i].id, staged[i]);
+      }
+      prior.state = "ready";
+      prior.ids = children.map(x => x.id);
+    } else if (prior && prior.state !== parent.childrenState) {
+      setStatus(prior.badge, parent);
+      prior.state = parent.childrenState;
+    }
+    return Object.freeze({ ok: true, scope: "incomplete", acceptedSealRef: seal,
+      parentId, childrenState: parent.childrenState, changed: true });
+  }
+  function dispose() {
+    if (disposed) return false;
+    disposed = true;
+    if (progressiveMainMountOwners.get(mount) === token) progressiveMainMountOwners.delete(mount);
+    mounted.clear();
+    return true;
+  }
+  return Object.freeze({ refresh, dispose });
+}
