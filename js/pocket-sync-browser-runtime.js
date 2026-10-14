@@ -365,9 +365,13 @@
   function createRuntime(input) {
     if (!input || typeof input !== "object" || Array.isArray(input)
         || Object.keys(input).some((field) => ![...SERVICE_FIELDS, "discoveryService",
-          "persistenceAuthorityService", "objectHeadService", "environment"].includes(field))
+          "persistenceAuthorityService", "objectHeadService", "environment", "progressiveOpenObserverFactory"].includes(field))
         || SERVICE_FIELDS.some((field) => !Object.prototype.hasOwnProperty.call(input, field))) {
       throw new Error("Pocket Sync browser runtime configuration-invalid.");
+    }
+    if (Object.prototype.hasOwnProperty.call(input, "progressiveOpenObserverFactory")
+        && typeof input.progressiveOpenObserverFactory !== "function") {
+      throw new Error("Pocket Sync browser runtime progressive-observer-invalid.");
     }
     const config = input;
     const environment = browserEnvironment(config.environment);
@@ -406,6 +410,7 @@
 
     const now = typeof environment.now === "function" ? environment.now : Date.now;
     let ownerlessAuthenticatedWitness = null;
+    let activeExistingOpen = null;
 
     function freshRuntimeIdentifier() {
       const bytes = browserRandom(environment)(32);
@@ -2331,6 +2336,8 @@
             && input.accountSelection !== "choose-another")) {
         return safeFailure("additional-device-target-dirty");
       }
+      // Busy refusal does not acquire, supersede or retire the owning flight.
+      if (activeExistingOpen) return safeFailure("additional-device-open-busy");
       const requestedDiscard = input.discardTarget || null;
       const discardTarget = requestedDiscard
         && ["json", "vault"].includes(requestedDiscard.ownerKind)
@@ -2345,34 +2352,92 @@
         } catch (_error) { return safeFailure("additional-device-target-dirty"); }
       }
       if (!additionalTargetReplaceable(null, discardTarget)) return safeFailure("additional-device-target-dirty");
-      const additionalDevice = additionalApi.createAdditionalDeviceOpener({
-        crypto, deviceStore, accountClient,
-        strandedActivationClassifier,
-        discoveryService: config.discoveryService,
-        contentService: config.contentService,
-        envelopeService: config.envelopeService,
-        ...(authorityPair === 2 ? {
-          persistenceAuthorityService: config.persistenceAuthorityService,
-          objectHeadService: config.objectHeadService,
-        } : {}),
-        randomBytes: browserRandom(environment), now,
-      });
-      const jsonSafetyToken = discardTarget?.ownerKind === "json"
-        ? await global.captureJsonSafetyForSyncedDiscard?.() || null
-        : null;
-      let opened = null;
+
+      const originalTarget = additionalTarget();
+      if (!originalTarget || !additionalTargetReplaceable(originalTarget, discardTarget)) {
+        return safeFailure("additional-device-target-dirty");
+      }
+      const lease = { retired: false };
+      activeExistingOpen = lease; // Synchronous acquisition before any await.
+      const isAttemptCurrent = () => !lease.retired && activeExistingOpen === lease
+        && additionalTargetCurrent(originalTarget)
+        && additionalTargetReplaceable(originalTarget, discardTarget);
+      let observer = null;
       try {
-        opened = await additionalDevice.openExisting({
-          captureTarget: additionalTarget,
-          isTargetCurrent: additionalTargetCurrent,
-          validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
-          adoptOpenedPocket: (opened) => adoptAdditionalDevice(opened, discardTarget, jsonSafetyToken),
-        }, input.accountSelection === "choose-another"
-          ? { accountSelection: "choose-another" }
-          : {});
-        return opened;
+        if (config.progressiveOpenObserverFactory) {
+          try {
+            observer = config.progressiveOpenObserverFactory(frozen({ isAttemptCurrent }));
+          } catch (_error) {
+            return safeFailure("additional-device-observer-invalid");
+          }
+          if (observer && typeof observer.then === "function") {
+            // Factories are synchronous. Consume a rejected thenable without
+            // accepting it as a private observer or starting authentication.
+            Promise.resolve(observer).catch(() => {});
+            return safeFailure("additional-device-observer-invalid");
+          }
+          if (!observer || typeof observer.onScopedStarlingReader !== "function"
+              || typeof observer.retire !== "function") {
+            return safeFailure("additional-device-observer-invalid");
+          }
+        }
+        if (!isAttemptCurrent()) return safeFailure("additional-device-target-stale");
+
+        const additionalDevice = additionalApi.createAdditionalDeviceOpener({
+          crypto, deviceStore, accountClient,
+          strandedActivationClassifier,
+          discoveryService: config.discoveryService,
+          contentService: config.contentService,
+          envelopeService: config.envelopeService,
+          ...(authorityPair === 2 ? {
+            persistenceAuthorityService: config.persistenceAuthorityService,
+            objectHeadService: config.objectHeadService,
+          } : {}),
+          randomBytes: browserRandom(environment), now,
+        });
+        const jsonSafetyToken = discardTarget?.ownerKind === "json"
+          ? await global.captureJsonSafetyForSyncedDiscard?.() || null
+          : null;
+        try {
+          if (!isAttemptCurrent()) return safeFailure("additional-device-target-stale");
+          return await additionalDevice.openExisting({
+            captureTarget: additionalTarget,
+            isTargetCurrent: additionalTargetCurrent,
+            validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
+            ...(observer ? {
+              onScopedStarlingReader: async (reader, source, isCurrent) => {
+                if (!isAttemptCurrent()) throw new Error("opening-attempt-stale");
+                await observer.onScopedStarlingReader(reader, source, isCurrent);
+                if (!isAttemptCurrent()) throw new Error("opening-attempt-stale");
+              },
+            } : {}),
+            adoptOpenedPocket: (opened) => {
+              // Do not check the old target AFTER successful adoption: the
+              // authoritative adopter legitimately replaces its identity.
+              if (!isAttemptCurrent()) {
+                return frozen({ ok: false, reason: "additional-device-target-stale" });
+              }
+              return adoptAdditionalDevice(opened, discardTarget, jsonSafetyToken);
+            },
+          }, input.accountSelection === "choose-another"
+            ? { accountSelection: "choose-another" }
+            : {});
+        } finally {
+          global.releaseJsonSafetyForSyncedDiscard?.(jsonSafetyToken);
+        }
       } finally {
-        global.releaseJsonSafetyForSyncedDiscard?.(jsonSafetyToken);
+        // A terminal attempt becomes ineligible before retiring private
+        // observers; only its own lease can be released.
+        lease.retired = true;
+        if (observer) {
+          try {
+            const result = observer.retire();
+            if (result && typeof result.then === "function") {
+              Promise.resolve(result).catch(() => {});
+            }
+          } catch (_error) {}
+        }
+        if (activeExistingOpen === lease) activeExistingOpen = null;
       }
     }
 
