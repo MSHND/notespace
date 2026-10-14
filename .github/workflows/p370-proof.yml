@@ -20,6 +20,7 @@ jobs:
         with:
           ref: 27028cc78bfd13596e603709ed1e47b684e3cdef
           persist-credentials: false
+          fetch-depth: 2
 
       - name: Verify pinned SHA, clean tree and authorised two-file diff
         shell: bash
