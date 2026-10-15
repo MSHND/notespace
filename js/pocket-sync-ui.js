@@ -120,6 +120,66 @@
     const chooseAccount = overlay.querySelector(".vaultDialogChooseAccount");
     const restart = overlay.querySelector(".vaultDialogRestart");
     const cancel = overlay.querySelector(".vaultDialogSecondary");
+    let incomingPreview = null;
+    // This host exists ONLY for an explicitly opted-in integration.
+    // It is UI-owned: the integration may project, but only exact visual
+    // generation tokens can reveal or remove the current rows.
+    if (typeof integration.registerIncomingPreviewHost === "function") {
+      const card = overlay.querySelector(".vaultDialogCard");
+      const actions = overlay.querySelector(".vaultDialogActions");
+      if (card && actions && typeof card.insertBefore === "function") {
+        const region = document.createElement("div");
+        region.className = "vaultDialogIncomingPreview";
+        region.hidden = true;
+        region.setAttribute("aria-label", "Incoming synced Pocket preview");
+        const heading = document.createElement("h3");
+        heading.textContent = "Your Pocket is coming in";
+        const explanation = document.createElement("p");
+        explanation.textContent = "This is a read-only glimpse. Some branches have not arrived yet.";
+        const mount = document.createElement("ul");
+        mount.className = "vaultDialogIncomingTree";
+        mount.setAttribute("aria-label", "Read-only incoming Pocket outline");
+        region.appendChild(heading);
+        region.appendChild(explanation);
+        region.appendChild(mount);
+        card.insertBefore(region, actions);
+        let generation = null;
+        function empty() {
+          region.hidden = true;
+          while (mount.firstChild) mount.removeChild(mount.firstChild);
+          mount.removeAttribute("data-pocket-scope");
+          mount.removeAttribute("data-accepted-seal-ref");
+        }
+        const host = Object.freeze({
+          mount,
+          begin() {
+            generation = Object.freeze({});
+            empty();
+            return generation;
+          },
+          reveal(owned) {
+            if (!owned || generation !== owned || mount.firstChild === null) return false;
+            region.hidden = false;
+            return true;
+          },
+          clear(owned) {
+            if (!owned || generation !== owned) return false;
+            generation = null;
+            empty();
+            return true;
+          },
+        });
+        if (integration.registerIncomingPreviewHost(host) === true) {
+          incomingPreview = {
+            region, mount, host,
+            // Settled/idle UI cleanup; visual tokens do not cancel Open.
+            clearIdle() { generation = null; empty(); },
+          };
+        } else {
+          region.remove();
+        }
+      }
+    }
 
     function eligibleActivation(session) { return !!session && ["json", "vault"].includes(session.ownerKind); }
     function eligibleOpen(session) {
@@ -191,6 +251,9 @@
       discoveryVersion += 1;
       discovering = false;
       overlay.hidden = true;
+      // The runtime observer owns active-attempt cleanup; idle close is
+      // only a visual safety clear, never a network cancellation.
+      incomingPreview?.clearIdle();
       continuation = null;
       ownerlessActivationId = null;
       restartEligible = false;
@@ -442,6 +505,7 @@
       }
       if (result?.ok === true) {
         clearOpenDiagnostic();
+        incomingPreview?.clearIdle();
         overlay.hidden = true;
         continuation = null;
         refresh();
@@ -474,6 +538,7 @@
         primary.textContent = "Continue setup";
       }
       status.textContent = message(result);
+      if (mode === "open") incomingPreview?.clearIdle();
       if (mode === "open" && result?.reason === "synced-pocket-not-configured" && chooseAccount) {
         chooseAccount.hidden = false;
       }

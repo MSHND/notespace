@@ -133,7 +133,106 @@
     return typeof value === "string" && value.length > 0 && value === value.trim();
   }
 
-  function create() {
+  function create(options) {
+    if (options !== undefined && (!options || typeof options !== "object"
+        || Array.isArray(options) || Object.keys(options).length !== 1
+        || options.progressivePreview !== true)) {
+      throw new Error("Pocket Sync local preview composition option invalid.");
+    }
+    const previewRequested = options?.progressivePreview === true;
+    let previewHost = null;
+    let previewHostRegistered = false;
+
+    function registerIncomingPreviewHost(host) {
+      if (!previewRequested || previewHostRegistered || !host
+          || typeof host !== "object" || Array.isArray(host)
+          || typeof host.begin !== "function"
+          || typeof host.reveal !== "function"
+          || typeof host.clear !== "function"
+          || !host.mount || typeof host.mount.appendChild !== "function"
+          || typeof host.mount.removeChild !== "function"
+          || typeof host.mount.ownerDocument?.createElement !== "function") return false;
+      previewHostRegistered = true;
+      previewHost = host;
+      return true;
+    }
+
+    function createPrivatePreviewObserver({ isAttemptCurrent } = {}) {
+      // P379 invokes this only for an accepted Open, before authentication.
+      // The UI host was registered after this runtime was created.
+      const knowledgeFactory = global.PocketProgressiveOpenConnection?.createSession;
+      const bridgeFactory = global.PocketProgressiveOpenPresentationConnection?.createBridge;
+      const presenterFactory = global.createProgressiveMainPresentation;
+      if (!previewHost || typeof isAttemptCurrent !== "function"
+          || typeof knowledgeFactory !== "function"
+          || typeof bridgeFactory !== "function"
+          || typeof presenterFactory !== "function") {
+        throw new Error("Pocket Sync incoming preview unavailable.");
+      }
+      const host = previewHost;
+      const knowledgeSession = knowledgeFactory({ isAttemptCurrent });
+      let bridge = null;
+      let generation = null;
+      let retired = false;
+      const current = () => {
+        try { return !retired && isAttemptCurrent() === true; }
+        catch (_error) { return false; }
+      };
+      function clearOwned() {
+        if (bridge) {
+          try { bridge.dispose(); } catch (_error) {}
+          bridge = null;
+        }
+        const owned = generation;
+        generation = null;
+        if (owned !== null) {
+          try { host.clear(owned); } catch (_error) {}
+        }
+      }
+      return frozen({
+        async onScopedStarlingReader(reader, source, isCurrent) {
+          if (!current()) throw new Error("Pocket Sync incoming preview attempt stale.");
+          // A second P375 selection, including SAME Seal, must retire the
+          // first visual generation before P376 replaces reached knowledge.
+          clearOwned();
+          const owned = host.begin();
+          if (!owned || typeof owned !== "object") {
+            throw new Error("Pocket Sync incoming preview host invalid.");
+          }
+          generation = owned;
+          await knowledgeSession.onScopedStarlingReader(reader, source, isCurrent);
+          if (!current() || generation !== owned) {
+            throw new Error("Pocket Sync incoming preview attempt stale.");
+          }
+          const selected = knowledgeSession.currentSource();
+          const root = knowledgeSession.inspect("root");
+          if (!selected || !root || root.scope !== "incomplete"
+              || root.childrenState !== "ready" || root.reached !== true
+              || root.acceptedSealRef !== selected.acceptedSealRef) {
+            throw new Error("Pocket Sync incoming preview root invalid.");
+          }
+          bridge = bridgeFactory({
+            knowledgeSession, mount: host.mount, createPresentation: presenterFactory,
+            isAttemptCurrent,
+          });
+          const attached = bridge.attachCurrent();
+          if (!attached || attached.ok !== true
+              || attached.scope !== "incomplete" || !current()
+              || generation !== owned || knowledgeSession.currentSource() !== selected
+              || host.reveal(owned) !== true) {
+            throw new Error("Pocket Sync incoming preview projection failed.");
+          }
+        },
+        retire() {
+          if (retired) return false;
+          retired = true;
+          clearOwned(); // Token-owned cleanup works AFTER P379 retires its lease.
+          knowledgeSession.retire();
+          return true;
+        },
+      });
+    }
+
     const serviceRoot = configuredServiceRoot;
     const remote = global.PocketSyncRemoteClient;
     const browser = global.PocketSyncBrowserRuntime;
@@ -161,6 +260,9 @@
       ...authorityServices,
       envelopeService: remote.createEnvelopeService({ transport }),
       recoveryService: remote.createRecoveryService({ transport }),
+      ...(previewRequested
+        ? { progressiveOpenObserverFactory: createPrivatePreviewObserver }
+        : {}),
     });
     if (!runtime
         || typeof runtime.startOwnerlessFirstCreate !== "function"
@@ -323,6 +425,7 @@
       captureSwitchTarget, saveSwitchTarget, discardSwitchTarget,
       recoverExisting, resumeRecovery, findRecoveryAttempt, verifyRoundTrip, admitAcceptedDeleteRestore,
       startOwnerlessFirstCreate, continueOwnerlessFirstCreate,
+      ...(previewRequested ? { registerIncomingPreviewHost } : {}),
     });
     global.PocketSyncActiveIntegration = integration;
     try { global.PocketSyncUi?.install?.(integration); } catch (_error) {}
