@@ -30,12 +30,13 @@ test("P053 exposes only an injectable installer and does no work while no integr
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(UI_PATH, "utf8"), context, { filename: "pocket-sync-ui.js" });
   assert.deepEqual(Object.keys(context.PocketSyncUi), [
-    "install", "refresh", "canOpenExisting", "canCreateNew", "beginCreateNew",
+    "install", "refresh", "canOpenExisting", "canCreateNew", "beginCreateNew", "isDialogOpen",
   ]);
   assert.equal(Object.isFrozen(context.PocketSyncUi), true);
   assert.equal(context.PocketSyncUi.canOpenExisting(), false);
   assert.equal(context.PocketSyncUi.canCreateNew(), false);
   assert.equal(context.PocketSyncUi.beginCreateNew(), false);
+  assert.equal(context.PocketSyncUi.isDialogOpen(), false);
   assert.equal(context.PocketSyncUi.install(null), false);
 });
 
@@ -746,8 +747,10 @@ test("P053b keeps dirty detached work out of Sync open and single-flights a fres
 test("P053c idle Escape restores visible focus and busy Escape keeps Sync truthful", async () => {
   const idle = createUiHarness("json", { paletteOpen: true });
   idle.command.fire("click");
+  assert.equal(idle.context.PocketSyncUi.isDialogOpen(), true);
   idle.event("keydown", { key: "Escape" });
   assert.equal(idle.overlay.hidden, true);
+  assert.equal(idle.context.PocketSyncUi.isDialogOpen(), false);
   assert.equal(idle.activateCalls, 0);
   assert.equal(idle.openCalls, 0);
   assert.equal(idle.resumeCalls, 0);
@@ -758,6 +761,7 @@ test("P053c idle Escape restores visible focus and busy Escape keeps Sync truthf
   idle.event("keydown", { key: "Escape" });
   assert.equal(idle.overlay.querySelector(".vaultDialogSecondary").disabled, true);
   assert.equal(idle.overlay.hidden, false);
+  assert.equal(idle.context.PocketSyncUi.isDialogOpen(), true);
   idle.resolveActivate({ ok: false });
   await Promise.resolve(); await Promise.resolve();
   assert.equal(idle.overlay.hidden, false);

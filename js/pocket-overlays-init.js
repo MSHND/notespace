@@ -565,6 +565,7 @@ function openSelectedItemDetailsFromControls() {
 }
 
 function handleWindowFocusToTree() {
+  if (window.PocketSyncUi?.isDialogOpen?.() === true) return;
   const pickerOwner = window.PocketNativeFilePickerActivity;
   if (pickerOwner && typeof pickerOwner.isActive === "function" && pickerOwner.isActive()) return;
   if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
@@ -576,6 +577,8 @@ function handleWindowFocusToTree() {
   // do not pull the list back to the previously selected row.
   // The next actual click/keyboard action will choose where focus belongs.
   requestAnimationFrame(() => {
+    // The dialog may have opened AFTER focus restoration was scheduled.
+    if (window.PocketSyncUi?.isDialogOpen?.() === true) return;
     const currentPickerOwner = window.PocketNativeFilePickerActivity;
     if (currentPickerOwner
         && typeof currentPickerOwner.isActive === "function"
@@ -846,6 +849,9 @@ function bind() {
     triggerStatusAction(ev);
   });
   const handleGlobalShortcuts = (ev) => {
+    // Yield before any Main command, on both capture listeners.
+    // Do not preventDefault: Sync owns Escape/Tab and normal browser keys.
+    if (window.PocketSyncUi?.isDialogOpen?.() === true) return;
     if (typeof window.isPocketVaultRecoveryFlowOpen === "function"
         && window.isPocketVaultRecoveryFlowOpen()) return;
     if (typeof window.isPocketDeviceChangesDecisionOpen === "function"

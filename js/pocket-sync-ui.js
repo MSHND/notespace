@@ -5,6 +5,7 @@
   let canOpenExistingInstalled = () => false;
   let canCreateNewInstalled = () => false;
   let beginCreateNewInstalled = () => false;
+  let installedDialogOpen = () => false;
   const RECOVERY_COPY = Object.freeze({
     "recovery-required": "A recovery copy is needed to open this synced Pocket on this device.",
     "recovery-package-invalid": "Recovery copy could not be used. Your current Pocket is unchanged.",
@@ -110,6 +111,8 @@
       + '<div class="vaultDialogActions"><button class="vaultDialogPrimary" type="button"></button><button class="vaultDialogCreateAccount" type="button">Create new account</button><button class="vaultDialogRecovery" type="button">Use recovery copy…</button><button class="vaultDialogChooseAccount" type="button" hidden>Choose another account</button><button class="vaultDialogRestart" type="button">Restart recovery</button><button class="vaultDialogSecondary" type="button">Cancel</button></div>'
       + '</section>';
     document.body.appendChild(overlay);
+    // One visibility owner: all other event owners only ask this question.
+    installedDialogOpen = () => overlay.hidden === false;
     const title = overlay.querySelector("h2");
     const body = overlay.querySelector("#syncSetupBody");
     const status = overlay.querySelector("#syncSetupStatus");
@@ -120,6 +123,39 @@
     const chooseAccount = overlay.querySelector(".vaultDialogChooseAccount");
     const restart = overlay.querySelector(".vaultDialogRestart");
     const cancel = overlay.querySelector(".vaultDialogSecondary");
+    const dialogCard = overlay.querySelector(".vaultDialogCard");
+    if (dialogCard) dialogCard.tabIndex = -1;
+
+    function enabledDialogControls() {
+      return [primary, createAccount, recovery, chooseAccount, restart, cancel]
+        .filter(control => control && control.hidden !== true && control.disabled !== true);
+    }
+    function focusDialogFallback() {
+      if (overlay.hidden || !dialogCard) return;
+      const targets = enabledDialogControls();
+      // A disabled focused button is not a safe focus owner during busy Open.
+      const active = document.activeElement;
+      if (targets.includes(active)) return;
+      (targets[0] || dialogCard).focus?.({ preventScroll: true });
+    }
+    function keepDialogTab(event) {
+      if (overlay.hidden || event.key !== "Tab") return;
+      const targets = enabledDialogControls();
+      const active = document.activeElement;
+      if (targets.length === 0) {
+        event.preventDefault();
+        dialogCard?.focus?.({ preventScroll: true });
+        return;
+      }
+      const index = targets.indexOf(active);
+      if (index < 0 || (event.shiftKey === true && index === 0)
+          || (event.shiftKey !== true && index === targets.length - 1)) {
+        event.preventDefault();
+        targets[event.shiftKey === true ? targets.length - 1 : 0]
+          .focus?.({ preventScroll: true });
+      }
+      // Native Tab handles interior transitions without a second focus owner.
+    }
     let incomingPreview = null;
     // This host exists ONLY for an explicitly opted-in integration.
     // It is UI-owned: the integration may project, but only exact visual
@@ -342,7 +378,12 @@
       recovery.hidden = mode === "switch" ? false : mode !== "open" || !hasRecovery();
       recovery.textContent = mode === "switch" ? "Discard and open Synced Pocket" : "Use recovery copy…";
       cancel.hidden = false;
-      global.requestAnimationFrame?.(() => (primary.hidden ? cancel : primary).focus({ preventScroll: true }));
+      global.requestAnimationFrame?.(() => {
+        if (overlay.hidden) return;
+        const preferred = primary.hidden ? cancel : primary;
+        if (preferred.hidden || preferred.disabled) focusDialogFallback();
+        else preferred.focus({ preventScroll: true });
+      });
       return true;
     }
 
@@ -367,6 +408,7 @@
       if (chooseAccount) chooseAccount.disabled = busy;
       cancel.disabled = busy;
       restart.disabled = busy;
+      if (busy) focusDialogFallback();
     }
     function ownerlessAttention(copy) {
       ownerlessActivationId = null;
@@ -479,6 +521,7 @@
       if (chooseAccount) chooseAccount.disabled = true;
       cancel.disabled = true;
       restart.disabled = true;
+      focusDialogFallback();
       status.textContent = mode === "open" ? "Opening synced Pocket…"
         : mode === "recovery-restart" ? "Restarting recovery…"
           : mode.startsWith("recovery") ? "Recovering synced Pocket…" : "Setting up Sync…";
@@ -551,6 +594,7 @@
       primary.disabled = true;
       recovery.disabled = true;
       cancel.disabled = true;
+      focusDialogFallback();
       status.textContent = decision === "save" ? "Saving local changes…" : "Preparing to open Synced Pocket…";
       let result;
       try {
@@ -667,7 +711,18 @@
     restart.addEventListener("click", () => void run("recovery-restart"));
     cancel.addEventListener("click", close);
     document.addEventListener("keydown", (event) => {
-      if (!overlay.hidden && event.key === "Escape" && !busy) { event.preventDefault(); close(); }
+      if (overlay.hidden) return;
+      if (event.key === "Tab") {
+        keepDialogTab(event);
+        return;
+      }
+      if (event.key === "Escape" && !busy) {
+        event.preventDefault();
+        event.stopPropagation?.();
+        close();
+      }
+      // During busy Open, Escape is owned by Sync: no cancellation, no
+      // Main Escape action, no synthetic keyboard consumption.
     }, true);
     global.addEventListener?.("pocket-owner-state-changed", refresh);
     refreshInstalled = refresh;
@@ -684,5 +739,6 @@
     canOpenExisting: () => canOpenExistingInstalled() === true,
     canCreateNew: () => canCreateNewInstalled() === true,
     beginCreateNew: () => beginCreateNewInstalled() === true,
+    isDialogOpen: () => installedDialogOpen() === true,
   });
 })(typeof window !== "undefined" ? window : globalThis);
