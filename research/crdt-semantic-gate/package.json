@@ -1,0 +1,14 @@
+{
+  "name": "pocket-crdt-semantic-research",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-reporter=tap tests/*.test.mjs",
+    "measure": "node metrics.mjs"
+  },
+  "dependencies": {
+    "yjs": "13.6.33",
+    "@automerge/automerge": "3.5.0"
+  }
+}

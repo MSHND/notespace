@@ -1,0 +1,65 @@
+name: Research only - semantic CRDT comparison
+on:
+  push:
+    branches:
+      - candidate/crdt-semantic-proof-20261017
+    paths:
+      - 'research/crdt-semantic-gate/**'
+      - '.github/workflows/crdt-semantic-proof-20261017.yml'
+permissions:
+  contents: read
+jobs:
+  semantic-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact source SHA and controlled paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "RESEARCH_SHA=$GITHUB_SHA"
+          git diff --check HEAD^ HEAD
+          git diff --name-only HEAD^ HEAD | while IFS= read -r f; do
+            case "$f" in
+              research/crdt-semantic-gate/*|.github/workflows/crdt-semantic-proof-20261017.yml) ;;
+              *) echo "OUT OF BOUNDS: $f"; exit 1 ;;
+            esac
+          done
+      - name: Install exact genuine libraries
+        working-directory: research/crdt-semantic-gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node --version | tee evidence/node.txt
+          npm install --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.txt
+          npm ls --depth=0 yjs @automerge/automerge | tee evidence/versions.txt
+      - name: Compare real engine and reference-policy outcomes
+        working-directory: research/crdt-semantic-gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/*.test.mjs 2>&1 | tee evidence/tests.tap
+      - name: Record change-locality measurements
+        working-directory: research/crdt-semantic-gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node metrics.mjs 2>&1 | tee evidence/metrics.log
+      - name: Save research evidence even when test fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crdt-semantic-comparison-evidence
+          path: |
+            research/crdt-semantic-gate/evidence/
+            research/crdt-semantic-gate/package-lock.json
+          if-no-files-found: warn
