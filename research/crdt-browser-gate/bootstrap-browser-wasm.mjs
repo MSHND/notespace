@@ -7,7 +7,7 @@ const exact = (s, before, after) => {
 };
 app = exact(app,
   "import * as A from '@automerge/automerge';",
-  "import * as A from '@automerge/automerge/slim';\nimport { automergeWasmBase64 } from '@automerge/automerge/automerge.wasm.base64.js';"
+  "import * as A from '@automerge/automerge/slim';\nimport { automergeWasmBase64 } from '@automerge/automerge/automerge.wasm.base64';"
 );
 app = exact(app, '\ninitial();\n', '\nif (engine === \'automerge\') {\n  A.initializeBase64Wasm(automergeWasmBase64).then(() => { initial(); render({forceBody:true}); }).catch(error => console.error(\'Automerge browser bootstrap failed\', error));\n} else initial();\n');
 const ending='\nrender({forceBody:true});\n';
