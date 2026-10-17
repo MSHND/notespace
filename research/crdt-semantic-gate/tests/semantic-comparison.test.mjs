@@ -26,7 +26,7 @@ const aEdit=(d,word,value)=>A.change(d,draft=>{
 });
 
 test('P01 Pocket reference policy admits independent text intentions atomically',()=>{
-  const ops=[replace('a','alice',7,'supplier','Blackwoods'),replace('b','bob',33,'payment','invoice')];
+  const ops=[replace('a','alice',7,'supplier','Blackwoods'),replace('b','bob',34,'payment','invoice')];
   const result=reconcileIntents(baseState(),ops);
   assert.equal(result.status,'ready');
   assert.equal(result.state.nodes['note-1'].text,'Review Blackwoods before processing invoice.');
@@ -105,7 +105,7 @@ test('A03 Automerge joins promoted idea identity and @ target without duplicatin
     d.references['ref-44']={sourceNodeId:'note-1',targetNodeId:'creditor:blackwoods',selectionId:'sel-1'};
   });
   const b=A.change(A.clone(seed),d=>{
-    A.splice(d,['body'],33,7,'invoice');
+    A.splice(d,['body'],34,7,'invoice');
     d.ideas['idea-23']={id:'idea-23',parentId:'note-1',text:'Check approval'};
   });
   const merged=A.merge(a,b);
