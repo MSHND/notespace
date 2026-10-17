@@ -1,0 +1,74 @@
+name: Research only - P386 two-device simulation
+on:
+  push:
+    branches:
+      - 'candidate/p386-two-device-simulation-20261017'
+    paths:
+      - 'research/p386-two-device-simulation.test.cjs'
+      - '.github/workflows/p386-two-device-simulation-20261017.yml'
+permissions:
+  contents: read
+jobs:
+  disposable-two-device:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - name: Exact source checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check research-only scope and pinned baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          base=d946aff6461400d7f6e0d2332d42a49ae15f46b3
+          git cat-file -e "$base^{commit}"
+          git diff --check "$base" HEAD
+          while IFS= read -r path; do
+            case "$path" in
+              research/p386-two-device-simulation.test.cjs|.github/workflows/p386-two-device-simulation-20261017.yml) ;;
+              *) echo "OUT-OF-SCOPE: $path"; exit 1 ;;
+            esac
+          done < <(git diff --name-only "$base" HEAD)
+          echo "PROOF_ONLY_SHA=$GITHUB_SHA"
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install unchanged accepted dependency set
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research/p386-evidence
+          node --version | tee research/p386-evidence/node.txt
+          npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee research/p386-evidence/install.log
+      - name: New continuous A-B-A disposable test
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap research/p386-two-device-simulation.test.cjs 2>&1 | tee research/p386-evidence/aba.tap
+      - name: Existing separate-device enrolment and reopen acceptance
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap --test-name-pattern='P052b accepts a production Device A activation|P085 reopens the same adopted device record' tests/p052-additional-device.test.js 2>&1 | tee research/p386-evidence/enrolment.tap
+      - name: Existing encrypted remote Open and concurrency checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/p126-starling-remote-edit-publication-loop.test.js 2>&1 | tee research/p386-evidence/remote-loop.tap
+      - name: Existing ordinary PE Save and production-shaped reentry checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/p360-main-pe-owner-save-admission.test.js tests/p190-starling-save-observability-and-reentry.test.js 2>&1 | tee research/p386-evidence/owner-save.tap
+      - name: Retain results including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p386-disposable-two-device-results
+          path: research/p386-evidence/
+          if-no-files-found: warn
