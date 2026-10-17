@@ -57,6 +57,9 @@ jobs:
           npm install --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
           npm ls --depth=0 yjs @automerge/automerge playwright esbuild | tee evidence/versions.txt
           npx playwright install --with-deps chromium 2>&1 | tee evidence/browser-install.log
+      - name: Initialise Automerge WASM in disposable browser adapter
+        working-directory: research/crdt-browser-gate/harness
+        run: node ../bootstrap-browser-wasm.mjs
       - name: Bundle real libraries into disposable browser editor
         working-directory: research/crdt-browser-gate/harness
         run: npm run bundle
