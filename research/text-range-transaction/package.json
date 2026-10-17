@@ -1,0 +1,10 @@
+{
+  "name": "pocket-text-range-transaction-research",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "yjs": "13.6.33",
+    "@automerge/automerge": "3.5.0"
+  }
+}
