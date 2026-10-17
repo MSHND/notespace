@@ -1,0 +1,69 @@
+name: Research only - Pocket text-engine adaptor seam
+on:
+  push:
+    branches:
+      - candidate/text-adaptor-proof-20261017
+    paths:
+      - research/text-adaptor-gate/**
+      - .github/workflows/pocket-text-adaptor-research-20261017.yml
+permissions:
+  contents: read
+jobs:
+  owner-adaptor-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Check exact revision and proof-only paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse --is-shallow-repository)" = "false"
+          git diff --check HEAD^ HEAD
+          while IFS= read -r f; do
+            case "$f" in
+              research/text-adaptor-gate/*|.github/workflows/pocket-text-adaptor-research-20261017.yml) ;;
+              *) echo "OUT-OF-BOUNDS: $f"; exit 1 ;;
+            esac
+          done < <(git diff --name-only HEAD^ HEAD)
+          echo "EXACT_PROOF_SHA=$GITHUB_SHA"
+      - name: Install unchanged Pocket root dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install genuine pinned isolated text engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research/text-adaptor-gate/evidence
+          node --version | tee research/text-adaptor-gate/evidence/node.txt
+          npm install --prefix research/text-adaptor-gate --ignore-scripts --no-audit --no-fund 2>&1 | tee research/text-adaptor-gate/evidence/install.txt
+          npm ls --prefix research/text-adaptor-gate --depth=0 yjs @automerge/automerge | tee research/text-adaptor-gate/evidence/versions.txt
+      - name: Run real owner/adaptor integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap research/text-adaptor-gate/tests/owner-adaptor.test.cjs 2>&1 | tee research/text-adaptor-gate/evidence/adaptor.tap
+      - name: Re-run unchanged Pocket semantic authority and exact-target tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=15s 720s node --test --test-reporter=tap \
+            tests/p360-main-pe-owner-save-admission.test.js \
+            tests/p190b-semantic-admission-negative.test.js \
+            tests/p342-edit-target-ownership.test.js 2>&1 | tee research/text-adaptor-gate/evidence/owner.tap
+      - name: Retain exact evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-text-adaptor-real-owner-evidence
+          path: |
+            research/text-adaptor-gate/evidence/
+            research/text-adaptor-gate/package-lock.json
+          if-no-files-found: warn
