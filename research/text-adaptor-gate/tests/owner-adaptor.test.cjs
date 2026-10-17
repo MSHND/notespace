@@ -88,9 +88,9 @@ for(const [label,factory] of [["Yjs",createYjs],["Automerge",createAutomerge]]){
   const p=bridge(opened,e.proposal());assert.equal(p.ok,true);
   const wrongFile=h.context.PocketNodePopoutEditor.apply({...p.payload,sourceFileName:"wrong-file.json"},{returnDetails:true});
   assert.equal(wrongFile.ok,false);assert.equal(wrongFile.reason,"file-session-changed");
-  const huge="x".repeat(5000);
+  const huge="x".repeat(h.context.PocketNodeContent.LIMITS.canonicalBytes+1);
   const tooLong=h.context.PocketNodePopoutEditor.apply({...p.payload,text:huge,body:huge},{returnDetails:true});
-  assert.equal(tooLong.ok,false);
+  assert.equal(tooLong.ok,false);assert.equal(tooLong.reason,"editor-text-too-large");
   assert.equal(node.details,"Before\n  child");assert.equal(state.ops.length,0);
   e.close();
  });
