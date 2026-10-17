@@ -22,6 +22,12 @@ function acceptedHarness() {
   const marker = 'const test = require("node:test"), assert = require("node:assert/strict"),';
   assert.ok(source.includes(marker), "P126 acceptance harness source changed");
   source = source.replace(marker, 'const test = () => {}, assert = require("node:assert/strict"),');
+  // P126 predates the accepted canonical node-content dependency. Update only
+  // the loaded test-harness source in memory, never product files.
+  const oldModules = '"js/pocket-outline-persistence-policy.js", "js/pocket-editor-metadata.js",';
+  assert.ok(source.includes(oldModules), "P126 module fixture drift");
+  source = source.replace(oldModules,
+    '"js/pocket-outline-persistence-policy.js", "js/pocket-node-content.js", "js/pocket-editor-metadata.js",');
   source += "\nmodule.exports={setup,openFresh,prepare,publisher,plain};\n";
   const moduleRecord = { exports: {} };
   new Function("require", "module", "exports", "__filename", "__dirname", source)(
