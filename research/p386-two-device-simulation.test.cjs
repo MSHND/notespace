@@ -15,7 +15,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createRequire } = require("node:module");
 
-const P126 = path.resolve(__dirname, "../../tests/p126-starling-remote-edit-publication-loop.test.js");
+const P126 = path.resolve(__dirname, "../tests/p126-starling-remote-edit-publication-loop.test.js");
 
 function acceptedHarness() {
   let source = fs.readFileSync(P126, "utf8");
