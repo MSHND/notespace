@@ -1,0 +1,80 @@
+name: Research only - Pocket text range transaction
+
+on:
+  push:
+    branches:
+      - 'candidate/text-range-transaction-proof-20261017'
+    paths:
+      - 'research/text-range-transaction/**'
+      - '.github/workflows/text-range-transaction-proof-20261017.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  text-range-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact research commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact checkout and research-only changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          base=d946aff6461400d7f6e0d2332d42a49ae15f46b3
+          git cat-file -e "$base^{commit}"
+          git diff --check "$base" HEAD
+          while IFS= read -r path; do
+            case "$path" in
+              research/text-range-transaction/*|.github/workflows/text-range-transaction-proof-20261017.yml) ;;
+              *) echo "RESEARCH_OUT_OF_SCOPE=$path"; exit 1 ;;
+            esac
+          done < <(git diff --name-only "$base" HEAD)
+          echo "RESEARCH_SHA=$GITHUB_SHA"
+
+      - name: Establish Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install genuine pinned libraries
+        shell: bash
+        working-directory: research/text-range-transaction
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          npm install --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
+          npm ls --depth=0 yjs @automerge/automerge | tee evidence/versions.log
+
+      - name: Run text-range proposal and real Pocket Save tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap research/text-range-transaction/tests/range-owner.test.cjs 2>&1 | tee research/text-range-transaction/evidence/range-tests.tap
+
+      - name: Run unchanged Pocket owner and semantic-admission regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap \
+            tests/p360-main-pe-owner-save-admission.test.js \
+            tests/p190b-semantic-admission-negative.test.js \
+            tests/p342-edit-target-ownership.test.js \
+            2>&1 | tee research/text-range-transaction/evidence/pocket-regressions.tap
+
+      - name: Retain research evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-text-range-intent-research
+          path: |
+            research/text-range-transaction/evidence/
+            research/text-range-transaction/package-lock.json
+          if-no-files-found: warn
