@@ -1,0 +1,77 @@
+name: Research only - real-browser text engine gate
+on:
+  push:
+    branches:
+      - candidate/crdt-browser-proof-20261017
+    paths:
+      - research/crdt-browser-gate/**
+      - .github/workflows/crdt-browser-proof-20261017.yml
+permissions:
+  contents: read
+jobs:
+  browser-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact proof SHA with ancestry
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact source and proof-only diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git merge-base HEAD HEAD^)" = "$(git rev-parse HEAD^)"
+          git diff --check HEAD^ HEAD
+          git diff --name-only HEAD^ HEAD | while IFS= read -r f; do
+            case "$f" in
+              research/crdt-browser-gate/*|.github/workflows/crdt-browser-proof-20261017.yml) ;;
+              *) echo "OUT OF BOUNDS: $f"; exit 1 ;;
+            esac
+          done
+          echo "RESEARCH_SHA=$GITHUB_SHA"
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Unpack exact audited test source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research/crdt-browser-gate/harness
+          echo "22e4f5c2018ff427c1e27b4067d1b30464b0fb81032369462817edf76b2ec6b9  research/crdt-browser-gate/source.tar.gz" | sha256sum -c -
+          tar -tzf research/crdt-browser-gate/source.tar.gz | tee "$RUNNER_TEMP/source-inventory.txt"
+          tar -xzf research/crdt-browser-gate/source.tar.gz -C research/crdt-browser-gate/harness
+          test -f research/crdt-browser-gate/harness/app.mjs
+          test -f research/crdt-browser-gate/harness/tests/browser-gate.test.mjs
+      - name: Install pinned libraries and browser
+        working-directory: research/crdt-browser-gate/harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          node --version | tee evidence/node.txt
+          npm install --ignore-scripts --no-audit --no-fund 2>&1 | tee evidence/install.log
+          npm ls --depth=0 yjs @automerge/automerge playwright esbuild | tee evidence/versions.txt
+          npx playwright install --with-deps chromium 2>&1 | tee evidence/browser-install.log
+      - name: Bundle real libraries into disposable browser editor
+        working-directory: research/crdt-browser-gate/harness
+        run: npm run bundle
+      - name: Execute two-process Chromium tests
+        working-directory: research/crdt-browser-gate/harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=tap tests/browser-gate.test.mjs 2>&1 | tee evidence/browser-tests.tap
+      - name: Preserve exact evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-crdt-browser-evidence
+          path: |
+            research/crdt-browser-gate/harness/evidence/
+            research/crdt-browser-gate/harness/package-lock.json
+          if-no-files-found: warn
