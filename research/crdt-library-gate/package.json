@@ -1,0 +1,13 @@
+{
+  "name": "pocket-crdt-library-proof",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-reporter=tap tests/*.test.mjs"
+  },
+  "dependencies": {
+    "yjs": "13.6.33",
+    "@automerge/automerge": "3.5.0"
+  }
+}
