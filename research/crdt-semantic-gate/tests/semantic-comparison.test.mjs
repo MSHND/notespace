@@ -82,8 +82,10 @@ test('Y02 Yjs converges overlapping human intentions, without classifying their 
 });
 test('A02 Automerge converges overlapping human intentions, without classifying their meaning',()=>{
   const seed=aSeed(),a=aEdit(seed,'supplier','Blackwoods'),b=aEdit(A.clone(seed),'supplier','creditor');
-  assert.equal(A.merge(a,b).body,A.merge(b,a).body);
-  console.log('AUTOMERGE_OVERLAP_OBSERVED='+JSON.stringify(A.merge(a,b).body));
+  const forward=A.merge(A.clone(a),A.clone(b)).body;
+  const reverse=A.merge(A.clone(b),A.clone(a)).body;
+  assert.equal(forward,reverse);
+  console.log('AUTOMERGE_OVERLAP_OBSERVED='+JSON.stringify(forward));
 });
 test('Y03 Yjs joins promoted idea identity and @ target without duplicating source',()=>{
   const [a,b]=yFork();
