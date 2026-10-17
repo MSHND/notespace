@@ -16,5 +16,8 @@ app = app.slice(0,-ending.length) + "\nif (engine === 'yjs') render({forceBody:t
 fs.writeFileSync(appPath,app);
 let tests=fs.readFileSync(testPath,'utf8');
 tests=exact(tests,'await page.waitForFunction(() => Boolean(window.pocketResearch));','await page.waitForFunction(() => Boolean(window.pocketResearch) && document.querySelector("#body").value.length > 0);');
+const invalidCDPFields=',replacementStart:-1,replacementEnd:-1';
+if (tests.split(invalidCDPFields).length !== 3) throw new Error('Unexpected Chromium CDP fixture');
+tests=tests.replaceAll(invalidCDPFields,'');
 fs.writeFileSync(testPath,tests);
 console.log('DISPOSABLE_AUTOMERGE_WASM_ADAPTER_APPLIED');
