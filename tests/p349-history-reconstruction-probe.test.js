@@ -6,6 +6,7 @@ const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const {fakeTransactionalPool}=require("./helpers/p349-dormant-transaction-fake.js");
 const {NAMES} = require("../sync-service/pocket-handover-release-witness.js");
 const {SQL,createHandoverReleaseSafetyStore} =
   require("../sync-service/pocket-handover-release-safety-store.js");
@@ -29,7 +30,7 @@ function fixture() {
   ]);
   let approval=false, failure=null, queryCount=0;
   const key = (...v) => JSON.stringify(v);
-  const pool={async query(sql,v=[]) {
+  const pool=fakeTransactionalPool(async function query(sql,v=[]) {
     queryCount++;
     const entryKey=key(...v.slice(0,4));
     const pointerKey=key(...v.slice(0,2));
@@ -50,12 +51,12 @@ function fixture() {
       row={owner_id:v[0],resource_id:v[1],release_id:v[2],content:v[3],
         revision:sql===SQL.createPointer?"1":String(Number(prior.revision)+1)};
       pointers.set(pointerKey,row);
-      if (failure==="after") throw new Error("synthetic lost ACK after write");
+      // Lost COMMIT acknowledgment is injected at the transaction boundary.
     } else if (sql===SQL.readPointer) {
       row=pointers.get(pointerKey) || null;
     } else { throw new Error("Unexpected synthetic SQL"); }
     return {rowCount:row?1:0,rows:row?[{...row}]:[]};
-  }};
+  }, {commitError:()=>failure==="after"});
   const store=createHandoverReleaseSafetyStore({
     pool,
     async resolvePrincipal(token) { return identities.get(token); },
@@ -176,7 +177,8 @@ test("candidate: interrupted publication preserves staged entries; unknown ACK r
     const f=fixture();await f.stageAll();f.enableApproval();
     f.setFailure(mode);
     await denied(()=>f.store.publishPointer({auth:f.auth.alicePublish,
-      releaseId:"r1",content:f.manifest(),expectedRevision:0}),"storage-failed");
+      releaseId:"r1",content:f.manifest(),expectedRevision:0}),
+      mode==="before"?"storage-failed":"publication-outcome-unknown");
     f.setFailure(null);
     const pointer=await f.store.readPointer({auth:f.auth.aliceRead});
     assert.equal(pointer.ok,mode==="after");
@@ -185,13 +187,12 @@ test("candidate: interrupted publication preserves staged entries; unknown ACK r
   }
 });
 
-test("candidate: existing pointer can publish a non-existent release: DEMONSTRATED OPEN GAP",async()=>{
+test("candidate: non-existent release fails closed without pointer publication",async()=>{
   const f=fixture();f.enableApproval();
-  const result=await f.store.publishPointer({auth:f.auth.alicePublish,
-    releaseId:"r99",content:f.manifest("r99",false),expectedRevision:0});
-  assert.equal(result.ok,true,"synthetic publication currently lacks entry-existence proof");
-  await exportDenied(()=>captureVerifiedRelease({store:f.store,auth:f.auth.aliceRead,
-    releaseId:"r99",manifestContent:f.manifest("r99",false)}),"entry-missing-or-invalid");
+  await denied(()=>f.store.publishPointer({auth:f.auth.alicePublish,
+    releaseId:"r99",content:f.manifest("r99",false),expectedRevision:0}),
+    "release-incomplete-or-invalid");
+  assert.equal(f.pointers.size,0);
 });
 
 test("candidate: SQL migration immutability remains dormant, not a deployed DB proof",()=>{
