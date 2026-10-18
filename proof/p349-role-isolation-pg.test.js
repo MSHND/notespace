@@ -186,6 +186,12 @@ test("P349 real login and RLS owner isolation on disposable PostgreSQL 16",{time
       auth:pubAuth,releaseId:r1,content:manifest(r1),expectedRevision:0});
     assert.equal(published.ok,true);
     assert.equal(published.pointer.revision,1);
+    // The narrow column-level UPDATE grant exists only for SELECT FOR SHARE;
+    // an actual UPDATE is still rejected by the immutable trigger.
+    await assert.rejects(()=>pubPool.query(
+      "UPDATE public.pocket_handover_release_entries SET revision=1 "+
+      "WHERE owner_id='alice' AND release_id=$1",[r1]),
+      e=>/immutable/.test(e.message));
     await rejectsDb(()=>stagePool.query(
       "UPDATE public.pocket_handover_release_pointers "+
       "SET release_id='r999' WHERE owner_id='alice'"),["42501"]);
