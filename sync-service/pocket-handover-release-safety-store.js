@@ -201,7 +201,10 @@ function createHandoverReleaseSafetyStore({pool,resolvePrincipal,verifyPublisher
         try {await client.query("ROLLBACK"); active=false;}
         catch {discard=true;}
       }
-      if(commitAttempted) fail("publication-outcome-unknown");
+      if(commitAttempted) {
+        discard=true;
+        fail("publication-outcome-unknown");
+      }
       if(error?.code==="handover-release-safety-denied") throw error;
       fail("storage-failed");
     } finally {
