@@ -88,6 +88,11 @@ CREATE POLICY p349_pointers_publish_update ON public.pocket_handover_release_poi
 -- Reading staged entries during atomic publication is required.
 GRANT SELECT ON public.pocket_handover_release_entries
   TO pocket_handover_reader, pocket_handover_stager, pocket_handover_publisher;
+-- PostgreSQL SELECT ... FOR SHARE requires UPDATE privilege on at least one
+-- column. Only this single immutable revision column is granted; the existing
+-- unconditional BEFORE UPDATE trigger still refuses ALL actual UPDATEs.
+GRANT UPDATE (revision) ON public.pocket_handover_release_entries
+  TO pocket_handover_publisher;
 GRANT INSERT ON public.pocket_handover_release_entries
   TO pocket_handover_stager;
 GRANT SELECT ON public.pocket_handover_release_pointers
