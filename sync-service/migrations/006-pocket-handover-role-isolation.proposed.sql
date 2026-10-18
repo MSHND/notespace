@@ -70,7 +70,16 @@ CREATE POLICY p349_entries_read ON public.pocket_handover_release_entries
 CREATE POLICY p349_entries_stage ON public.pocket_handover_release_entries
   FOR INSERT WITH CHECK (
     public.pocket_handover_db_can_access(owner_id,resource_id,'stage'));
--- No UPDATE or DELETE policy, grant or API for immutable snapshots.
+-- PostgreSQL SELECT ... FOR SHARE checks the UPDATE RLS policy as well as
+-- SELECT privileges. Expose publisher-owned rows solely for row-locking.
+-- WITH CHECK (false) prevents an updated row ever passing RLS; the existing
+-- immutable BEFORE UPDATE trigger also rejects every actual mutation.
+CREATE POLICY p349_entries_publisher_lock_only
+  ON public.pocket_handover_release_entries
+  FOR UPDATE USING (
+    public.pocket_handover_db_can_access(owner_id,resource_id,'publish'))
+  WITH CHECK (false);
+-- No DELETE grant/policy; immutable UPDATE/DELETE trigger is still universal.
 
 CREATE POLICY p349_pointers_read ON public.pocket_handover_release_pointers
   FOR SELECT USING (
