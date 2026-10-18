@@ -3,6 +3,9 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
+const {createHash} = require("node:crypto");
+const {fakeTransactionalPool} = require("./helpers/p349-dormant-transaction-fake.js");
+const digest = s => createHash("sha256").update(s,"utf8").digest("hex");
 const {NAMES} = require("../sync-service/pocket-handover-release-witness.js");
 const {SQL,createHandoverReleaseSafetyStore} =
   require("../sync-service/pocket-handover-release-safety-store.js");
@@ -54,7 +57,7 @@ function fixture() {
   };
   let approvalEnabled=true, approvalMutator=null;
   const store=createHandoverReleaseSafetyStore({
-    pool:{query},
+    pool:fakeTransactionalPool(query),
     async resolvePrincipal(auth){return identities[auth];},
     async verifyPublisherApproval(proof){
       if(!approvalEnabled)return null;
@@ -64,10 +67,13 @@ function fixture() {
     }
   });
   const manifest=releaseId=>JSON.stringify({releaseId,authorityEpoch:"GOOGLE_ONLY",
-    documents:NAMES.map(name=>({name,releaseId,digest:"a".repeat(64)}))});
+    documents:NAMES.map(name=>({name,releaseId,digest:digest("complete text\n")}))});
   const stage=(auth="alice-stage",name="pocket.start-here",releaseId="r1")=>
     store.createEntry({auth,releaseId,name,kind:"document",content:"complete text\n"});
-  return {store,identities,entries,pointers,calls,stage,manifest,
+  const seedAll=async releaseId=>{
+    for(const name of NAMES) await stage("alice-stage",name,releaseId);
+  };
+  return {store,identities,entries,pointers,calls,stage,seedAll,manifest,
     permit(v){approvalEnabled=v;},mutateApproval(fn){approvalMutator=fn;}};
 }
 async function denial(fn,reason){
@@ -136,7 +142,7 @@ test("publisher is separate from stage permission AND independently exact-approv
 });
 test("first pointer create is exact absent-only; later update requires CAS and retains old generations", {timeout:5000},async()=>{
   const f=fixture();
-  await f.stage();
+  await f.seedAll("r1"); await f.seedAll("r2");
   const initial=await f.store.publishPointer({auth:"alice-publisher",
     releaseId:"r1",content:f.manifest("r1"),expectedRevision:0});
   assert.equal(initial.ok,true);
@@ -156,12 +162,14 @@ test("first pointer create is exact absent-only; later update requires CAS and r
   assert.deepEqual(await f.store.readPointer({auth:"bob-reader"}),{ok:false,reason:"not-found"});
   assert.equal((await f.store.readPointer({auth:"alice-reader"})).pointer.revision,2);
   const f2=fixture();
+  await f2.seedAll("r2");
   assert.deepEqual(await f2.store.publishPointer({auth:"alice-publisher",
     releaseId:"r2",content:f2.manifest("r2"),expectedRevision:1}),
     {ok:false,reason:"not-found"});
 });
 test("same expected revision permits only one publisher pointer winner", {timeout:5000},async()=>{
   const f=fixture();
+  await f.seedAll("r1"); await f.seedAll("r2"); await f.seedAll("r3");
   await f.store.publishPointer({auth:"alice-publisher",
     releaseId:"r1",content:f.manifest("r1"),expectedRevision:0});
   const [left,right]=await Promise.all(["r2","r3"].map(releaseId=>
