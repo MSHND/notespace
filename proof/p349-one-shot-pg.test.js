@@ -154,23 +154,6 @@ test("P349 one-shot SPENT admission: PostgreSQL, roles, concurrency, rollback an
    // C. Real SQL publication succeeds inside BEGIN but is rolled back.
    // SPENT is already committed on a separate connection.
    await stageAll("r3102");const rolled=await issue("r3102",1);
-   const aborted={
-     connect:async()=>{
-       const c=await executorDb.connect();
-       return {query:async(sql,v)=>{
-         if(typeof sql==="string" && sql.includes("pocket_handover_publish_claimed")){
-           dispatches++;return c.query(sql,v);
-         }
-         if(sql==="COMMIT" && observedSpend){
-           // Simulate an actual outer caller-controlled rollback AFTER SQL.
-           await c.query("ROLLBACK");
-           throw Error("disposable rollback instead of COMMIT");
-         }
-         return c.query(sql,v);
-       },release:x=>c.release(x)};
-     },
-     query:(sql,v)=>executorDb.query(sql,v)
-   };
    let observedSpend=false;
    // Mark spend's COMMIT before the finaliser connection is used.
    const rollbackWrapper={connect:async()=>{
@@ -239,19 +222,19 @@ test("P349 one-shot SPENT admission: PostgreSQL, roles, concurrency, rollback an
 
    // I. Denial scenarios leave SPENT and prior releases untouched.
    const missing=await issue("r3107",3);
-   assert.equal((await execute(missing)).result?.reason||"incomplete-release","incomplete-release");
+   assert.equal((await execute(missing)).reason,"incomplete-release");
    assert.equal((await state(missing)).status,"settled");
    await stageAll("r3108");
    const wrong=JSON.parse(manifest("r3108"));
    wrong.documents[0].digest="f".repeat(64);
    const corrupted=await issue("r3108",3,{man:JSON.stringify(wrong)});
-   assert.equal((await execute(corrupted)).result?.reason||"incomplete-release","incomplete-release");
+   assert.equal((await execute(corrupted)).reason,"incomplete-release");
    const spoof=await issue("r3108",3,{owner:"bob"});
    assert.equal((await execute(spoof)).reason,"admission-denied");
    const badResource=await issue("r3108",3,{resource:"notes"});
    assert.equal((await execute(badResource)).reason,"admission-denied");
    const stale=await issue("r3108",1);
-   assert.equal((await execute(stale)).result?.reason||"revision-conflict","revision-conflict");
+   assert.equal((await execute(stale)).reason,"revision-conflict");
    assert.deepEqual(await pointer(),{releaseId:"r3106",revision:3});
    const past=await reader.query(
      "SELECT content,sha256 FROM public.pocket_handover_release_entries "+
