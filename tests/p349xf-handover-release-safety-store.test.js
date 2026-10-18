@@ -212,6 +212,16 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   assert.doesNotMatch(migrator,/008-pocket-handover-identity-capability/);
   assert.match(capabilitySql,/pocket_handover_principal_bindings/);
   assert.match(capabilitySql,/pocket_handover_scoped_capabilities/);
+
+  assert.match(capabilitySql,/AND b.subject=c.subject/);
+  assert.match(capabilitySql,/r.principal_id IS DISTINCT FROM c.principal_id/);
+  assert.match(capabilitySql,/pocket_handover_spend_receipt_scoped/);
+  assert.match(capabilitySql,/REVOKE EXECUTE ON FUNCTION public\.pocket_handover_spend_receipt\(/);
+  assert.match(capabilitySql,/FOR SHARE/);
+  assert.match(capabilitySql,/ADD COLUMN principal_id TEXT/);
+  const executor=fs.readFileSync(path.join(root,
+    "sync-service/pocket-handover-one-shot-executor.js"),"utf8");
+  assert.match(executor,/pocket_handover_spend_receipt_scoped/);
   assert.match(capabilitySql,/SESSION_USER::name/);
   assert.match(capabilitySql,/SECURITY DEFINER SET search_path = pg_catalog, pg_temp/);
   assert.match(capabilitySql,/REVOKE ALL ON FUNCTION public\.pocket_handover_issue_capability/);
