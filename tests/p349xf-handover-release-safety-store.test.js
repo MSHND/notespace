@@ -207,6 +207,22 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   const gated=fs.readFileSync(path.join(root,
     "sync-service/migrations/007-pocket-handover-restricted-publication.proposed.sql"),"utf8");
   assert.doesNotMatch(migrator,/007-pocket-handover-restricted-publication/);
+  const capabilitySql=fs.readFileSync(path.join(root,
+    "sync-service/migrations/008-pocket-handover-identity-capability.proposed.sql"),"utf8");
+  assert.doesNotMatch(migrator,/008-pocket-handover-identity-capability/);
+  assert.match(capabilitySql,/pocket_handover_principal_bindings/);
+  assert.match(capabilitySql,/pocket_handover_scoped_capabilities/);
+  assert.match(capabilitySql,/SESSION_USER::name/);
+  assert.match(capabilitySql,/SECURITY DEFINER SET search_path = pg_catalog, pg_temp/);
+  assert.match(capabilitySql,/REVOKE ALL ON FUNCTION public\.pocket_handover_issue_capability/);
+  assert.match(capabilitySql,/REVOKE ALL ON public\.pocket_handover_scoped_capabilities/);
+  const broker=fs.readFileSync(path.join(root,
+    "sync-service/pocket-handover-identity-capability-broker.js"),"utf8");
+  assert.match(broker,/createProjectDocumentsTokenVerifier/);
+  assert.match(broker,/createHandoverVerifiedSubjectBinding/);
+  assert.match(broker,/pocket_handover_check_capability/);
+  assert.match(broker,/createOneShotPublicationExecutor/);
+
   assert.match(gated,/REVOKE INSERT, UPDATE ON public\.pocket_handover_release_pointers/);
   assert.match(gated,/SECURITY DEFINER/);
   assert.match(gated,/SET search_path = pg_catalog, pg_temp/);
