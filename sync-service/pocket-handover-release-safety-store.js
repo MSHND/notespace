@@ -21,6 +21,10 @@ const SQL = Object.freeze({
   readEntry: `SELECT owner_id,resource_id,release_id,name,kind,content,sha256,revision
     FROM public.pocket_handover_release_entries
     WHERE owner_id=$1 AND resource_id=$2 AND release_id=$3 AND name=$4`,
+  // The same SERIALIZABLE transaction locks each required immutable row before CAS.
+  lockEntry: `SELECT owner_id,resource_id,release_id,name,kind,content,sha256,revision
+    FROM public.pocket_handover_release_entries
+    WHERE owner_id=$1 AND resource_id=$2 AND release_id=$3 AND name=$4 FOR SHARE`,
   createPointer: `INSERT INTO public.pocket_handover_release_pointers
     (owner_id,resource_id,release_id,content,revision,updated_at)
     VALUES ($1,$2,$3,$4,1,clock_timestamp())
@@ -89,7 +93,7 @@ function validateManifest(content,releaseId) {
      !m.documents.every((doc,i)=>doc && typeof doc==="object" &&
         doc.name===NAMES[i] && doc.releaseId===releaseId &&
         typeof doc.digest==="string" && DIGEST.test(doc.digest))) fail("manifest-invalid");
-  return content;
+  return m;
 }
 
 function createHandoverReleaseSafetyStore({pool,resolvePrincipal,verifyPublisherApproval}={}) {
@@ -137,28 +141,75 @@ function createHandoverReleaseSafetyStore({pool,resolvePrincipal,verifyPublisher
   }
   async function publishPointer({auth,releaseId,content,expectedRevision}={}) {
     const b=await binding(auth,"publish");
-    expectedRelease(releaseId); validateManifest(content,releaseId);
+    expectedRelease(releaseId);
+    const manifest=validateManifest(content,releaseId);
     if(!validRevision(expectedRevision)) fail("expected-revision-invalid");
-    // Independently trusted, narrow, one-use publisher approval; NOT the generic write OAuth scope.
-    // Verification of real grant expiry/replay/subject is an external, UNIMPLEMENTED boundary.
     const proof={ownerId:b.ownerId,resourceId:b.resourceId,
       principalId:b.principalId,releaseId,expectedRevision,digest:sha256(content)};
+    // This existing callback is a separate, synthetic-only approval seam.
+    // A deployed one-use human ceremony is NOT implemented by this store.
     let g;
     try {g=await verifyPublisherApproval(Object.freeze({...proof}));}
     catch {fail("publisher-approval-denied");}
     if(!g || g.approved!==true || g.revoked!==false || g.oneAttempt!==true ||
        Object.keys(proof).some(k=>g[k]!==proof[k])) fail("publisher-approval-denied");
-    const values=[b.ownerId,b.resourceId,releaseId,content];
-    const row=await execute(expectedRevision===0?SQL.createPointer:SQL.updatePointer,
-      expectedRevision===0?values:[...values,expectedRevision]);
-    if(!row) {
-      const existing=await execute(SQL.readPointer,[b.ownerId,b.resourceId]);
-      return Object.freeze({ok:false,reason:existing?"revision-conflict":"not-found"});
+
+    // A pool.query followed by another pool.query is NOT a transaction: both
+    // verification and the only pointer write MUST use this pinned client.
+    if(typeof pool.connect!=="function") fail("atomic-transaction-unavailable");
+    let client, active=false, commitAttempted=false, discard=false;
+    try {
+      client=await pool.connect();
+      if(!client || typeof client.query!=="function" ||
+         typeof client.release!=="function") fail("atomic-transaction-unavailable");
+      await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      active=true;
+      // No row from any other owner/release can count. FOR SHARE prevents
+      // concurrent update/delete during the critical transaction.
+      for(const expected of manifest.documents) {
+        const row=safeResult(await client.query(SQL.lockEntry,
+          [b.ownerId,b.resourceId,releaseId,expected.name]));
+        if(!row) fail("release-incomplete-or-invalid");
+        const entry=asEntry(row,b,releaseId,expected.name);
+        if(entry.kind!=="document" || entry.digest!==expected.digest) {
+          fail("release-incomplete-or-invalid");
+        }
+      }
+      const values=[b.ownerId,b.resourceId,releaseId,content];
+      const row=safeResult(await client.query(
+        expectedRevision===0?SQL.createPointer:SQL.updatePointer,
+        expectedRevision===0?values:[...values,expectedRevision]));
+      if(!row) {
+        const existing=safeResult(await client.query(SQL.readPointer,
+          [b.ownerId,b.resourceId]));
+        await client.query("ROLLBACK");
+        active=false;
+        return Object.freeze({ok:false,
+          reason:existing?"revision-conflict":"not-found"});
+      }
+      const pointer=asPointer(row,b);
+      if(pointer.revision!==expectedRevision+1 || pointer.releaseId!==releaseId ||
+         pointer.content!==content) fail("publication-result-invalid");
+      // If COMMIT acknowledgement is lost it may already be durable.
+      // Never roll back/retry or claim failure/success: require fresh read.
+      commitAttempted=true;
+      await client.query("COMMIT");
+      active=false;
+      return Object.freeze({ok:true,pointer});
+    } catch(error) {
+      if(!commitAttempted && active) {
+        try {await client.query("ROLLBACK"); active=false;}
+        catch {discard=true;}
+      }
+      if(commitAttempted) fail("publication-outcome-unknown");
+      if(error?.code==="handover-release-safety-denied") throw error;
+      fail("storage-failed");
+    } finally {
+      if(client) {
+        try {client.release(discard || (active && !commitAttempted));}
+        catch { /* Unusable connection: publication status is not inferred. */ }
+      }
     }
-    const pointer=asPointer(row,b);
-    if(pointer.revision!==expectedRevision+1 || pointer.releaseId!==releaseId ||
-       pointer.content!==content) fail("publication-result-invalid");
-    return Object.freeze({ok:true,pointer});
   }
   return Object.freeze({createEntry,readEntry,readPointer,publishPointer});
 }
