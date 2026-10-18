@@ -220,7 +220,8 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path = pg_catalog, pg_temp
 AS $p349_status$
 DECLARE r public.pocket_handover_approval_receipts%ROWTYPE;
-DECLARE p RECORD;
+DECLARE pointer_release TEXT;
+DECLARE pointer_revision BIGINT;
 BEGIN
   SELECT * INTO r FROM public.pocket_handover_approval_receipts
     WHERE receipt_id=p_receipt;
@@ -228,12 +229,12 @@ BEGIN
       OR r.secret_sha256 <> encode(sha256(convert_to(p_secret,'UTF8')),'hex')
       OR NOT public.pocket_handover_db_can_access(r.owner_id,r.resource_id,'publish')
   THEN RETURN jsonb_build_object('ok',false,'reason','not-authorised'); END IF;
-  SELECT release_id,revision INTO p
+  SELECT release_id,revision INTO pointer_release,pointer_revision
     FROM public.pocket_handover_release_pointers
     WHERE owner_id=r.owner_id AND resource_id=r.resource_id;
   RETURN jsonb_build_object('ok',true,'receiptStatus',r.status,
     'outcome',r.publication_outcome,'publishedRevision',r.published_revision,
-    'pointerRelease',p.release_id,'pointerRevision',p.revision);
+    'pointerRelease',pointer_release,'pointerRevision',pointer_revision);
 END;
 $p349_status$;
 
