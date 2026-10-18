@@ -29,7 +29,10 @@ CREATE TABLE public.pocket_handover_approval_receipts (
   status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','spent','settled','revoked')),
   spent_at TIMESTAMPTZ,
   settled_at TIMESTAMPTZ,
-  CHECK (status <> 'spent' OR spent_at IS NOT NULL)
+  publication_outcome TEXT CHECK (publication_outcome IN ('published','denied')),
+  published_revision BIGINT,
+  CHECK (status <> 'spent' OR spent_at IS NOT NULL),
+  CHECK (publication_outcome IS DISTINCT FROM 'published' OR published_revision > 0)
 );
 REVOKE ALL ON public.pocket_handover_approval_receipts FROM PUBLIC;
 GRANT INSERT ON public.pocket_handover_approval_receipts
@@ -121,14 +124,14 @@ BEGIN
       OR r.manifest_sha256 <> encode(sha256(convert_to(p_manifest,'UTF8')),'hex')
   THEN
     UPDATE public.pocket_handover_approval_receipts SET status='settled',
-      settled_at=clock_timestamp() WHERE receipt_id=p_receipt;
+      settled_at=clock_timestamp(),publication_outcome='denied' WHERE receipt_id=p_receipt;
     RETURN jsonb_build_object('ok',false,'reason','expired-or-mismatched');
   END IF;
   BEGIN
     m := p_manifest::jsonb;
   EXCEPTION WHEN OTHERS THEN
     UPDATE public.pocket_handover_approval_receipts SET status='settled',
-      settled_at=clock_timestamp() WHERE receipt_id=p_receipt;
+      settled_at=clock_timestamp(),publication_outcome='denied' WHERE receipt_id=p_receipt;
     RETURN jsonb_build_object('ok',false,'reason','invalid-manifest');
   END;
   IF jsonb_typeof(m) <> 'object' OR m->>'releaseId' IS DISTINCT FROM r.release_id
@@ -137,7 +140,7 @@ BEGIN
       OR jsonb_array_length(m->'documents') <> 9
   THEN
     UPDATE public.pocket_handover_approval_receipts SET status='settled',
-      settled_at=clock_timestamp() WHERE receipt_id=p_receipt;
+      settled_at=clock_timestamp(),publication_outcome='denied' WHERE receipt_id=p_receipt;
     RETURN jsonb_build_object('ok',false,'reason','invalid-manifest');
   END IF;
 
@@ -149,7 +152,7 @@ BEGIN
         OR doc->>'digest' !~ '^[a-f0-9]{64}$'
     THEN
       UPDATE public.pocket_handover_approval_receipts SET status='settled',
-        settled_at=clock_timestamp() WHERE receipt_id=p_receipt;
+        settled_at=clock_timestamp(),publication_outcome='denied' WHERE receipt_id=p_receipt;
       RETURN jsonb_build_object('ok',false,'reason','invalid-manifest');
     END IF;
     SELECT name,kind,content,sha256,revision INTO entry
@@ -161,7 +164,7 @@ BEGIN
         OR entry.sha256 <> encode(sha256(convert_to(entry.content,'UTF8')),'hex')
     THEN
       UPDATE public.pocket_handover_approval_receipts SET status='settled',
-        settled_at=clock_timestamp() WHERE receipt_id=p_receipt;
+        settled_at=clock_timestamp(),publication_outcome='denied' WHERE receipt_id=p_receipt;
       RETURN jsonb_build_object('ok',false,'reason','incomplete-release');
     END IF;
   END LOOP;
@@ -180,7 +183,9 @@ BEGIN
       RETURNING revision INTO new_revision;
   END IF;
   UPDATE public.pocket_handover_approval_receipts
-    SET status='settled',settled_at=clock_timestamp()
+    SET status='settled',settled_at=clock_timestamp(),
+        publication_outcome=CASE WHEN new_revision IS NULL THEN 'denied' ELSE 'published' END,
+        published_revision=new_revision
     WHERE receipt_id=p_receipt;
   IF new_revision IS NULL THEN
     RETURN jsonb_build_object('ok',false,'reason','revision-conflict');
@@ -205,4 +210,37 @@ GRANT EXECUTE ON FUNCTION public.pocket_handover_spend_receipt(TEXT,TEXT,TEXT)
   TO pocket_handover_publication_executor;
 GRANT EXECUTE ON FUNCTION public.pocket_handover_publish_claimed(TEXT,TEXT,TEXT)
   TO pocket_handover_publication_executor;
+
+-- Read-only authoritative reconciliation. A SPENT receipt without a committed
+-- publication result is unresolved; this function NEVER permits re-dispatch.
+CREATE FUNCTION public.pocket_handover_publication_status(
+  p_receipt TEXT, p_secret TEXT
+) RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $p349_status$
+DECLARE r public.pocket_handover_approval_receipts%ROWTYPE;
+DECLARE p RECORD;
+BEGIN
+  SELECT * INTO r FROM public.pocket_handover_approval_receipts
+    WHERE receipt_id=p_receipt;
+  IF NOT FOUND OR r.principal_login <> SESSION_USER::name
+      OR r.secret_sha256 <> encode(sha256(convert_to(p_secret,'UTF8')),'hex')
+      OR NOT public.pocket_handover_db_can_access(r.owner_id,r.resource_id,'publish')
+  THEN RETURN jsonb_build_object('ok',false,'reason','not-authorised'); END IF;
+  SELECT release_id,revision INTO p
+    FROM public.pocket_handover_release_pointers
+    WHERE owner_id=r.owner_id AND resource_id=r.resource_id;
+  RETURN jsonb_build_object('ok',true,'receiptStatus',r.status,
+    'outcome',r.publication_outcome,'publishedRevision',r.published_revision,
+    'pointerRelease',p.release_id,'pointerRevision',p.revision);
+END;
+$p349_status$;
+
+ALTER FUNCTION public.pocket_handover_publication_status(TEXT,TEXT)
+  OWNER TO pocket_handover_authority_owner;
+REVOKE ALL ON FUNCTION public.pocket_handover_publication_status(TEXT,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.pocket_handover_publication_status(TEXT,TEXT)
+  TO pocket_handover_publication_executor;
+
 COMMIT;
