@@ -104,8 +104,10 @@ function createDormantIdentityCapabilityBroker({
       });
       resolvedIntents.set(handle,pending);
     }
-    try {return await pending;}
-    catch {
+    try {
+      const intent=await pending;
+      return Object.freeze({...intent,capabilityId:c.id,capabilitySecret:c.secret});
+    } catch {
       resolvedIntents.delete(handle);
       throw Error("p349-separate-approval-required");
     }
