@@ -290,7 +290,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
        "$1,$2,$3,$4,$5,$6::name,$7,$8,$9,$10::timestamptz) AS ok",
        [cfg.issuer,"alice-user","alice.principal","alice","handover",
        "p349_alice_executor","publish",id,H(raceCapSecret),
-       new Date(Date.now()+100000)]);
+       new Date(Date.now()+45000)]);
      assert.equal(x.rows[0].ok,true);
      return id;
    }
