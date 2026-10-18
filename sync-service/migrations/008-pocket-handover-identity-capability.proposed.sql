@@ -25,6 +25,10 @@ CREATE TABLE public.pocket_handover_principal_bindings (
 CREATE TABLE public.pocket_handover_scoped_capabilities (
   capability_id TEXT PRIMARY KEY CHECK (capability_id ~ '^cap[a-f0-9]{32}$'),
   secret_sha256 TEXT NOT NULL CHECK (secret_sha256 ~ '^[a-f0-9]{64}$'),
+  -- Immutable originating identity. An unrelated policy row with the same
+  -- principal/owner/resource may NEVER rescue this capability.
+  issuer TEXT NOT NULL,
+  subject TEXT NOT NULL,
   principal_id TEXT NOT NULL,
   owner_id TEXT NOT NULL,
   resource_id TEXT NOT NULL,
@@ -64,9 +68,10 @@ BEGIN
      )
   THEN RETURN false; END IF;
   INSERT INTO public.pocket_handover_scoped_capabilities
-    (capability_id,secret_sha256,principal_id,owner_id,resource_id,
-     db_login,operation,expires_at)
-  VALUES(p_id,p_digest,p_principal,p_owner,p_resource,p_login,p_operation,p_expiry);
+    (capability_id,secret_sha256,issuer,subject,principal_id,owner_id,
+     resource_id,db_login,operation,expires_at)
+  VALUES(p_id,p_digest,p_issuer,p_subject,p_principal,p_owner,p_resource,
+    p_login,p_operation,p_expiry);
   RETURN true;
 END;
 $p349_issue$;
@@ -84,7 +89,8 @@ AS $p349_check$
     SELECT 1
     FROM public.pocket_handover_scoped_capabilities c
     JOIN public.pocket_handover_principal_bindings b
-      ON b.principal_id=c.principal_id
+      ON b.issuer=c.issuer AND b.subject=c.subject
+      AND b.principal_id=c.principal_id
       AND b.owner_id=c.owner_id AND b.resource_id=c.resource_id
       AND b.db_login=c.db_login AND b.operation=c.operation
     WHERE c.capability_id=p_id
@@ -115,4 +121,78 @@ GRANT EXECUTE ON FUNCTION public.pocket_handover_check_capability(
   TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
   TO pocket_handover_publication_executor,
      pocket_handover_reader,pocket_handover_stager,pocket_handover_publisher;
+
+-- PostgreSQL 007 remains a historical pre-008 definition. Its unscoped
+-- admission route must not be executable by a runtime role after 008.
+REVOKE EXECUTE ON FUNCTION public.pocket_handover_spend_receipt(
+  TEXT,TEXT,TEXT) FROM pocket_handover_publication_executor;
+
+-- Protected definer only: FOR SHARE needs column UPDATE permission, but
+-- no ordinary login inherits pocket_handover_authority_owner.
+GRANT SELECT ON public.pocket_handover_scoped_capabilities
+  TO pocket_handover_authority_owner;
+GRANT UPDATE (revoked) ON public.pocket_handover_scoped_capabilities
+  TO pocket_handover_authority_owner;
+GRANT SELECT ON public.pocket_handover_principal_bindings
+  TO pocket_handover_authority_owner;
+GRANT UPDATE (revoked) ON public.pocket_handover_principal_bindings
+  TO pocket_handover_authority_owner;
+
+-- An approval SPENT before later revocation stays SPENT. That admitted
+-- one-shot execution may continue; it is not retroactively cancelled.
+-- Revocation committed before this protected admission MUST deny.
+CREATE FUNCTION public.pocket_handover_spend_receipt_scoped(
+  p_receipt TEXT,p_secret TEXT,p_manifest TEXT,
+  p_cap_id TEXT,p_cap_secret TEXT
+) RETURNS TEXT LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = pg_catalog, pg_temp
+AS $p349_scoped_admission$
+DECLARE
+  r public.pocket_handover_approval_receipts%ROWTYPE;
+  c public.pocket_handover_scoped_capabilities%ROWTYPE;
+  b public.pocket_handover_principal_bindings%ROWTYPE;
+BEGIN
+  IF p_receipt IS NULL OR p_secret IS NULL OR p_manifest IS NULL
+     OR p_cap_id IS NULL OR p_cap_secret IS NULL
+     OR octet_length(p_manifest)>2097152 THEN RETURN 'denied'; END IF;
+  SELECT * INTO r FROM public.pocket_handover_approval_receipts
+    WHERE receipt_id=p_receipt FOR UPDATE;
+  IF NOT FOUND OR r.status <> 'approved' OR r.expires_at <= clock_timestamp()
+      OR r.principal_login <> SESSION_USER::name
+      OR r.secret_sha256 <> encode(sha256(convert_to(p_secret,'UTF8')),'hex')
+      OR r.manifest_sha256 <> encode(sha256(convert_to(p_manifest,'UTF8')),'hex')
+      OR NOT public.pocket_handover_db_can_access(
+        r.owner_id,r.resource_id,'publish')
+  THEN RETURN 'denied'; END IF;
+
+  SELECT * INTO c FROM public.pocket_handover_scoped_capabilities
+    WHERE capability_id=p_cap_id FOR SHARE;
+  IF NOT FOUND OR c.revoked OR c.expires_at <= clock_timestamp()
+      OR c.operation <> 'publish' OR c.db_login <> SESSION_USER::name
+      OR c.owner_id <> r.owner_id OR c.resource_id <> r.resource_id
+      OR c.secret_sha256 <> encode(sha256(convert_to(p_cap_secret,'UTF8')),'hex')
+  THEN RETURN 'denied'; END IF;
+
+  SELECT * INTO b FROM public.pocket_handover_principal_bindings
+    WHERE issuer=c.issuer AND subject=c.subject
+      AND principal_id=c.principal_id
+      AND owner_id=c.owner_id AND resource_id=c.resource_id
+      AND db_login=c.db_login AND operation=c.operation
+    FOR SHARE;
+  IF NOT FOUND OR b.revoked OR NOT b.approved THEN RETURN 'denied'; END IF;
+
+  UPDATE public.pocket_handover_approval_receipts
+    SET status='spent',spent_at=clock_timestamp()
+    WHERE receipt_id=p_receipt AND status='approved';
+  IF NOT FOUND THEN RETURN 'denied'; END IF;
+  RETURN 'spent';
+END;
+$p349_scoped_admission$;
+
+ALTER FUNCTION public.pocket_handover_spend_receipt_scoped(
+  TEXT,TEXT,TEXT,TEXT,TEXT) OWNER TO pocket_handover_authority_owner;
+REVOKE ALL ON FUNCTION public.pocket_handover_spend_receipt_scoped(
+  TEXT,TEXT,TEXT,TEXT,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.pocket_handover_spend_receipt_scoped(
+  TEXT,TEXT,TEXT,TEXT,TEXT) TO pocket_handover_publication_executor;
 COMMIT;
