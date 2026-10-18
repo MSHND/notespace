@@ -280,6 +280,75 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      "public.pocket_handover_release_entries WHERE owner_id='alice' "+
      "AND resource_id='handover' AND release_id='r4101' AND name=$1",[NAMES[0]]);
    assert.equal(old.rows[0].sha256,H(old.rows[0].content));
+
+   // ADVERSARIAL PRE-REPAIR reproduction (intentionally fails until repaired).
+   const adversarialManifest=manifest("r4198");
+   const adversarialSecret="original-test-capability-secret";
+   const capId="cap"+("a".repeat(31))+"1";
+   const issued=await issuer.query("SELECT public.pocket_handover_issue_capability("+
+     "$1,$2,$3,$4,$5,$6::name,$7,$8,$9,$10::timestamptz) AS ok",
+     [cfg.issuer,"alice-user","alice.principal","alice","handover",
+     "p349_alice_executor","publish",capId,H(adversarialSecret),
+     new Date(Date.now()+45000)]);
+   assert.equal(issued.rows[0].ok,true);
+   const precheck=await aliceExec.query(
+     "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
+     [capId,adversarialSecret,"alice.principal","alice","handover","publish"]);
+   assert.equal(precheck.rows[0].ok,true);
+   const approvalId=rid();
+   const approvalSecret="separate-adversarial-approval-secret";
+   await approvalIssuer.query("INSERT INTO public.pocket_handover_approval_receipts "+
+     "(receipt_id,owner_id,resource_id,principal_login,release_id,expected_revision,"+
+     "manifest_sha256,secret_sha256,expires_at) "+
+     "VALUES($1,'alice','handover','p349_alice_executor','r4198',2,$2,$3,"+
+     "clock_timestamp()+interval '2 minutes')",
+     [approvalId,H(adversarialManifest),H(approvalSecret)]);
+   await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
+     "SET revoked=true WHERE capability_id=$1",[capId]);
+   // Previous broker check succeeded before this real committed revocation.
+   const revokedAdmission=await aliceExec.query(
+     "SELECT public.pocket_handover_spend_receipt($1,$2,$3) AS decision",
+     [approvalId,approvalSecret,adversarialManifest]);
+   const revocationBug=revokedAdmission.rows[0].decision==="spent";
+   // Identity collision: revoke original binding, leave another issuer/subject
+   // approved with identical principal/owner/resource/login/operation.
+   await admin.query("INSERT INTO public.pocket_handover_principal_bindings "+
+     "(principal_id,issuer,subject,owner_id,resource_id,db_login,operation,approved) "+
+     "VALUES('alice.principal','https://other-issuer.test/','other-subject',"+
+     "'alice','handover','p349_alice_executor','publish',true)");
+   await admin.query("UPDATE public.pocket_handover_principal_bindings SET revoked=true "+
+     "WHERE issuer=$1 AND subject='alice-user' AND operation='publish'",
+     [cfg.issuer]);
+   const wrongBinding=await aliceExec.query(
+     "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
+     [capId,adversarialSecret,"alice.principal","alice","handover","publish"]);
+   // An unrevoked twin capability witnesses the bad partial identity JOIN.
+   const capTwin="cap"+("b".repeat(31))+"2";
+   await issuer.query("SELECT public.pocket_handover_issue_capability("+
+     "$1,$2,$3,$4,$5,$6::name,$7,$8,$9,$10::timestamptz) AS ok",
+     ["https://other-issuer.test/","other-subject","alice.principal","alice","handover",
+      "p349_alice_executor","publish",capTwin,H(adversarialSecret),
+      new Date(Date.now()+45000)]);
+   // Restore original binding solely to issue its separate targeted capability.
+   await admin.query("UPDATE public.pocket_handover_principal_bindings SET revoked=false "+
+     "WHERE issuer=$1 AND subject='alice-user' AND operation='publish'",[cfg.issuer]);
+   const originalTwin="cap"+("c".repeat(31))+"3";
+   await issuer.query("SELECT public.pocket_handover_issue_capability("+
+     "$1,$2,$3,$4,$5,$6::name,$7,$8,$9,$10::timestamptz) AS ok",
+     [cfg.issuer,"alice-user","alice.principal","alice","handover",
+      "p349_alice_executor","publish",originalTwin,H(adversarialSecret),
+      new Date(Date.now()+45000)]);
+   await admin.query("UPDATE public.pocket_handover_principal_bindings SET revoked=true "+
+     "WHERE issuer=$1 AND subject='alice-user' AND operation='publish'",[cfg.issuer]);
+   const collisionResult=await aliceExec.query(
+     "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
+     [originalTwin,adversarialSecret,"alice.principal","alice","handover","publish"]);
+   const collisionBug=collisionResult.rows[0].ok===true;
+   console.log("P349_PRE_REPAIR_BUGS admission-after-revocation="+revocationBug+
+     ";cross-issuer-collision="+collisionBug);
+   assert.equal(revocationBug,false,"revoked before SPENT must deny");
+   assert.equal(collisionBug,false,"original revoked issuer/subject cannot be rescued by collision");
+
    console.log("P349_IDENTITY_DB=PASS ES256=real JWT verified; owner-policy=separate; "+
      "PG-capability=scope+revoke+expiry; service-issuer-executor=isolated; "+
      "pooled-login=isolated; separate-consent=PASS; one-shot-replay=0; "+
