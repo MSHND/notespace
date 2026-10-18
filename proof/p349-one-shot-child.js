@@ -11,6 +11,7 @@ const settings={host:"127.0.0.1",port:5432,database:"postgres",
  user:"p349_alice_executor",password:"only_test_p349_alice_executor",
  max:2,connectionTimeoutMillis:3000};
 const raw=new Pool(settings);
+let commits=0;
 const wrapped={
  connect:async()=>{
    const client=await raw.connect();
@@ -22,7 +23,7 @@ const wrapped={
          process.stdout.write("FINALISER_SUBMITTED\n");
          return p;
        }
-       if(mode==="lost-ack" && sql==="COMMIT"){
+       if(mode==="lost-ack" && sql==="COMMIT" && ++commits===2){
          await client.query(sql,args);
          throw Error("synthetic lost COMMIT acknowledgement AFTER real PG COMMIT");
        }
