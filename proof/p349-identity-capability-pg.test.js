@@ -281,7 +281,102 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      "AND resource_id='handover' AND release_id='r4101' AND name=$1",[NAMES[0]]);
    assert.equal(old.rows[0].sha256,H(old.rows[0].content));
 
-   // ADVERSARIAL PRE-REPAIR reproduction (intentionally fails until repaired).
+
+   // Corrected database admission serialises with independent revocation
+   // transactions. A previous app-level CHECK is not final authority.
+   const raceCapSecret="single-test-capability-race-secret";
+   async function raceCap(id){
+     const x=await issuer.query("SELECT public.pocket_handover_issue_capability("+
+       "$1,$2,$3,$4,$5,$6::name,$7,$8,$9,$10::timestamptz) AS ok",
+       [cfg.issuer,"alice-user","alice.principal","alice","handover",
+       "p349_alice_executor","publish",id,H(raceCapSecret),
+       new Date(Date.now()+100000)]);
+     assert.equal(x.rows[0].ok,true);
+     return id;
+   }
+   async function raceApproval(release,rev){
+     const id=rid(),man=manifest(release),secret="test-approval-"+release;
+     await approvalIssuer.query(
+       "INSERT INTO public.pocket_handover_approval_receipts "+
+       "(receipt_id,owner_id,resource_id,principal_login,release_id,"+
+       "expected_revision,manifest_sha256,secret_sha256,expires_at) "+
+       "VALUES($1,'alice','handover','p349_alice_executor',$2,$3,$4,$5,"+
+       "clock_timestamp()+interval '2 minutes')",
+       [id,release,rev,H(man),H(secret)]);
+     return {id,man,secret};
+   }
+   const scopedSpend=(cap,approval)=>aliceExec.query(
+     "SELECT public.pocket_handover_spend_receipt_scoped($1,$2,$3,$4,$5) AS decision",
+     [approval.id,approval.secret,approval.man,cap,raceCapSecret])
+     .then(x=>x.rows[0].decision);
+   async function waitBlocked(promise,ms=65){
+     let done=false;promise.then(()=>{done=true;},()=>{done=true;});
+     await new Promise(ok=>setTimeout(ok,ms));
+     assert.equal(done,false,"PG row lock must hold pending admission");
+   }
+   // C1: revocation UPDATE obtains the capability row lock first.
+   const capRevoke=await raceCap("cap"+("d".repeat(31))+"4");
+   const approvalRevoke=await raceApproval("r4191",1);
+   assert.equal((await aliceExec.query(
+     "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
+     [capRevoke,raceCapSecret,"alice.principal","alice","handover","publish"]
+   )).rows[0].ok,true);
+   const capLock=await admin.connect();
+   let capAdmission;
+   try{
+     await capLock.query("BEGIN");
+     await capLock.query("UPDATE public.pocket_handover_scoped_capabilities "+
+       "SET revoked=true WHERE capability_id=$1",[capRevoke]);
+     capAdmission=scopedSpend(capRevoke,approvalRevoke);
+     await waitBlocked(capAdmission);
+     await capLock.query("COMMIT");
+   }finally{capLock.release();}
+   assert.equal(await capAdmission,"denied");
+   assert.equal((await admin.query(
+     "SELECT status FROM public.pocket_handover_approval_receipts WHERE receipt_id=$1",
+     [approvalRevoke.id])).rows[0].status,"approved");
+
+   // C2: an independent binding revocation holds its row lock before SPENT.
+   const capPolicy=await raceCap("cap"+("e".repeat(31))+"5");
+   const approvalPolicy=await raceApproval("r4192",1);
+   const policyLock=await admin.connect();
+   let policyAdmission;
+   try{
+     await policyLock.query("BEGIN");
+     await policyLock.query("UPDATE public.pocket_handover_principal_bindings "+
+       "SET revoked=true WHERE issuer=$1 AND subject='alice-user' "+
+       "AND operation='publish'",[cfg.issuer]);
+     policyAdmission=scopedSpend(capPolicy,approvalPolicy);
+     await waitBlocked(policyAdmission);
+     await policyLock.query("COMMIT");
+   }finally{policyLock.release();}
+   assert.equal(await policyAdmission,"denied");
+   await admin.query("UPDATE public.pocket_handover_principal_bindings "+
+     "SET revoked=false WHERE issuer=$1 AND subject='alice-user' "+
+     "AND operation='publish'",[cfg.issuer]);
+
+   // D: SPENT admission committed first; subsequent capability revocation
+   // cannot restore approval. Policy explicitly allows the already admitted
+   // one-shot to finalise, rather than retroactively cancelling publication.
+   const capSpent=await raceCap("cap"+("f".repeat(31))+"6");
+   const approvalSpent=await raceApproval("r4193",1);
+   await stageRelease("r4193");
+   assert.equal(await scopedSpend(capSpent,approvalSpent),"spent");
+   await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
+     "SET revoked=true WHERE capability_id=$1",[capSpent]);
+   const outcome=await aliceExec.query(
+     "SELECT public.pocket_handover_publish_claimed($1,$2,$3) AS result",
+     [approvalSpent.id,approvalSpent.secret,approvalSpent.man]);
+   assert.equal(outcome.rows[0].result.ok,true);
+   assert.equal(outcome.rows[0].result.revision,2);
+   assert.equal(await scopedSpend(capSpent,approvalSpent),"denied");
+   assert.equal((await admin.query(
+     "SELECT status FROM public.pocket_handover_approval_receipts WHERE receipt_id=$1",
+     [approvalSpent.id])).rows[0].status,"settled");
+   console.log("P349_REVOKE_RACE=PASS cap-UPDATE-before-admit=DENIED "+
+     "binding-UPDATE-before-admit=DENIED SPENT-before-revoke=one-existing-dispatch");
+
+   // REPAIRED adversarial regression (original RED run retained as evidence).
    const adversarialManifest=manifest("r4198");
    const adversarialSecret="original-test-capability-secret";
    const capId="cap"+("a".repeat(31))+"1";
