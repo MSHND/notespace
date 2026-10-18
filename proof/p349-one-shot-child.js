@@ -23,7 +23,8 @@ const wrapped={
          process.stdout.write("FINALISER_SUBMITTED\n");
          return p;
        }
-       if(mode==="lost-ack" && sql==="COMMIT" && ++commits===2){
+       if(sql==="COMMIT" && (mode==="lost-ack" || mode==="lost-admission")
+          && ++commits===(mode==="lost-admission"?1:2)){
          await client.query(sql,args);
          throw Error("synthetic lost COMMIT acknowledgement AFTER real PG COMMIT");
        }
