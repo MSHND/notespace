@@ -68,6 +68,10 @@ function fixture({ confirm = "approve", resultError = false, approvalGate = null
       };
       entries.set(k, r); return { rowCount: 1, rows: [r] };
     }
+    if (sql === SQL.readEntry) {
+      const r = entries.get(key(values[0],values[1],values[2],values[3]));
+      return {rowCount:r?1:0,rows:r?[r]:[]};
+    }
     if (sql === SQL.createPointer || sql === SQL.updatePointer) {
       const k = key(values[0], values[1]), prev = pointers.get(k);
       if (sql === SQL.createPointer && prev
