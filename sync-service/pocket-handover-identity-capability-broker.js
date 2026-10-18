@@ -35,6 +35,9 @@ function createDormantIdentityCapabilityBroker({
     },
   });
   const privateCapability=new WeakMap();
+  // Pin the first exact trusted approval to this opaque handle. Later approval
+  // records for the same principal cannot be claimed by an old request handle.
+  const resolvedIntents=new WeakMap();
   const opaque=()=>Object.freeze(Object.create(null));
 
   async function prepare(token,operation) {
@@ -85,15 +88,27 @@ function createDormantIdentityCapabilityBroker({
     if(!c||c.operation!=="publish"||!await check(handle,"publish"))
       throw Error("p349-capability-denied");
     // Separate protected synthetic receipt provider. JWT alone NEVER approves.
-    const intent=await readApprovedPublication(Object.freeze({
+    let pending=resolvedIntents.get(handle);
+    if(!pending) {
+      pending=Promise.resolve().then(()=>readApprovedPublication(Object.freeze({
       ownerId:c.principal.ownerId,resourceId:c.principal.resourceId,
       principalId:c.principal.principalId,dbLogin:executorLogin,
-    }));
-    if(!intent||typeof intent.receiptId!=="string"
-      ||typeof intent.secret!=="string"||typeof intent.manifest!=="string")
+      }))).then(intent=>{
+        if(!intent||typeof intent.receiptId!=="string"
+          ||typeof intent.secret!=="string"||typeof intent.manifest!=="string")
+          throw Error("p349-separate-approval-required");
+        // Capture exact bytes ONCE. Never retain a mutable trusted-provider
+        // object whose contents could change between requests.
+        return Object.freeze({receiptId:intent.receiptId,
+          secret:intent.secret,manifest:intent.manifest});
+      });
+      resolvedIntents.set(handle,pending);
+    }
+    try {return await pending;}
+    catch {
+      resolvedIntents.delete(handle);
       throw Error("p349-separate-approval-required");
-    return Object.freeze({receiptId:intent.receiptId,
-      secret:intent.secret,manifest:intent.manifest});
+    }
   }
 
   const executor=createOneShotPublicationExecutor({
