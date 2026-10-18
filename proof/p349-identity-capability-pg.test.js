@@ -294,15 +294,15 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      assert.equal(x.rows[0].ok,true);
      return id;
    }
-   async function raceApproval(release,rev){
+   async function raceApproval(release,rev,principal="alice.principal"){
      const id=rid(),man=manifest(release),secret="test-approval-"+release;
      await approvalIssuer.query(
        "INSERT INTO public.pocket_handover_approval_receipts "+
        "(receipt_id,owner_id,resource_id,principal_login,principal_id,release_id,"+
        "expected_revision,manifest_sha256,secret_sha256,expires_at) "+
-       "VALUES($1,'alice','handover','p349_alice_executor','alice.principal',$2,$3,$4,$5,"+
+       "VALUES($1,'alice','handover','p349_alice_executor',$6,$2,$3,$4,$5,"+
        "clock_timestamp()+interval '2 minutes')",
-       [id,release,rev,H(man),H(secret)]);
+       [id,release,rev,H(man),H(secret),principal]);
      return {id,man,secret};
    }
    const scopedSpend=(cap,approval)=>aliceExec.query(
@@ -374,6 +374,15 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    assert.equal((await admin.query(
      "SELECT status FROM public.pocket_handover_approval_receipts WHERE receipt_id=$1",
      [approvalSpent.id])).rows[0].status,"settled");
+   // A receipt for a different verified principal cannot be consumed
+   // even when DB login, owner, resource and manifest match.
+   const capOther=await raceCap("cap"+("9".repeat(31))+"7");
+   const otherApproval=await raceApproval("r4194",Number(after.revision)+1,
+     "different.principal");
+   assert.equal(await scopedSpend(capOther,otherApproval),"denied");
+   assert.equal((await admin.query("SELECT status FROM "+
+     "public.pocket_handover_approval_receipts WHERE receipt_id=$1",
+     [otherApproval.id])).rows[0].status,"approved");
    console.log("P349_REVOKE_RACE=PASS cap-UPDATE-before-admit=DENIED "+
      "binding-UPDATE-before-admit=DENIED SPENT-before-revoke=one-existing-dispatch");
 
