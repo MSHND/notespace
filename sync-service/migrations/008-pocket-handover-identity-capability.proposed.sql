@@ -7,6 +7,12 @@
 -- This is NOT live owner authentication or human approval.
 
 BEGIN;
+-- Existing 007 synthetic receipts bind a database login, but a new scoped
+-- approval must also match the exact verified principal before SPENT.
+-- Nullable only to preserve pre-008 historical fixture rows; the new scoped
+-- admission ALWAYS rejects NULL.
+ALTER TABLE public.pocket_handover_approval_receipts
+  ADD COLUMN principal_id TEXT;
 CREATE ROLE pocket_handover_capability_issuer NOLOGIN;
 CREATE ROLE pocket_handover_capability_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
 
@@ -170,6 +176,7 @@ BEGIN
   IF NOT FOUND OR c.revoked OR c.expires_at <= clock_timestamp()
       OR c.operation <> 'publish' OR c.db_login <> SESSION_USER::name
       OR c.owner_id <> r.owner_id OR c.resource_id <> r.resource_id
+      OR r.principal_id IS DISTINCT FROM c.principal_id
       OR c.secret_sha256 <> encode(sha256(convert_to(p_cap_secret,'UTF8')),'hex')
   THEN RETURN 'denied'; END IF;
 
