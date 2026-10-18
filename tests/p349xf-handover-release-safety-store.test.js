@@ -210,10 +210,15 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   assert.match(gated,/REVOKE INSERT, UPDATE ON public\.pocket_handover_release_pointers/);
   assert.match(gated,/SECURITY DEFINER/);
   assert.match(gated,/SET search_path = pg_catalog, pg_temp/);
-  assert.match(gated,/pocket_handover_claim_receipt/);
+  assert.match(gated,/pocket_handover_spend_receipt/);
   assert.match(gated,/pocket_handover_publish_claimed/);
-  assert.match(gated,/ONE-USE CONTRACT: one durable CLAIM/);
-  assert.match(gated,/after an unexpected ROLLBACK/);
+  assert.match(gated,/ONE-USE CONTRACT: one durable SPENT/);
+  assert.match(gated,/AFTER|after.*publication.*transaction/i);
+  assert.match(gated,/GRANT EXECUTE ON FUNCTION public\.pocket_handover_publish_claimed\(TEXT,TEXT,TEXT\)[\s\S]*?TO pocket_handover_publication_executor/);
+  assert.match(gated,/REVOKE EXECUTE ON FUNCTION public\.pocket_handover_publish_claimed/);
+  assert.match(gated,/pocket_handover_publication_status/);
+  assert.match(gated,/publication_outcome/);
+  assert.match(gated,/REVOKE INSERT, UPDATE ON public\.pocket_handover_release_pointers/);
 
   assert.match(roleProposal,/publisher.*direct pointer INSERT\/UPDATE capability/s);
   assert.match(current,/PRIMARY KEY/);
