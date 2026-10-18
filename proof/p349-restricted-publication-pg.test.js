@@ -88,6 +88,21 @@ test("P349 DB restricted publication, scope, receipt claim and rollback boundari
   assert.equal(await status(interrupted),"claimed");
   assert.equal(await claim(interrupted),"denied");
   assert.deepEqual(await pointer(),{release:"r2002",rev:3});
+  // ADVERSE PROOF: after ROLLBACK, the same CLAIMED receipt can enter the
+  // restricted finaliser a SECOND TIME. Roll back again to preserve fixture.
+  // This is a demonstrated remaining one-ATTEMPT security flaw, not a PASS.
+  const replay=await pub.connect();
+  try {
+    await replay.query("BEGIN");
+    const attempt=await replay.query(
+      "SELECT public.pocket_handover_publish_claimed($1,$2,$3) AS v",
+      [interrupted.id,secret,interrupted.manifest]);
+    assert.equal(attempt.rows[0].v.ok,true,
+      "RED finding: a second finalisation can proceed without a new claim");
+    await replay.query("ROLLBACK");
+  } finally {replay.release();}
+  assert.equal(await claim(interrupted),"denied");
+  assert.deepEqual(await pointer(),{release:"r2002",rev:3});
   const acknowledged=await issue("r2003",3);
   assert.equal(await claim(acknowledged),"claimed");
   const c2=await pub.connect();let unknown=false;
@@ -100,6 +115,6 @@ test("P349 DB restricted publication, scope, receipt claim and rollback boundari
   const old=await reader.query("SELECT content,sha256 FROM public.pocket_handover_release_entries WHERE owner_id='alice' AND resource_id='handover' AND release_id='r2001' AND name=$1",[NAMES[0]]);
   assert.equal(old.rows[0].content,txt("r2001",NAMES[0]));
   assert.equal(old.rows[0].sha256,H(old.rows[0].content));
-  console.log("P349_RESTRICTED_DB=PASS; direct SQL pointer bypass denied; ONE_CLAIM=durable; OPEN=post-rollback repeat finalisation; HUMAN=synthetic only");
+  console.log("P349_RESTRICTED_DB=PASS; direct SQL pointer bypass denied; ONE_CLAIM=durable; RED=post-rollback second finalisation demonstrated; HUMAN=synthetic only");
  }finally{await Promise.allSettled(all.map(p=>p.end()));}
 });
