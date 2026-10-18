@@ -94,11 +94,11 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
  async function separateConsent(r,rev,principal="alice.principal") {
    const receiptId=rid(),secret=randomBytes(24).toString("hex"),man=manifest(r);
    await approvalIssuer.query("INSERT INTO public.pocket_handover_approval_receipts "+
-     "(receipt_id,owner_id,resource_id,principal_login,release_id,expected_revision,"+
+     "(receipt_id,owner_id,resource_id,principal_login,principal_id,release_id,expected_revision,"+
      "manifest_sha256,secret_sha256,expires_at) "+
-     "VALUES($1,'alice','handover','p349_alice_executor',$2,$3,$4,$5,"+
+     "VALUES($1,'alice','handover','p349_alice_executor',$6,$2,$3,$4,$5,"+
      "clock_timestamp()+interval '2 minutes')",
-     [receiptId,r,rev,H(man),H(secret)]);
+     [receiptId,r,rev,H(man),H(secret),principal]);
    intents.set(principal,Object.freeze({receiptId,secret,manifest:man}));
  }
  const state=async()=>{const x=await aliceRead.query("SELECT release_id,revision FROM "+
@@ -298,9 +298,9 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      const id=rid(),man=manifest(release),secret="test-approval-"+release;
      await approvalIssuer.query(
        "INSERT INTO public.pocket_handover_approval_receipts "+
-       "(receipt_id,owner_id,resource_id,principal_login,release_id,"+
+       "(receipt_id,owner_id,resource_id,principal_login,principal_id,release_id,"+
        "expected_revision,manifest_sha256,secret_sha256,expires_at) "+
-       "VALUES($1,'alice','handover','p349_alice_executor',$2,$3,$4,$5,"+
+       "VALUES($1,'alice','handover','p349_alice_executor','alice.principal',$2,$3,$4,$5,"+
        "clock_timestamp()+interval '2 minutes')",
        [id,release,rev,H(man),H(secret)]);
      return {id,man,secret};
@@ -394,9 +394,9 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    const approvalId=rid();
    const approvalSecret="separate-adversarial-approval-secret";
    await approvalIssuer.query("INSERT INTO public.pocket_handover_approval_receipts "+
-     "(receipt_id,owner_id,resource_id,principal_login,release_id,expected_revision,"+
+     "(receipt_id,owner_id,resource_id,principal_login,principal_id,release_id,expected_revision,"+
      "manifest_sha256,secret_sha256,expires_at) "+
-     "VALUES($1,'alice','handover','p349_alice_executor','r4198',2,$2,$3,"+
+     "VALUES($1,'alice','handover','p349_alice_executor','alice.principal','r4198',2,$2,$3,"+
      "clock_timestamp()+interval '2 minutes')",
      [approvalId,H(adversarialManifest),H(approvalSecret)]);
    await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
