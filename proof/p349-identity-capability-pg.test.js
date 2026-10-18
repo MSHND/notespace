@@ -355,6 +355,18 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      "SET revoked=false WHERE issuer=$1 AND subject='alice-user' "+
      "AND operation='publish'",[cfg.issuer]);
 
+   // Expiry is also checked afresh at protected DB admission.
+   const capExpired=await raceCap("cap"+("8".repeat(31))+"8");
+   const approvalExpired=await raceApproval("r4195",Number(after.revision));
+   assert.equal((await aliceExec.query(
+     "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
+     [capExpired,raceCapSecret,"alice.principal","alice","handover","publish"]
+   )).rows[0].ok,true);
+   await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
+     "SET expires_at=clock_timestamp()-interval '1 second' "+
+     "WHERE capability_id=$1",[capExpired]);
+   assert.equal(await scopedSpend(capExpired,approvalExpired),"denied");
+
    // D: SPENT admission committed first; subsequent capability revocation
    // cannot restore approval. Policy explicitly allows the already admitted
    // one-shot to finalise, rather than retroactively cancelling publication.
@@ -450,6 +462,12 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
       new Date(Date.now()+45000)]);
    await admin.query("UPDATE public.pocket_handover_principal_bindings SET revoked=true "+
      "WHERE issuer=$1 AND subject='alice-user' AND operation='publish'",[cfg.issuer]);
+   // Additional same-issuer, different-subject collision cannot rescue
+   // the original revoked identity either.
+   await admin.query("INSERT INTO public.pocket_handover_principal_bindings "+
+     "(principal_id,issuer,subject,owner_id,resource_id,db_login,operation,approved) "+
+     "VALUES('alice.principal',$1,'another-alice-subject','alice','handover',"+
+     "'p349_alice_executor','publish',true)",[cfg.issuer]);
    const collisionResult=await aliceExec.query(
      "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
      [originalTwin,adversarialSecret,"alice.principal","alice","handover","publish"]);
