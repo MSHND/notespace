@@ -50,6 +50,9 @@ function createOneShotPublicationExecutor({
         try {await c.query("ROLLBACK");} catch {discard=true;}
       }
       if (commitStarted) {
+        // Release the ambiguous pinned connection first. Reconciliation must
+        // use a fresh session even when the pool's max size is one.
+        if (c) {try {c.release(true);} catch {} c=null;}
         // A fresh authoritative read is diagnostic ONLY. Even if SPENT
         // committed, uncertain admission is never permission to dispatch.
         const reconciliation=await reconcile(auth);
@@ -91,6 +94,7 @@ function createOneShotPublicationExecutor({
         try {await p.query("ROLLBACK");}catch{bad=true;}
       }
       if (commitAttempted) {
+        if (p) {try {p.release(true);} catch {} p=null;}
         const reconciliation=await reconcile(auth);
         return Object.freeze({ok:false,
           reason:"publication-acknowledgement-unknown",reconciliation});
