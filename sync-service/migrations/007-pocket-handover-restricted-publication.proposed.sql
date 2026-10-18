@@ -2,15 +2,18 @@
 -- Depends on proposed 005 (digest/immutability) and 006 (LOGIN/RLS).
 -- Receipts here are SYNTHETIC: an issuer-login may insert them without proving
 -- a human ceremony. Verified identity-to-DB-LOGIN brokering is also NOT live.
--- ONE-USE CONTRACT: one durable CLAIM per receipt; a claim must COMMIT in its
--- own transaction before the publication transaction begins.
--- GAP: after an unexpected ROLLBACK of the separate publication transaction,
--- a CLAIMED receipt can be submitted again. Strict at-most-one EXECUTION attempt
--- therefore requires a separately proven trusted executor/terminal claim gate.
--- Fail closed: never present this as a deployable human-authorised system.
+-- ONE-USE CONTRACT: one durable SPENT admission per receipt, committed BEFORE
+-- the trusted executor may dispatch its one finaliser invocation.
+-- A rollback of finalisation cannot restore APPROVED. The executor must never
+-- dispatch the same receipt again, including after loss of COMMIT acknowledgement.
+-- The SQL finaliser itself remains repeat-callable by a compromised executor:
+-- a separate trusted, one-shot service and locked-down executor credentials
+-- are REQUIRED. Genuine human authorisation and identity binding remain absent.
+-- Fail closed: this is not a production-ready human-authorised system.
 BEGIN;
 
 CREATE ROLE pocket_handover_approval_issuer NOLOGIN;
+CREATE ROLE pocket_handover_publication_executor NOLOGIN;
 CREATE ROLE pocket_handover_authority_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
 
 CREATE TABLE public.pocket_handover_approval_receipts (
@@ -23,10 +26,10 @@ CREATE TABLE public.pocket_handover_approval_receipts (
   manifest_sha256 TEXT NOT NULL CHECK (manifest_sha256 ~ '^[a-f0-9]{64}$'),
   secret_sha256 TEXT NOT NULL CHECK (secret_sha256 ~ '^[a-f0-9]{64}$'),
   expires_at TIMESTAMPTZ NOT NULL,
-  status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','claimed','settled','revoked')),
-  claimed_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'approved' CHECK (status IN ('approved','spent','settled','revoked')),
+  spent_at TIMESTAMPTZ,
   settled_at TIMESTAMPTZ,
-  CHECK (status <> 'claimed' OR claimed_at IS NOT NULL)
+  CHECK (status <> 'spent' OR spent_at IS NOT NULL)
 );
 REVOKE ALL ON public.pocket_handover_approval_receipts FROM PUBLIC;
 GRANT INSERT ON public.pocket_handover_approval_receipts
@@ -48,9 +51,9 @@ GRANT EXECUTE ON FUNCTION public.pocket_handover_db_can_access(TEXT,TEXT,TEXT)
 REVOKE INSERT, UPDATE ON public.pocket_handover_release_pointers
   FROM pocket_handover_publisher, pocket_handover_stager, pocket_handover_reader, PUBLIC;
 
--- These two functions are the only runtime authority entrypoints.
+-- These two functions are the only executor authority entrypoints.
 -- The caller controls neither their definer nor their trusted login binding.
-CREATE FUNCTION public.pocket_handover_claim_receipt(
+CREATE FUNCTION public.pocket_handover_spend_receipt(
   p_receipt TEXT, p_secret TEXT, p_manifest TEXT
 ) RETURNS TEXT
 LANGUAGE plpgsql SECURITY DEFINER
@@ -71,10 +74,10 @@ BEGIN
       OR r.manifest_sha256 <> encode(sha256(convert_to(p_manifest,'UTF8')),'hex')
   THEN RETURN 'denied'; END IF;
   UPDATE public.pocket_handover_approval_receipts
-    SET status='claimed',claimed_at=clock_timestamp()
+    SET status='spent',spent_at=clock_timestamp()
     WHERE receipt_id=p_receipt AND status='approved';
   IF NOT FOUND THEN RETURN 'denied'; END IF;
-  RETURN 'claimed';
+  RETURN 'spent';
 END;
 $p349_claim$;
 
@@ -103,7 +106,7 @@ BEGIN
 
   SELECT * INTO r FROM public.pocket_handover_approval_receipts
     WHERE receipt_id=p_receipt FOR UPDATE;
-  IF NOT FOUND OR r.status <> 'claimed'
+  IF NOT FOUND OR r.status <> 'spent'
       OR r.principal_login <> SESSION_USER::name
       OR NOT public.pocket_handover_db_can_access(r.owner_id,r.resource_id,'publish')
       OR r.secret_sha256 <> encode(sha256(convert_to(p_secret,'UTF8')),'hex')
@@ -111,10 +114,10 @@ BEGIN
     RETURN jsonb_build_object('ok',false,'reason','approval-not-claimed');
   END IF;
 
-  -- Terminalise known denials inside a COMMITTABLE transaction: no exception
-  -- should restore a claimed receipt after a normal business denial.
+  -- Terminalise known denials inside a COMMITTABLE transaction. A rollback
+  -- leaves SPENT, but the trusted executor must never call this function again.
   IF r.expires_at <= clock_timestamp()
-      OR r.claimed_at < clock_timestamp() - interval '60 seconds'
+      OR r.spent_at < clock_timestamp() - interval '60 seconds'
       OR r.manifest_sha256 <> encode(sha256(convert_to(p_manifest,'UTF8')),'hex')
   THEN
     UPDATE public.pocket_handover_approval_receipts SET status='settled',
@@ -187,14 +190,19 @@ BEGIN
 END;
 $p349_publish$;
 
-ALTER FUNCTION public.pocket_handover_claim_receipt(TEXT,TEXT,TEXT)
+ALTER FUNCTION public.pocket_handover_spend_receipt(TEXT,TEXT,TEXT)
   OWNER TO pocket_handover_authority_owner;
 ALTER FUNCTION public.pocket_handover_publish_claimed(TEXT,TEXT,TEXT)
   OWNER TO pocket_handover_authority_owner;
-REVOKE ALL ON FUNCTION public.pocket_handover_claim_receipt(TEXT,TEXT,TEXT) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.pocket_handover_spend_receipt(TEXT,TEXT,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.pocket_handover_publish_claimed(TEXT,TEXT,TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.pocket_handover_claim_receipt(TEXT,TEXT,TEXT)
-  TO pocket_handover_publisher;
+-- Neither ordinary publisher nor stager/reader may invoke admission/finaliser.
+REVOKE EXECUTE ON FUNCTION public.pocket_handover_spend_receipt(TEXT,TEXT,TEXT)
+  FROM pocket_handover_publisher, pocket_handover_reader, pocket_handover_stager;
+REVOKE EXECUTE ON FUNCTION public.pocket_handover_publish_claimed(TEXT,TEXT,TEXT)
+  FROM pocket_handover_publisher, pocket_handover_reader, pocket_handover_stager;
+GRANT EXECUTE ON FUNCTION public.pocket_handover_spend_receipt(TEXT,TEXT,TEXT)
+  TO pocket_handover_publication_executor;
 GRANT EXECUTE ON FUNCTION public.pocket_handover_publish_claimed(TEXT,TEXT,TEXT)
-  TO pocket_handover_publisher;
+  TO pocket_handover_publication_executor;
 COMMIT;
