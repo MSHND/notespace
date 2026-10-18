@@ -30,11 +30,23 @@ function createOneShotPublicationExecutor({
       return Object.freeze({ok:false,reason:"unverified-intent"});
     }
     const {receiptId,secret,manifest} = intent;
+    // 008 opt-in: exact DB capability accompanies the privately resolved
+    // receipt. 005–007 historical fixtures still exercise the legacy seam;
+    // under 008 its three-argument DB grant is REVOKED.
+    const scoped=typeof intent.capabilityId==="string"
+      && /^cap[a-f0-9]{32}$/.test(intent.capabilityId)
+      && typeof intent.capabilitySecret==="string"
+      && intent.capabilitySecret.length>=32;
+    if ((intent.capabilityId!==undefined || intent.capabilitySecret!==undefined)
+        && !scoped) return Object.freeze({ok:false,reason:"unverified-capability"});
     let c, claimCommitted=false, commitStarted=false, discard=false;
     try {
       c = await pool.connect();
       await c.query("BEGIN");
-      const result = await c.query(
+      const result = scoped ? await c.query(
+        "SELECT public.pocket_handover_spend_receipt_scoped($1,$2,$3,$4,$5) AS decision",
+        [receiptId,secret,manifest,intent.capabilityId,intent.capabilitySecret]
+      ) : await c.query(
         "SELECT public.pocket_handover_spend_receipt($1,$2,$3) AS decision",
         [receiptId,secret,manifest]);
       if (result.rowCount !== 1 || result.rows[0].decision !== "spent") {
