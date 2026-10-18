@@ -36,5 +36,11 @@ jobs:
           node-version: 24
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Exact candidate and proof SHA-256 inventory
+        run: |
+          sha256sum sync-service/pocket-handover-release-reconstruction-probe.js
+          sha256sum tests/p349-history-reconstruction-probe.test.js
+          sha256sum proof/p349-disposable-pg-release-proof.test.js
+          sha256sum sync-service/migrations/005-pocket-handover-release-safety.proposed.sql
       - name: Run proposed migration ONLY in disposable service
         run: node --test proof/p349-disposable-pg-release-proof.test.js
