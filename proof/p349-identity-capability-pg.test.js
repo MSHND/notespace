@@ -45,10 +45,10 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    issuer:cfg.issuer,audience:cfg.audience,algorithms:["ES256"],
  })).payload;
  const policies=[
-  approved("alice-user","alice-principal","alice","handover","publisher"),
-  approved("bob-user","bob-principal","bob","handover","publisher"),
-  approved("alice-reader","alice-reader-principal","alice","handover","reader"),
-  approved("alice-stager","alice-stager-principal","alice","handover","stager"),
+  approved("alice-user","alice.principal","alice","handover","publisher"),
+  approved("bob-user","bob.principal","bob","handover","publisher"),
+  approved("alice-reader","alice.reader.principal","alice","handover","reader"),
+  approved("alice-stager","alice.stager.principal","alice","handover","stager"),
  ];
  const readApprovedPolicy=async()=>({version:1,approved:true,revoked:false,
   bindings:policies});
@@ -89,7 +89,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
        [r,name,doc(r,name),H(doc(r,name))]);
    }
  }
- async function separateConsent(r,rev,principal="alice-principal") {
+ async function separateConsent(r,rev,principal="alice.principal") {
    const receiptId=rid(),secret=randomBytes(24).toString("hex"),man=manifest(r);
    await approvalIssuer.query("INSERT INTO public.pocket_handover_approval_receipts "+
      "(receipt_id,owner_id,resource_id,principal_login,release_id,expected_revision,"+
@@ -115,14 +115,14 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
       "(db_login,owner_id,resource_id,capability) "+
       "VALUES('p349_bob_executor','bob','handover','publisher')");
    const bindings=[
-     ["alice-principal","alice-user","alice","handover",
+     ["alice.principal","alice-user","alice","handover",
        "p349_alice_executor","publish"],
-     ["bob-principal","bob-user","bob","handover","p349_bob_executor","publish"],
-     ["alice-reader-principal","alice-reader","alice","handover",
+     ["bob.principal","bob-user","bob","handover","p349_bob_executor","publish"],
+     ["alice.reader.principal","alice-reader","alice","handover",
        "p349_alice_reader","read"],
-     ["alice-stager-principal","alice-stager","alice","handover",
+     ["alice.stager.principal","alice-stager","alice","handover",
        "p349_alice_stager","stage"],
-     ["alice-stager-principal","alice-stager","alice","handover",
+     ["alice.stager.principal","alice-stager","alice","handover",
        "p349_alice_stager","read"],
    ];
    for(const [principal,subject,owner,resource,login,operation] of bindings)
@@ -193,7 +193,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    // Forged DB login/binding/ID or custom session state cannot grant scope.
    const forgery=await issuer.query("SELECT public.pocket_handover_issue_capability("+
      "$1,$2,$3,$4,$5,$6::name,$7,$8,$9,$10::timestamptz) AS ok",
-     [cfg.issuer,"alice-user","alice-principal","bob","handover",
+     [cfg.issuer,"alice-user","alice.principal","bob","handover",
       "p349_alice_executor","publish","cap"+"e".repeat(32),"f".repeat(64),
       new Date(Date.now()+15000)]);
    assert.equal(forgery.rows[0].ok,false);
@@ -206,21 +206,21 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    const revoked=await alice.prepare(aliceToken,"publish");assert.ok(revoked);
    const latest=await admin.query("SELECT capability_id FROM "+
      "public.pocket_handover_scoped_capabilities "+
-     "WHERE principal_id='alice-principal' ORDER BY issued_at DESC LIMIT 1");
+     "WHERE principal_id='alice.principal' ORDER BY issued_at DESC LIMIT 1");
    await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
       "SET revoked=true WHERE capability_id=$1",[latest.rows[0].capability_id]);
    assert.equal(await alice.check(revoked,"publish"),false);
    // Revoke protected admin policy: previously issued capabilities must fail.
    await admin.query("UPDATE public.pocket_handover_principal_bindings "+
-     "SET revoked=true WHERE principal_id='bob-principal'");
+     "SET revoked=true WHERE principal_id='bob.principal'");
    assert.equal(await bob.check(b,"publish"),false);
    assert.equal(await bob.prepare(bobToken,"publish"),null);
    await admin.query("UPDATE public.pocket_handover_principal_bindings "+
-     "SET revoked=false WHERE principal_id='bob-principal'");
+     "SET revoked=false WHERE principal_id='bob.principal'");
    const expired=await alice.prepare(aliceToken,"publish");assert.ok(expired);
    const latest2=await admin.query("SELECT capability_id FROM "+
      "public.pocket_handover_scoped_capabilities "+
-     "WHERE principal_id='alice-principal' ORDER BY issued_at DESC LIMIT 1");
+     "WHERE principal_id='alice.principal' ORDER BY issued_at DESC LIMIT 1");
    await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
      "SET expires_at=clock_timestamp()-interval '1 second' "+
      "WHERE capability_id=$1",[latest2.rows[0].capability_id]);
