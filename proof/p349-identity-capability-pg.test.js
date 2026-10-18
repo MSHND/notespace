@@ -316,7 +316,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    }
    // C1: revocation UPDATE obtains the capability row lock first.
    const capRevoke=await raceCap("cap"+("d".repeat(31))+"4");
-   const approvalRevoke=await raceApproval("r4191",1);
+   const approvalRevoke=await raceApproval("r4191",Number(after.revision));
    assert.equal((await aliceExec.query(
      "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
      [capRevoke,raceCapSecret,"alice.principal","alice","handover","publish"]
@@ -338,7 +338,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
 
    // C2: an independent binding revocation holds its row lock before SPENT.
    const capPolicy=await raceCap("cap"+("e".repeat(31))+"5");
-   const approvalPolicy=await raceApproval("r4192",1);
+   const approvalPolicy=await raceApproval("r4192",Number(after.revision));
    const policyLock=await admin.connect();
    let policyAdmission;
    try{
@@ -359,7 +359,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    // cannot restore approval. Policy explicitly allows the already admitted
    // one-shot to finalise, rather than retroactively cancelling publication.
    const capSpent=await raceCap("cap"+("f".repeat(31))+"6");
-   const approvalSpent=await raceApproval("r4193",1);
+   const approvalSpent=await raceApproval("r4193",Number(after.revision));
    await stageRelease("r4193");
    assert.equal(await scopedSpend(capSpent,approvalSpent),"spent");
    await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
@@ -369,7 +369,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      [approvalSpent.id,approvalSpent.secret,approvalSpent.man]);
    assert.equal(outcome.rows[0].result.ok,true,
      JSON.stringify(outcome.rows[0].result));
-   assert.equal(outcome.rows[0].result.revision,2);
+   assert.equal(outcome.rows[0].result.revision,Number(after.revision)+1);
    assert.equal(await scopedSpend(capSpent,approvalSpent),"denied");
    assert.equal((await admin.query(
      "SELECT status FROM public.pocket_handover_approval_receipts WHERE receipt_id=$1",
