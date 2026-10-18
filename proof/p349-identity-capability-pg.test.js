@@ -265,7 +265,12 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    assert.equal(dispatches,prevCount);
    assert.equal(await bob.check(b,"publish"),true);
    // Incomplete release + stale CAS keep previous pointer and consume approval.
-   const invalidReceipt=await separateConsent("r4102",Number(after.revision));
+   await separateConsent("r4102",Number(after.revision));
+   // The previous request's handle stays bound to the former SPENT receipt,
+   // even after this principal receives a distinct later approval.
+   const oldDispatchCount=dispatches;
+   assert.equal((await alice.execute(a)).reason,"admission-denied");
+   assert.equal(dispatches,oldDispatchCount);
    const next=await alice.prepare(aliceToken,"publish");
    assert.equal((await alice.execute(next)).reason,"incomplete-release");
    assert.equal((await state()).release_id,"r4101");
