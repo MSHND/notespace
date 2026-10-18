@@ -195,6 +195,16 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   assert.match(ddl,/BEFORE UPDATE OR DELETE ON public\.pocket_handover_release_entries/);
   assert.match(ddl,/RAISE EXCEPTION 'Pocket handover generation\/evidence is immutable'/);
   assert.doesNotMatch(migrator,/005-pocket-handover-release-safety/);
+  const roleProposal=fs.readFileSync(path.join(root,
+    "sync-service/migrations/006-pocket-handover-role-isolation.proposed.sql"),"utf8");
+  assert.match(roleProposal,/SESSION_USER::name/);
+  assert.match(roleProposal,/FORCE ROW LEVEL SECURITY/);
+  assert.match(roleProposal,/WITH CHECK \(false\)/);
+  assert.match(roleProposal,/GRANT UPDATE \(revision\)/);
+  assert.match(roleProposal,/REVOKE ALL ON public\.pocket_handover_release_entries/);
+  assert.match(roleProposal,/REVOKE ALL ON public\.pocket_handover_role_bindings/);
+  assert.doesNotMatch(migrator,/006-pocket-handover-role-isolation/);
+  assert.match(roleProposal,/publisher.*direct pointer INSERT\/UPDATE capability/s);
   assert.match(current,/PRIMARY KEY/);
   assert.equal(SQL.updatePointer.includes("revision=$5"),true);
   assert.equal(Object.keys(SQL).some(name=>/updateEntry|deleteEntry/i.test(name)),false);
