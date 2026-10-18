@@ -39,15 +39,18 @@ function createDormantIdentityCapabilityBroker({
 
   async function prepare(token,operation) {
     if(!OPS.has(operation))return null;
-    let principal,subject;
+    let principal,subject,authExpiryMs;
     try {
       const auth=await verifier.verifyAccessToken(token);
       principal=await binding.resolvePrincipal(auth);
       subject=verifiedSubjectByAuth.get(auth);
+      authExpiryMs=auth.expiresAt*1000;
       if(!principal.capabilities.includes(operation)||typeof subject!=="string")
         return null;
     } catch{return null;}
-    const expiresAt=new Date(now()+30000);
+    const limit=Math.min(now()+30000,authExpiryMs);
+    if(!Number.isFinite(limit)||limit<=now())return null;
+    const expiresAt=new Date(limit);
     const id="cap"+randomBytes(16).toString("hex");
     const secret=randomBytes(32).toString("hex");
     try {
