@@ -1,5 +1,8 @@
 "use strict";
 const test = require("node:test");
+const {createHash}=require("node:crypto");
+const {fakeTransactionalPool}=require("./helpers/p349-dormant-transaction-fake.js");
+const digest=s=>createHash("sha256").update(s,"utf8").digest("hex");
 const assert = require("node:assert/strict");
 const { createProjectDocumentsTokenVerifier } =
   require("../sync-service/pocket-project-documents-auth.js");
@@ -34,7 +37,7 @@ const row = (subject = "user-murray", owner = "owner-murray", role = "stager") =
 const manifest = (releaseId = "r1") => JSON.stringify({
   releaseId, authorityEpoch: "GOOGLE_ONLY",
   documents: NAMES.map(name => ({
-    name, releaseId, digest: "a".repeat(64),
+    name, releaseId, digest: digest("synthetic staging"),
   })),
 });
 function fixture({ confirm = "approve", resultError = false, approvalGate = null } = {}) {
@@ -50,7 +53,7 @@ function fixture({ confirm = "approve", resultError = false, approvalGate = null
   });
   const sqlCalls = [], entries = new Map(), pointers = new Map();
   const key = (...parts) => JSON.stringify(parts);
-  const pool = { async query(sql, values) {
+  const pool = fakeTransactionalPool(async function query(sql, values) {
     sqlCalls.push({ sql, values });
     if (uncertain && (sql === SQL.createPointer || sql === SQL.updatePointer)) {
       throw Error("synthetic ambiguous storage error");
@@ -82,7 +85,7 @@ function fixture({ confirm = "approve", resultError = false, approvalGate = null
       return { rowCount: r ? 1 : 0, rows: r ? [r] : [] };
     }
     throw Error("unexpected SQL");
-  }};
+  });
   const confirmations = [];
   const model = createSinglePrincipalPublishReceiptModel({
     pool, resolvePrincipal: bridge.resolvePrincipal, nowMs: () => clock,
@@ -104,10 +107,23 @@ function fixture({ confirm = "approve", resultError = false, approvalGate = null
     expectedRevision = 0) => model.confirm({
       auth: a, releaseId, content: bytes, expectedRevision,
     });
+  // Synthetic pre-existing immutable documents; NOT staging authority or
+  // production fixture creation. These rows let receipt tests reach CAS.
+  const ensureComplete = releaseId => {
+    for(const name of NAMES) {
+      const k=key("owner-murray","handover",releaseId,name);
+      if(!entries.has(k)) entries.set(k,{
+        owner_id:"owner-murray",resource_id:"handover",release_id:releaseId,
+        name,kind:"document",content:"synthetic staging",
+        sha256:digest("synthetic staging"),revision:1,
+      });
+    }
+  };
   const publish = (a, releaseId = "r1", bytes = manifest(releaseId),
-    expectedRevision = 0) => model.publish({
-      auth: a, releaseId, content: bytes, expectedRevision,
-    });
+    expectedRevision = 0) => {
+      ensureComplete(releaseId);
+      return model.publish({auth: a, releaseId, content: bytes, expectedRevision});
+    };
   return {
     model, auth, stage, confirmPublish, publish,
     calls: () => sqlCalls, confirmations: () => confirmations,
@@ -177,7 +193,7 @@ test("P349xr one-subject one-role policy remains untouched; no permanent publish
   await f.confirmPublish(a);
   assert.deepEqual((await f.model.stage({
     auth: a, releaseId: "r1", name: "pocket.start-here",
-    kind: "document", content: "still a stager",
+    kind: "document", content: "synthetic staging",
   })).ok, true);
   assert.deepEqual(f.getPolicy(), policy);
   assert.equal((await f.publish(a)).ok, true);
