@@ -49,8 +49,17 @@ function createOneShotPublicationExecutor({
       if (!commitStarted && c) {
         try {await c.query("ROLLBACK");} catch {discard=true;}
       }
-      return Object.freeze({ok:false,reason:commitStarted?
-        "admission-acknowledgement-unknown":"admission-failed"});
+      if (commitStarted) {
+        // Release the ambiguous pinned connection first. Reconciliation must
+        // use a fresh session even when the pool's max size is one.
+        if (c) {try {c.release(true);} catch {} c=null;}
+        // A fresh authoritative read is diagnostic ONLY. Even if SPENT
+        // committed, uncertain admission is never permission to dispatch.
+        const reconciliation=await reconcile(auth);
+        return Object.freeze({ok:false,
+          reason:"admission-acknowledgement-unknown",reconciliation});
+      }
+      return Object.freeze({ok:false,reason:"admission-failed"});
     } finally {
       if(c) {try {c.release(discard || (commitStarted && !claimCommitted));}catch {}}
     }
@@ -84,9 +93,14 @@ function createOneShotPublicationExecutor({
       if(!commitAttempted && p){
         try {await p.query("ROLLBACK");}catch{bad=true;}
       }
-      return Object.freeze({ok:false,reason:commitAttempted?
-        "publication-acknowledgement-unknown":
-        dispatchStarted?"publication-failed-spent":"spent-before-dispatch"});
+      if (commitAttempted) {
+        if (p) {try {p.release(true);} catch {} p=null;}
+        const reconciliation=await reconcile(auth);
+        return Object.freeze({ok:false,
+          reason:"publication-acknowledgement-unknown",reconciliation});
+      }
+      return Object.freeze({ok:false,reason:dispatchStarted?
+        "publication-failed-spent":"spent-before-dispatch"});
     } finally {
       if(p){try {p.release(bad||commitAttempted);}catch {}}
     }
