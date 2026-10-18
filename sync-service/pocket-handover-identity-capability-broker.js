@@ -93,20 +93,22 @@ function createDormantIdentityCapabilityBroker({
       pending=Promise.resolve().then(()=>readApprovedPublication(Object.freeze({
       ownerId:c.principal.ownerId,resourceId:c.principal.resourceId,
       principalId:c.principal.principalId,dbLogin:executorLogin,
-      })));
+      }))).then(intent=>{
+        if(!intent||typeof intent.receiptId!=="string"
+          ||typeof intent.secret!=="string"||typeof intent.manifest!=="string")
+          throw Error("p349-separate-approval-required");
+        // Capture exact bytes ONCE. Never retain a mutable trusted-provider
+        // object whose contents could change between requests.
+        return Object.freeze({receiptId:intent.receiptId,
+          secret:intent.secret,manifest:intent.manifest});
+      });
       resolvedIntents.set(handle,pending);
     }
-    let intent;
-    try {intent=await pending;}
-    catch {resolvedIntents.delete(handle);throw Error("p349-separate-approval-required");}
-    if(!intent||typeof intent.receiptId!=="string"
-      ||typeof intent.secret!=="string"||typeof intent.manifest!=="string")
-    {
+    try {return await pending;}
+    catch {
       resolvedIntents.delete(handle);
       throw Error("p349-separate-approval-required");
     }
-    return Object.freeze({receiptId:intent.receiptId,
-      secret:intent.secret,manifest:intent.manifest});
   }
 
   const executor=createOneShotPublicationExecutor({
