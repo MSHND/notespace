@@ -185,8 +185,8 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   const current=fs.readFileSync(path.join(root,"sync-service/migrations/004-pocket-project-documents.sql"),"utf8");
   const migrator=fs.readFileSync(path.join(root,"sync-service/pocket-sync-db-migrate.js"),"utf8");
   assert.match(ddl,/PRIMARY KEY \(owner_id, resource_id, release_id, name\)/);
-  assert.equal((ddl.match(/CREATE TABLE IF NOT EXISTS public\\.pocket_handover_release_entries/g)||[]).length,1);
-  assert.equal((ddl.match(/CREATE TABLE IF NOT EXISTS public\\.pocket_handover_release_pointers/g)||[]).length,1);
+  assert.equal((ddl.match(/CREATE TABLE IF NOT EXISTS public\.pocket_handover_release_entries/g)||[]).length,1);
+  assert.equal((ddl.match(/CREATE TABLE IF NOT EXISTS public\.pocket_handover_release_pointers/g)||[]).length,1);
   assert.match(ddl,/sha256 ~ '\^\[a-f0-9\]\{64\}\$'/);
   assert.match(ddl,/sha256\s*=\s*pg_catalog\.encode\(/);
   assert.match(ddl,/pg_catalog\.sha256\(pg_catalog\.convert_to\(content, 'UTF8'\)\)/);
