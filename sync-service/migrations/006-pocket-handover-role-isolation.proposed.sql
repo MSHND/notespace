@@ -106,8 +106,10 @@ GRANT INSERT ON public.pocket_handover_release_entries
   TO pocket_handover_stager;
 GRANT SELECT ON public.pocket_handover_release_pointers
   TO pocket_handover_reader, pocket_handover_stager, pocket_handover_publisher;
-GRANT INSERT, UPDATE ON public.pocket_handover_release_pointers
-  TO pocket_handover_publisher;
+-- P349 restricted-publication follow-on: NO direct pointer DML for
+-- application publishers. A separately verified definer function owns CAS.
+REVOKE INSERT, UPDATE ON public.pocket_handover_release_pointers
+  FROM pocket_handover_publisher;
 
 -- No runtime role may change role_bindings. Dedicated LOGIN role provisioning,
 -- explicit memberships, service credential scoping, and binding admission
