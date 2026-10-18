@@ -204,6 +204,17 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   assert.match(roleProposal,/REVOKE ALL ON public\.pocket_handover_release_entries/);
   assert.match(roleProposal,/REVOKE ALL ON public\.pocket_handover_role_bindings/);
   assert.doesNotMatch(migrator,/006-pocket-handover-role-isolation/);
+  const gated=fs.readFileSync(path.join(root,
+    "sync-service/migrations/007-pocket-handover-restricted-publication.proposed.sql"),"utf8");
+  assert.doesNotMatch(migrator,/007-pocket-handover-restricted-publication/);
+  assert.match(gated,/REVOKE INSERT, UPDATE ON public\.pocket_handover_release_pointers/);
+  assert.match(gated,/SECURITY DEFINER/);
+  assert.match(gated,/SET search_path = pg_catalog, pg_temp/);
+  assert.match(gated,/pocket_handover_claim_receipt/);
+  assert.match(gated,/pocket_handover_publish_claimed/);
+  assert.match(gated,/ONE-USE CONTRACT: one durable CLAIM/);
+  assert.match(gated,/after an unexpected ROLLBACK/);
+
   assert.match(roleProposal,/publisher.*direct pointer INSERT\/UPDATE capability/s);
   assert.match(current,/PRIMARY KEY/);
   assert.equal(SQL.updatePointer.includes("revision=$5"),true);
