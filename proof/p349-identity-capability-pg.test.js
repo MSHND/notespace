@@ -367,7 +367,8 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    const outcome=await aliceExec.query(
      "SELECT public.pocket_handover_publish_claimed($1,$2,$3) AS result",
      [approvalSpent.id,approvalSpent.secret,approvalSpent.man]);
-   assert.equal(outcome.rows[0].result.ok,true);
+   assert.equal(outcome.rows[0].result.ok,true,
+     JSON.stringify(outcome.rows[0].result));
    assert.equal(outcome.rows[0].result.revision,2);
    assert.equal(await scopedSpend(capSpent,approvalSpent),"denied");
    assert.equal((await admin.query(
