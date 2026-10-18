@@ -34,6 +34,77 @@ identities.set(auth.bobRead,{ownerId:"bob",resourceId:"handover",principalId:"bo
 const connectionOptions={host:"127.0.0.1",port:5432,user:"postgres",
   password:"disposable_only_password",database:"postgres"};
 
+test("P349 digest: direct PostgreSQL 16 INSERT enforces SHA-256 of exact UTF-8 bytes",{timeout:30000},async()=>{
+  const db=new Pool({...connectionOptions,max:3,connectionTimeoutMillis:3000});
+  const owner="digest-admission-probe";
+  const insert=(releaseId,name,content,suppliedDigest)=>db.query(
+    "INSERT INTO public.pocket_handover_release_entries "+
+    "(owner_id,resource_id,release_id,name,kind,content,sha256,revision) "+
+    "VALUES ($1,'handover',$2,$3,'document',$4,$5,1) "+
+    "RETURNING owner_id,release_id,name,content,sha256,revision",
+    [owner,releaseId,name,content,suppliedDigest]);
+  try {
+    await db.query(ddl);
+    const version=await db.query("SHOW server_version_num");
+    assert.ok(Number(version.rows[0].server_version_num)>=160000);
+    const enc=await db.query("SHOW server_encoding");
+    assert.equal(enc.rows[0].server_encoding,"UTF8");
+    // PostgreSQL's built-in pg_catalog.sha256(bytea); no pgcrypto extension.
+    const extensions=await db.query(
+      "SELECT extname FROM pg_extension WHERE extname='pgcrypto'");
+    assert.equal(extensions.rowCount,0);
+    const schema=await db.query(
+      "SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint "+
+      "WHERE conrelid='public.pocket_handover_release_entries'::regclass "+
+      "AND contype='c'");
+    assert.ok(schema.rows.some(r=>r.definition.includes("sha256(")
+      && r.definition.includes("convert_to(")
+      && r.definition.includes("UTF8")));
+    const text="Café / 你好 / 🌿\ncombining e\u0301 and composed é\n";
+    const digest=hash(text);
+    const native=await db.query("SELECT pg_catalog.encode(pg_catalog.sha256("+
+      "pg_catalog.convert_to($1::text, 'UTF8')), 'hex') AS digest",[text]);
+    assert.equal(native.rows[0].digest,digest);
+    const good=await insert("r70","pocket.start-here",text,digest);
+    assert.equal(good.rowCount,1);
+    assert.equal(good.rows[0].content,text);
+    assert.equal(good.rows[0].sha256,digest);
+    assert.equal(Number(good.rows[0].revision),1);
+    await assert.rejects(
+      ()=>insert("r71","pocket.start-here",text,"f".repeat(64)),
+      e=>e.code==="23514"); // Valid syntax; wrong content fingerprint.
+    await assert.rejects(
+      ()=>insert("r72","pocket.start-here",text,"z".repeat(64)),
+      e=>e.code==="23514"); // Invalid digest syntax.
+    await assert.rejects(
+      ()=>insert("r70","pocket.start-here",text,digest),
+      e=>e.code==="23505"); // Identity uniqueness unchanged.
+    await assert.rejects(
+      ()=>db.query("UPDATE public.pocket_handover_release_entries SET "+
+        "content='tampered' WHERE owner_id=$1 AND release_id='r70'",[owner]),
+      e=>/immutable/.test(e.message));
+    await assert.rejects(
+      ()=>db.query("DELETE FROM public.pocket_handover_release_entries "+
+        "WHERE owner_id=$1 AND release_id='r70'",[owner]),
+      e=>/immutable/.test(e.message));
+    const count=await db.query(
+      "SELECT release_id,content,sha256 FROM "+
+      "public.pocket_handover_release_entries WHERE owner_id=$1 "+
+      "ORDER BY release_id",[owner]);
+    assert.equal(count.rowCount,1);
+    assert.equal(count.rows[0].release_id,"r70");
+    assert.equal(count.rows[0].sha256,digest);
+    assert.equal(count.rows[0].content,text);
+    const pointer=await db.query(
+      "SELECT count(*)::int AS n FROM public.pocket_handover_release_pointers "+
+      "WHERE owner_id=$1",[owner]);
+    assert.equal(pointer.rows[0].n,0);
+    console.log("P349_DB_DIGEST=PASS; native=pg_catalog.sha256; "+
+      "invalid-64hex=23514; invalid-syntax=23514; duplicate=23505; "+
+      "UTF8=PASS; immutable-update-delete=PASS; rejected-insert-no-pointer=PASS");
+  } finally {await db.end();}
+});
+
 test("P349 atomic publication: PostgreSQL 16 real transactions and locked nine-snapshot CAS",{timeout:30000},async()=>{
   const db=new Pool({...connectionOptions,max:10,connectionTimeoutMillis:3000});
   let approved=true, confirmed=0;
