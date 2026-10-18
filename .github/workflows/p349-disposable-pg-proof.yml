@@ -2,7 +2,7 @@ name: P349 disposable PostgreSQL proof (not production)
 on:
   push:
     branches:
-      - candidate/p349-history-probe-20261018-identity-proof
+      - candidate/p349-history-probe-20261018-revocation-proof
 
 permissions:
   contents: read
