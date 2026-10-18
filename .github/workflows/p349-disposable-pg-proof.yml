@@ -1,0 +1,47 @@
+name: P349 disposable PostgreSQL proof (not production)
+on:
+  push:
+    branches:
+      - candidate/p349-history-probe-20261018-digest-proof
+
+permissions:
+  contents: read
+
+jobs:
+  isolated-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: disposable_only_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    steps:
+      - name: Checkout exact proof-only SHA
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify exact checkout
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Establish Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Exact candidate and proof SHA-256 inventory
+        run: |
+          sha256sum sync-service/pocket-handover-release-reconstruction-probe.js
+          sha256sum tests/p349-history-reconstruction-probe.test.js
+          sha256sum proof/p349-atomic-pg-publication.test.js
+          sha256sum sync-service/migrations/005-pocket-handover-release-safety.proposed.sql
+          sha256sum sync-service/pocket-handover-release-safety-store.js
+      - name: Run proposed migration ONLY in disposable service
+        run: node --test proof/p349-atomic-pg-publication.test.js
