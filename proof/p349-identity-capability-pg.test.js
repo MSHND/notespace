@@ -307,9 +307,14 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      "SET revoked=true WHERE capability_id=$1",[capId]);
    // Previous broker check succeeded before this real committed revocation.
    const revokedAdmission=await aliceExec.query(
-     "SELECT public.pocket_handover_spend_receipt($1,$2,$3) AS decision",
-     [approvalId,approvalSecret,adversarialManifest]);
+     "SELECT public.pocket_handover_spend_receipt_scoped($1,$2,$3,$4,$5) AS decision",
+     [approvalId,approvalSecret,adversarialManifest,capId,adversarialSecret]);
    const revocationBug=revokedAdmission.rows[0].decision==="spent";
+   // The original 007 unscoped privilege is now revoked on the executor.
+   await assert.rejects(aliceExec.query(
+     "SELECT public.pocket_handover_spend_receipt($1,$2,$3)",
+     [approvalId,approvalSecret,adversarialManifest]),
+     e=>e.code==="42501");
    // Identity collision: revoke original binding, leave another issuer/subject
    // approved with identical principal/owner/resource/login/operation.
    await admin.query("INSERT INTO public.pocket_handover_principal_bindings "+
@@ -344,7 +349,7 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
      "SELECT public.pocket_handover_check_capability($1,$2,$3,$4,$5,$6) AS ok",
      [originalTwin,adversarialSecret,"alice.principal","alice","handover","publish"]);
    const collisionBug=collisionResult.rows[0].ok===true;
-   console.log("P349_PRE_REPAIR_BUGS admission-after-revocation="+revocationBug+
+   console.log("P349_ADVERSARIAL_GATES admission-after-revocation="+revocationBug+
      ";cross-issuer-collision="+collisionBug);
    assert.equal(revocationBug,false,"revoked before SPENT must deny");
    assert.equal(collisionBug,false,"original revoked issuer/subject cannot be rescued by collision");
