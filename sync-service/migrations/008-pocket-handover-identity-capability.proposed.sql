@@ -25,6 +25,10 @@ CREATE TABLE public.pocket_handover_principal_bindings (
 CREATE TABLE public.pocket_handover_scoped_capabilities (
   capability_id TEXT PRIMARY KEY CHECK (capability_id ~ '^cap[a-f0-9]{32}$'),
   secret_sha256 TEXT NOT NULL CHECK (secret_sha256 ~ '^[a-f0-9]{64}$'),
+  -- Immutable originating identity. An unrelated policy row with the same
+  -- principal/owner/resource may NEVER rescue this capability.
+  issuer TEXT NOT NULL,
+  subject TEXT NOT NULL,
   principal_id TEXT NOT NULL,
   owner_id TEXT NOT NULL,
   resource_id TEXT NOT NULL,
@@ -64,9 +68,10 @@ BEGIN
      )
   THEN RETURN false; END IF;
   INSERT INTO public.pocket_handover_scoped_capabilities
-    (capability_id,secret_sha256,principal_id,owner_id,resource_id,
-     db_login,operation,expires_at)
-  VALUES(p_id,p_digest,p_principal,p_owner,p_resource,p_login,p_operation,p_expiry);
+    (capability_id,secret_sha256,issuer,subject,principal_id,owner_id,
+     resource_id,db_login,operation,expires_at)
+  VALUES(p_id,p_digest,p_issuer,p_subject,p_principal,p_owner,p_resource,
+    p_login,p_operation,p_expiry);
   RETURN true;
 END;
 $p349_issue$;
@@ -84,7 +89,8 @@ AS $p349_check$
     SELECT 1
     FROM public.pocket_handover_scoped_capabilities c
     JOIN public.pocket_handover_principal_bindings b
-      ON b.principal_id=c.principal_id
+      ON b.issuer=c.issuer AND b.subject=c.subject
+      AND b.principal_id=c.principal_id
       AND b.owner_id=c.owner_id AND b.resource_id=c.resource_id
       AND b.db_login=c.db_login AND b.operation=c.operation
     WHERE c.capability_id=p_id
@@ -115,4 +121,4 @@ GRANT EXECUTE ON FUNCTION public.pocket_handover_check_capability(
   TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
   TO pocket_handover_publication_executor,
      pocket_handover_reader,pocket_handover_stager,pocket_handover_publisher;
-COMMIT;
+()=>add+before
