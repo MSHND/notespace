@@ -210,10 +210,22 @@ test("P349 one-shot SPENT admission: PostgreSQL, roles, concurrency, rollback an
    assert.equal((await execute(interrupted)).reason,"admission-denied");
    assert.equal(dispatches,oldCount);
 
+   // Unknown admission COMMIT: independently read SPENT, do NOT dispatch.
+   await stageAll("r3110");const admissionUnknown=await issue("r3110",2);
+   const badAdmissionAck=await runChild("lost-admission",admissionUnknown);
+   assert.match(badAdmissionAck.stdout,/admission-acknowledgement-unknown/);
+   assert.match(badAdmissionAck.stdout,/"receiptStatus":"spent"/);
+   assert.equal((await state(admissionUnknown)).status,"spent");
+   assert.deepEqual(await pointer(),{releaseId:"r3103",revision:2});
+   const beforeUnknownAdmissionRepeat=dispatches;
+   assert.equal((await execute(admissionUnknown)).reason,"admission-denied");
+   assert.equal(dispatches,beforeUnknownAdmissionRepeat);
+
    // H. Real publication COMMIT then synthetic lost ACK; read only.
    await stageAll("r3106");const uncertain=await issue("r3106",2);
    const lost=await runChild("lost-ack",uncertain);
    assert.match(lost.stdout,/publication-acknowledgement-unknown/);
+   assert.match(lost.stdout,/"outcome":"published"/);
    const remote=await mk(uncertain).reconcile(Object.freeze({}));
    assert.equal(remote.outcome,"published");
    assert.equal(remote.publishedRevision,3);
