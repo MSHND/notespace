@@ -8,6 +8,8 @@ const fs=require("node:fs"),path=require("node:path");
 const {NAMES}=require("../sync-service/pocket-handover-release-witness.js");
 const {createDormantIdentityCapabilityBroker}=
   require("../sync-service/pocket-handover-identity-capability-broker.js");
+const DDL7=fs.readFileSync(path.join(__dirname,
+ "../sync-service/migrations/007-pocket-handover-restricted-publication.proposed.sql"),"utf8");
 const DDL=fs.readFileSync(path.join(__dirname,
  "../sync-service/migrations/008-pocket-handover-identity-capability.proposed.sql"),"utf8");
 const H=s=>createHash("sha256").update(s,"utf8").digest("hex");
@@ -103,6 +105,18 @@ test("P349 real ES256 JWT + protected PostgreSQL capability + one-shot executor"
    "public.pocket_handover_release_pointers WHERE owner_id='alice' "+
    "AND resource_id='handover'");return x.rows[0];};
  try {
+   // Previous role proof leaves disposable 005/006 populated. Initialise
+   // previously GREEN dormant 007 here without running the process-kill suite.
+   await admin.query("CREATE ROLE p349_issuer LOGIN PASSWORD 'only_test_p349_issuer'");
+   await admin.query(DDL7);
+   await admin.query("GRANT pocket_handover_approval_issuer TO p349_issuer");
+   await admin.query("CREATE ROLE p349_alice_executor LOGIN "+
+     "PASSWORD 'only_test_p349_alice_executor'");
+   await admin.query("GRANT pocket_handover_publication_executor,"+
+     "pocket_handover_publisher TO p349_alice_executor");
+   await admin.query("INSERT INTO public.pocket_handover_role_bindings "+
+     "(db_login,owner_id,resource_id,capability) "+
+     "VALUES('p349_alice_executor','alice','handover','publisher')");
    await admin.query(DDL);
    await admin.query("CREATE ROLE p349_capability_service LOGIN "+
      "PASSWORD 'only_test_p349_capability_service'");
