@@ -78,7 +78,7 @@ CREATE FUNCTION public.pocket_handover_check_capability(
   p_id TEXT,p_secret TEXT,p_principal TEXT,p_owner TEXT,p_resource TEXT,
   p_operation TEXT
 ) RETURNS BOOLEAN
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $p349_check$
   SELECT EXISTS(
     SELECT 1
