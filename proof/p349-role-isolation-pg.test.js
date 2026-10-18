@@ -61,6 +61,9 @@ test("P349 real login and RLS owner isolation on disposable PostgreSQL 16",{time
   });
   try {
     await admin.query(base);
+    // New, isolated disposable fixture after the separate historical
+    // PostgreSQL regression suite; never run on a persistent database.
+    await admin.query("TRUNCATE TABLE public.pocket_handover_release_pointers, public.pocket_handover_release_entries");
     await admin.query(isolation);
     // Real database LOGIN identities have no shared role membership.
     for(const [login,owner,resource,capability] of principals){
