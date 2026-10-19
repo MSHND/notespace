@@ -57,13 +57,14 @@ jobs:
           python -m pip show playwright cryptography | grep -E '^(Name|Version):'
           /usr/bin/chromium --version
           printf 'P349_CHROMIUM_PATH=%s\n' "$BROWSER"
-      - name: Run ORIGINAL, unchanged, virtual WebAuthn acceptance
+      - name: Run DERIVED corrected virtual WebAuthn acceptance (original files unchanged)
         shell: bash
         working-directory: proof/p349-browser-disposable
         run: |
           set -euo pipefail
-          python acceptance.py 2>&1 | tee "$RUNNER_TEMP/p349-browser-test.log"
-          printf 'P349_BROWSER_UNMODIFIED_SUITE=PASS\n'
+          sha256sum corrected_acceptance.py
+          python corrected_acceptance.py 2>&1 | tee "$RUNNER_TEMP/p349-browser-test.log"
+          printf 'P349_BROWSER_CORRECTED_SUITE=PASS\n'
       - name: Independently check async cancellation, keyboard focus, expiry and credential denial
         if: always()
         working-directory: proof/p349-browser-disposable
