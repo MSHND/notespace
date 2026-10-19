@@ -52,7 +52,7 @@ jobs:
           fi
           test -n "$BROWSER"
           test -x "$BROWSER"
-          sudo ln -s "$BROWSER" /usr/bin/chromium
+          sudo ln -sfn "$BROWSER" /usr/bin/chromium
           python --version
           python -m pip show playwright cryptography | grep -E '^(Name|Version):'
           /usr/bin/chromium --version
