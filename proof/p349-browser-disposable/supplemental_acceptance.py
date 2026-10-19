@@ -25,7 +25,7 @@ class Supplemental(unittest.TestCase):
   with Original.app.conn() as c:
    c.execute("UPDATE intent SET expires=? WHERE id='ceremony-p349'",(Original.app.now()-1,))
   Original.page.get_by_role('button',name='Confirm with passkey').click()
-  Original.page.get_by_role('status').get_by_text('Expired.',exact=False).wait_for(timeout=8000)
+  Original.page.get_by_role('status').get_by_text('Expired',exact=True).wait_for(timeout=8000)
   self.assertEqual(self.receipts(),0)
   print('P349_SUPPLEMENT_EXPIRED=PASS; zero receipt',flush=True)
  def test_03_keyboard_actual_focus_sequence(self):
@@ -46,7 +46,7 @@ class Supplemental(unittest.TestCase):
  def test_04_wrong_credential_and_frozen_release(self):
   v=Original.api(Original.page,'/api/begin')
   self.assertEqual(v['status'],'READY')
-  a=Original.assertion(v)
+  a=Original('test_01_success_browser_and_accessibility').assertion(v)
   with Original.app.conn() as c:
    bob=c.execute("SELECT id FROM credential WHERE account='acct-bob' LIMIT 1").fetchone()[0]
    before=c.execute("SELECT owner,resource,release,expected_rev,docs,manifest FROM intent").fetchone()
@@ -67,4 +67,4 @@ class Supplemental(unittest.TestCase):
   print('P349_SUPPLEMENT_ABANDON=PASS; real browser page closed, zero receipt',flush=True)
 
 if __name__=='__main__':
- unittest.main(verbosity=2)
+ unittest.main(defaultTest='Supplemental',verbosity=2)
