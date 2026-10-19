@@ -210,6 +210,26 @@ test("P349xf proposed isolated SQL has scoped keys and database immutable UPDATE
   const capabilitySql=fs.readFileSync(path.join(root,
     "sync-service/migrations/008-pocket-handover-identity-capability.proposed.sql"),"utf8");
   assert.doesNotMatch(migrator,/008-pocket-handover-identity-capability/);
+
+  const statusSql=fs.readFileSync(path.join(root,
+    "sync-service/migrations/009-pocket-handover-status-only.proposed.sql"),"utf8");
+  assert.doesNotMatch(migrator,/009-pocket-handover-status-only/);
+  assert.match(statusSql,/pocket_handover_read_publication_outcome/);
+  assert.match(statusSql,/AND subject=c.subject/);
+  assert.match(statusSql,/r.principal_id IS DISTINCT FROM c.principal_id/);
+  assert.match(statusSql,/c.operation <> 'read'/);
+  assert.match(statusSql,/SESSION_USER::name/);
+  assert.match(statusSql,/FOR SHARE/);
+  assert.match(statusSql,/SET search_path = pg_catalog, pg_temp/);
+  assert.match(statusSql,/TO pocket_handover_outcome_reader/);
+  assert.doesNotMatch(statusSql,/GRANT EXECUTE[\s\S]*?TO pocket_handover_publication_executor/);
+  const outcomeReader=fs.readFileSync(path.join(root,
+    "sync-service/pocket-handover-outcome-reader.js"),"utf8");
+  assert.match(outcomeReader,/createProjectDocumentsTokenVerifier/);
+  assert.match(outcomeReader,/createHandoverVerifiedSubjectBinding/);
+  assert.match(outcomeReader,/pocket_handover_read_publication_outcome/);
+  assert.doesNotMatch(outcomeReader,/createOneShotPublicationExecutor/);
+
   assert.match(capabilitySql,/pocket_handover_principal_bindings/);
   assert.match(capabilitySql,/pocket_handover_scoped_capabilities/);
 
