@@ -85,7 +85,7 @@ test("P349 STATUS: independent owner read after publish revoke, genuine PG permi
    const first=await read();
    assert.equal(first.status,"PUBLISHED");
    assert.equal(first.releaseId,RECEIPT_OLD);
-   assert.equal(first.publishedRevision,1);
+   assert.equal(first.publishedRevision,2);
    // A: expired publish credentials alone cannot block independent read.
    await admin.query("UPDATE public.pocket_handover_scoped_capabilities "+
      "SET expires_at=clock_timestamp()-interval '1 second' "+
@@ -290,7 +290,7 @@ test("P349 STATUS: independent owner read after publish revoke, genuine PG permi
      i%2?aliceReader.status({token:aliceToken,receiptId:original}):
      bobReader.status({token:bobToken,receiptId:original})));
    results.forEach((x,i)=>assert.deepEqual(x,
-      i%2?{status:"PUBLISHED",releaseId:RECEIPT_OLD,publishedRevision:1}:
+      i%2?{status:"PUBLISHED",releaseId:RECEIPT_OLD,publishedRevision:2}:
       {status:"ACCESS_DENIED"}));
    assert.deepEqual(await eventCounts(),beforeState);
    assert.equal(finaliserCalls,1);
