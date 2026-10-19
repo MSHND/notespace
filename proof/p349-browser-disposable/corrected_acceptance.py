@@ -28,8 +28,8 @@ class CorrectedBrowserAcceptance(Original):
         print('P349_BROWSER_CANCEL_SETTLED=PASS; receipt_count=0', flush=True)
 
         # The remaining original abandonment and expiry scenarios are unchanged.
-        self.setUp(); self.begin(); self.page.close(); self.page=self.ctx.new_page(); self.page.goto(self.base); self.assertEqual(self.counts()[0],0)
-        self.cdp.detach(); self.cdp=self.ctx.new_cdp_session(self.page); self.cdp.send('WebAuthn.enable'); self.alice_auth=self.cdp.send('WebAuthn.addVirtualAuthenticator',{'options':{'protocol':'ctap2','transport':'usb','hasResidentKey':True,'hasUserVerification':True,'isUserVerified':True,'automaticPresenceSimulation':True}})['authenticatorId']
+        self.setUp(); self.begin(); self.cdp.detach(); self.page.close(); type(self).page=self.ctx.new_page(); self.page.goto(self.base); self.assertEqual(self.counts()[0],0)
+        type(self).cdp=self.ctx.new_cdp_session(self.page); self.cdp.send('WebAuthn.enable'); type(self).alice_auth=self.cdp.send('WebAuthn.addVirtualAuthenticator',{'options':{'protocol':'ctap2','transport':'usb','hasResidentKey':True,'hasUserVerification':True,'isUserVerified':True,'automaticPresenceSimulation':True}})['authenticatorId']
         # Authenticator above lost its earlier credential; recreate synthetic account credential.
         self.register('alice'); self.setUp(); self.app.clock_offset=4000
         self.page.get_by_role('button',name='Confirm with passkey').click(); self.page.get_by_role('status').get_by_text('Expired',exact=True).wait_for(timeout=8000); self.assertEqual(self.counts()[0],0)
