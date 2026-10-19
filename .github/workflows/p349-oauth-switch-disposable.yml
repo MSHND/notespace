@@ -28,7 +28,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
-          test "$(git rev-parse HEAD^)" = "28260e40afb9eb7c45620bbc85faac493741b318"
+          test "$(git rev-parse HEAD^)" = "1436ff284b3d50292162e83c5d52e23120a610b2"
           printf '%s\n' 'proof/p349-oauth-switch/account_switch_acceptance.py.gz' '.github/workflows/p349-oauth-switch-disposable.yml' > "$RUNNER_TEMP/expected.txt"
           git diff-tree --no-commit-id --name-only -r HEAD | sort > "$RUNNER_TEMP/actual.txt"
           sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
@@ -37,10 +37,10 @@ jobs:
             a8980038b666e90e43ae967997150b9c634a9343804255546ba2cb3246bb8c11 prototype.py \
             a5281415badae1d1689ac1521d4999e223ca196eaaf84bd2429662496a8afb20 acceptance.py \
             | sha256sum --check --strict)
-          printf '%s  %s\n' 85b2415ce4a82ef6e77ad1b9580a90357e03eda523fbe18ac92c22d5b4a89adb proof/p349-oauth-switch/account_switch_acceptance.py.gz | sha256sum --check --strict
+          printf '%s  %s\n' 42970fc065f78ad0c89ade27d3029a0b6c1339cd0b99f678e3d2177f6f0fb3f7 proof/p349-oauth-switch/account_switch_acceptance.py.gz | sha256sum --check --strict
           mkdir -p "$RUNNER_TEMP/p349-source"
           gzip -dc proof/p349-oauth-switch/account_switch_acceptance.py.gz > proof/p349-oauth-switch/account_switch_acceptance.py
-          printf '%s  %s\n' 630886cf388a2e2fe042725479e44ba845c3d11f67dced172bdbc5810a756cb7 proof/p349-oauth-switch/account_switch_acceptance.py | sha256sum --check --strict
+          printf '%s  %s\n' 31ef809d985e6c7c49fea9d448d6b7915d4f39a271f8136c07419594e6fcd11e proof/p349-oauth-switch/account_switch_acceptance.py | sha256sum --check --strict
           python3 -m py_compile proof/p349-oauth-switch/account_switch_acceptance.py
           printf 'P349_SWITCH_SOURCE=PASS; accepted browser proof unchanged; no production changes\n'
       - name: Prepare isolated Python 3.13
