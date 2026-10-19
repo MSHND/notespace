@@ -64,6 +64,13 @@ jobs:
           set -euo pipefail
           python acceptance.py 2>&1 | tee "$RUNNER_TEMP/p349-browser-test.log"
           printf 'P349_BROWSER_UNMODIFIED_SUITE=PASS\n'
+      - name: Independently check async cancellation, keyboard focus, expiry and credential denial
+        if: always()
+        working-directory: proof/p349-browser-disposable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python supplemental_acceptance.py 2>&1 | tee "$RUNNER_TEMP/p349-supplemental.log"
       - name: Save synthetic-only browser screenshots and diagnostic log
         if: always()
         uses: actions/upload-artifact@v4
