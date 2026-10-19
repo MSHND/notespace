@@ -221,6 +221,18 @@ test("P349 STATUS: independent owner read after publish revoke, genuine PG permi
      "SET revoked=false WHERE issuer=$1 AND subject='alice-user' "+
      "AND operation='read'",[cfg.issuer]);
 
+   await admin.query("INSERT INTO public.pocket_handover_principal_bindings "+
+     "(principal_id,issuer,subject,owner_id,resource_id,db_login,operation,approved) "+
+     "VALUES('alice.principal',$1,'other-subject-same-issuer','alice',"+
+     "'handover','p349_alice_status','read',true)",[cfg.issuer]);
+   await admin.query("UPDATE public.pocket_handover_principal_bindings "+
+     "SET revoked=true WHERE issuer=$1 AND subject='alice-user' "+
+     "AND operation='read'",[cfg.issuer]);
+   assert.deepEqual(await read(),{status:"ACCESS_DENIED"});
+   await admin.query("UPDATE public.pocket_handover_principal_bindings "+
+     "SET revoked=false WHERE issuer=$1 AND subject='alice-user' "+
+     "AND operation='read'",[cfg.issuer]);
+
    // H: complete release -> real COMMIT -> synthetic lost acknowledgement ->
    // status read only with independent fresh JWT and NO FINALISER REPLAY.
    await admin.query("UPDATE public.pocket_handover_principal_bindings "+
@@ -295,6 +307,26 @@ test("P349 STATUS: independent owner read after publish revoke, genuine PG permi
    assert.deepEqual(await eventCounts(),beforeState);
    assert.equal(finaliserCalls,1);
    assert.deepEqual(await read(original),await read(original));
+
+   // Connection errors produce UNKNOWN, never a presumed publication.
+   const failedPool={query:async()=>{throw Error("synthetic database unavailable");}};
+   const unavailable=broker("p349_alice_status",failedPool);
+   assert.deepEqual(await unavailable.status({token:aliceToken,receiptId:original}),
+     {status:"UNKNOWN"});
+   // Unknown capability/receipt identifiers cannot act as bearer authority.
+   assert.deepEqual((await alice.query(
+     "SELECT public.pocket_handover_read_publication_outcome($1,$2,$3) AS result",
+     [original,"cap"+"0".repeat(32),"guessed-secret"])).rows[0].result,
+     {status:"ACCESS_DENIED"});
+   const extraGrants=await admin.query(
+     "SELECT "+
+     "has_table_privilege('p349_alice_status','public.pocket_handover_approval_receipts','INSERT') AS receipt_insert,"+
+     "has_table_privilege('p349_alice_status','public.pocket_handover_approval_receipts','DELETE') AS receipt_delete,"+
+     "has_table_privilege('p349_alice_status','public.pocket_handover_release_pointers','INSERT') AS pointer_insert,"+
+     "has_table_privilege('p349_alice_status','public.pocket_handover_release_pointers','DELETE') AS pointer_delete");
+   assert.deepEqual(extraGrants.rows[0],{
+     receipt_insert:false,receipt_delete:false,pointer_insert:false,pointer_delete:false
+   });
 
    // K: corrupted snapshot admission, immutable history and atomic CAS
    // were rerun by earlier original suites in this workflow.
