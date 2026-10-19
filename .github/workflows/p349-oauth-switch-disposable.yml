@@ -1,0 +1,74 @@
+name: P349 disposable OAuth account-switch isolation
+on:
+  push:
+    branches:
+      - candidate/p349-oauth-switch-proof-20261019
+    paths:
+      - proof/p349-oauth-switch/**
+      - .github/workflows/p349-oauth-switch-disposable.yml
+permissions:
+  contents: read
+jobs:
+  one-oauth-switch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+    steps:
+      - name: Read-only exact proof checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify previous accepted proof is unmodified and proof files are bounded
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test "$(git rev-parse HEAD^)" = "28260e40afb9eb7c45620bbc85faac493741b318"
+          printf '%s\n' 'proof/p349-oauth-switch/account_switch_acceptance.py.gz' '.github/workflows/p349-oauth-switch-disposable.yml' > "$RUNNER_TEMP/expected.txt"
+          git diff-tree --no-commit-id --name-only -r HEAD | sort > "$RUNNER_TEMP/actual.txt"
+          sort "$RUNNER_TEMP/expected.txt" -o "$RUNNER_TEMP/expected.txt"
+          diff -u "$RUNNER_TEMP/expected.txt" "$RUNNER_TEMP/actual.txt"
+          (cd proof/p349-browser-disposable && printf '%s  %s\n' \
+            a8980038b666e90e43ae967997150b9c634a9343804255546ba2cb3246bb8c11 prototype.py \
+            a5281415badae1d1689ac1521d4999e223ca196eaaf84bd2429662496a8afb20 acceptance.py \
+            | sha256sum --check --strict)
+          printf '%s  %s\n' 85b2415ce4a82ef6e77ad1b9580a90357e03eda523fbe18ac92c22d5b4a89adb proof/p349-oauth-switch/account_switch_acceptance.py.gz | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/p349-source"
+          gzip -dc proof/p349-oauth-switch/account_switch_acceptance.py.gz > proof/p349-oauth-switch/account_switch_acceptance.py
+          printf '%s  %s\n' 630886cf388a2e2fe042725479e44ba845c3d11f67dced172bdbc5810a756cb7 proof/p349-oauth-switch/account_switch_acceptance.py | sha256sum --check --strict
+          python3 -m py_compile proof/p349-oauth-switch/account_switch_acceptance.py
+          printf 'P349_SWITCH_SOURCE=PASS; accepted browser proof unchanged; no production changes\n'
+      - name: Prepare isolated Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install isolated browser dependencies
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check 'playwright==1.57.0' 'cryptography==46.0.4'
+          python3 -m playwright install --with-deps chromium
+          BROWSER="$(find "$HOME/.cache/ms-playwright" -type f -path '*/chrome-linux64/chrome' -print -quit)"
+          if [ -z "$BROWSER" ]; then BROWSER="$(find "$HOME/.cache/ms-playwright" -type f -path '*/chrome-linux/chrome' -print -quit)"; fi
+          test -x "$BROWSER"
+          sudo ln -sfn "$BROWSER" /usr/bin/chromium
+          node --version
+          /usr/bin/chromium --version
+      - name: One ordered synthetic OAuth A to B to A acceptance test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 proof/p349-oauth-switch/account_switch_acceptance.py 2>&1 | tee "$RUNNER_TEMP/p349-oauth-switch.log"
+          printf 'P349_OAUTH_SWITCH_ONE_TEST=PASS\n'
+      - name: Preserve readable source for independent review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p349-oauth-switch-readable-source
+          path: proof/p349-oauth-switch/account_switch_acceptance.py
+          retention-days: 14
+          if-no-files-found: ignore
