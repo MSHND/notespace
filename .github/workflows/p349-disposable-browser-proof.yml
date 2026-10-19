@@ -1,0 +1,77 @@
+name: P349 disposable browser WebAuthn acceptance
+on:
+  push:
+    branches:
+      - candidate/p349-browser-recovery-proof-20261019
+    paths:
+      - proof/p349-browser-disposable/**
+      - .github/workflows/p349-disposable-browser-proof.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  virtual-passkey-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - name: Read-only checkout of this exact disposable proof revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify original recovered files, not reconstructions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          cd proof/p349-browser-disposable
+          printf '%s  %s\n' \
+            a8980038b666e90e43ae967997150b9c634a9343804255546ba2cb3246bb8c11 prototype.py \
+            a5281415badae1d1689ac1521d4999e223ca196eaaf84bd2429662496a8afb20 acceptance.py \
+            | sha256sum --check --strict
+          printf 'P349_EXACT_SOURCE_SHA=PASS\n'
+      - name: Python 3.13 disposable runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: proof/p349-browser-disposable/requirements-proof.txt
+      - name: Install isolated browser dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'playwright==1.57.0' 'cryptography==46.0.4'
+          python -m playwright install --with-deps chromium
+          BROWSER="$(find "$HOME/.cache/ms-playwright" -type f -path '*/chrome-linux64/chrome' -print -quit)"
+          if [ -z "$BROWSER" ]; then
+            BROWSER="$(find "$HOME/.cache/ms-playwright" -type f -path '*/chrome-linux/chrome' -print -quit)"
+          fi
+          test -n "$BROWSER"
+          test -x "$BROWSER"
+          sudo ln -s "$BROWSER" /usr/bin/chromium
+          python --version
+          python -m pip show playwright cryptography | grep -E '^(Name|Version):'
+          /usr/bin/chromium --version
+          printf 'P349_CHROMIUM_PATH=%s\n' "$BROWSER"
+      - name: Run ORIGINAL, unchanged, virtual WebAuthn acceptance
+        shell: bash
+        working-directory: proof/p349-browser-disposable
+        run: |
+          set -euo pipefail
+          python acceptance.py 2>&1 | tee "$RUNNER_TEMP/p349-browser-test.log"
+          printf 'P349_BROWSER_UNMODIFIED_SUITE=PASS\n'
+      - name: Save synthetic-only browser screenshots and diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p349-synthetic-browser-proof
+          if-no-files-found: ignore
+          retention-days: 7
+          path: |
+            proof/p349-browser-disposable/p349-*-synthetic.png
