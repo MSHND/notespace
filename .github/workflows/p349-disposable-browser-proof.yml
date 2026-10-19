@@ -40,8 +40,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-          cache: 'pip'
-          cache-dependency-path: proof/p349-browser-disposable/requirements-proof.txt
       - name: Install isolated browser dependencies
         shell: bash
         run: |
