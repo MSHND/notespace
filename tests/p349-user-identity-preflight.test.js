@@ -117,8 +117,8 @@ test("P349: a valid refreshed delegated end-user token can PASS after /userinfo 
 test("P349: tampered JWT, wrong issuer/API audience, expiry, nbf and future issued-at all DENY", async () => {
   const original = await signed(base());
   const pieces = original.split(".");
-  const tamperedPayload = pieces[1].slice(0, -1) + (pieces[1].endsWith("A") ? "B" : "A");
-  const changed = [pieces[0], tamperedPayload, pieces[2]].join(".");
+  const other = (await signed({ ...base(), sub: "auth0|synthetic-forged-user" })).split(".");
+  const changed = [pieces[0], other[1], pieces[2]].join(".");
   const negative = [
     runCase(base(), { token: changed }),
     runCase({ ...base(), iss: "https://other.synthetic.example/" }),
