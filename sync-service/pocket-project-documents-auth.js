@@ -116,6 +116,10 @@ function createProjectDocumentsTokenVerifier(input) {
             audience: handoverAudience(payload, config, authInfo.scopes),
             resourceUrl: config.resourceUrl,
             expiresAt: payload.exp,
+            // Optional verified token-grant evidence, private to opt-in consumers.
+            grantType: Object.hasOwn(payload, "gty") ? payload.gty : null,
+            grantTypeAlias: Object.hasOwn(payload, "grant_type") ? payload.grant_type : null,
+            tokenUse: Object.hasOwn(payload, "token_use") ? payload.token_use : null,
           }));
         } catch (_error) {
           throw projectDocumentsAuthError();
@@ -128,8 +132,11 @@ function createProjectDocumentsTokenVerifier(input) {
 
 function createProjectDocumentsJwtTokenVerifier(configInput, options = null) {
   const config = validateConfig(configInput);
-  if (options !== null && (!isObject(options) || Object.keys(options).length !== 1
-      || typeof options.verifiedSubjectObserver !== "function")) {
+  if (options !== null && (!isObject(options)
+      || ![1, 2].includes(Object.keys(options).length)
+      || typeof options.verifiedSubjectObserver !== "function"
+      || Object.keys(options).some(key => !["verifiedSubjectObserver", "expectedAlgorithm"].includes(key))
+      || (Object.hasOwn(options, "expectedAlgorithm") && options.expectedAlgorithm !== "RS256"))) {
     throw projectDocumentsAuthError("project-documents-auth-config-invalid");
   }
   let verifier = null;
@@ -151,6 +158,8 @@ function createProjectDocumentsJwtTokenVerifier(configInput, options = null) {
       const verified = await jose.jwtVerify(token, verifier, {
         issuer: config.issuer,
         audience: config.audience,
+        // The dormant identity preflight alone opts into RS256 pinning.
+        ...(options?.expectedAlgorithm ? { algorithms: [options.expectedAlgorithm] } : {}),
       });
       if (!verified || !isObject(verified.payload)) throw projectDocumentsAuthError();
       return verified.payload;
