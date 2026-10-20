@@ -116,6 +116,7 @@ function createProjectDocumentsTokenVerifier(input) {
             audience: handoverAudience(payload, config, authInfo.scopes),
             resourceUrl: config.resourceUrl,
             expiresAt: payload.exp,
+            issuedAt: Object.hasOwn(payload, "iat") ? payload.iat : null,
             // Optional verified token-grant evidence, private to opt-in consumers.
             grantType: Object.hasOwn(payload, "gty") ? payload.gty : null,
             grantTypeAlias: Object.hasOwn(payload, "grant_type") ? payload.grant_type : null,
