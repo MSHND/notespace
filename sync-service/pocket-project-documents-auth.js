@@ -120,6 +120,14 @@ function createProjectDocumentsTokenVerifier(input) {
             // Never add either value to the public MCP authInfo.
             grantType: payload.gty,
             oauthGrantType: payload.grant_type,
+            // P349 diagnostic-only provenance; never part of public authInfo.
+            // The unmodified signed audience remains private to the observer.
+            apiOnlyAudience: payload.aud === config.audience,
+            authorizedParty: payload.azp,
+            signedClientId: payload.client_id,
+            issuedAt: payload.iat,
+            notBefore: payload.nbf,
+            tokenUse: payload.token_use,
           }));
         } catch (_error) {
           throw projectDocumentsAuthError();
