@@ -139,6 +139,68 @@ test("P349 diagnostic: genuine JOSE, one-tool HTTP MCP and forbidden-module isol
     }));
   });
 
+  await t.test("immutable registered-client snapshot: caller mutation cannot rebind signed client", async () => {
+    const mutableClient = { ...registration };
+    const isolated = makeDiagnostic({
+      diagnosticOnly: true, config, registeredClient: mutableClient,
+    });
+    const authorised = await sign();
+    assert.equal(await isolated.checkToken(authorised), "PASS");
+
+    // Mutate the ORIGINAL caller object, not the diagnostic's internal snapshot.
+    mutableClient.clientId = "synthetic-attacker-client";
+    mutableClient.verified = false;
+    mutableClient.delegatedOnly = false;
+    mutableClient.machineGrantsDisabled = false;
+    mutableClient.issuer = "https://attacker.synthetic.example/";
+    assert.equal(Object.isFrozen(mutableClient), false);
+    assert.equal(mutableClient.clientId, "synthetic-attacker-client");
+
+    assert.equal(await isolated.checkToken(authorised), "PASS");
+    assert.equal(await isolated.checkToken(await sign({
+      ...baseClaims(), azp: "synthetic-attacker-client",
+    })), "DENY");
+    assert.equal(await isolated.checkToken(await sign({
+      ...baseClaims(), azp: undefined, client_id: "synthetic-attacker-client",
+    })), "DENY");
+  });
+
+  await t.test("immutable config snapshot: caller mutation cannot redirect the verified policy", async () => {
+    const mutableConfig = { ...config };
+    const isolated = makeDiagnostic({
+      diagnosticOnly: true, config: mutableConfig, registeredClient: registration,
+    });
+    const authorised = await sign();
+    const originalPath = { url: config.mcpRoot };
+    assert.equal(await isolated.checkToken(authorised), "PASS");
+    assert.equal(isolated.matches(originalPath), true);
+
+    mutableConfig.issuer = "https://attacker.synthetic.example/";
+    mutableConfig.audience = "https://attacker.synthetic.example/alternate-api";
+    mutableConfig.resourceUrl = "https://attacker.synthetic.example/alternate-api";
+    mutableConfig.resourceMetadataUrl =
+      "https://attacker.synthetic.example/.well-known/oauth-protected-resource/alternate-api";
+    mutableConfig.mcpRoot = "/alternate-api";
+    mutableConfig.readScope = "pocket.project-documents.write";
+    mutableConfig.jwksUrl = "http://127.0.0.1:1/attacker-jwks";
+    assert.equal(Object.isFrozen(mutableConfig), false);
+    assert.equal(mutableConfig.mcpRoot, "/alternate-api");
+
+    // Original signed token and original resource continue to work unchanged.
+    assert.equal(await isolated.checkToken(authorised), "PASS");
+    assert.equal(isolated.matches(originalPath), true);
+    assert.equal(isolated.matches({ url: mutableConfig.mcpRoot }), false);
+
+    // New issuer, audience or downgraded scope cannot be substituted later.
+    assert.equal(await isolated.checkToken(await sign({
+      ...baseClaims(), iss: mutableConfig.issuer,
+      aud: mutableConfig.audience, scope: mutableConfig.readScope,
+    })), "DENY");
+    assert.equal(await isolated.checkToken(await sign({
+      ...baseClaims(), scope: mutableConfig.readScope,
+    })), "DENY");
+  });
+
   await t.test("HTTP MCP: only diagnostic tool, no ordinary Project Documents tools or store", async () => {
     const local = http.createServer((req,res) => {
       Promise.resolve(diagnostic.matches(req) ? diagnostic.handle(req,res)
