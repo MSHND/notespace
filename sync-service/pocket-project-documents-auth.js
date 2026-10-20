@@ -116,6 +116,10 @@ function createProjectDocumentsTokenVerifier(input) {
             audience: handoverAudience(payload, config, authInfo.scopes),
             resourceUrl: config.resourceUrl,
             expiresAt: payload.exp,
+            // Verified claims only, available to opt-in server-only consumers.
+            // Never add either value to the public MCP authInfo.
+            grantType: payload.gty,
+            oauthGrantType: payload.grant_type,
           }));
         } catch (_error) {
           throw projectDocumentsAuthError();
@@ -128,8 +132,10 @@ function createProjectDocumentsTokenVerifier(input) {
 
 function createProjectDocumentsJwtTokenVerifier(configInput, options = null) {
   const config = validateConfig(configInput);
-  if (options !== null && (!isObject(options) || Object.keys(options).length !== 1
-      || typeof options.verifiedSubjectObserver !== "function")) {
+  if (options !== null && (!isObject(options)
+      || typeof options.verifiedSubjectObserver !== "function"
+      || Object.keys(options).some(key => !["verifiedSubjectObserver", "requireRs256"].includes(key))
+      || (Object.hasOwn(options, "requireRs256") && options.requireRs256 !== true))) {
     throw projectDocumentsAuthError("project-documents-auth-config-invalid");
   }
   let verifier = null;
@@ -151,6 +157,7 @@ function createProjectDocumentsJwtTokenVerifier(configInput, options = null) {
       const verified = await jose.jwtVerify(token, verifier, {
         issuer: config.issuer,
         audience: config.audience,
+        ...(options?.requireRs256 === true ? { algorithms: ["RS256"] } : {}),
       });
       if (!verified || !isObject(verified.payload)) throw projectDocumentsAuthError();
       return verified.payload;
