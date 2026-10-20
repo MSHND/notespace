@@ -223,7 +223,8 @@ test("P349: verified observer failure rejects in the EXISTING genuine JOSE verif
   const verifier = createProjectDocumentsJwtTokenVerifier(config, {
     verifiedSubjectObserver() { throw Error("synthetic private observer failure"); },
   });
-  await assert.rejects(() => verifier.verifyAccessToken(await signed(base())),
+  const token = await signed(base());
+  await assert.rejects(() => verifier.verifyAccessToken(token),
     error => error?.code === "project-documents-auth-invalid"
       && !error.message.includes("private observer failure"));
 });
