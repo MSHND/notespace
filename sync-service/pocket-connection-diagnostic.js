@@ -94,7 +94,12 @@ function resultOnly(result) {
 
 function createPocketConnectionDiagnostic(input) {
   validate(input);
-  const { config, registeredClient } = input;
+  // Copy the validated primitive security policy into privately owned objects.
+  // Never freeze or subsequently consult the caller's mutable objects.
+  const config = Object.freeze({ ...input.config });
+  const registeredClient = Object.freeze({ ...input.registeredClient });
+  // Validate the exact snapshots consumed by the verifier and MCP handler.
+  validate({ diagnosticOnly: true, config, registeredClient });
   // Private verified claims, keyed by the exact frozen authInfo object.
   const provenance = new WeakMap();
   const verifier = createProjectDocumentsJwtTokenVerifier(config, {
