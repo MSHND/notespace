@@ -24,6 +24,11 @@ typedef enum pc_result {
     PC_STALE = 5
 } pc_result;
 
+/* Hard RAM limits: 32 Undo steps, 33 states, 128 KiB retained text. */
+#define PC_TEXT_MAX_BYTES 32768u
+#define PC_HISTORY_MAX_STATES 33u
+#define PC_HISTORY_MAX_BYTES 131072u
+
 typedef struct pc_snapshot {
     uint8_t *identity;
     size_t identity_length;
@@ -38,6 +43,10 @@ pc_result pc_document_create(const uint8_t *identity, size_t identity_length,
                              uint64_t loaded_revision, pc_document **out_document);
 void pc_document_destroy(pc_document *document);
 pc_result pc_document_edit(pc_document *document, const uint8_t *text, size_t text_length);
+pc_result pc_document_undo(pc_document *document);
+pc_result pc_document_redo(pc_document *document);
+int pc_document_can_undo(const pc_document *document);
+int pc_document_can_redo(const pc_document *document);
 pc_result pc_document_capture(const pc_document *document, pc_snapshot *snapshot);
 void pc_snapshot_release(pc_snapshot *snapshot);
 pc_result pc_document_confirm_saved(pc_document *document, uint64_t revision,

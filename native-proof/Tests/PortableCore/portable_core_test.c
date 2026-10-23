@@ -96,7 +96,7 @@ static void unicode_and_nul(void) {
 static void refusals_preserve_state(void) {
     pc_document *doc = loaded((const uint8_t *)"safe", 4, 0);
     CHECK(pc_document_edit(doc, NULL, 2) == PC_INVALID);
-    CHECK(pc_document_edit(doc, (const uint8_t *)"x", SIZE_MAX) == PC_INVALID);
+    CHECK(pc_document_edit(doc, (const uint8_t *)"x", SIZE_MAX) == PC_OVERFLOW);
     CHECK(pc_document_revision(doc) == 0 && pc_document_is_dirty(doc) == 0);
     CHECK(pc_document_confirm_saved(doc, 0, 999) == PC_STALE);
     CHECK(pc_document_edit(doc, (const uint8_t *)"unsafe", 6) == PC_OK);
@@ -106,8 +106,90 @@ static void refusals_preserve_state(void) {
     CHECK(pc_document_is_dirty(doc) == 0);
     pc_document_destroy(doc);
 }
+static void history_proof(void) {
+    const uint8_t multi[] = "🌿\nこんにちは";
+    const uint8_t nul[] = {'a', 0, 'b', '\n', 0};
+    pc_document *doc = loaded(NULL, 0, 5);
+    CHECK(pc_document_undo(doc) == PC_UNCHANGED);
+    CHECK(pc_document_redo(doc) == PC_UNCHANGED);
+    CHECK(pc_document_edit(doc, multi, sizeof(multi)-1) == PC_OK);
+    pc_snapshot before = capture(doc);
+    CHECK(pc_document_edit(doc, nul, sizeof(nul)) == PC_OK);
+    CHECK(pc_document_undo(doc) == PC_OK);
+    pc_snapshot now = capture(doc);
+    CHECK(now.text_length == sizeof(multi)-1 && memcmp(now.text, multi, now.text_length) == 0);
+    CHECK(now.revision > before.revision && now.epoch > before.epoch);
+    CHECK(pc_document_confirm_saved(doc, before.revision, before.epoch) == PC_STALE);
+    CHECK(pc_document_redo(doc) == PC_OK);
+    pc_snapshot binary = capture(doc);
+    CHECK(binary.text_length == sizeof(nul) && memcmp(binary.text, nul, sizeof(nul)) == 0);
+    CHECK(pc_document_undo(doc) == PC_OK);
+    CHECK(pc_document_undo(doc) == PC_OK);
+    CHECK(!pc_document_is_dirty(doc));
+    CHECK(pc_document_redo(doc) == PC_OK);
+    CHECK(pc_document_is_dirty(doc));
+    CHECK(pc_document_edit(doc, multi, sizeof(multi)-1) == PC_UNCHANGED);
+    CHECK(pc_document_can_redo(doc));
+    CHECK(pc_document_edit(doc, (const uint8_t *)"branch", 6) == PC_OK);
+    CHECK(!pc_document_can_redo(doc));
+    CHECK(pc_document_redo(doc) == PC_UNCHANGED);
+    CHECK(pc_document_edit(doc, NULL, 1) == PC_INVALID);
+    CHECK(pc_document_edit(doc, (const uint8_t *)"x", PC_TEXT_MAX_BYTES+1u) == PC_OVERFLOW);
+    CHECK(pc_document_undo(doc) == PC_OK);
+    CHECK(pc_document_redo(doc) == PC_OK);
+    CHECK(pc_document_confirm_saved(doc, before.revision, before.epoch) == PC_STALE);
+    pc_snapshot saved = capture(doc);
+    CHECK(pc_document_confirm_saved(doc, saved.revision, saved.epoch) == PC_OK);
+    CHECK(!pc_document_is_dirty(doc));
+    CHECK(pc_document_undo(doc) == PC_OK);
+    CHECK(pc_document_is_dirty(doc));
+    CHECK(pc_document_redo(doc) == PC_OK);
+    CHECK(!pc_document_is_dirty(doc));
+    pc_snapshot_release(&saved);
+    pc_snapshot_release(&binary);
+    pc_snapshot_release(&now);
+    pc_snapshot_release(&before);
+    pc_document_destroy(doc);
+}
+static void bounded_history_proof(void) {
+    pc_document *doc = loaded((const uint8_t *)"0", 1, 0);
+    for (unsigned i = 1; i <= PC_HISTORY_MAX_STATES + 8u; i++) {
+        char b[16];
+        int n = snprintf(b, sizeof(b), "%u", i);
+        CHECK(n > 0);
+        CHECK(pc_document_edit(doc, (const uint8_t *)b, (size_t)n) == PC_OK);
+    }
+    unsigned moves = 0;
+    while (pc_document_can_undo(doc)) {
+        CHECK(pc_document_undo(doc) == PC_OK);
+        moves++;
+    }
+    CHECK(moves == PC_HISTORY_MAX_STATES - 1u);
+    CHECK(pc_document_undo(doc) == PC_UNCHANGED);
+    pc_document_destroy(doc);
+    uint8_t big[PC_TEXT_MAX_BYTES];
+    memset(big, 'x', sizeof(big));
+    doc = loaded(big, sizeof(big), 0);
+    big[0] = 'y';
+    for (unsigned i = 0; i < 7; i++) {
+        big[1] = (uint8_t)('0' + i);
+        CHECK(pc_document_edit(doc, big, sizeof(big)) == PC_OK);
+    }
+    moves = 0;
+    while (pc_document_can_undo(doc)) {
+        CHECK(pc_document_undo(doc) == PC_OK);
+        moves++;
+    }
+    CHECK(moves == 3u);
+    pc_document_destroy(doc);
+    doc = loaded((const uint8_t *)"z", 1, UINT64_MAX);
+    CHECK(pc_document_edit(doc, (const uint8_t *)"x", 1) == PC_OVERFLOW);
+    CHECK(pc_document_revision(doc) == UINT64_MAX);
+    pc_document_destroy(doc);
+}
 int main(void) {
     content_cycle(); empty_content(); unicode_and_nul(); refusals_preserve_state();
-    printf("portable C core proof PASS (4 suites, %u assertions; no files, accounts or Sync)\n", checks);
+    history_proof(); bounded_history_proof();
+    printf("portable C core proof PASS (6 suites, %u assertions; no files, accounts or Sync)\n", checks);
     return 0;
 }
