@@ -48,3 +48,8 @@ jobs:
       - name: Test rebuilt WebAssembly independently
         shell: bash
         run: node native-proof/playground/tests/web-core-smoke.mjs "$RUNNER_TEMP/standalone.html"
+      - name: Emit disposable built core for committed-page generation
+        shell: bash
+        run: |
+          python3 -c 'import re,sys; h=open(sys.argv[1],encoding="utf-8").read(); b=re.search(r"<script id=\"core-wasm\" type=\"application/octet-stream\">([A-Za-z0-9+/=]+)</script>",h).group(1); print("CORE_START"); [print("CORE_CHUNK:"+b[i:i+96]) for i in range(0,len(b),96)]; print("CORE_END")' "$RUNNER_TEMP/standalone.html"
+

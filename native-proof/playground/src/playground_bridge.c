@@ -36,6 +36,12 @@ int pg_edit(uint32_t byte_count) {
     return (int)pc_document_edit(document, input_buffer, byte_count);
 }
 
+/* Thin WASM adapter: the C11 document remains the only Undo/Redo owner. */
+int pg_undo(void) { return document ? (int)pc_document_undo(document) : (int)PC_INVALID; }
+int pg_redo(void) { return document ? (int)pc_document_redo(document) : (int)PC_INVALID; }
+int pg_can_undo(void) { return pc_document_can_undo(document); }
+int pg_can_redo(void) { return pc_document_can_redo(document); }
+
 int pg_mark_baseline(void) {
     if (!document) return (int)PC_INVALID;
     pc_snapshot snap;

@@ -168,6 +168,8 @@
 <div class="controls" aria-label="Playground actions">
   <button id="baseline" class="primary" disabled>Mark in-memory baseline</button>
   <button id="restore" disabled>Restore baseline text</button>
+  <button id="undo" disabled>Undo (core)</button>
+  <button id="redo" disabled>Redo (core)</button>
   <button id="reset" disabled>Reset playground</button>
 </div>
 <section class="details" aria-label="Actual core state">
@@ -180,7 +182,7 @@
   </dl>
   <p class="message" id="message" role="status" aria-live="polite"></p>
 </section>
-<p class="footnote" id="scope-note"><strong>What this proves:</strong> Actual core edit, revision, dirty-state and baseline-confirmation calls can run in a browser, with no server connection. The baseline is <strong>not a disk Save</strong>. Browser text Undo belongs to the host editor, not Pocket's portable Undo system. Returning to identical baseline text now correctly returns Pocket to a clean state, even though its revision history continues to advance. All content disappears on reload. Do not enter real or private thoughts in this experimental preview.</p>
+<p class="footnote" id="scope-note"><strong>What this proves:</strong> Actual core edit, revision, dirty-state and baseline-confirmation calls can run in a browser, with no server connection. The baseline is <strong>not a disk Save</strong>. The Undo and Redo buttons call Pocket's C11 history, while Ctrl/Cmd+Z remains browser-owned and is not intercepted or accepted here. Returning to identical baseline text now correctly returns Pocket to a clean state, even though its revision history continues to advance. All content disappears on reload. Do not enter real or private thoughts in this experimental preview.</p>
 <script id="core-wasm" type="application/octet-stream">@@CORE_WASM_BASE64@@</script>
 <script>
 'use strict';
@@ -203,6 +205,8 @@
     state.textContent=dirty?'UNSAVED IN MEMORY':'AT IN-MEMORY BASELINE';
     state.classList.toggle('dirty',dirty);
     $('length').textContent=encoder.encode(editor.value).length+' / '+api.pg_input_capacity()+' bytes';
+    $('undo').disabled=api.pg_can_undo()===0;
+    $('redo').disabled=api.pg_can_redo()===0;
   }
   function updateCoreText(value){
     const bytes=encoder.encode(value);
@@ -241,6 +245,16 @@
       try {updateCoreText(baselineText);editor.value=textFromCore();syncStatus();note('Baseline text restored. Pocket checks the current content against the confirmed in-memory baseline.');}
       catch(err){note(err.message,true);}
     });
+    for (const [id,operation] of [['undo','pg_undo'],['redo','pg_redo']]) {
+      $(id).addEventListener('click',()=>{
+        try {
+          guard(api[operation](),id);
+          editor.value=textFromCore();
+          syncStatus();
+          note(id==='undo'?'Pocket C11 Undo restored the prior text.':'Pocket C11 Redo restored the edit.');
+        } catch(err){note(err.message,true);}
+      });
+    }
     $('reset').addEventListener('click',()=>{
       try {guard(api.pg_reset(),'reset');editor.value=textFromCore();baselineText=editor.value;baselineRevision=api.pg_revision();syncStatus();note('Fresh disposable thought. No previous contents retained by the app.');}
       catch(err){note(err.message,true);}
