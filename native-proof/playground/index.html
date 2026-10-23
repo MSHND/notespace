@@ -9,11 +9,11 @@
   :root {
     color-scheme: light;
     font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #304037;
-    background: #e8ece7;
-    --paper: #faf9f5;
-    --muted: #637568;
-    --line: rgba(65, 85, 70, .14);
+    color: #344655;
+    background: #e1eaf1;
+    --paper: #f6f8fb;
+    --muted: #667888;
+    --line: rgba(86, 112, 134, .13);
   }
   * { box-sizing: border-box; }
   body {
@@ -23,6 +23,9 @@
     flex-direction: column;
     align-items: center;
     padding: clamp(28px, 6vh, 68px) 22px 45px;
+    background:
+      radial-gradient(ellipse 85% 50% at 50% 0%, rgba(249, 252, 255, .65), transparent 90%),
+      linear-gradient(155deg, #e6edf4 0%, #dce6ef 72%, #d6e2ec 100%);
   }
   header {
     width: min(650px, 100%);
@@ -33,40 +36,57 @@
     gap: 12px;
     margin-bottom: 26px;
   }
-  .brand { font-size: 1.38rem; font-weight: 630; letter-spacing: -.055em; color: #394d3f; }
+  .brand { font-size: 1.38rem; font-weight: 630; letter-spacing: -.055em; color: #354a5d; }
   .brand small { font-size: .72rem; letter-spacing: .012em; font-weight: 400; color: var(--muted); margin-left: 8px; }
   .scope { font-size: .67rem; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; color: var(--muted); }
-  .intro, .footnote { width: min(650px, 100%); font-size: .8rem; line-height: 1.65; color: #607064; }
+  .intro, .footnote { width: min(650px, 100%); font-size: .8rem; line-height: 1.65; color: #5a6e7d; }
   .intro { margin: 0 0 23px; }
   .footnote { margin: 24px 0 0; }
-  .footnote strong { color: #435847; }
+  .footnote strong { color: #3d576d; }
 
-  /* One uninterrupted sheet: this is the visual anchor, not a stack of cards. */
+  /* One sheet: a lit upper rim and shaded underside suggest softly turned paper. */
   .paper {
+    position: relative;
+    isolation: isolate;
     width: min(650px, 100%);
     min-height: 420px;
     display: flex;
     flex-direction: column;
     padding: 29px clamp(24px, 5vw, 43px) 24px;
-    background: var(--paper);
-    border: 1px solid rgba(83, 91, 76, .12);
-    border-radius: 6px;
+    background:
+      radial-gradient(110% 42px at 50% 0%, rgba(255,255,255,.9), transparent 100%),
+      radial-gradient(110% 58px at 50% 100%, rgba(174,195,214,.14), transparent 100%),
+      linear-gradient(122deg, #f8fafc 0%, #f5f8fb 54%, #f6f8fb 100%);
+    border: 1px solid rgba(113, 134, 151, .16);
+    border-radius: 32px;
     box-shadow:
-      0 2px 3px rgba(31, 41, 32, .075),
-      0 9px 22px rgba(31, 41, 32, .085),
-      0 32px 54px -22px rgba(31, 41, 32, .15);
+      0 3px 5px -3px rgba(51, 75, 97, .16),
+      0 13px 29px -13px rgba(46, 68, 90, .20),
+      0 40px 62px -29px rgba(44, 65, 85, .28);
+  }
+  /* Edge modelling only: no extra inner card, no glossy border and no interaction layer. */
+  .paper::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow:
+      inset 2px 2px 2px rgba(255,255,255,.72),
+      inset -2px -2px 4px rgba(89, 113, 133, .085);
   }
   .paper header { width: 100%; margin: 0 0 33px; }
-  .thought-label { font-size: .7rem; color: #738274; letter-spacing: .06em; }
+  .thought-label { font-size: .7rem; color: #718599; letter-spacing: .06em; }
   .state {
     font-size: .68rem;
-    background: #e8eee7;
-    color: #405848;
+    background: #e8eef4;
+    color: #45637a;
     border-radius: 20px;
     padding: 7px 11px;
     font-weight: 620;
   }
-  .state.dirty { background: #f3ebdd; color: #806443; }
+  .state.dirty { background: #f5ecdf; color: #806443; }
   textarea {
     display: block;
     flex: 1 1 auto;
@@ -77,11 +97,11 @@
     outline: 0;
     resize: vertical;
     background: transparent;
-    color: #304037;
+    color: #334654;
     font: 400 1.19rem/1.7 Georgia, 'Times New Roman', serif;
     overflow-wrap: anywhere;
   }
-  textarea:focus-visible { outline: 2px solid #a4bba7; outline-offset: 8px; border-radius: 2px; }
+  textarea:focus-visible { outline: 2px solid #8ba9c0; outline-offset: 8px; border-radius: 2px; }
   .paper-footer {
     display: flex;
     justify-content: space-between;
@@ -92,43 +112,43 @@
     padding-top: 14px;
     border-top: 1px solid var(--line);
     font-size: .7rem;
-    color: #79877b;
+    color: #75889a;
   }
 
-  /* Instruments stay accessible but visually sit behind the paper. */
+  /* Keep proof controls legible but subordinate to the floating sheet. */
   .controls { width: min(650px, 100%); display: flex; flex-wrap: wrap; gap: 9px; margin-top: 28px; }
   button {
     padding: 10px 13px;
-    background: rgba(250, 251, 247, .52);
-    color: #48604e;
-    border: 1px solid rgba(70, 92, 75, .23);
-    border-radius: 6px;
+    background: rgba(249, 251, 253, .55);
+    color: #405e75;
+    border: 1px solid rgba(71, 104, 130, .25);
+    border-radius: 9px;
     font: 600 .78rem/1.35 ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     cursor: pointer;
   }
-  button.primary { background: #405a47; border-color: #405a47; color: #fff; }
+  button.primary { background: #496a83; border-color: #496a83; color: #fff; }
   button:hover { filter: brightness(.96); }
-  button:focus-visible { outline: 3px solid #759e7c; outline-offset: 3px; }
+  button:focus-visible { outline: 3px solid #779bb7; outline-offset: 3px; }
   button:disabled { opacity: .52; cursor: not-allowed; }
   .details {
     width: min(650px, 100%);
     margin-top: 34px;
     padding: 20px 1px 0;
-    border-top: 1px solid rgba(65, 85, 70, .16);
+    border-top: 1px solid rgba(74, 106, 133, .16);
     background: transparent;
     font-size: .8rem;
-    color: #526659;
+    color: #526b7e;
   }
   .details h2 { margin: 0 0 14px; font-size: .83rem; font-weight: 620; }
   dl { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 15px; margin: 0; }
   dt { opacity: .76; }
   dd { margin: 0; font-weight: 620; font-variant-numeric: tabular-nums; }
-  .message { margin-top: 15px; min-height: 1.1em; font-size: .78rem; color: #627363; }
+  .message { margin-top: 15px; min-height: 1.1em; font-size: .78rem; color: #57738a; }
   .error { color: #9f302a; font-weight: 650; }
   @media (max-width: 480px) {
     body { padding: 24px 16px 34px; }
     header { margin-bottom: 18px; }
-    .paper { min-height: 390px; padding: 22px 22px 19px; }
+    .paper { min-height: 390px; padding: 22px 22px 19px; border-radius: 25px; }
     .paper header { margin-bottom: 26px; }
     textarea { min-height: 225px; font-size: 1.12rem; }
     .controls { margin-top: 23px; }
