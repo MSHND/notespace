@@ -64,7 +64,7 @@
   </dl>
   <p class="message" id="message" role="status" aria-live="polite"></p>
 </section>
-<p class="footnote" id="scope-note"><strong>What this proves:</strong> Actual core edit, revision, dirty-state and baseline-confirmation calls can run in a browser, with no server connection. The baseline is <strong>not a disk Save</strong>. Browser text Undo belongs to the host editor, not Pocket's portable Undo system. Returning to identical baseline text may still show Dirty: that is a known open core issue we're exposing rather than hiding. All content disappears on reload. Do not enter real or private thoughts in this experimental preview.</p>
+<p class="footnote" id="scope-note"><strong>What this proves:</strong> Actual core edit, revision, dirty-state and baseline-confirmation calls can run in a browser, with no server connection. The baseline is <strong>not a disk Save</strong>. Browser text Undo belongs to the host editor, not Pocket's portable Undo system. Returning to identical baseline text now correctly returns Pocket to a clean state, even though its revision history continues to advance. All content disappears on reload. Do not enter real or private thoughts in this experimental preview.</p>
 <script id="core-wasm" type="application/octet-stream">@@CORE_WASM_BASE64@@</script>
 <script>
 'use strict';
@@ -122,7 +122,7 @@
       catch(err){note(err.message,true);}
     });
     $('restore').addEventListener('click',()=>{
-      try {updateCoreText(baselineText);editor.value=textFromCore();syncStatus();note('Baseline text restored by a core edit. If Dirty remains YES, you found the known revision issue.');}
+      try {updateCoreText(baselineText);editor.value=textFromCore();syncStatus();note('Baseline text restored. Pocket checks the current content against the confirmed in-memory baseline.');}
       catch(err){note(err.message,true);}
     });
     $('reset').addEventListener('click',()=>{
