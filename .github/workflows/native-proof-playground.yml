@@ -33,6 +33,12 @@ jobs:
       - name: Check committed single-file actual core bundle
         shell: bash
         run: node native-proof/playground/tests/web-core-smoke.mjs
+      - name: Install WebAssembly linker
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends lld
+          command -v wasm-ld
       - name: Recompile C11 to fresh WebAssembly HTML
         shell: bash
         run: |
