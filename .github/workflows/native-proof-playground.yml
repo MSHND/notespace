@@ -1,0 +1,44 @@
+name: Pocket disposable browser playground
+
+on:
+  push:
+    branches:
+      - candidate/native-core-portable-20261023
+    paths:
+      - 'native-proof/**'
+      - '.github/workflows/native-proof-playground.yml'
+  pull_request:
+    paths:
+      - 'native-proof/**'
+      - '.github/workflows/native-proof-playground.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  web-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Prove clean exact checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git status --porcelain)"
+      - name: Check committed single-file actual core bundle
+        shell: bash
+        run: node native-proof/playground/tests/web-core-smoke.mjs
+      - name: Recompile C11 to fresh WebAssembly HTML
+        shell: bash
+        run: |
+          clang --version
+          wasm-ld --version
+          bash native-proof/playground/build-html.sh "$RUNNER_TEMP/standalone.html"
+      - name: Test rebuilt WebAssembly independently
+        shell: bash
+        run: node native-proof/playground/tests/web-core-smoke.mjs "$RUNNER_TEMP/standalone.html"

@@ -1,0 +1,51 @@
+// Smoke the actual compiled C11 core embedded in the standalone browser page.
+// Node WebAssembly runtime, no JSDOM and no Javascript stand-in for semantics.
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+const filename = process.argv[2] ?? new URL('../index.html', import.meta.url);
+const html=readFileSync(filename,'utf8');
+assert.match(html, /id="core-wasm"/);
+assert.doesNotMatch(html,/@@CORE_WASM_BASE64@@/);
+assert.doesNotMatch(html, /fetch\s*\(/);
+const b64=html.match(/<script id="core-wasm" type="application\/octet-stream">([A-Za-z0-9+/=]+)<\/script>/)?.[1];
+assert(b64,'missing embedded WebAssembly binary');
+const {instance}=await WebAssembly.instantiate(Buffer.from(b64,'base64'),{});
+const a=instance.exports;
+const encoder=new TextEncoder(),decoder=new TextDecoder();
+const capture=()=>{
+  const len=a.pg_capture(); assert(len>=0);
+  return decoder.decode(new Uint8Array(a.memory.buffer,a.pg_display_pointer(),len));
+};
+const edit=s=>{
+  const bytes=encoder.encode(s);
+  assert(bytes.length<=a.pg_input_capacity());
+  new Uint8Array(a.memory.buffer,a.pg_input_pointer(),bytes.length).set(bytes);
+  return a.pg_edit(bytes.length);
+};
+assert.equal(a.pg_reset(),0);
+const original=capture();
+assert.equal(original,'A tiny thought, just for testing. 🌿');
+assert.equal(a.pg_revision(),0n);
+assert.equal(a.pg_is_dirty(),0);
+assert.equal(edit(original),1);
+assert.equal(a.pg_revision(),0n);
+assert.equal(edit('Kaya 🌿\nHello, Pocket!'),0);
+assert.equal(capture(),'Kaya 🌿\nHello, Pocket!');
+assert.equal(a.pg_revision(),1n);
+assert.equal(a.pg_is_dirty(),1);
+assert.equal(a.pg_mark_baseline(),0);
+assert.equal(a.pg_revision(),1n);
+assert.equal(a.pg_is_dirty(),0);
+assert.equal(edit('Kaya 🌿\nHello, Pocket! More text'),0);
+assert.equal(a.pg_revision(),2n);
+assert.equal(a.pg_is_dirty(),1);
+assert.equal(edit('Kaya 🌿\nHello, Pocket!'),0);
+assert.equal(a.pg_revision(),3n);
+assert.equal(a.pg_is_dirty(),1,'document known dirty-equality issue truthfully exposed');
+assert.equal(a.pg_edit(a.pg_input_capacity()+1),2,'oversize edit must refuse');
+assert.equal(a.pg_revision(),3n);
+assert.equal(a.pg_reset(),0);
+assert.equal(capture(),original);
+assert.equal(a.pg_revision(),0n);
+assert.equal(a.pg_is_dirty(),0);
+console.log('PASS: embedded actual C11 WASM: Unicode, edit, baseline, reset, revision, oversize refusal; open dirty-equality behaviour exposed');

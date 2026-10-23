@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light" />
+<title>Pocket · Disposable core playground</title>
+<style>
+  :root { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #303e35; background:#e8e9e5; }
+  * { box-sizing:border-box }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:clamp(18px,5vw,68px) 18px 32px; }
+  header { width:min(650px,100%); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:24px; }
+  .brand { font-size:1.5rem; font-weight:650; letter-spacing:-.07em; }
+  .brand small { font-size:.76rem; letter-spacing:0; font-weight:400; opacity:.64; margin-left:8px }
+  .scope { font-size:.72rem; letter-spacing:.07em; text-transform:uppercase; font-weight:650; opacity:.75 }
+  .paper { width:min(650px,100%); min-height:365px; background:#f9f8f3; border:1px solid #e2e2da; border-radius:10px; box-shadow: 0 5px 11px rgba(37,44,31,.12),0 23px 44px rgba(37,44,31,.08); padding:26px clamp(20px,5vw,42px) 24px; }
+  .paper header { width:100%; margin:0 0 28px; }
+  .thought-label { font-size:.76rem; color:#728076; letter-spacing:.045em; }
+  .state { font-size:.71rem; background:#e8ece4; border-radius:16px; padding:7px 10px; font-weight:650; }
+  .state.dirty { background:#f7ead8; color:#795e37 }
+  textarea { border:0; display:block; padding:0; color:inherit; outline:0; resize:vertical; width:100%; min-height:215px; font: 400 1.17rem/1.65 Georgia, 'Times New Roman', serif; background:transparent; overflow-wrap:anywhere; }
+  textarea:focus-visible { outline:2px solid #a9bba9; outline-offset:7px; border-radius:2px; }
+  .paper-footer { margin-top:22px; border-top:1px solid #e4e6df; padding-top:13px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; font-size:.73rem; color:#6d796f; }
+  .controls { width:min(650px,100%); margin-top:20px; display:flex; gap:9px; flex-wrap:wrap; }
+  button { border:1px solid #abb8aa; border-radius:8px; background:#f5f6f2; color:#304635; padding:12px 15px; font-weight:600; font-size:.82rem; cursor:pointer; }
+  button.primary { background:#3c5543; color:#fff; border-color:#3c5543 }
+  button:hover { filter:brightness(.96); }
+  button:focus-visible { outline:3px solid #7da98a; outline-offset:3px }
+  button:disabled { opacity:.5; cursor:not-allowed }
+  .details { width:min(650px,100%); margin-top:25px; background:#f2f3ee; border-radius:8px; padding:16px 20px; font-size:.85rem; }
+  .details h2 {font-size:.88rem;margin:0 0 10px;}
+  dl { display:grid; grid-template-columns: 1fr auto; gap:8px 12px; margin:0; }
+  dt { opacity:.73 } dd { margin:0; font-weight:600; font-variant-numeric:tabular-nums }
+  .intro,.footnote { width:min(650px,100%); font-size:.83rem; line-height:1.65; color:#526055 }
+  .intro { margin:0 0 14px } .footnote { margin:16px 0 0 }
+  .footnote strong {color:#3e5542}
+  .message { margin-top:13px; font-size:.78rem; color:#627261; min-height:1.1em }
+  .error { color:#9f302a; font-weight:650 }
+  .paper:focus-within { box-shadow: 0 5px 11px rgba(37,44,31,.12),0 23px 44px rgba(37,44,31,.08); }
+  @media(prefers-reduced-motion:no-preference) { button { transition:filter .15s ease } }
+</style>
+</head>
+<body>
+<header><div class="brand">pocket <small>proof space</small></div><div class="scope">Portable core · candidate only</div></header>
+<p class="intro">This is a little floating-paper experiment powered by Pocket’s <strong>real C11 core, compiled to WebAssembly</strong>. Type freely. Nothing here accesses or saves to your actual Pocket.</p>
+<main class="paper" aria-label="Disposable thought">
+  <header><span class="thought-label">DISPOSABLE THOUGHT · 01</span><span id="state" class="state" role="status">LOADING CORE</span></header>
+  <label class="thought-label" for="editor">WORKING TEXT</label>
+  <textarea id="editor" aria-describedby="scope-note" spellcheck="true" disabled></textarea>
+  <footer class="paper-footer"><span id="identity">disposable-playground-1</span><span id="length">0 / 4096 bytes</span></footer>
+</main>
+<div class="controls" aria-label="Playground actions">
+  <button id="baseline" class="primary" disabled>Mark in-memory baseline</button>
+  <button id="restore" disabled>Restore baseline text</button>
+  <button id="reset" disabled>Reset playground</button>
+</div>
+<section class="details" aria-label="Actual core state">
+  <h2>What's the portable core doing?</h2>
+  <dl>
+    <dt>Core revision</dt><dd id="revision">—</dd>
+    <dt>Core dirty flag</dt><dd id="dirty">—</dd>
+    <dt>In-memory baseline</dt><dd id="baseline-revision">—</dd>
+    <dt>Engine</dt><dd id="engine">Loading compiled C11…</dd>
+  </dl>
+  <p class="message" id="message" role="status" aria-live="polite"></p>
+</section>
+<p class="footnote" id="scope-note"><strong>What this proves:</strong> Actual core edit, revision, dirty-state and baseline-confirmation calls can run in a browser, with no server connection. The baseline is <strong>not a disk Save</strong>. Browser text Undo belongs to the host editor, not Pocket's portable Undo system. Returning to identical baseline text may still show Dirty: that is a known open core issue we're exposing rather than hiding. All content disappears on reload. Do not enter real or private thoughts in this experimental preview.</p>
+<script id="core-wasm" type="application/octet-stream">AGFzbQEAAAABOApgAABgBn9/f39+fwF/YAF/AGADf39/AX9gAn9/AX9gA39+fgF/YAF/AX9gAX8BfmAAAX9gAAF+AxoZAAECAwQCBQYHCAgIBggICAgICQYCBAMDAwUEAQECQAZBCn8BQfDIBAt/AEHwyAQLfwBBgAgLfwBB8MgAC38AQfDIAAt/AEHwyAQLfwBBgAgLfwBBgIAIC38AQQALfwBBAQsHqAQjBm1lbW9yeQIAEV9fd2FzbV9jYWxsX2N0b3JzAAAScGNfZG9jdW1lbnRfY3JlYXRlAAEGY2FsbG9jABUGbWFsbG9jABMGbWVtY3B5ABcEZnJlZQAUE3BjX2RvY3VtZW50X2Rlc3Ryb3kAAhBwY19kb2N1bWVudF9lZGl0AAMGbWVtY21wABgTcGNfZG9jdW1lbnRfY2FwdHVyZQAEBm1lbXNldAAWE3BjX3NuYXBzaG90X3JlbGVhc2UABRlwY19kb2N1bWVudF9jb25maXJtX3NhdmVkAAYUcGNfZG9jdW1lbnRfaXNfZGlydHkABxRwY19kb2N1bWVudF9yZXZpc2lvbgAICHBnX3Jlc2V0AAkQcGdfaW5wdXRfcG9pbnRlcgAKEXBnX2lucHV0X2NhcGFjaXR5AAsHcGdfZWRpdAAMEHBnX21hcmtfYmFzZWxpbmUADQpwZ19jYXB0dXJlAA4ScGdfZGlzcGxheV9wb2ludGVyAA8PcGdfZGlzcGxheV9zaXplABALcGdfaXNfZGlydHkAEQtwZ19yZXZpc2lvbgASC19faGVhcF9iYXNlAwEMX19kc29faGFuZGxlAwIKX19kYXRhX2VuZAMDC19fc3RhY2tfbG93AwQMX19zdGFja19oaWdoAwUNX19nbG9iYWxfYmFzZQMGCl9faGVhcF9lbmQDBw1fX21lbW9yeV9iYXNlAwgMX190YWJsZV9iYXNlAwkKzhYZAgALpQMBBH9BAiEGAkAgBUUNACAFQQA2AgAgAEUNACABQb9/akFASQ0AQQAhB0EAIQgCQANAAkAgACAIai0AACIJQd8BcUG/f2pB/wFxQRpJDQAgCUEtRg0AIAlBUGpB/wFxQQlLDQILIAhBAWoiCCABTyEHIAEgCEcNAAsLIAdBAXFFDQAgA0F/Rg0AIAJFIANBAEdxDQBBAyEGQQFBKBCVgICAACIIRQ0AQQAhCQJAIAFBf0YNACABQQFqEJOAgIAAIgdFDQACQCABRQ0AIAcgACABEJeAgIAAGgsgByABakEAOgAAIAchCQsgCCAJNgIAAkACQAJAAkACQCACDQAgAw0BCyADQQFqEJOAgIAAIgANASAIKAIAIQkLIAhBADYCCAwBCwJAIANFDQAgACACIAMQl4CAgAAaC0EAIQkgACADakEAOgAAIAggADYCCCAIKAIADQELIAkQlICAgAAgCCgCCBCUgICAACAIEJSAgIAAQQMPCyAIQgE3AyAgCCAENwMYIAggBDcDECAIIAM2AgwgCCABNgIEIAUgCDYCAEEAIQYLIAYLKAACQCAARQ0AIAAoAgAQlICAgAAgACgCCBCUgICAACAAEJSAgIAACwvZAQECf0ECIQMCQCAARQ0AIAJBf0YNACABRSACQQBHcQ0AAkAgACgCDCACRw0AQQEhAyACRQ0BIAEgACgCCCACEJiAgIAARQ0BC0EEIQMgACkDEEJ/UQ0AIAApAyBCf1ENAEEDIQMCQCABDQAgAg0BCyACQQFqEJOAgIAAIgRFDQACQCACRQ0AIAQgASACEJeAgIAAGgtBACEDIAQgAmpBADoAACAAKAIIEJSAgIAAIAAgAjYCDCAAIAQ2AgggACAAKQMQQgF8NwMQIAAgACkDIEIBfDcDIAsgAwvIAgEEf0ECIQICQCAARQ0AIAFFDQBBACECIAFBAEEgEJaAgIAAGgJAIAAoAgQiA0F/Rg0AAkAgACgCACIEDQAgAw0BCyADQQFqEJOAgIAAIgVFDQACQCADRQ0AIAUgBCADEJeAgIAAGgsgBSADakEAOgAAIAUhAgsgASACNgIAAkACQAJAAkAgACgCDCIDQX9GDQACQCAAKAIIIgQNACADDQELIANBAWoQk4CAgAAiBQ0BIAEoAgAhAgsgAUEANgIIDAELAkAgA0UNACAFIAQgAxCXgICAABoLQQAhAiAFIANqQQA6AAAgASAFNgIIIAEoAgANAQsgAhCUgICAACABKAIIEJSAgIAAIAFBAEEgEJaAgIAAGkEDDwsgASAAKAIENgIEIAEgACgCDDYCDCABIAApAxA3AxAgASAAKQMgNwMYQQAhAgsgAgstAAJAIABFDQAgACgCABCUgICAACAAKAIIEJSAgIAAIABBAEEgEJaAgIAAGgsLNgEBfwJAIAANAEECDwtBBSEDAkAgACkDECABUg0AIAApAyAgAlINACAAIAE3AxhBACEDCyADCxcAAkAgAA0AQQAPCyAAKQMQIAApAxhSCxEAAkAgAA0AQgAPCyAAKQMQC+cBAQJ/I4CAgIAAQdAAayIAJICAgIAAIABBADYCTCAAQTBqQRBqQQApA5CIgIAANwMAIABBACkDiIiAgAA3AzggAEEAKQOAiICAADcDMCAAQR9qQQApAL+IgIAANwAAIABBGGpBACkDuIiAgAA3AwAgAEEQakEAKQOwiICAADcDACAAQQApA6iIgIAANwMIIABBACkDoIiAgAA3AwACQCAAQTBqQRcgAEEmQgAgAEHMAGoQgYCAgAAiAQ0AQQAoAtCIgIAAEIKAgIAAQQAgACgCTDYC0IiAgAALIABB0ABqJICAgIAAIAELCABB4IiAgAALBQBBgCALNQECf0ECIQECQCAAQYAgSw0AQQAoAtCIgIAAIgJFDQAgAkHgiICAACAAEIOAgIAAIQELIAELbAECfyOAgICAAEEgayIAJICAgIAAAkACQEEAKALQiICAACIBDQBBAiEBDAELIAEgABCEgICAACIBDQBBACgC0IiAgAAgACkDECAAKQMYEIaAgIAAIQEgABCFgICAAAsgAEEgaiSAgICAACABC6oBAQN/I4CAgIAAQSBrIgAkgICAgAACQAJAQQAoAtCIgIAAIgENAEF/IQIMAQtBfyECIAEgABCEgICAAA0AAkAgACgCDCIBQYEgSQ0AIAAQhYCAgAAMAQtB4KiAgAAgACgCCCABEJeAgIAAGkEAIAAoAgwiAjYC5MiAgAAgAkHgqICAAGpBADoAACAAEIWAgIAAQQAoAuTIgIAAIQILIABBIGokgICAgAAgAgsIAEHgqICAAAsLAEEAKALkyICAAAsRAEEAKALQiICAABCHgICAAAsRAEEAKALQiICAABCIgICAAAvpAQEEf0EAIQECQCAAQYCABEsNACAAQQEgAEEBSxtBB2pB+P8PcSECQejIgIAAIQACQANAIAAiASgCACIARQ0BIAAoAgQgAkkNAAsgASAAKAIANgIAIABBCGoPC0EAIQECQEEAKALsyICAACIADQBBAEHwyISAAEEHakF4cSIANgLsyICAAAsgAEF3IAJrSw0AAkAgAiAAakEIaiIDPwBBEHQiBE0NACADIARrQf//A2pBEHZAAEF/Rg0BQQAoAuzIgIAAIQALIABBADYCACAAIAI2AgRBACADNgLsyICAACAAQQhqIQELIAELKAACQCAARQ0AIABBeGoiAEEAKALoyICAADYCAEEAIAA2AujIgIAACwv0AgEEfwJAIAFFDQAgAa0gAK1+QiCIp0UNAEEADwsCQCABIABsIgJBgIAETQ0AQQAPCyACQQEgAkEBSxtBB2pB+P8PcSEAQejIgIAAIQECQAJAAkADQCABIgMoAgAiAUUNASABKAIEIABJDQALIAMgASgCADYCAAwBC0EAIQQCQEEAKALsyICAACIBDQBBAEHwyISAAEEHakF4cSIBNgLsyICAAAsgAUF3IABrSw0BAkAgACABakEIaiIDPwBBEHQiBU0NACADIAVrQf//A2pBEHZAAEF/Rg0CQQAoAuzIgIAAIQELIAFBADYCACABIAA2AgRBACADNgLsyICAAAsgAUEIaiEEIAJFDQAgAkEHcSEDQQAhAAJAIAJBCEkNACACQfj/B3EhAkEAIQADQCABIABqQQhqQgA3AAAgAiAAQQhqIgBHDQALCyADRQ0AIAAgAWpBCGohAQNAIAFBADoAACABQQFqIQEgA0F/aiIDDQALCyAEC7UBAQN/AkAgAkUNACACQQdxIQNBACEEAkAgAkEISQ0AIAJBeHEhBUEAIQQDQCAAIARqIgIgAToAACACQQdqIAE6AAAgAkEGaiABOgAAIAJBBWogAToAACACQQRqIAE6AAAgAkEDaiABOgAAIAJBAmogAToAACACQQFqIAE6AAAgBSAEQQhqIgRHDQALCyADRQ0AIAAgBGohAgNAIAIgAToAACACQQFqIQIgA0F/aiIDDQALCyAAC7gBAQR/AkAgAkUNACACQQNxIQNBACEEAkAgAkEESQ0AIAJBfHEhBUEAIQQDQCAAIARqIgIgASAEaiIGLQAAOgAAIAJBAWogBkEBai0AADoAACACQQJqIAZBAmotAAA6AAAgAkEDaiAGQQNqLQAAOgAAIAUgBEEEaiIERw0ACwsgA0UNACABIARqIQIgACAEaiEEA0AgBCACLQAAOgAAIAJBAWohAiAEQQFqIQQgA0F/aiIDDQALCyAAC0oBA39BACEDAkAgAkUNAAJAA0AgAC0AACIEIAEtAAAiBUcNASAAQQFqIQAgAUEBaiEBIAJBf2oiAkUNAgwACwsgBCAFayEDCyADCwtOAQBBgAgLR2Rpc3Bvc2FibGUtcGxheWdyb3VuZC0xAAAAAAAAAAAAQSB0aW55IHRob3VnaHQsIGp1c3QgZm9yIHRlc3RpbmcuIPCfjL8AAL4DBG5hbWUAERBwb2NrZXQtY29yZS53YXNtAYMDGQARX193YXNtX2NhbGxfY3RvcnMBEnBjX2RvY3VtZW50X2NyZWF0ZQITcGNfZG9jdW1lbnRfZGVzdHJveQMQcGNfZG9jdW1lbnRfZWRpdAQTcGNfZG9jdW1lbnRfY2FwdHVyZQUTcGNfc25hcHNob3RfcmVsZWFzZQYZcGNfZG9jdW1lbnRfY29uZmlybV9zYXZlZAcUcGNfZG9jdW1lbnRfaXNfZGlydHkIFHBjX2RvY3VtZW50X3JldmlzaW9uCQhwZ19yZXNldAoQcGdfaW5wdXRfcG9pbnRlcgsRcGdfaW5wdXRfY2FwYWNpdHkMB3BnX2VkaXQNEHBnX21hcmtfYmFzZWxpbmUOCnBnX2NhcHR1cmUPEnBnX2Rpc3BsYXlfcG9pbnRlchAPcGdfZGlzcGxheV9zaXplEQtwZ19pc19kaXJ0eRILcGdfcmV2aXNpb24TBm1hbGxvYxQEZnJlZRUGY2FsbG9jFgZtZW1zZXQXBm1lbWNweRgGbWVtY21wBxIBAA9fX3N0YWNrX3BvaW50ZXIJCgEABy5yb2RhdGEAfwlwcm9kdWNlcnMBDHByb2Nlc3NlZC1ieQEFY2xhbmdfMTcuMC4wIChodHRwczovL2dpdGh1Yi5jb20vc3dpZnRsYW5nL2xsdm0tcHJvamVjdC5naXQgMTA5OTliNmQwMzRmZTMxOGYzZDU2YzgzYmRkYjY1NzI1OTNhOGJiMCkASQ90YXJnZXRfZmVhdHVyZXMEKwptdWx0aXZhbHVlKw9tdXRhYmxlLWdsb2JhbHMrD3JlZmVyZW5jZS10eXBlcysIc2lnbi1leHQ=</script>
+<script>
+'use strict';
+(async () => {
+  const $ = id => document.getElementById(id);
+  const editor=$('editor'), state=$('state'), msg=$('message');
+  const encoder=new TextEncoder(), decoder=new TextDecoder('utf-8',{fatal:true});
+  const note=(s,error=false)=>{msg.textContent=s;msg.classList.toggle('error',error);};
+  let api, memory, baselineText='', baselineRevision=0n;
+  function guard(result,action){ if(result!==0 && !(action==='edit' && result===1)) throw Error(action+' core code '+result); }
+  function textFromCore(){
+    const size=api.pg_capture(); if(size<0) throw Error('Core capture failed');
+    return decoder.decode(new Uint8Array(memory.buffer,api.pg_display_pointer(),size));
+  }
+  function syncStatus(){
+    const dirty=api.pg_is_dirty()!==0,rev=api.pg_revision();
+    $('revision').textContent=rev.toString();
+    $('dirty').textContent=dirty?'YES':'NO';
+    $('baseline-revision').textContent=baselineRevision.toString();
+    state.textContent=dirty?'UNSAVED IN MEMORY':'AT IN-MEMORY BASELINE';
+    state.classList.toggle('dirty',dirty);
+    $('length').textContent=encoder.encode(editor.value).length+' / '+api.pg_input_capacity()+' bytes';
+  }
+  function updateCoreText(value){
+    const bytes=encoder.encode(value);
+    if(bytes.length>api.pg_input_capacity()) throw Error('Maximum size is 4096 UTF-8 bytes. Your last edit was not sent to the core.');
+    new Uint8Array(memory.buffer,api.pg_input_pointer(),bytes.length).set(bytes);
+    guard(api.pg_edit(bytes.length),'edit');
+    // Read the canonical text back from the compiled core, not a JS replica.
+    const canonical=textFromCore();
+    if(canonical!==value) throw Error('Core round-trip mismatch');
+    syncStatus();
+  }
+  try {
+    const encoded=$('core-wasm').textContent.trim();
+    const binary=Uint8Array.from(atob(encoded),c=>c.charCodeAt(0));
+    const {instance,module}=await WebAssembly.instantiate(binary,{});
+    api=instance.exports;
+    memory=api.memory;
+    if(!memory || typeof api.pg_edit!=='function') throw Error('Incorrect WASM exports');
+    guard(api.pg_reset(),'reset');
+    editor.value=textFromCore();
+    baselineText=editor.value;
+    baselineRevision=api.pg_revision();
+    ['editor','baseline','restore','reset'].forEach(id=>$(id).disabled=false);
+    $('engine').textContent='Compiled Pocket C11 · WASM';
+    syncStatus();
+    note('Core ready. Try typing, then marking an in-memory baseline.');
+    editor.addEventListener('input',()=>{
+      try {updateCoreText(editor.value);note('Edit sent to Pocket C11 core.');}
+      catch(err){editor.value=textFromCore();syncStatus();note(err.message,true);}
+    });
+    $('baseline').addEventListener('click',()=>{
+      try {guard(api.pg_mark_baseline(),'mark baseline');baselineText=textFromCore();baselineRevision=api.pg_revision();syncStatus();note('Baseline confirmed in core RAM. Nothing saved to disk.');}
+      catch(err){note(err.message,true);}
+    });
+    $('restore').addEventListener('click',()=>{
+      try {updateCoreText(baselineText);editor.value=textFromCore();syncStatus();note('Baseline text restored by a core edit. If Dirty remains YES, you found the known revision issue.');}
+      catch(err){note(err.message,true);}
+    });
+    $('reset').addEventListener('click',()=>{
+      try {guard(api.pg_reset(),'reset');editor.value=textFromCore();baselineText=editor.value;baselineRevision=api.pg_revision();syncStatus();note('Fresh disposable thought. No previous contents retained by the app.');}
+      catch(err){note(err.message,true);}
+    });
+  } catch (err) {
+    state.textContent='CORE FAILED TO START';state.classList.add('dirty');
+    $('engine').textContent='Unavailable';
+    note('Browser WASM startup failed: '+err.message,true);
+  }
+})();
+</script>
+</body>
+</html>
