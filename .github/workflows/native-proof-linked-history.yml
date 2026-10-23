@@ -1,0 +1,35 @@
+name: Pocket linked semantic history disposable proof
+
+on:
+  push:
+    branches:
+      - candidate/native-linked-history-probe-20261023
+    paths:
+      - 'native-proof/linked-history-probe/**'
+      - '.github/workflows/native-proof-linked-history.yml'
+  pull_request:
+    paths:
+      - 'native-proof/linked-history-probe/**'
+      - '.github/workflows/native-proof-linked-history.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linked-c11-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out exactly the submitted candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact clean checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git status --porcelain)"
+      - name: Run isolated linked semantic history contract proof
+        shell: bash
+        run: bash native-proof/linked-history-probe/check-linked-history.sh
