@@ -8,6 +8,8 @@ struct pc_document {
     size_t identity_length;
     uint8_t *text;
     size_t text_length;
+    uint8_t *saved_text;
+    size_t saved_text_length;
     uint64_t revision;
     uint64_t saved_revision;
     uint64_t epoch;
@@ -44,12 +46,14 @@ pc_result pc_document_create(const uint8_t *identity, size_t identity_length,
     if (!doc) return PC_NO_MEMORY;
     doc->identity = copy_bytes(identity, identity_length);
     doc->text = copy_bytes(text, text_length);
-    if (!doc->identity || !doc->text) {
+    doc->saved_text = copy_bytes(text, text_length);
+    if (!doc->identity || !doc->text || !doc->saved_text) {
         pc_document_destroy(doc);
         return PC_NO_MEMORY;
     }
     doc->identity_length = identity_length;
     doc->text_length = text_length;
+    doc->saved_text_length = text_length;
     doc->revision = loaded_revision;
     doc->saved_revision = loaded_revision;
     doc->epoch = 1;
@@ -61,6 +65,7 @@ void pc_document_destroy(pc_document *doc) {
     if (!doc) return;
     free(doc->identity);
     free(doc->text);
+    free(doc->saved_text);
     free(doc);
 }
 
@@ -105,12 +110,23 @@ void pc_snapshot_release(pc_snapshot *snapshot) {
 pc_result pc_document_confirm_saved(pc_document *doc, uint64_t revision, uint64_t epoch) {
     if (!doc) return PC_INVALID;
     if (doc->revision != revision || doc->epoch != epoch) return PC_STALE;
+    /* A valid confirmation is the only authority to advance the baseline.
+       Allocate first so failure cannot alter the previous confirmed content. */
+    if (doc->text_length != doc->saved_text_length ||
+        (doc->text_length && memcmp(doc->text, doc->saved_text, doc->text_length))) {
+        uint8_t *new_baseline = copy_bytes(doc->text, doc->text_length);
+        if (!new_baseline) return PC_NO_MEMORY;
+        free(doc->saved_text);
+        doc->saved_text = new_baseline;
+        doc->saved_text_length = doc->text_length;
+    }
     doc->saved_revision = revision;
     return PC_OK;
 }
 
 int pc_document_is_dirty(const pc_document *doc) {
-    return doc ? doc->revision != doc->saved_revision : 0;
+    return doc && (doc->text_length != doc->saved_text_length ||
+                   (doc->text_length && memcmp(doc->text, doc->saved_text, doc->text_length) != 0));
 }
 
 uint64_t pc_document_revision(const pc_document *doc) {

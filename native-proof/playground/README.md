@@ -16,9 +16,9 @@ Pocket-owned C11 core. JavaScript does **not** simulate the core state.
 
 Play with the disposable thought, **Mark in-memory baseline**, edit again,
 **Restore baseline text**, and **Reset playground**. The core's revision and
-dirty flag are shown on screen. A known case is intentionally exposed: editing
-back to identical baseline text still increments revision and leaves Dirty=YES.
-That is an open core defect, *not* a passing Undo test.
+dirty flag are shown on screen. The dirty-state regression is corrected: restoring exactly identical confirmed
+baseline text makes Dirty=NO while revision history continues to advance.
+This proves the state *after an edit*, not an independent portable Undo owner.
 
 There is **no actual local file Save**, no full portable Undo owner, no
 persistent history, no real Pocket model, no account or Sync, no E2EE, no
