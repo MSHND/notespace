@@ -1,0 +1,35 @@
+name: Pocket portable core proof
+
+on:
+  push:
+    branches:
+      - candidate/native-core-portable-20261023
+    paths:
+      - 'native-proof/**'
+      - '.github/workflows/native-proof-core.yml'
+  pull_request:
+    paths:
+      - 'native-proof/**'
+      - '.github/workflows/native-proof-core.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  portable-c11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact candidate commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git status --porcelain)"
+      - name: Compile and exercise the actual portable C11 core
+        shell: bash
+        run: bash native-proof/scripts/check-portable-core.sh
