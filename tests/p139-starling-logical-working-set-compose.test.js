@@ -665,7 +665,7 @@ function linkedV1Plan({ c, current, witness, targetId, undoUpdatedAt }) {
   return { ok: true, traversedRevisions: steps,
     operation: { type: "payload", input: { nodeId: targetId, payload } } };
 }
-async function linkedV1Scenario(targetId = "N") {
+async function linkedV1Scenario(targetId = "N", options = {}) {
   const c = runtime(), fixture = linkedFractalFixture();
   // A second child makes child sibling reorder a genuine structural edit.
   fixture.nodes.push({
@@ -677,6 +677,11 @@ async function linkedV1Scenario(targetId = "N") {
   fixture.relation.parents.D = "N";
   fixture.relation.children.N = ["C", "D"];
   fixture.relation.children.D = [];
+  if (options.emoji) {
+    const unicodeTarget = fixture.nodes.find(node => node.id === targetId);
+    unicodeTarget.details = "X😀Y";
+    unicodeTarget.editor.text = "X😀Y";
+  }
   const staged = stage(c, fixture), api = c.PocketStarlingLogicalEditShadow;
   const opened = await open(c, staged, "disposable-linked-v1");
   const context = {
@@ -704,7 +709,7 @@ async function linkedV1Scenario(targetId = "N") {
     },
   };
   const original = context.get(targetId), beforeSeal = context.current.head;
-  const afterText = targetId === "N"
+  const afterText = options.emoji ? "X😇Y" : targetId === "N"
     ? "Check @Blackwoods before processing the payment."
     : "Creditor updated";
   await context.advance(context.edit(targetId, afterText, "2026-10-24T01:00:00.000Z"));
@@ -814,4 +819,31 @@ test("Linked Text Undo v1: forged, missing, changed-back, ambiguous and cross-po
   assert.ok(repeated);
   assert.equal(repeated.removed, "", "pure insertion must not acquire guessed identity");
   assert.equal(s.current.head !== baseline, true);
+});
+
+
+test("Linked Text Undo v1: deleted target and invalid grapheme edit refuse with no scoped operation", async () => {
+  const gone = await linkedV1Scenario("T");
+  await gone.advance({ type: "delete", input: { nodeId: "T", fromIndex: 1 } });
+  const deletedHead = gone.current.head;
+  const deletedResult = linkedV1Plan({
+    c: gone.c, current: gone.current, witness: gone.witness,
+    targetId: "T", undoUpdatedAt: "2026-10-24T05:00:00.000Z",
+  });
+  assert.deepEqual(deletedResult, { ok: false, reason: "unverified-history-state" });
+  assert.equal("operation" in deletedResult, false);
+  assert.equal(gone.current.head, deletedHead, "refusal leaves deletion unchanged");
+
+  const unicode = await linkedV1Scenario("T", { emoji: true });
+  assert.equal(unicode.witness.range, null, "partial surrogate match is not a valid grapheme range");
+  const unicodeHead = unicode.current.head;
+  const unicodeBefore = unicode.get("T");
+  const result = linkedV1Plan({
+    c: unicode.c, current: unicode.current, witness: unicode.witness,
+    targetId: "T", undoUpdatedAt: "2026-10-24T05:00:00.000Z",
+  });
+  assert.deepEqual(result, { ok: false, reason: "invalid-or-ambiguous-text-anchor" });
+  assert.equal("operation" in result, false);
+  assert.equal(unicode.current.head, unicodeHead);
+  assert.deepEqual(unicode.get("T"), unicodeBefore);
 });
