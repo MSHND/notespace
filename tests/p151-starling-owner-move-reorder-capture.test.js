@@ -260,3 +260,145 @@ test("P151 sources remain limited to Move/Reorder capture without completion or 
   assert.doesNotMatch(actions, /moveNodeIntoCompletedSystemBucket|ensureCompletedSystemBucketChildNode/);
   for (const program of [history, actions]) assert.doesNotMatch(program, /LogicalEdit|RemoteEdit|RemoteSave|compareAndSetShadowHead/);
 });
+
+
+// Disposable linked-history shadow proof. No live Undo handler, history source, Save or UI owner is modified.
+// This planner consumes the real post-move semantic journal, its exact operation frontier and a
+// bounded post-move sibling witness. It deliberately has no snapshot input or snapshot read.
+function planShadowSameParentReorderInverse(context, forward, recorded, frontier) {
+  const fail = (reason) => ({ ok: false, reason });
+  if (!forward || forward.type !== "move_up" || !Number.isSafeInteger(forward.seq)
+      || forward.seq < 1 || context.state.operationHighWater !== forward.seq
+      || context.state.ops.length !== 1
+      || context.state.ops[0]?.seq !== forward.seq) return fail("stale-or-ambiguous-operation-frontier");
+  if (!Array.isArray(recorded) || recorded.length !== 1
+      || recorded[0]?.type !== "reorder") return fail("absent-or-ambiguous-semantic-history");
+  const operation = recorded[0].input;
+  if (!operation || typeof operation.nodeId !== "string"
+      || operation.nodeId !== forward.id
+      || !Number.isSafeInteger(operation.fromIndex) || !Number.isSafeInteger(operation.toIndex)
+      || operation.fromIndex <= 0 || operation.toIndex !== operation.fromIndex - 1)
+    return fail("inconsistent-forward-operation");
+  const actualNode = context.nodeMap().get(operation.nodeId);
+  const parentId = actualNode?.parentId || "";
+  if (!actualNode || parentId !== forward.parentId || parentId !== frontier?.parentId)
+    return fail("incorrect-current-parent");
+  const now = siblingIds(context, parentId);
+  if (!Array.isArray(frontier?.afterSiblings) || frontier.afterSiblings.length !== now.length
+      || new Set(frontier.afterSiblings).size !== now.length
+      || now.some((id, i) => id !== frontier.afterSiblings[i]))
+    return fail("current-sibling-frontier-mismatch");
+  const fromIndex = now.indexOf(operation.nodeId);
+  if (fromIndex !== operation.toIndex || operation.fromIndex >= now.length)
+    return fail("current-placement-mismatch");
+  return {
+    ok: true,
+    operation: {
+      type: "reorder",
+      input: {
+        nodeId: operation.nodeId,
+        fromIndex,
+        // P139 placement reorder indices address the sequence BEFORE removal.
+        toIndex: operation.fromIndex + (fromIndex < operation.fromIndex ? 1 : 0),
+      },
+    },
+  };
+}
+
+test("Linked-history shadow replays a real Main move inverse independently of snapshot Undo", async () => {
+  const nodes = [
+    node("parent", "root", 1001),
+    node("a", "parent", 1001, { details: "A retained" }),
+    node("b", "parent", 1002, { details: "B retained" }),
+    node("b-child", "b", 1001, { details: "Child retained" }),
+    node("b-grandchild", "b-child", 1001, { details: "Grandchild retained" }),
+    node("c", "parent", 1003),
+    node("unrelated", "root", 1002, { details: "Independent branch" }),
+  ];
+  const context = runtime(nodes);
+  context.state.selectedId = "b";
+  context.state.focusRootId = "";
+  context.state.collapsed.add("unrelated");
+  context.moveNodeWithinSiblings("b", -1);
+  const forward = plain(movement(context));
+  const recorded = captured(context, forward.seq);
+  const afterMove = plain(context.state.nodes);
+  const frontier = { parentId: "parent", afterSiblings: siblingIds(context, "parent") };
+  assert.deepEqual(frontier.afterSiblings, ["b", "a", "c"]);
+  assert.deepEqual(recorded, [{ type: "reorder", input: { nodeId: "b", fromIndex: 1, toIndex: 0 } }]);
+
+  // The independent candidate is constructed from post-move nodes + forward operation only.
+  // The existing lastMoveUndoSnapshot is not supplied to this planner or to P139 composition.
+  const plan = planShadowSameParentReorderInverse(context, forward, recorded, frontier);
+  assert.equal(plan.ok, true, plan.reason);
+  assert.deepEqual(plan.operation, { type: "reorder", input: { nodeId: "b", fromIndex: 0, toIndex: 2 } });
+  const shadow = await composeCapturedThroughP139(afterMove, [plan.operation]);
+  assert.deepEqual(shadow.relation.children.parent, ["a", "b", "c"]);
+  assert.deepEqual(shadow.relation.children.b, ["b-child"]);
+  assert.deepEqual(shadow.relation.children["b-child"], ["b-grandchild"]);
+  assert.deepEqual(shadow.relation.children.root, ["parent", "unrelated"]);
+
+  // Actual, accepted snapshot Undo is performed without interception.
+  assert.equal(context.undoLastMoveAction(), undefined);
+  const afterActualUndo = semanticInput(plain(context.state.nodes)).relation;
+  assert.deepEqual(shadow.relation.parents, afterActualUndo.parents);
+  for (const [parentId, children] of Object.entries(afterActualUndo.children)) {
+    assert.deepEqual(shadow.relation.children[parentId], children, "mismatched placement for " + parentId);
+  }
+  // Real descendants and unrelated semantic payloads were not rebuilt or replaced.
+  for (const item of context.state.nodes) {
+    const semantic = shadow.context.PocketStarlingRootShadow.getContent(shadow.candidate, item.id);
+    assert.equal(semantic?.nodeId, item.id);
+    assert.equal(semantic.payload?.label, item.label);
+    assert.equal(semantic.payload?.updatedAt, item.updatedAt);
+    assert.equal(semantic.payload?.details || "", item.details || "");
+  }
+  assert.equal(context.state.selectedId, "b");
+  assert.equal(context.state.focusRootId, "");
+  assert.deepEqual(Array.from(context.state.collapsed), ["unrelated"]);
+  const actualUndo = movement(context);
+  assert.equal(actualUndo.type, "undo_move_up");
+  assert.deepEqual(captured(context, actualUndo.seq), [...recorded, plan.operation]);
+});
+
+test("Linked-history reorder shadow refuses missing, ambiguous, stale and inconsistent evidence without mutating Pocket", () => {
+  function moved() {
+    const context = runtime([
+      node("parent", "root", 1001),
+      node("a", "parent", 1001),
+      node("b", "parent", 1002),
+      node("child", "b", 1001),
+      node("c", "parent", 1003),
+      node("unrelated", "root", 1002),
+    ]);
+    context.moveNodeWithinSiblings("b", -1);
+    const forward = plain(movement(context));
+    const recorded = captured(context, forward.seq);
+    const frontier = { parentId: "parent", afterSiblings: siblingIds(context, "parent") };
+    return { context, forward, recorded, frontier };
+  }
+  function rejected(change, expectedReason) {
+    const h = moved();
+    change(h);
+    const before = JSON.stringify({
+      nodes: h.context.state.nodes,
+      ops: h.context.state.ops,
+      operationHighWater: h.context.state.operationHighWater,
+      selectedId: h.context.state.selectedId,
+    });
+    const plan = planShadowSameParentReorderInverse(h.context, h.forward, h.recorded, h.frontier);
+    assert.deepEqual(plan, { ok: false, reason: expectedReason });
+    assert.equal(JSON.stringify({
+      nodes: h.context.state.nodes,
+      ops: h.context.state.ops,
+      operationHighWater: h.context.state.operationHighWater,
+      selectedId: h.context.state.selectedId,
+    }), before, "the proposed inverse must never mutate the actual Pocket state");
+  }
+  rejected((h) => { h.recorded = []; }, "absent-or-ambiguous-semantic-history");
+  rejected((h) => { h.recorded = [...h.recorded, ...h.recorded]; }, "absent-or-ambiguous-semantic-history");
+  rejected((h) => { h.context.recordOp({ type: "unrelated-later-action" }); }, "stale-or-ambiguous-operation-frontier");
+  rejected((h) => { h.frontier.afterSiblings = ["b", "c", "a"]; }, "current-sibling-frontier-mismatch");
+  rejected((h) => { h.context.state.nodes.find((node) => node.id === "c").order = 1000; }, "current-sibling-frontier-mismatch");
+  rejected((h) => { h.recorded[0].input.toIndex = 2; }, "inconsistent-forward-operation");
+});
