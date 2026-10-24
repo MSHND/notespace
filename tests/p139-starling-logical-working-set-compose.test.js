@@ -830,7 +830,7 @@ test("Linked Text Undo v1: deleted target and invalid grapheme edit refuse with 
     c: gone.c, current: gone.current, witness: gone.witness,
     targetId: "T", undoUpdatedAt: "2026-10-24T05:00:00.000Z",
   });
-  assert.deepEqual(deletedResult, { ok: false, reason: "unverified-history-state" });
+  assert.deepEqual(deletedResult, { ok: false, reason: "intervening-target-change" });
   assert.equal("operation" in deletedResult, false);
   assert.equal(gone.current.head, deletedHead, "refusal leaves deletion unchanged");
 
