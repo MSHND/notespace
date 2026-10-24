@@ -228,7 +228,7 @@ function planInverse(c, current, history, eventId, revisions, permission) {
   if (text(c, n) !== op.afterText) return refuse("conflicting-newer-text");
   const next = c.PocketNodeContent.prepareCanonical(op.beforeText);
   if (!next.ok || !next.editor) return refuse("invalid-inverse-content");
-  const payload = { ...n, editor: next.editor, details: next.details };
+  const payload = plain({ ...n, editor: next.editor, details: next.details });
   return Object.freeze({ ok: true, operation: Object.freeze({
     type: "payload", input: Object.freeze({ nodeId: "N", payload }),
   }), inverseOf: op.txId });
