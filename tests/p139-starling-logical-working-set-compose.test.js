@@ -502,10 +502,11 @@ test("Linked fractal text shadow rejects forged preimages and unauthenticated li
       ...witness, afterDetails: "False after details",
     }] }],
     ["stale-or-ambiguous-lineage", { witness: [{
-      ...witness, beforeSeal: forward.candidate.sealRef,
+      ...witness, beforeSeal: childEdit.candidate.sealRef,
     }] }],
     ["stale-or-ambiguous-lineage", { witness: [{
-      ...witness, afterSeal: originalSeal, appliedSeal: originalSeal,
+      ...witness, afterSeal: childEdit.candidate.sealRef,
+      appliedSeal: childEdit.candidate.sealRef,
     }] }],
     ["conflicting-current-node-or-reference", { currentN: {
       ...parentNow, editor: { ...parentNow.editor, text: nextText + " another edit" },
