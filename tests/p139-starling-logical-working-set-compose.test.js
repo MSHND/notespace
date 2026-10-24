@@ -211,6 +211,7 @@ async function linkedFractalSuccessor(c, current, candidate) {
     pocketId: current.pocketId, authority: current.authority,
     proof: admitted.semanticBaseProof, resolveLogical,
     base: base.base, head: candidate.sealRef,
+    semanticValidity: validity,
   };
 }
 
@@ -559,6 +560,37 @@ function linkedV1Equal(c, a, b) {
   const y = c.PocketStarlingObjectSealShadow.canonical(b);
   return x.ok && y.ok && x.bytes === y.bytes;
 }
+// Per-revision HMAC semantic admission is required in addition to P109's
+// deterministic (non-cryptographic) object-ref integrity. The fixture owns a
+// private, ephemeral admission ledger; this is NOT a persistent history schema.
+function linkedV1SemanticBinding(c, current, sealRef) {
+  try {
+    const audit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(
+      sealRef, current.resolveLogical
+    );
+    if (!audit.ok) return null;
+    const provenance = c.PocketStarlingObjectSealShadow.semanticAuditProvenance(audit);
+    const raw = c.PocketStarlingObjectSealShadow.semanticAuditBinding(provenance);
+    return raw ? Object.freeze({ ...raw, syncedPocketId: current.pocketId }) : null;
+  } catch (_error) {
+    return null;
+  }
+}
+async function linkedV1HasAdmission(c, current, admissions, sealRef) {
+  if (!(admissions instanceof Map)) return false;
+  const semanticValidity = admissions.get(sealRef);
+  const binding = linkedV1SemanticBinding(c, current, sealRef);
+  if (!semanticValidity || !binding || !current.authority) return false;
+  try {
+    const authenticated = await c.PocketStarlingSemanticAuthorityShadow.authenticate({
+      authority: current.authority, semanticValidity, binding,
+    });
+    return authenticated.ok === true;
+  } catch (_error) {
+    return false;
+  }
+}
+
 function linkedV1State(c, current, ref, targetId) {
   if (typeof ref !== "string" || !ref || typeof targetId !== "string" || !targetId) return null;
   try {
@@ -575,7 +607,7 @@ function linkedV1State(c, current, ref, targetId) {
     return null;
   }
 }
-function linkedV1Plan({ c, current, witness, targetId, undoUpdatedAt }) {
+async function linkedV1Plan({ c, current, admissions, witness, targetId, undoUpdatedAt }) {
   const refuse = (reason) => ({ ok: false, reason });
   if (!current || typeof current.resolveLogical !== "function"
       || typeof current.head !== "string" || typeof current.pocketId !== "string")
@@ -590,11 +622,22 @@ function linkedV1Plan({ c, current, witness, targetId, undoUpdatedAt }) {
       || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(undoUpdatedAt))
     return refuse("invalid-undo-timestamp");
 
+  // A caller-selected head cannot borrow a proof for a different, possibly
+  // coherent but unadmitted, seal. This is existing P139 semantic-base authority.
+  const headBinding = linkedV1SemanticBinding(c, current, current.head);
+  if (!headBinding || !c.PocketStarlingSemanticAuthorityShadow.validSemanticBase({
+    authority: current.authority, semanticBaseProof: current.proof, binding: headBinding,
+  })) return refuse("unauthenticated-current-head");
+
   const before = linkedV1State(c, current, witness.beforeSeal, targetId);
   const after = linkedV1State(c, current, witness.afterSeal, targetId);
   if (!before || !after) return refuse("unverified-history-state");
   if (after.seal.previousSealRef !== witness.beforeSeal)
     return refuse("stale-or-gapped-lineage");
+  if (!await linkedV1HasAdmission(c, current, admissions, witness.beforeSeal)
+      || !await linkedV1HasAdmission(c, current, admissions, witness.afterSeal)
+      || !await linkedV1HasAdmission(c, current, admissions, current.head))
+    return refuse("unadmitted-history-revision");
   const b = before.payload, a = after.payload;
   if (b.editor?.schema !== "pocket.nodeEditor.v2"
       || a.editor?.schema !== "pocket.nodeEditor.v2"
@@ -648,6 +691,9 @@ function linkedV1Plan({ c, current, witness, targetId, undoUpdatedAt }) {
       return refuse("stale-or-gapped-lineage");
     const older = linkedV1State(c, current, previous, targetId);
     if (!older) return refuse("unverified-history-state");
+    if (!await linkedV1HasAdmission(c, current, admissions, cursor)
+        || !await linkedV1HasAdmission(c, current, admissions, previous))
+      return refuse("unadmitted-history-revision");
     if (!linkedV1Equal(c, newer.payload, older.payload)
         || newer.parentId !== older.parentId)
       return refuse("intervening-target-change");
@@ -684,8 +730,23 @@ async function linkedV1Scenario(targetId = "N", options = {}) {
   }
   const staged = stage(c, fixture), api = c.PocketStarlingLogicalEditShadow;
   const opened = await open(c, staged, "disposable-linked-v1");
+  // Initial semantic attestation from the existing P139 helper, retrieved
+  // without issuing a new one. All later entries come only from its
+  // authenticated successor handshake.
+  const initialCurrent = {
+    authority: opened.semanticAuthority, pocketId: opened.syncedPocketId,
+    resolveLogical: (ref) => staged.stager.store.get(ref),
+  };
+  const initialBinding = linkedV1SemanticBinding(c, initialCurrent, staged.stage.sealRef);
+  const initialValidity = c.PocketStarlingSemanticAuthorityShadow.attestationForStage({
+    authority: opened.semanticAuthority, proof: opened.semanticValidityProof,
+    binding: initialBinding,
+  });
+  assert.ok(initialValidity, "initial P139 admission must be signed");
+  const admissions = new Map([[staged.stage.sealRef, initialValidity]]);
   const context = {
     c, staged, api, fixture,
+    admissions,
     current: { pocketId: opened.syncedPocketId, authority: opened.semanticAuthority,
       proof: opened.semanticBaseProof, resolveLogical: (ref) => staged.stager.store.get(ref),
       base: opened.base, head: staged.stage.sealRef },
@@ -694,6 +755,8 @@ async function linkedV1Scenario(targetId = "N", options = {}) {
       assert.equal(changed.ok, true, JSON.stringify(changed));
       assert.equal(changed.changed, true);
       this.current = await linkedFractalSuccessor(c, this.current, changed.candidate);
+      assert.ok(this.current.semanticValidity, "successor HMAC attestation");
+      this.admissions.set(this.current.head, this.current.semanticValidity);
       return changed.candidate;
     },
     get(id) {
@@ -743,7 +806,7 @@ test("Linked Text Undo v1: generic target, zero/one/four later revisions, scoped
       const originalOthers = Object.fromEntries(
         beforeUndo.relation.nodeIds.filter(id => id !== targetId)
           .map(id => [id, plain(s.c.PocketStarlingRootShadow.getContent(beforeUndo.candidate, id).payload)]));
-      const plan = linkedV1Plan({ c: s.c, current: s.current, witness: s.witness,
+      const plan = await linkedV1Plan({ c: s.c, current: s.current, admissions: s.admissions, witness: s.witness,
         targetId, undoUpdatedAt: "2026-10-24T05:00:00.000Z" });
       assert.equal(plan.ok, true, JSON.stringify(plan));
       assert.equal(plan.traversedRevisions, count);
@@ -776,7 +839,7 @@ test("Linked Text Undo v1: forged, missing, changed-back, ambiguous and cross-po
   await linkedV1IndependentEdits(s, 4);
   const baseline = s.current.head, originalPayload = s.get("N");
   const plan = (overrides = {}) => linkedV1Plan({
-    c: s.c, current: s.current, witness: s.witness, targetId: "N",
+    c: s.c, current: s.current, admissions: s.admissions, witness: s.witness, targetId: "N",
     undoUpdatedAt: "2026-10-24T05:00:00.000Z", ...overrides,
   });
   const bogus = "Check @Blackwoods before processing the wages.";
@@ -794,7 +857,7 @@ test("Linked Text Undo v1: forged, missing, changed-back, ambiguous and cross-po
     ["invalid-undo-timestamp", { undoUpdatedAt: "wrong" }],
   ];
   for (const [reason, change] of bad) {
-    const result = plan(change);
+    const result = await plan(change);
     assert.deepEqual(result, { ok: false, reason }, JSON.stringify(change));
     assert.equal("operation" in result, false, reason);
     assert.equal(s.current.head, baseline);
@@ -804,14 +867,14 @@ test("Linked Text Undo v1: forged, missing, changed-back, ambiguous and cross-po
   const middle = objectAt(s.current.resolveLogical, s.current.head).previousSealRef;
   const missing = { ...s.current, resolveLogical: ref =>
     ref === middle ? undefined : s.current.resolveLogical(ref) };
-  assert.deepEqual(plan({ current: missing }), { ok: false, reason: "unverified-history-state" });
+  assert.deepEqual(await plan({ current: missing }), { ok: false, reason: "unverified-history-state" });
   // Truly amended target, then restored to the EXACT same payload (ABA).
   await s.advance(s.edit("N", "Changed again", "2026-10-24T06:00:00.000Z"));
   const restored = { type: "payload", input: { nodeId: "N", payload: originalPayload } };
   await s.advance(restored);
   assert.deepEqual(s.get("N"), originalPayload, "full content really matches after-image again");
-  assert.deepEqual(plan(), { ok: false, reason: "intervening-target-change" });
-  assert.equal("operation" in plan(), false);
+  assert.deepEqual(await plan(), { ok: false, reason: "intervening-target-change" });
+  assert.equal("operation" in (await plan()), false);
   // Unique grapheme-aligned replacement is the only v1 anchor grammar.
   const segmented = linkedFractalTextRange("X😀Y", "X😇Y");
   assert.equal(segmented, null, "surrogate pair replacement cannot form a partial grapheme anchor");
@@ -826,8 +889,8 @@ test("Linked Text Undo v1: deleted target and invalid grapheme edit refuse with 
   const gone = await linkedV1Scenario("T");
   await gone.advance({ type: "delete", input: { nodeId: "T", fromIndex: 1 } });
   const deletedHead = gone.current.head;
-  const deletedResult = linkedV1Plan({
-    c: gone.c, current: gone.current, witness: gone.witness,
+  const deletedResult = await linkedV1Plan({
+    c: gone.c, current: gone.current, admissions: gone.admissions, witness: gone.witness,
     targetId: "T", undoUpdatedAt: "2026-10-24T05:00:00.000Z",
   });
   assert.deepEqual(deletedResult, { ok: false, reason: "intervening-target-change" });
@@ -838,12 +901,77 @@ test("Linked Text Undo v1: deleted target and invalid grapheme edit refuse with 
   assert.equal(unicode.witness.range, null, "partial surrogate match is not a valid grapheme range");
   const unicodeHead = unicode.current.head;
   const unicodeBefore = unicode.get("T");
-  const result = linkedV1Plan({
-    c: unicode.c, current: unicode.current, witness: unicode.witness,
+  const result = await linkedV1Plan({
+    c: unicode.c, current: unicode.current, admissions: unicode.admissions, witness: unicode.witness,
     targetId: "T", undoUpdatedAt: "2026-10-24T05:00:00.000Z",
   });
   assert.deepEqual(result, { ok: false, reason: "invalid-or-ambiguous-text-anchor" });
   assert.equal("operation" in result, false);
   assert.equal(unicode.current.head, unicodeHead);
   assert.deepEqual(unicode.get("T"), unicodeBefore);
+});
+
+
+test("Linked Text Undo v1: coherent but unadmitted revision and missing/misbound HMAC refuse", async () => {
+  const s = await linkedV1Scenario("N");
+  await linkedV1IndependentEdits(s, 4);
+  const originalHead = s.current.head, originalN = s.get("N");
+  const checkedPlan = (overrides = {}) => linkedV1Plan({
+    c: s.c, current: s.current, admissions: s.admissions, witness: s.witness,
+    targetId: "N", undoUpdatedAt: "2026-10-24T05:00:00.000Z", ...overrides,
+  });
+  const accepted = await checkedPlan();
+  assert.equal(accepted.ok, true);
+  // A full, internally consistent P139 candidate seal can exist without
+  // the required semantic HMAC admission. The caller must not borrow the
+  // accepted predecessor's current-base proof for that candidate head.
+  const unadmitted = await s.api.compose(s.current.base, [
+    s.edit("C", "Independent edit with no admitted successor", "2026-10-24T07:00:00.000Z"),
+  ]);
+  assert.equal(unadmitted.ok, true);
+  const fakeHead = {
+    ...s.current,
+    head: unadmitted.candidate.sealRef,
+    resolveLogical: ref => unadmitted.candidate.resolveLogical(ref) || s.current.resolveLogical(ref),
+  };
+  assert.ok(linkedV1State(s.c, fakeHead, fakeHead.head, "N"),
+    "coherent content-addressed seal and target really audit before refusal");
+  assert.equal(s.admissions.has(fakeHead.head), false, "candidate not semantically admitted");
+  assert.deepEqual(await checkedPlan({ current: fakeHead }), {
+    ok: false, reason: "unauthenticated-current-head",
+  });
+
+  // Even with a valid current authority, EACH historical seal must have its
+  // own cryptographically valid attestation; deleting a retained receipt,
+  // or using an attestation for some other seal, cannot authorise Undo.
+  const absent = new Map(s.admissions);
+  absent.delete(s.witness.afterSeal);
+  assert.deepEqual(await checkedPlan({ admissions: absent }), {
+    ok: false, reason: "unadmitted-history-revision",
+  });
+  const swapped = new Map(s.admissions);
+  swapped.set(s.witness.afterSeal, s.admissions.get(s.witness.beforeSeal));
+  assert.deepEqual(await checkedPlan({ admissions: swapped }), {
+    ok: false, reason: "unadmitted-history-revision",
+  });
+  const intermediate = objectAt(s.current.resolveLogical, s.current.head).previousSealRef;
+  const gap = new Map(s.admissions);
+  gap.delete(intermediate);
+  assert.deepEqual(await checkedPlan({ admissions: gap }), {
+    ok: false, reason: "unadmitted-history-revision",
+  });
+
+  // An otherwise good current seal may not carry another stage's proof.
+  const borrowedProof = { ...s.current, proof: Object.freeze({}) };
+  assert.deepEqual(await checkedPlan({ current: borrowedProof }), {
+    ok: false, reason: "unauthenticated-current-head",
+  });
+  assert.equal(s.current.head, originalHead);
+  assert.deepEqual(s.get("N"), originalN);
+  for (const refused of [
+    await checkedPlan({ current: fakeHead }),
+    await checkedPlan({ admissions: absent }),
+    await checkedPlan({ admissions: swapped }),
+    await checkedPlan({ admissions: gap }),
+  ]) assert.equal("operation" in refused, false);
 });
