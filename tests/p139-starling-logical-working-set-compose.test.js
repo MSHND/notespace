@@ -352,7 +352,7 @@ test("Linked fractal text: scoped parent Undo preserves a newer child edit and t
   }
   function projection(expanded) {
     return { nodeId: "N", text: content("N").editor.text,
-      children: expanded ? relationships.relation.children.N : undefined };
+      children: expanded ? plain(relationships.relation.children.N) : undefined };
   }
   assert.deepEqual(projection(false), { nodeId: "N", text: before.editor.text, children: undefined });
   assert.deepEqual(projection(true), { nodeId: "N", text: before.editor.text, children: ["C"] });
