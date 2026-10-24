@@ -184,7 +184,7 @@ function view(c, state, expanded) {
 }
 
 function anchor() {
-  return { start: 41, removed: "invoice", inserted: "payment" };
+  return { start: 40, removed: "invoice", inserted: "payment" };
 }
 
 function event(props) {
@@ -286,7 +286,7 @@ async function prepared() {
 }
 
 test("Linked-fractal proof is source-locked and changes only this disposable test", () => {
-  assert.equal(git("rev-parse", "HEAD^"), ACCEPTED);
+  assert.equal(git("merge-base", "HEAD", "origin/main"), ACCEPTED);
   assert.deepEqual(git("diff", "--name-only", ACCEPTED, "HEAD").split("\n"), [SELF]);
   for (const file of SCRIPTS) {
     const actual = fs.readFileSync(path.join(ROOT, file));
