@@ -141,3 +141,275 @@ test("P139 rejects invalid compose grammar and stops on the exact lower-layer fa
 test("P139 is production-bounded beneath the P164 successor composer", () => {
   const manifest = createProductionReleaseManifest({ browserRoot: ROOT, serviceRoot: "/pocket-sync/v1" }), paths = manifest.map((entry) => entry.path); assert.equal(fs.readFileSync(path.join(ROOT, "index.html"), "utf8").includes(MODULE), false); assert.equal(paths.includes(`/${MODULE}`), true); assert.equal(paths.includes("/js/pocket-starling-remote-save-shadow.js"), false);
 });
+
+
+// Isolated linked-fractal-text shadow proof; it does not install another editor, Undo
+// owner, retained history schema, renderer, persistence path or Sync feature.
+// "referenceFixture" is deliberately opaque disposable test data, NOT an accepted link schema.
+function linkedFractalFixture() {
+  const initial = "Check @Blackwoods before processing the invoice.";
+  const child = "Child context";
+  const textNode = (id, parentId, order, label, text, extra = {}) => ({
+    id, parentId, order, label, details: text,
+    editor: { schema: "pocket.nodeEditor.v2", text },
+    updatedAt: "2026-10-24T00:00:00.000Z",
+    ...extra,
+  });
+  const nodes = [
+    textNode("N", "root", 0, "Check invoice", initial, {
+      referenceFixture: { occurrenceId: "L", targetId: "T", alias: "@Blackwoods" },
+    }),
+    textNode("C", "N", 0, "Nested context", child),
+    textNode("T", "root", 1, "J & B Blackwood & Sons", "Creditor target"),
+    textNode("U", "root", 2, "Unrelated", "Untouched notes"),
+  ];
+  return {
+    nodes,
+    relation: {
+      nodeIds: ["N", "C", "T", "U"],
+      parents: { N: "root", C: "N", T: "root", U: "root" },
+      children: { root: ["N", "T", "U"], N: ["C"], C: [], T: [], U: [] },
+    },
+  };
+}
+
+function linkedFractalPayload(c, staged, candidate, id, extraResolver = null) {
+  const read = (ref) => candidate.resolveLogical(ref)
+    || (extraResolver && extraResolver(ref)) || staged.stager.store.get(ref);
+  const audited = c.PocketStarlingObjectSealShadow.auditCandidateSeal(candidate.sealRef, read);
+  assert.equal(audited.ok, true, JSON.stringify(audited));
+  const record = c.PocketStarlingRootShadow.getContent(audited.candidate, id);
+  assert.equal(record?.nodeId, id);
+  return plain(record.payload);
+}
+
+async function linkedFractalSuccessor(c, current, candidate) {
+  const api = c.PocketStarlingLogicalEditShadow;
+  const semantic = c.PocketStarlingSemanticAuthorityShadow;
+  const issued = await semantic.issueSuccessor({
+    authority: current.authority, semanticBaseProof: current.proof, candidate,
+  });
+  assert.equal(issued.ok, true, JSON.stringify(issued));
+  const binding = api.semanticTransitionBinding(candidate, current.authority, current.proof);
+  assert.ok(binding);
+  const validity = semantic.attestationForStage({
+    authority: current.authority, proof: issued.proof, binding,
+  });
+  assert.ok(validity);
+  const admitted = await semantic.authenticate({
+    authority: current.authority, semanticValidity: validity, binding,
+  });
+  assert.equal(admitted.ok, true, JSON.stringify(admitted));
+  const resolveLogical = (ref) => candidate.resolveLogical(ref) || current.resolveLogical(ref);
+  const base = await api.createBase({
+    acceptedSealRef: candidate.sealRef, resolveLogical,
+    syncedPocketId: current.pocketId, semanticAuthority: current.authority,
+    semanticBaseProof: admitted.semanticBaseProof,
+  });
+  assert.equal(base.ok, true, JSON.stringify(base));
+  return {
+    pocketId: current.pocketId, authority: current.authority,
+    proof: admitted.semanticBaseProof, resolveLogical,
+    base: base.base, head: candidate.sealRef,
+  };
+}
+
+function linkedFractalTextRange(before, after) {
+  if (typeof before !== "string" || typeof after !== "string" || before === after) return null;
+  let start = 0;
+  while (start < before.length && start < after.length && before[start] === after[start]) start += 1;
+  let left = before.length, right = after.length;
+  while (left > start && right > start && before[left - 1] === after[right - 1]) {
+    left -= 1; right -= 1;
+  }
+  const boundary = (value, offset) => offset === value.length
+    || Array.from(new Intl.Segmenter("en", { granularity: "grapheme" }).segment(value))
+      .some((segment) => segment.index === offset);
+  if (!boundary(before, start) || !boundary(after, start)
+      || !boundary(before, left) || !boundary(after, right)) return null;
+  return { start, removed: before.slice(start, left), inserted: after.slice(start, right) };
+}
+
+// Intentionally pure: only one node's reversible text evidence is accepted.
+// The independent child edit may advance global head, but must not invalidate N.
+// No whole-tree snapshot and no source editor state is provided to this planner.
+function planLinkedFractalInverse({ current, witness, currentN, currentSeal, previousSeal, pocketId }) {
+  const fail = (reason) => ({ ok: false, reason });
+  if (!Array.isArray(witness) || witness.length !== 1
+      || !witness[0] || typeof witness[0] !== "object")
+    return fail("missing-or-ambiguous-history");
+  const w = witness[0];
+  if (w.pocketId !== pocketId || current?.pocketId !== pocketId
+      || w.pocketId !== current?.pocketId) return fail("incorrect-pocket-authority");
+  if (typeof w.transactionId !== "string" || !w.transactionId
+      || w.nodeId !== "N" || !w.beforeSeal || !w.afterSeal
+      || w.beforeSeal === w.afterSeal) return fail("incomplete-history-identity");
+  if (current?.head !== currentSeal || previousSeal !== w.afterSeal
+      || w.afterSeal !== w.appliedSeal || currentSeal === w.afterSeal)
+    return fail("stale-or-ambiguous-lineage");
+  if (!currentN || currentN.editor?.schema !== "pocket.nodeEditor.v2"
+      || typeof currentN.editor.text !== "string"
+      || typeof w.beforeText !== "string" || typeof w.afterText !== "string"
+      || typeof w.beforeDetails !== "string" || typeof w.afterDetails !== "string"
+      || typeof w.afterUpdatedAt !== "string" || typeof w.beforeUpdatedAt !== "string")
+    return fail("missing-or-unsupported-text-witness");
+  const range = linkedFractalTextRange(w.beforeText, w.afterText);
+  if (!range || !w.range || JSON.stringify(w.range) !== JSON.stringify(range))
+    return fail("invalid-or-ambiguous-text-anchor");
+  if (currentN.updatedAt !== w.afterUpdatedAt || currentN.editor.text !== w.afterText
+      || currentN.details !== w.afterDetails
+      || currentN.referenceFixture?.occurrenceId !== "L"
+      || currentN.referenceFixture?.targetId !== "T"
+      || currentN.referenceFixture?.alias !== "@Blackwoods"
+      || !currentN.editor.text.includes("@Blackwoods"))
+    return fail("conflicting-current-node-or-reference");
+  if (!w.beforeText.includes("@Blackwoods") || !w.afterText.includes("@Blackwoods"))
+    return fail("invalid-or-ambiguous-text-anchor");
+  if (currentN.editor.text.slice(range.start, range.start + range.inserted.length) !== range.inserted)
+    return fail("invalid-or-ambiguous-text-anchor");
+  // A new local revision is issued by Undo. Do not rewind the node's timestamp.
+  const undoPayload = plain({
+    ...currentN, updatedAt: "2026-10-24T03:00:00.000Z",
+    details: w.beforeDetails,
+    editor: { schema: "pocket.nodeEditor.v2", text: w.beforeText },
+  });
+  return { ok: true, operation: { type: "payload", input: { nodeId: "N", payload: undoPayload } } };
+}
+
+test("Linked fractal text: scoped parent Undo preserves a newer child edit and two view projections", async () => {
+  const c = runtime(), fixture = linkedFractalFixture(), staged = stage(c, fixture);
+  const api = c.PocketStarlingLogicalEditShadow;
+  const opened = await open(c, staged, "fractal-test-pocket");
+  let current = {
+    pocketId: opened.syncedPocketId, authority: opened.semanticAuthority,
+    proof: opened.semanticBaseProof, resolveLogical: (ref) => staged.stager.store.get(ref),
+    base: opened.base, head: staged.stage.sealRef,
+  };
+  const before = plain(fixture.nodes.find((node) => node.id === "N"));
+  const afterText = "Check @Blackwoods before processing the payment.";
+  const parentAfter = {
+    label: before.label, details: afterText,
+    editor: { schema: "pocket.nodeEditor.v2", text: afterText },
+    updatedAt: "2026-10-24T01:00:00.000Z",
+    referenceFixture: plain(before.referenceFixture),
+  };
+  const forward = await api.compose(current.base, [{
+    type: "payload", input: { nodeId: "N", payload: parentAfter },
+  }]);
+  assert.equal(forward.ok, true, JSON.stringify(forward));
+  assert.deepEqual(linkedFractalPayload(c, staged, forward.candidate, "N"), parentAfter);
+  const evidence = [{
+    transactionId: "disposable-parent-edit-1", nodeId: "N",
+    pocketId: current.pocketId, beforeSeal: current.head,
+    afterSeal: forward.candidate.sealRef, appliedSeal: forward.candidate.sealRef,
+    beforeText: before.editor.text, afterText,
+    beforeDetails: before.details, afterDetails: parentAfter.details,
+    beforeUpdatedAt: before.updatedAt, afterUpdatedAt: parentAfter.updatedAt,
+    range: linkedFractalTextRange(before.editor.text, afterText),
+  }];
+  current = await linkedFractalSuccessor(c, current, forward.candidate);
+  const childOriginal = plain(fixture.nodes.find((node) => node.id === "C"));
+  const childChanged = {
+    label: childOriginal.label, details: "Child context revised independently",
+    editor: { schema: "pocket.nodeEditor.v2", text: "Child context revised independently" },
+    updatedAt: "2026-10-24T02:00:00.000Z",
+  };
+  const childUpdate = await api.compose(current.base, [{
+    type: "payload", input: { nodeId: "C", payload: childChanged },
+  }]);
+  assert.equal(childUpdate.ok, true, JSON.stringify(childUpdate));
+  const chain = current.resolveLogical;
+  assert.deepEqual(linkedFractalPayload(c, staged, childUpdate.candidate, "C", chain), childChanged);
+  current = await linkedFractalSuccessor(c, current, childUpdate.candidate);
+  const parentNow = linkedFractalPayload(c, staged, childUpdate.candidate, "N", chain);
+  const previousSeal = objectAt(current.resolveLogical, childUpdate.candidate.sealRef).previousSealRef;
+  const plan = planLinkedFractalInverse({
+    current, witness: evidence, currentN: parentNow,
+    currentSeal: childUpdate.candidate.sealRef, previousSeal,
+    pocketId: "fractal-test-pocket",
+  });
+  assert.equal(plan.ok, true, JSON.stringify(plan));
+  const undone = await api.compose(current.base, [plan.operation]);
+  assert.equal(undone.ok, true, JSON.stringify(undone));
+  const finalResolver = (ref) => undone.candidate.resolveLogical(ref) || current.resolveLogical(ref);
+  const finalAudit = c.PocketStarlingObjectSealShadow.auditCandidateSeal(undone.candidate.sealRef, finalResolver);
+  assert.equal(finalAudit.ok, true, JSON.stringify(finalAudit));
+  const final = finalAudit.candidate;
+  const relationships = c.PocketStarlingPlacementShadow.materialise(final.structural);
+  assert.equal(relationships.ok, true, JSON.stringify(relationships));
+  assert.deepEqual(plain(relationships.relation.parents), fixture.relation.parents);
+  assert.deepEqual(plain(relationships.relation.children), fixture.relation.children);
+  const content = (id) => plain(c.PocketStarlingRootShadow.getContent(final, id).payload);
+  assert.equal(content("N").editor.text, before.editor.text);
+  assert.equal(content("N").details, before.details);
+  assert.equal(content("N").updatedAt, "2026-10-24T03:00:00.000Z");
+  assert.deepEqual(content("N").referenceFixture, before.referenceFixture);
+  assert.deepEqual(content("C"), childChanged, "newer independent child edit must survive parent Undo");
+  for (const id of ["T", "U"]) {
+    const original = fixture.nodes.find((node) => node.id === id);
+    const { id: ignoredId, parentId: ignoredParent, order: ignoredOrder, ...payload } = original;
+    assert.deepEqual(content(id), payload);
+  }
+  function projection(expanded) {
+    return { nodeId: "N", text: content("N").editor.text,
+      children: expanded ? relationships.relation.children.N : undefined };
+  }
+  assert.deepEqual(projection(false), { nodeId: "N", text: before.editor.text, children: undefined });
+  assert.deepEqual(projection(true), { nodeId: "N", text: before.editor.text, children: ["C"] });
+  assert.equal(objectAt(finalResolver, undone.candidate.sealRef).previousSealRef, childUpdate.candidate.sealRef);
+  assert.equal(objectAt(current.resolveLogical, childUpdate.candidate.sealRef).previousSealRef, forward.candidate.sealRef);
+});
+
+test("Linked fractal text shadow rejects absent, stale, conflicting and unauthorised Undo evidence without mutation", () => {
+  const original = "Check @Blackwoods before processing the invoice.";
+  const altered = "Check @Blackwoods before processing the payment.";
+  const after = {
+    label: "Check invoice", details: altered,
+    editor: { schema: "pocket.nodeEditor.v2", text: altered },
+    updatedAt: "2026-10-24T01:00:00.000Z",
+    referenceFixture: { occurrenceId: "L", targetId: "T", alias: "@Blackwoods" },
+  };
+  const witness = {
+    transactionId: "disposable-parent-edit-1", nodeId: "N", pocketId: "fixture",
+    beforeSeal: "s0", afterSeal: "s1", appliedSeal: "s1",
+    beforeText: original, afterText: altered,
+    beforeDetails: original, afterDetails: altered,
+    beforeUpdatedAt: "2026-10-24T00:00:00.000Z",
+    afterUpdatedAt: after.updatedAt,
+    range: linkedFractalTextRange(original, altered),
+  };
+  const defaults = {
+    current: { pocketId: "fixture", head: "s2" },
+    witness: [witness], currentN: after, currentSeal: "s2",
+    previousSeal: "s1", pocketId: "fixture",
+  };
+  assert.equal(planLinkedFractalInverse(defaults).ok, true);
+  const cases = [
+    ["missing-or-ambiguous-history", { witness: [] }],
+    ["missing-or-ambiguous-history", { witness: [witness, witness] }],
+    ["incorrect-pocket-authority", { pocketId: "other" }],
+    ["stale-or-ambiguous-lineage", { previousSeal: "unrelated" }],
+    ["stale-or-ambiguous-lineage", { currentSeal: "old-head" }],
+    ["incomplete-history-identity", { witness: [{ ...witness, transactionId: "" }] }],
+    ["conflicting-current-node-or-reference", { currentN: {
+      ...after, editor: { ...after.editor, text: altered + " later same-node edit" } } }],
+    ["conflicting-current-node-or-reference", { currentN: {
+      ...after, updatedAt: "2026-10-24T04:00:00.000Z" } }],
+    ["conflicting-current-node-or-reference", { currentN: {
+      ...after, referenceFixture: { ...after.referenceFixture, targetId: "wrong" } } }],
+    ["invalid-or-ambiguous-text-anchor", { witness: [{ ...witness, range: {
+      ...witness.range, start: witness.range.start + 1 } }] }],
+    ["missing-or-unsupported-text-witness", { currentN: {
+      ...after, editor: { schema: "unknown.editor.schema", text: altered } } }],
+  ];
+  for (const [reason, delta] of cases) {
+    const args = { ...defaults, ...delta };
+    const untouched = JSON.stringify(args);
+    const refused = planLinkedFractalInverse(args);
+    assert.deepEqual(refused, { ok: false, reason });
+    assert.equal(JSON.stringify(args), untouched, reason + ": refusal must have zero mutation");
+    assert.equal("operation" in refused, false);
+  }
+  // UTF-16 mid-surrogate boundaries must not be mistaken for valid grapheme anchors.
+  assert.equal(linkedFractalTextRange("X😀Y", "X😇Y"), null);
+});
