@@ -385,7 +385,19 @@ function createHarness({ unrelatedCount = 0, collapsed = [] } = {}) {
     canShowPocketTree() { return !gate; },
     readLocalSafetySnapshot() { return null; },
     normaliseDetails(value) { return String(value || ""); },
-    getPath(id) { return String(id || ""); },
+    getPath(nodeId) {
+      const map = context.nodeMap();
+      const parts = [];
+      let cur = map.get(nodeId) || null;
+      let guard = 0;
+      while (cur && guard < 200) {
+        parts.push(cur.label);
+        if (!cur.parentId || cur.parentId === "root") break;
+        cur = map.get(cur.parentId) || null;
+        guard += 1;
+      }
+      return parts.reverse().join(" > ");
+    },
     nodeAttentionState() { return ""; },
     shouldCopyOnSingleClick() { return false; },
     installTreeGutterDrag() {},
