@@ -548,3 +548,270 @@ test("Linked fractal text shadow rejects forged preimages and unauthenticated li
   }
   assert.equal(linkedFractalTextRange("X😀Y", "X😇Y"), null);
 });
+
+
+// Linked Text Undo Proof v1 — disposable, view-independent P139 semantic history
+// research ONLY. Keeps the existing P139 seal/composer and the accepted Undo/PE
+// intact. These short deterministic P109 refs are test integrity evidence, not
+// production authentication or a new durable event/fragment/permission schema.
+function linkedV1Equal(c, a, b) {
+  const x = c.PocketStarlingObjectSealShadow.canonical(a);
+  const y = c.PocketStarlingObjectSealShadow.canonical(b);
+  return x.ok && y.ok && x.bytes === y.bytes;
+}
+function linkedV1State(c, current, ref, targetId) {
+  if (typeof ref !== "string" || !ref || typeof targetId !== "string" || !targetId) return null;
+  try {
+    const checked = c.PocketStarlingObjectSealShadow.auditCandidateSeal(ref, current.resolveLogical);
+    if (!checked.ok) return null;
+    const seal = objectAt(current.resolveLogical, ref);
+    const relation = c.PocketStarlingPlacementShadow.materialise(checked.candidate.structural);
+    if (!relation.ok) return null;
+    const node = c.PocketStarlingRootShadow.getContent(checked.candidate, targetId);
+    if (!node || node.nodeId !== targetId || !Object.hasOwn(relation.relation.parents, targetId)) return null;
+    return { seal, candidate: checked.candidate, relation: plain(relation.relation),
+      payload: plain(node.payload), parentId: relation.relation.parents[targetId] };
+  } catch (_error) {
+    return null;
+  }
+}
+function linkedV1Plan({ c, current, witness, targetId, undoUpdatedAt }) {
+  const refuse = (reason) => ({ ok: false, reason });
+  if (!current || typeof current.resolveLogical !== "function"
+      || typeof current.head !== "string" || typeof current.pocketId !== "string")
+    return refuse("invalid-current-authority");
+  if (!witness || typeof witness !== "object" || Array.isArray(witness)
+      || typeof witness.transactionId !== "string" || !witness.transactionId
+      || !witness.beforeSeal || !witness.afterSeal || witness.beforeSeal === witness.afterSeal
+      || witness.appliedSeal !== witness.afterSeal || witness.nodeId !== targetId)
+    return refuse("missing-or-ambiguous-history");
+  if (witness.pocketId !== current.pocketId) return refuse("incorrect-pocket-authority");
+  if (typeof undoUpdatedAt !== "string"
+      || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(undoUpdatedAt))
+    return refuse("invalid-undo-timestamp");
+
+  const before = linkedV1State(c, current, witness.beforeSeal, targetId);
+  const after = linkedV1State(c, current, witness.afterSeal, targetId);
+  if (!before || !after) return refuse("unverified-history-state");
+  if (after.seal.previousSealRef !== witness.beforeSeal)
+    return refuse("stale-or-gapped-lineage");
+  const b = before.payload, a = after.payload;
+  if (b.editor?.schema !== "pocket.nodeEditor.v2"
+      || a.editor?.schema !== "pocket.nodeEditor.v2"
+      || typeof b.editor.text !== "string" || typeof a.editor.text !== "string"
+      || typeof b.details !== "string" || typeof a.details !== "string"
+      || b.details !== b.editor.text || a.details !== a.editor.text
+      || typeof b.updatedAt !== "string" || typeof a.updatedAt !== "string")
+    return refuse("missing-or-unsupported-text");
+  for (const [key, found] of [
+    ["beforeText", b.editor.text], ["beforeDetails", b.details],
+    ["beforeUpdatedAt", b.updatedAt], ["afterText", a.editor.text],
+    ["afterDetails", a.details], ["afterUpdatedAt", a.updatedAt],
+  ]) {
+    if (witness[key] !== found)
+      return refuse(key.startsWith("before") ? "unauthenticated-before-image" : "unauthenticated-after-image");
+  }
+  const expectedAfter = { ...b, details: a.details,
+    editor: { schema: "pocket.nodeEditor.v2", text: a.editor.text }, updatedAt: a.updatedAt };
+  if (!linkedV1Equal(c, expectedAfter, a)
+      || !linkedV1Equal(c, before.relation, after.relation))
+    return refuse("unexplained-forward-mutation");
+  for (const id of before.relation.nodeIds) {
+    if (id === targetId) continue;
+    const oldRecord = c.PocketStarlingRootShadow.getContent(before.candidate, id);
+    const newRecord = c.PocketStarlingRootShadow.getContent(after.candidate, id);
+    if (!oldRecord || !newRecord || !linkedV1Equal(c, plain(oldRecord.payload), plain(newRecord.payload)))
+      return refuse("unexplained-forward-mutation");
+  }
+  const range = linkedFractalTextRange(b.editor.text, a.editor.text);
+  // Deliberately conservative v1 anchor: a unique nonempty replacement at
+  // valid grapheme boundaries. Repeated/pure insert/erase anchor cases remain
+  // outside this proof; do not guess where a future editor caret belonged.
+  if (!range || !range.removed || !range.inserted
+      || b.editor.text.indexOf(range.removed) !== b.editor.text.lastIndexOf(range.removed)
+      || a.editor.text.indexOf(range.inserted) !== a.editor.text.lastIndexOf(range.inserted)
+      || !witness.range || !linkedV1Equal(c, witness.range, range))
+    return refuse("invalid-or-ambiguous-text-anchor");
+
+  // From accepted CURRENT head, inspect EVERY content-addressed seal in order.
+  // Check each adjacent pair. A later edit to the target must deny Undo even
+  // when the final bytes happen to equal those at the recorded edit (ABA).
+  let cursor = current.head, steps = 0;
+  const visited = new Set();
+  while (cursor !== witness.afterSeal) {
+    if (visited.has(cursor) || ++steps > 128) return refuse("stale-or-gapped-lineage");
+    visited.add(cursor);
+    const newer = linkedV1State(c, current, cursor, targetId);
+    if (!newer) return refuse("unverified-history-state");
+    const previous = newer.seal.previousSealRef;
+    if (typeof previous !== "string" || !previous || visited.has(previous))
+      return refuse("stale-or-gapped-lineage");
+    const older = linkedV1State(c, current, previous, targetId);
+    if (!older) return refuse("unverified-history-state");
+    if (!linkedV1Equal(c, newer.payload, older.payload)
+        || newer.parentId !== older.parentId)
+      return refuse("intervening-target-change");
+    cursor = previous;
+  }
+  const now = linkedV1State(c, current, current.head, targetId);
+  if (!now || !linkedV1Equal(c, now.payload, a))
+    return refuse("conflicting-current-target");
+  if (now.parentId !== before.parentId) return refuse("intervening-target-change");
+
+  // A NEW single-target P139 command, not a whole-tree snapshot rollback.
+  const payload = { ...now.payload, details: b.details,
+    editor: { schema: "pocket.nodeEditor.v2", text: b.editor.text },
+    updatedAt: undoUpdatedAt };
+  return { ok: true, traversedRevisions: steps,
+    operation: { type: "payload", input: { nodeId: targetId, payload } } };
+}
+async function linkedV1Scenario(targetId = "N") {
+  const c = runtime(), fixture = linkedFractalFixture();
+  // A second child makes child sibling reorder a genuine structural edit.
+  fixture.nodes.push({
+    id: "D", parentId: "N", order: 1, label: "Another child",
+    details: "Second child", editor: { schema: "pocket.nodeEditor.v2", text: "Second child" },
+    updatedAt: "2026-10-24T00:00:00.000Z",
+  });
+  fixture.relation.nodeIds.push("D");
+  fixture.relation.parents.D = "N";
+  fixture.relation.children.N = ["C", "D"];
+  fixture.relation.children.D = [];
+  const staged = stage(c, fixture), api = c.PocketStarlingLogicalEditShadow;
+  const opened = await open(c, staged, "disposable-linked-v1");
+  const context = {
+    c, staged, api, fixture,
+    current: { pocketId: opened.syncedPocketId, authority: opened.semanticAuthority,
+      proof: opened.semanticBaseProof, resolveLogical: (ref) => staged.stager.store.get(ref),
+      base: opened.base, head: staged.stage.sealRef },
+    async advance(operation) {
+      const changed = await api.compose(this.current.base, [operation]);
+      assert.equal(changed.ok, true, JSON.stringify(changed));
+      assert.equal(changed.changed, true);
+      this.current = await linkedFractalSuccessor(c, this.current, changed.candidate);
+      return changed.candidate;
+    },
+    get(id) {
+      const state = linkedV1State(c, this.current, this.current.head, id);
+      assert.ok(state, "verified current " + id);
+      return state.payload;
+    },
+    edit(id, text, timestamp) {
+      const original = this.get(id);
+      return { type: "payload", input: { nodeId: id, payload: {
+        ...original, details: text, editor: { schema: "pocket.nodeEditor.v2", text },
+        updatedAt: timestamp } } };
+    },
+  };
+  const original = context.get(targetId), beforeSeal = context.current.head;
+  const afterText = targetId === "N"
+    ? "Check @Blackwoods before processing the payment."
+    : "Creditor updated";
+  await context.advance(context.edit(targetId, afterText, "2026-10-24T01:00:00.000Z"));
+  const afterSeal = context.current.head, edited = context.get(targetId);
+  const witness = {
+    transactionId: "bounded-disposable-forward-edit", nodeId: targetId,
+    pocketId: context.current.pocketId, beforeSeal, afterSeal, appliedSeal: afterSeal,
+    beforeText: original.editor.text, afterText: edited.editor.text,
+    beforeDetails: original.details, afterDetails: edited.details,
+    beforeUpdatedAt: original.updatedAt, afterUpdatedAt: edited.updatedAt,
+    range: linkedFractalTextRange(original.editor.text, edited.editor.text),
+  };
+  return { ...context, original, witness };
+}
+async function linkedV1IndependentEdits(s, extent) {
+  if (extent === 0) return;
+  await s.advance(s.edit("C", "Independent child revision", "2026-10-24T02:00:00.000Z"));
+  if (extent === 1) return;
+  await s.advance({ type: "reorder", input: { nodeId: "D", fromIndex: 1, toIndex: 0 } });
+  await s.advance(s.edit("U", "Independent unrelated sibling", "2026-10-24T02:30:00.000Z"));
+  await s.advance({ type: "reorder", input: { nodeId: "U", fromIndex: 2, toIndex: 1 } });
+}
+
+test("Linked Text Undo v1: generic target, zero/one/four later revisions, scoped restoration and shared projections", async () => {
+  for (const targetId of ["N", "T"]) {
+    for (const count of [0, 1, 4]) {
+      const s = await linkedV1Scenario(targetId);
+      await linkedV1IndependentEdits(s, count);
+      const beforeUndo = linkedV1State(s.c, s.current, s.current.head, targetId);
+      assert.ok(beforeUndo);
+      const originalOthers = Object.fromEntries(
+        beforeUndo.relation.nodeIds.filter(id => id !== targetId)
+          .map(id => [id, plain(s.c.PocketStarlingRootShadow.getContent(beforeUndo.candidate, id).payload)]));
+      const plan = linkedV1Plan({ c: s.c, current: s.current, witness: s.witness,
+        targetId, undoUpdatedAt: "2026-10-24T05:00:00.000Z" });
+      assert.equal(plan.ok, true, JSON.stringify(plan));
+      assert.equal(plan.traversedRevisions, count);
+      const undone = await s.api.compose(s.current.base, [plan.operation]);
+      assert.equal(undone.ok, true, JSON.stringify(undone));
+      const finalResolver = ref => undone.candidate.resolveLogical(ref) || s.current.resolveLogical(ref);
+      const audited = s.c.PocketStarlingObjectSealShadow.auditCandidateSeal(undone.candidate.sealRef, finalResolver);
+      assert.equal(audited.ok, true, JSON.stringify(audited));
+      const relation = s.c.PocketStarlingPlacementShadow.materialise(audited.candidate.structural);
+      assert.equal(relation.ok, true);
+      assert.deepEqual(plain(relation.relation), beforeUndo.relation, "independent structural work survives");
+      const payload = id => plain(s.c.PocketStarlingRootShadow.getContent(audited.candidate, id).payload);
+      assert.equal(payload(targetId).editor.text, s.original.editor.text);
+      assert.equal(payload(targetId).details, s.original.details);
+      assert.equal(payload(targetId).updatedAt, "2026-10-24T05:00:00.000Z");
+      for (const [id, original] of Object.entries(originalOthers))
+        assert.deepEqual(payload(id), original, "unrelated payload " + id + " survives");
+      const collapsed = () => ({ id: targetId, text: payload(targetId).editor.text });
+      const expanded = () => ({ id: targetId, text: payload(targetId).editor.text,
+        children: relation.relation.children[targetId] || [] });
+      assert.deepEqual({ id: expanded().id, text: expanded().text }, collapsed(),
+        "both views read one semantic result, not independent editor state");
+      assert.equal(objectAt(finalResolver, undone.candidate.sealRef).previousSealRef, s.current.head);
+    }
+  }
+});
+
+test("Linked Text Undo v1: forged, missing, changed-back, ambiguous and cross-pocket histories refuse without edits", async () => {
+  const s = await linkedV1Scenario();
+  await linkedV1IndependentEdits(s, 4);
+  const baseline = s.current.head, originalPayload = s.get("N");
+  const plan = (overrides = {}) => linkedV1Plan({
+    c: s.c, current: s.current, witness: s.witness, targetId: "N",
+    undoUpdatedAt: "2026-10-24T05:00:00.000Z", ...overrides,
+  });
+  const bogus = "Check @Blackwoods before processing the wages.";
+  const bad = [
+    ["unauthenticated-before-image", { witness: { ...s.witness,
+      beforeText: bogus, beforeDetails: bogus, range: linkedFractalTextRange(bogus, s.witness.afterText) } }],
+    ["unauthenticated-after-image", { witness: { ...s.witness, afterDetails: "fake" } }],
+    ["incorrect-pocket-authority", { witness: { ...s.witness, pocketId: "wrong-pocket" } }],
+    ["missing-or-ambiguous-history", { witness: { ...s.witness, transactionId: "" } }],
+    ["missing-or-ambiguous-history", { witness: { ...s.witness, nodeId: "C" } }],
+    ["stale-or-gapped-lineage", { witness: { ...s.witness, beforeSeal: baseline } }],
+    ["unverified-history-state", { witness: { ...s.witness, beforeSeal: "nonexistent-ref" } }],
+    ["invalid-or-ambiguous-text-anchor", { witness: { ...s.witness,
+      range: { ...s.witness.range, start: s.witness.range.start + 1 } } }],
+    ["invalid-undo-timestamp", { undoUpdatedAt: "wrong" }],
+  ];
+  for (const [reason, change] of bad) {
+    const result = plan(change);
+    assert.deepEqual(result, { ok: false, reason }, JSON.stringify(change));
+    assert.equal("operation" in result, false, reason);
+    assert.equal(s.current.head, baseline);
+    assert.deepEqual(s.get("N"), originalPayload);
+  }
+  // The resolver loses a signed-off intermediate ref: no skip/guess allowed.
+  const middle = objectAt(s.current.resolveLogical, s.current.head).previousSealRef;
+  const missing = { ...s.current, resolveLogical: ref =>
+    ref === middle ? undefined : s.current.resolveLogical(ref) };
+  assert.deepEqual(plan({ current: missing }), { ok: false, reason: "unverified-history-state" });
+  // Truly amended target, then restored to the EXACT same payload (ABA).
+  await s.advance(s.edit("N", "Changed again", "2026-10-24T06:00:00.000Z"));
+  const restored = { type: "payload", input: { nodeId: "N", payload: originalPayload } };
+  await s.advance(restored);
+  assert.deepEqual(s.get("N"), originalPayload, "full content really matches after-image again");
+  assert.deepEqual(plan(), { ok: false, reason: "intervening-target-change" });
+  assert.equal("operation" in plan(), false);
+  // Unique grapheme-aligned replacement is the only v1 anchor grammar.
+  const segmented = linkedFractalTextRange("X😀Y", "X😇Y");
+  assert.equal(segmented, null, "surrogate pair replacement cannot form a partial grapheme anchor");
+  const repeated = linkedFractalTextRange("aabb", "aaabb");
+  assert.ok(repeated);
+  assert.equal(repeated.removed, "", "pure insertion must not acquire guessed identity");
+  assert.equal(s.current.head !== baseline, true);
+});
