@@ -370,11 +370,11 @@ test("Boundary proof: authenticated unaccepted predecessor is indistinguishable 
   assert.deepEqual(copy([...yes.objects]), copy([...no.objects]));
 
   // World A: ordinary P122 publication, with genuinely accepted B and C.
-  const bCommit = await publisher(c, yes, "boundary-legit-B").publishCandidate({
+  const bCommit = await publisher(opener.c, yes, "boundary-legit-B").publishCandidate({
     stage: B.stage, expectedHead: original,
   });
   assert.equal(bCommit.outcome, "committed", JSON.stringify(bCommit));
-  const cCommit = await publisher(c, yes, "boundary-legit-C").publishCandidate({
+  const cCommit = await publisher(bReader.c, yes, "boundary-legit-C").publishCandidate({
     stage: C.stage, expectedHead: B.expectedHead.revision === original.revision ?
       { schema: HEAD, revision: 2, sealRef: B.stage.sealStorageRef } : B.expectedHead,
   });
@@ -382,7 +382,7 @@ test("Boundary proof: authenticated unaccepted predecessor is indistinguishable 
 
   // World B: accept D via P122 then exploit the actual P120 CAS request
   // boundary to point Head at C, whose predecessor is B rather than D.
-  const dCommit = await publisher(c, no, "boundary-unrelated-D").publishCandidate({
+  const dCommit = await publisher(opener.c, no, "boundary-unrelated-D").publishCandidate({
     stage: D.stage, expectedHead: original,
   });
   assert.equal(dCommit.outcome, "committed", JSON.stringify(dCommit));
