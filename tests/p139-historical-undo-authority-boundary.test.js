@@ -400,10 +400,10 @@ test("Boundary proof: authenticated unaccepted predecessor is indistinguishable 
   // world accepted D. Both current heads have the same revision (3).
   assert.equal(yes.head.revision, 3);
   assert.equal(no.head.revision, 3);
-  assert.notEqual(yes.casObservations[1].next.sealRef,
-    no.casObservations[1].next.sealRef);
-  assert.equal(yes.casObservations[1].next.sealRef, B.stage.sealStorageRef);
-  assert.equal(no.casObservations[1].next.sealRef, D.stage.sealStorageRef);
+  assert.notEqual(yes.casObservations[0].next.sealRef,
+    no.casObservations[0].next.sealRef);
+  assert.equal(yes.casObservations[0].next.sealRef, B.stage.sealStorageRef);
+  assert.equal(no.casObservations[0].next.sealRef, D.stage.sealStorageRef);
 
   // Restart discards all transport CAS observations, WeakMaps and ephemeral
   // human-action witnesses. Both persisted worlds are now byte-identical.
