@@ -71,11 +71,11 @@ async function successorBase(c, staged, opened, candidate) {
 function stateAt(c, read, sealRef) {
   try {
     const audited = c.PocketStarlingObjectSealShadow.auditCandidateSeal(sealRef, read);
-    if (!audited.ok) return null;
+    if (!audited.ok) throw new Error("seal-audit: " + JSON.stringify(audited));
     const seal = objectAt(read, sealRef);
     const root = objectAt(read, seal.rootRef);
     const structural = c.PocketStarlingPlacementShadow.materialise(audited.candidate.structural);
-    if (!structural.ok) return null;
+    if (!structural.ok) throw new Error("structural: " + JSON.stringify(structural));
     return {
       sealRef, seal, root, relation: plain(structural.relation),
       content: (id) => {
@@ -83,8 +83,8 @@ function stateAt(c, read, sealRef) {
         return record && record.nodeId === id ? plain(record.payload) : null;
       },
     };
-  } catch (_error) {
-    return null;
+  } catch (error) {
+    throw new Error("stateAt diagnostic " + sealRef + ": " + String(error));
   }
 }
 function placementOf(s, nodeId) {
