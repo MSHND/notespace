@@ -446,7 +446,7 @@ test("Accepted Postgres Head-CAS contract contains no predecessor or intent bind
     "sync-service/pocket-sync-object-head-postgres-store.js"), "utf8");
   const sql = file.match(/headCompareAndSet:\s*\x60([\s\S]*?)\x60/);
   assert.ok(sql, "real server SQL contract exists");
-  assert.match(sql[1], /UPDATE \\\$\{HEAD_TABLE\} SET revision = revision \+ 1/);
+  assert.ok(sql[1].includes('UPDATE ${HEAD_TABLE} SET revision = revision + 1'));
   assert.match(sql[1], /seal_storage_ref = \$4/);
   assert.match(sql[1], /revision = \$2/);
   assert.match(sql[1], /seal_storage_ref IS NOT DISTINCT FROM \$3/);
