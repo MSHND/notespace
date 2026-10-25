@@ -109,12 +109,7 @@ async function createDisposable() {
   assert.equal(encoded.ok, true, JSON.stringify(encoded));
   const built = c.PocketStarlingRootShadow.build(encoded.bridge);
   assert.equal(built.ok, true, JSON.stringify(built));
-  const staged = c.PocketStarlingObjectSealShadow.stageCandidate(
-    c.PocketStarlingObjectSealShadow.createStager(), built.state,
-    { previousSealRef: null });
-  assert.equal(staged.ok, true, JSON.stringify(staged));
-  // Fresh independent stager with retained logical objects supplied by stageCandidate.
-  // Use a single stager to preserve exactly the canonical P109 bytes.
+  // One canonical P109 stager for genesis; no alternate persistence truth.
   const stager = c.PocketStarlingObjectSealShadow.createStager();
   const accepted = c.PocketStarlingObjectSealShadow.stageCandidate(stager, built.state,
     { previousSealRef: null });
@@ -367,6 +362,31 @@ test("Proof 2 recovers encrypted structural lineage after restart, prepares a no
   const b = await reopened.opened.session.readContent("B");
   assert.equal(c.payload.note, "keep-me");
   assert.equal(b.payload.label, "B edited independently");
+
+  // COUNTERFACTUAL ONLY: In a separate cloned disposable store, explicitly
+  // publish the *manual structural move* prepared above. This establishes
+  // composition behaviour, not historical Undo authority: the production
+  // planner returns operation:null and the original accepted Head is untouched.
+  const fork = afterRestart(persisted);
+  const exercise = await publisher(freshReader.c, fork, "proof2-counterfactual").publishCandidate({
+    stage: prepared.stage, expectedHead: prepared.expectedHead,
+  });
+  assert.equal(exercise.outcome, "committed");
+  const forkReader = await fresh(f, fork, "proof2-counterfactual-open");
+  const forkC = await forkReader.opened.session.readPlacement("C");
+  assert.equal(forkC.parentId, "A");
+  const forkProjection = await forkReader.c.PocketStarlingMaterializeShadow.materializeAccepted(
+    forkReader.opened.session);
+  assert.equal(forkProjection.ok, true, JSON.stringify(forkProjection));
+  const forkState = { nodes: copy(forkProjection.document.nodes) };
+  assert.deepEqual(siblings(forkState, "C"), ["C", "D"]);
+  assert.equal(node(forkState, "C").note, "keep-me");
+  assert.equal(node(forkState, "B").label, "B edited independently");
+  assert.equal(node(forkState, "G").parentId, "C");
+  assert.equal(node(forkState, "E").parentId, "root");
+  assert.notEqual(fork.head.sealRef, persisted.head.sealRef);
+  assert.equal(fork.casObservations.length, 1);
+  assert.deepEqual(persisted.head, f.store.head);
 });
 
 test("Proof 2 denies unknown intent, stale Head, tampering, orphan candidates and post-move ABA without publishing", { timeout: 120000 }, async () => {
@@ -392,6 +412,36 @@ test("Proof 2 denies unknown intent, stale Head, tampering, orphan candidates an
   const physical = corrupted.objects.get(moved.sealRef);
   corrupted.objects.set(moved.sealRef, { ...physical, ciphertext: "AAAA" });
   await assert.rejects(inspectHistory(a, corrupted));
+
+  // Wrong Pocket binding and a foreign key both fail against actual P124
+  // encrypted, semantic-validated Open; no mere fixture boolean assertion.
+  await assert.rejects(
+    a.c.PocketStarlingRemoteOpenShadow.createRemoteOpener({
+      objectHeadService: service(a.c, persisted),
+      operationIdFactory: ids("proof2-cross-pocket"),
+    }).openRemote({
+      masterKey: a.credentials.masterKey,
+      context: context("a-foreign-pocket"),
+      semanticAuthority: a.credentials.semanticAuthority,
+    })
+  );
+  const alien = await a.c.PocketSyncCrypto.createMasterKeyBundle([{
+    context: { syncedPocketId: POCKET_ID, envelopeId: "alien",
+      envelopeKind: "device", envelopeVersion: 1 },
+    wrappingKey: await a.c.PocketSyncCrypto.generateDeviceWrappingKey(),
+  }], { semanticAuthority: true });
+  await assert.rejects(
+    a.c.PocketStarlingRemoteOpenShadow.createRemoteOpener({
+      objectHeadService: service(a.c, persisted),
+      operationIdFactory: ids("proof2-wrong-key"),
+    }).openRemote({
+      masterKey: alien.masterKey, context: context(),
+      semanticAuthority: alien.semanticAuthority,
+    })
+  );
+  assert.equal(
+    hypothesise(history, history[history.length - 1].physicalRef, persisted.head.sealRef).reason,
+    "selector-is-not-target-move");
 
   // An orphan prepared by the SAME P127 composer is not in accepted ancestry.
   const orphan = await prepareFrom(a, { nodeId: "C", fromIndex: 1,
