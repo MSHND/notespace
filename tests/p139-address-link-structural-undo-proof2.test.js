@@ -440,7 +440,7 @@ test("Proof 2 denies unknown intent, stale Head, tampering, orphan candidates an
     })
   );
   assert.equal(
-    hypothesise(history, history[history.length - 1].physicalRef, persisted.head.sealRef).reason,
+    hypothesise(history, history[0].physicalRef, persisted.head.sealRef).reason,
     "selector-is-not-target-move");
 
   // An orphan prepared by the SAME P127 composer is not in accepted ancestry.
