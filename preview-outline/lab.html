@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-POCKET v0.6.27 · CONTENT AND RETRIEVAL LAB · 11 NOVEMBER 2026
+POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
 Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
 Shift+Enter within a genuine unit inserts a newline in the interface/in-memory label
 without creating a new unit. This is NOT a durable Pocket body schema; normal
@@ -101,7 +101,7 @@ END NOTES
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
-<title>Pocket · v0.6.27 Content & Retrieval Lab</title>
+<title>Pocket · v0.6.28 Unit Sheet & Retrieval Lab</title>
 <style>
 :root {--page:#f8f7f2;--paper:#fffefa;--ink:#333c34;--muted:#8c968c;--soft:#69766c;--quiet:#dce2d9;--accent:#466b58;--tint:#f0f4ef;--line:#e9ebe3;--focus:#527390;--rail:320px;--font:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--page);font:15px/1.62 var(--font);color:var(--ink)}button,input{font:inherit;color:inherit}button{cursor:pointer}button:disabled{opacity:.28;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px}::selection{background:#dcece0}.hidden{display:none!important}
@@ -284,6 +284,55 @@ END NOTES
 .welcome .demo-button:hover{background:#e4eef4}
 .lab-note{border-left:2px solid #b2c5d0;padding:8px 12px;font-size:12px;color:#5b6f7c;margin:4px 0 19px;line-height:1.55;background:#f5f8fa}
 .lab-note strong{color:#344e61}
+
+/* v0.6.28: OG-inspired readability with restrained cool blue-grey states.
+   Presentation only. No change to Core semantics or JSON format. */
+:root{--page:#f5f6f7;--paper:#fffefd;--ink:#263543;--muted:#6d7b87;--soft:#586d7a;--quiet:#dce5eb;--accent:#42647b;--tint:#eef3f7;--line:#e1e7eb;--focus:#527b9a}
+body{color:var(--ink);background:var(--page)}
+.topbar{background:rgba(250,251,251,.97);border-bottom-color:#e1e7ea}
+.page{border-color:#e0e5e9;background:#fefefe;box-shadow:0 3px 15px #31485d0c}
+.page h1{color:#263644}.trail button,.trail button:last-of-type{color:#364b5b}
+.page .helper,.page .write-note,.source-meta,.pe-line{color:#627482}
+.unit-text{color:#283947}
+.outline .unit[data-id]:hover{background:linear-gradient(90deg,rgba(232,239,244,.65),rgba(232,239,244,.12) 90%)}
+.outline .unit[data-id] .thought-frame{box-shadow:0 0 0 1px rgba(97,132,159,.055)}
+.outline .unit[data-id]:hover .thought-frame{box-shadow:0 0 0 1px rgba(94,126,154,.22)}
+.outline .unit[data-id]:focus-within .thought-frame{box-shadow:0 0 0 1px rgba(82,119,151,.26)}
+.outline .unit[data-id] .fold:not(.placeholder){color:#8c9fae}
+.outline .unit[data-id] .fold:not(.placeholder):hover{background:#e9f0f5;color:#49677c}
+.outline .unit[data-id] .unit-marker .symbol{border-color:#a4b7c4}
+.unit-marker:hover .symbol,.unit-marker[aria-expanded=true] .symbol{background:#dfeaf1;border-color:#6386a1;color:#41637c}
+.search-results .unit.search-selected{background:#e9eef8;box-shadow:inset 3px 0 0 #849ec1}
+.search-results .unit.search-selected [data-search-result]{color:#284867!important}
+.search-results .quick-source{color:#526b80}
+.search-results .alias-pill{color:#48647c;background:#e9eff6}
+/* Keep the exact source visible after copying, without implying a data change. */
+.outline .unit[data-id].copied-unit{background:#e9eefb;border-radius:8px}
+.outline .unit[data-id].copied-unit .thought-frame{background:rgba(227,235,251,.8);box-shadow:0 0 0 1.5px #9aadd3}
+.outline .unit.pe-line.copied-pe .unit-text{background:#e9eefb;border-radius:7px;box-shadow:0 0 0 2px #9aadd3}
+.outline .unit[data-id].undo-preview .thought-frame{box-shadow:0 0 0 2px rgba(64,113,160,.87),0 0 0 5px rgba(61,115,169,.12);background:#e4eefa}
+.outline .unit[data-id].undo-spot .thought-frame{box-shadow:0 0 0 2px rgba(79,126,171,.68);background:#ebf2fb}
+/* The little square opens a floating metadata sheet, never a PE/body panel. */
+.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 22px));max-height:min(77vh,730px);padding:18px 19px;z-index:150;border-radius:14px;background:#fff;border:1px solid #dce4ec;box-shadow:0 18px 48px #273e5629}
+.aside .aside-head{align-items:flex-start;margin-bottom:9px;gap:12px}
+.aside .aside-head h2{font-size:calc(var(--read-support) + 5px);color:#26394a;font-weight:650;line-height:1.25;margin:3px 0 0}
+.aside .asidepath{font-size:11px;color:#6f8090;margin-bottom:17px}
+.aside .section,.aside .sheet-section{border-top:1px solid #e8edf1;padding:12px 0 8px;margin:0}
+.aside .sheet-eyebrow{font-size:9px;letter-spacing:.11em;font-weight:700;color:#64829a}
+.aside .sheet-label{font-size:10px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;color:#627a8a;margin-bottom:7px}
+.aside .sheet-property{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;font-size:12px;line-height:1.5;margin:6px 0;color:#304557}
+.aside .sheet-property>span:first-child{color:#738493}
+.aside .sheet-property>span:last-child,.aside .sheet-property code{overflow-wrap:anywhere;min-width:0}
+.aside .sheet-property code{font-size:11px;color:#30485b;background:#f2f5f8;padding:3px 6px;border-radius:5px}
+.aside .sheet-hint,.aside .sheet-foot{font-size:11px;color:#81919e;line-height:1.55;margin:7px 0}
+.aside .sheet-foot{padding-top:10px;border-top:1px solid #e8edf1}
+.aside .item{color:#3e5870;font-size:12px;border-radius:6px}
+.aside .item:hover,.aside .action:hover{background:#ebf2f7}
+.aside .action{background:#eff4f8;border-color:#d8e4ed;color:#47677e}
+.peek{border-color:#dce5ed;background:#fff;box-shadow:0 9px 27px #314b6628}
+.lab-note{background:#f1f5f9;border-color:#91b1c5;color:#4e6476}
+.lab-note strong{color:#2b4961}
+@media(max-width:720px){.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 20px));max-height:65vh;padding:14px}}
 </style>
 </head>
 <body>
@@ -324,20 +373,20 @@ END NOTES
     <section class="welcome" id="welcome">
       <p class="eyebrow">POCKET / A QUIETER OUTLINE</p>
       <h1>A place to think.</h1>
-      <p>Your thoughts in one calm outline. Click a thought to explore, or click the blank space to its right to write at the end. Escape finishes writing, closes a search, or steps back through visited thoughts. The quiet Copy icon enables one-click copying; the tiny square reveals connections. For keyboard and touch access, Start writing is also in the More menu.</p>
+      <p>Your thoughts in one calm outline. Click a thought to explore, or click the blank space to its right to write at the end. Escape finishes writing, closes a search, or steps back through visited thoughts. The quiet Copy icon enables one-click copying; the tiny square opens a metadata sheet for that thought. For keyboard and touch access, Start writing is also in the More menu.</p>
       <button type="button" class="filechoose" id="open-native" title="Choose a local Pocket JSON. In supported browsers you can save back to this file.">Open Pocket JSON…</button>
       <label class="filechoose" id="fallback-open-welcome" class="hidden" style="margin-left:8px">Open via file upload<input id="filepicker" type="file" accept=".json,application/json"></label>
-      <p class="privacy"><strong>New: v0.6.27 content and retrieval experiment.</strong> To test safely without your work data, use the synthetic example below. Aliases and Copy body are preview behaviour only, not saved Pocket properties.</p>
+      <p class="privacy"><strong>New: v0.6.28 content and retrieval interaction experiment.</strong> To test safely without your work data, use the synthetic example below. Aliases and Copy body are preview behaviour only, not saved Pocket properties.</p>
       <button type="button" class="demo-button" id="open-demo">Try synthetic example: RG → Enter → paste, then Shift+Enter</button>
-      <p class="privacy">Your JSON stays local. This v0.6.27 preview cannot save multiline changes as normal Pocket JSON. For ordinary work, use the preserved v0.6.26 version. In supported browsers, opening with file access otherwise enables Save back to that same file, with permission and a warning before first overwrite. Save As creates another file. If your browser does not allow direct file access, Save downloads a new copy instead. Keep a backup of your original: this experimental save has NOT been certified for importing into live Pocket. Proposed new links remain draft-only.</p>
+      <p class="privacy">Your JSON stays local. This v0.6.28 preview cannot save multiline changes as normal Pocket JSON. For ordinary work, use the preserved v0.6.26 version. In supported browsers, opening with file access otherwise enables Save back to that same file, with permission and a warning before first overwrite. Save As creates another file. If your browser does not allow direct file access, Save downloads a new copy instead. Keep a backup of your original: this experimental save has NOT been certified for importing into live Pocket. Proposed new links remain draft-only.</p>
       <div class="loaderr" id="loaderror" role="alert"></div>
     </section>
     <section id="viewer" class="hidden"></section>
   </main>
-  <aside id="aside" class="aside hidden" aria-label="Connections and navigation" tabindex="-1"></aside>
+  <aside id="aside" class="aside hidden" role="dialog" aria-label="Unit metadata and relationships" tabindex="-1"></aside>
 </div>
 <div id="peek" class="peek hidden" role="group" aria-label="Quick thought navigation"></div>
-<div class="foot" id="foot">Pocket · v0.6.27 Content & Retrieval Lab · Synthetic examples for aliases and copy sources · Shift+Enter multiline interaction only · No new Core schema or migration · Live importer unverified</div>
+<div class="foot" id="foot">Pocket · v0.6.28 Unit Sheet & Retrieval Lab · Synthetic aliases and body copying · Local data only · No Core changes or migration · Live importer unverified</div>
 <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 <script>
 'use strict';
@@ -353,6 +402,7 @@ let writeMode=false, copyMode=false, copyTickTimer=null, originalNodes=new Map()
 let originalExport=null, usedIds=new Set(), savedStateKey=null, lastSavedFile='';
 // Session-only retrieval settings. Never include these in the original export or normal saves.
 let retrievalPreview=new Map(), syntheticLab=false, searchNeedsDisambiguation=false;
+let lastCopiedId=null, lastCopiedPe=null; // Presentation-only cues, never data or Undo changes.
 
 // A file input or drag-and-drop does NOT give write permission to a source file.
 // Only a browser-granted native handle permits same-file saving.
@@ -411,7 +461,7 @@ function load(data,name){
   ['lab-title-only',{aliases:['AP'],copySource:'title'}],
   ['lab-conflict',{aliases:['CF'],copySource:'body'}]
  ]:[]);
- searchNeedsDisambiguation=false;
+ searchNeedsDisambiguation=false;lastCopiedId=null;lastCopiedPe=null;
  sourceHandle=null;sourceFileText=null;directSaveConfirmed=false;
  usedIds=new Set([...arr.map(n=>n.id),...(Array.isArray(data.mainThoughtTreeTombstones)?data.mainThoughtTreeTombstones.map(x=>x.id):[])]);
  for(const n of arr){if(Array.isArray(n.editor?.outline))for(const l of n.editor.outline)if(typeof l.id==='string')usedIds.add(l.id)}
@@ -470,7 +520,7 @@ function travel(shift){
  rememberRouteView();routePos=p;go(route[p],{history:false,restore:routeViews[p]});return true;
 }
 function fold(id){finishEdit();if(expanded.has(id))expanded.delete(id);else expanded.add(id);renderViewer()}
-function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-door="${esc(n.id)}" aria-label="Open choices for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="More about this thought"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
+function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="Unit metadata and relationships"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
 function detailsOf(n){
  const d=typeof n.details==='string'?n.details:''; const e=n.editor;
  const editor=e?(typeof e.text==='string'?e.text:Array.isArray(e.outline)?e.outline.map(x=>' '.repeat(Math.min(12,Number(x.depth)||0)*2)+String(x.text||'')).join('\n'):''):'';
@@ -496,7 +546,7 @@ function peRows(n,parentDepth){
  const lines=peLines(n);let out='';
  for(let i=0;i<lines.length;i++){const l=lines[i],depth=Math.min(15,parentDepth+1+l.depth),blank=!l.text;
   const edit=writeMode?`contenteditable="plaintext-only" role="textbox" data-empty="Write…" aria-label="Edit text line ${i+1} inside ${esc(n.label)}" spellcheck="true"`:'';
-  out+=`<div class="unit pe-line${blank?' pe-gap':''}" data-pe-owner="${esc(n.id)}" data-depth="${depth}" title="Text within ${esc(n.label)}; not a separate unit"><span class="indent" style="width:${Math.min(15,depth)*17}px"></span><span class="pe-gutter" aria-hidden="true">${blank?'':'·'}</span><span class="unit-body"><span class="unit-text" data-edit-pe="${esc(n.id)}" data-pe-index="${i}" ${edit}>${esc(l.text)}</span></span></div>`;
+  out+=`<div class="unit pe-line${blank?' pe-gap':''}${lastCopiedPe?.owner===n.id&&lastCopiedPe?.index===i?' copied-pe':''}" data-pe-owner="${esc(n.id)}" data-depth="${depth}" title="Text within ${esc(n.label)}; not a separate unit"><span class="indent" style="width:${Math.min(15,depth)*17}px"></span><span class="pe-gutter" aria-hidden="true">${blank?'':'·'}</span><span class="unit-body"><span class="unit-text" data-edit-pe="${esc(n.id)}" data-pe-index="${i}" ${edit}>${esc(l.text)}</span></span></div>`;
  }
  return out;
 }
@@ -506,7 +556,7 @@ function outline(items,depth=0){
   const c=kids(n.id),hasPe=peLines(n).some(x=>!!x.text),opened=expanded.has(n.id),isHeading=c.length>0||hasPe;
   const editable=writeMode?`contenteditable="plaintext-only" role="textbox" data-empty="${pendingBlank.has(n.id)?'':'A thought…'}" aria-label="Edit thought ${esc(n.label||'new thought')}" spellcheck="true"`:'';
   const name=`<span class="unit-text" data-unittext="${esc(n.id)}" data-edit-node="${esc(n.id)}" ${editable} title="${writeMode?'Edit thought':copyMode?'Click to copy thought text':'Click to focus thought'}">${esc(n.label)}</span>`;
-  str+=`<div class="unit${n.label.includes('\n')?' multiline':''}" data-depth="${depth}" data-id="${esc(n.id)}"><span class="indent" style="width:${Math.min(14,depth)*17}px"></span>${isHeading?`<button class="fold" data-fold="${esc(n.id)}" title="${opened?'Fold':'Unfold'} this thought" aria-label="${opened?'Collapse':'Expand'} ${esc(n.label)}" aria-expanded="${opened}">${opened?'⌄':'›'}</button>`:'<span class="fold placeholder" aria-hidden="true">·</span>'}<span class="unit-body"><span class="thought-frame">${name}</span>${marker(n)}</span></div>`;
+  str+=`<div class="unit${n.label.includes('\n')?' multiline':''}${lastCopiedId===n.id?' copied-unit':''}" data-depth="${depth}" data-id="${esc(n.id)}"><span class="indent" style="width:${Math.min(14,depth)*17}px"></span>${isHeading?`<button class="fold" data-fold="${esc(n.id)}" title="${opened?'Fold':'Unfold'} this thought" aria-label="${opened?'Collapse':'Expand'} ${esc(n.label)}" aria-expanded="${opened}">${opened?'⌄':'›'}</button>`:'<span class="fold placeholder" aria-hidden="true">·</span>'}<span class="unit-body"><span class="thought-frame">${name}</span>${marker(n)}</span></div>`;
   if(opened&&depth<50){str+=peRows(n,depth);if(c.length)str+=outline(c,depth+1)}
  }
  return str;
@@ -541,10 +591,32 @@ function quickCopyInfo(n){
  }
  return {kind:'title',text:n.label};
 }
-function quickCopyResult(n,row){
+async function quickCopyResult(n,row){
  const info=quickCopyInfo(n);
  if(info.kind==='blocked'){flash('Copy blocked: '+info.reason);return false}
- copyVisibleText(info.text,row);return true;
+ const success=await copyVisibleText(info.text,row);
+ if(!success)return false;
+ // A successful quick copy clears the filter and brings the source into view.
+ // This is presentation only: no identity, relationship, history or Undo change.
+ revealCopiedUnit(n.id);
+ return true;
+}
+function revealCopiedUnit(id){
+ const n=byId.get(id);if(!n)return;
+ lastCopiedId=id;lastCopiedPe=null;
+ if(searchMode)closeSearch();
+ const findRow=()=>[...document.querySelectorAll('#viewer .unit[data-id]')].find(r=>r.dataset.id===id);
+ if(!findRow()){
+  // Show the copied unit as a line in its parent context, rather than opening
+  // that unit or copying any of its descendants. Preserve a reversible view trail.
+  const parent=byId.has(n.parentId)?n.parentId:ALL;
+  if(current!==parent)go(parent);else renderViewer();
+ }
+ const row=findRow();
+ if(row){row.classList.add('copied-unit');row.scrollIntoView({block:'center',behavior:'instant'});}
+ // Don't leave keyboard focus in the now-hidden search field: the next typed
+ // character must be able to start another filter naturally.
+ const page=$('page');page.setAttribute('tabindex','-1');page.focus({preventScroll:true});
 }
 function matchingSearchNodes(q){
  const matching=nodes.filter(n=>norm(n.label).includes(q)||norm(n.details||'').includes(q)||norm(n.editor?.text||'').includes(q)||previewAliases(n).some(a=>norm(a).includes(q)));
@@ -567,7 +639,7 @@ function renderViewer(){if(!loaded)return;const v=$('viewer');if(searchMode){
   }).join('')}</div>${all.length>90?'<p class="gentle">Showing the first 90 matches.</p>':''}`;
   return;
  }
- if(current===ALL){v.innerHTML=`<h1>Everything</h1>${syntheticLab?'<div class="lab-note"><strong>Synthetic test data only.</strong> Try RG → Enter → paste. Try ZZ to check alias ambiguity. Try CF to see conflicting legacy body copies blocked. Open "Type here" and use Shift+Enter; no new unit should appear. No normal JSON saves from this demonstration.</div>':''}${writingHelp()}<div class="outline">${outline(roots)}</div>${writeMode?`<div class="write-row"><button data-write-new="root">+ A thought</button></div>`:''}`;return}
+ if(current===ALL){v.innerHTML=`<h1>Everything</h1>${syntheticLab?'<div class="lab-note"><strong>Synthetic test data only.</strong> Try RG → Enter → paste. The filter will clear and highlight Raise GR. Click its tiny square for the Unit Sheet. Try ZZ to check alias ambiguity. Try CF to see conflicting legacy body copies blocked. Open "Type here" and use Shift+Enter; no new unit should appear. No normal JSON saves from this demonstration.</div>':''}${writingHelp()}<div class="outline">${outline(roots)}</div>${writeMode?`<div class="write-row"><button data-write-new="root">+ A thought</button></div>`:''}`;return}
  const n=byId.get(current);if(!n){v.innerHTML='<p>This thought is unavailable.</p>';return}
  const {d,editor,hasAlternate}=detailsOf(n);const c=kids(n.id);
  v.innerHTML=`<h1 data-copy-current="${esc(n.id)}" title="${copyMode?'Click the title to copy this thought':''}">${esc(n.label||'Untitled thought')} ${marker(n)}</h1>${writingHelp()}<div class="outline focused-outline">${peRows(n,0)}${outline(c)}</div>${writeMode?`<div class="write-row"><button data-write-new="${esc(n.id)}">+ A thought</button></div>`:''}${hasAlternate?`<details class="source-meta" ${editorOpen?'open':''} id="alternate"><summary>Other saved version of this text</summary><p class="gentle">Pocket exported two different versions of this text. The editor's text appears in the outline above; the other copy is preserved here.</p>${note(d,'alt')}</details>`:''}<div class="understated-row" id="outlineactions">${c.length?`<button class="understated" data-action="foldall">Fold all</button><button class="understated" data-action="unfoldall">Unfold headings</button>`:''}</div><details class="source-meta"><summary>About this thought</summary><div>Source identity: ${esc(n.id)}. Parent: ${esc(byId.get(n.parentId)?.label||'Everything')}. Text inside PE remains part of this thought rather than independent, invented units. Use Save for a new working JSON. This prototype has not been certified for live Pocket import.</div></details>`;
@@ -593,13 +665,22 @@ function openAside(id,locked=false){
  document.querySelectorAll('[data-door]').forEach(x=>x.setAttribute('aria-expanded',String(x.dataset.door===id)));
 }
 function linkRow(n,subtitle,extra=''){return `<button class="item" data-open="${esc(n.id)}">${esc(n.label)}${subtitle?`<small>${esc(subtitle)}</small>`:''}</button>${extra}`}
-function renderAside(){if(!asideId)return;const n=byId.get(asideId);if(!n){closeAside();return}const parent=byId.get(n.parentId),same=(names.get(norm(n.label))||[]).filter(x=>x.id!==n.id),links=[...proposed.values()].filter(l=>l.from===n.id||l.to===n.id),c=kids(n.id),a=$('aside');
- const existing=`<div class="section"><p class="section-head">Go to</p>${linkRow(n,'Focus on this thought','').replace(`data-open="${esc(n.id)}"`,`data-open="${esc(n.id)}"`)}${parent?linkRow(parent,'Up to '+parent.label):`<button class="item" data-open="${ALL}">Everything</button>`}${c.length?`<details><summary>${c.length===1?'1 thought inside':'Thoughts inside'} (${c.length})</summary>${c.slice(0,12).map(x=>linkRow(x,'')).join('')}${c.length>12?'<p class="quiet">Open this thought to see the rest.</p>':''}</details>`:''}</div>`;
- const relation=`<div class="section"><p class="section-head">Connections</p>${links.length?links.map(l=>{const other=byId.get(l.from===n.id?l.to:l.from);return `<div class="proposal"><div style="flex:1">${linkRow(other,path(other))}</div><button data-remove="${esc(l.from)}|${esc(l.to)}" title="Remove temporary link" aria-label="Remove temporary link to ${esc(other.label)}">×</button></div>`}).join(''):'<p class="quiet">No links added here yet.</p>'}</div>`;
- const maybe=same.length?`<div class="section"><p class="section-head">Same name elsewhere</p>${same.slice(0,5).map(x=>`<div>${linkRow(x,path(x))}<button class="action" data-add="${esc(n.id)}|${esc(x.id)}" ${proposed.has(linkKey(n.id,x.id))?'disabled':''}>${proposed.has(linkKey(n.id,x.id))?'Linked in this session':'Link these thoughts'}</button></div>`).join('')}${same.length>5?'<p class="quiet">More matches available through search.</p>':''}<p class="hint">Matching names may describe different things.</p></div>`:'';
- const find=`<div class="divider"></div><details><summary>Link another thought…</summary><input type="search" id="aside-find" autocomplete="off" placeholder="Search names" aria-label="Find another thought to link"><div id="aside-results"><p class="quiet">Search for a thought, then choose whether to link it.</p></div></details>`;
- a.innerHTML=`<div class="aside-head"><h2>${esc(n.label)}</h2><button class="aside-close" id="aside-close" aria-label="Close choices" title="Close">×</button></div><div class="asidepath">${esc(path(n))}</div>${existing}<div class="divider"></div>${relation}${maybe}${find}<p class="hint">Links made here are temporary. Nothing is moved or duplicated.</p>`;
+function renderAside(){
+ if(!asideId)return;
+ const n=byId.get(asideId);if(!n){closeAside();return}
+ const parent=byId.get(n.parentId),same=(names.get(norm(n.label))||[]).filter(x=>x.id!==n.id),
+  links=[...proposed.values()].filter(l=>l.from===n.id||l.to===n.id),c=kids(n.id),a=$('aside'),pref=retrievalPreview.get(n.id);
+ const aliasDisplay=pref?.aliases?.length?pref.aliases.join(', '):'Not configured in this lab';
+ const copyDisplay=pref?.copySource==='body'?'Body (preview only)':'Title';
+ const meta=`<div class="sheet-section"><div class="sheet-label">Unit identity</div><div class="sheet-property"><span>ID</span><code>${esc(n.id)}</code></div><div class="sheet-property"><span>Parent</span><span>${esc(parent?.label||'Everything')}</span></div><div class="sheet-property"><span>Child units</span><span>${c.length}</span></div><div class="sheet-property"><span>Order</span><span>${esc(Number(n.order)||0)}</span></div></div>`;
+ const retrieval=`<div class="sheet-section"><div class="sheet-label">Retrieval</div><div class="sheet-property"><span>Aliases</span><span>${esc(aliasDisplay)}</span></div><div class="sheet-property"><span>Quick copy</span><span>${esc(copyDisplay)}</span></div><p class="sheet-hint">Aliases and copy sources are preview settings only. They are not written to normal Pocket JSON.</p></div>`;
+ const hierarchy=`<div class="sheet-section"><div class="sheet-label">Hierarchy & navigation</div>${linkRow(n,'Focus this unit')}${parent?linkRow(parent,'Stored parent: '+parent.label):`<button class="item" data-open="${ALL}">Everything</button>`}${c.length?`<details><summary>Children (${c.length})</summary>${c.slice(0,12).map(x=>linkRow(x,'')).join('')}${c.length>12?'<p class="quiet">Focus this unit to see all children.</p>':''}</details>`:''}</div>`;
+ const connections=`<div class="sheet-section"><div class="sheet-label">Other relationships (session proposals)</div>${links.length?links.map(l=>{const other=byId.get(l.from===n.id?l.to:l.from);return other?`<div class="proposal"><div style="flex:1">${linkRow(other,path(other))}</div><button data-remove="${esc(l.from)}|${esc(l.to)}" title="Remove temporary link" aria-label="Remove temporary link to ${esc(other.label)}">×</button></div>`:''}).join(''):'<p class="quiet">No additional relationship proposals this session.</p>'}<p class="sheet-hint">This does not claim to list every relationship in the original Pocket Core.</p></div>`;
+ const sameNames=same.length?`<div class="sheet-section"><div class="sheet-label">Same name elsewhere</div>${same.slice(0,5).map(x=>`<div>${linkRow(x,path(x))}<button class="action" data-add="${esc(n.id)}|${esc(x.id)}" ${proposed.has(linkKey(n.id,x.id))?'disabled':''}>${proposed.has(linkKey(n.id,x.id))?'Linked in this session':'Propose a link'}</button></div>`).join('')}${same.length>5?'<p class="quiet">More matches available in search.</p>':''}<p class="sheet-hint">Matching names need not share identity.</p></div>`:'';
+ const find=`<div class="sheet-section"><details><summary>Propose another relationship…</summary><input type="search" id="aside-find" autocomplete="off" placeholder="Search names" aria-label="Find a unit to link"><div id="aside-results"><p class="quiet">Find a unit to propose a session-only link.</p></div></details></div>`;
+ a.innerHTML=`<div class="aside-head"><div><div class="sheet-eyebrow">UNIT SHEET · METADATA ONLY</div><h2>${esc(n.label)}</h2></div><button class="aside-close" id="aside-close" aria-label="Close unit sheet" title="Close">×</button></div><div class="asidepath">${esc(path(n))}</div>${meta}${retrieval}${hierarchy}${connections}${sameNames}${find}<div class="sheet-section"><div class="sheet-label">History</div><p class="sheet-hint">Not displayed in this interface lab. No history is inferred or rewritten here.</p></div><p class="sheet-foot">Text, legacy PE and paragraphs stay in the main outline, not in this sheet. Any proposed links are temporary.</p>`;
 }
+
 function closePeek(){clearTimeout(peekTimer);$('peek').classList.add('hidden');peekId=null}
 function schedulePeekClose(){clearTimeout(peekTimer);peekTimer=setTimeout(closePeek,700)}
 function openPeek(button){
@@ -608,7 +689,7 @@ function openPeek(button){
  clearTimeout(peekTimer);peekId=id;const same=Math.max(0,(names.get(norm(n.label))||[]).length-1);
  const refs=linkCount(id),p=$('peek');
  const hint=refs?`${refs} connection${refs!==1?'s':''}`:same?`${same} same-name possibility${same!==1?'ies':''}`:'';
- p.innerHTML=`<div class="peek-name">${esc(n.label)}${hint?`<div class="peek-hint">${esc(hint)}</div>`:''}</div><button data-open="${esc(id)}">Focus here</button><button data-peek-full="${esc(id)}">Connections and options…</button>`;
+ p.innerHTML=`<div class="peek-name">${esc(n.label)}${hint?`<div class="peek-hint">${esc(hint)}</div>`:''}</div><button data-open="${esc(id)}">Focus here</button><button data-peek-full="${esc(id)}">Open unit metadata…</button>`;
  p.classList.remove('hidden');const r=button.getBoundingClientRect(),width=p.getBoundingClientRect().width,height=p.getBoundingClientRect().height;
  let left=r.right+8;if(left+width>window.innerWidth-12)left=r.left-width-8;
  left=Math.max(10,Math.min(left,window.innerWidth-width-10));
@@ -984,12 +1065,13 @@ async function copyVisibleText(text,row){
  try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);success=true}}
  catch(_){/* the local-file or permission fallback below may still work */}
  if(!success)success=clipboardFallback(text);
- if(!success){flash('Clipboard was blocked. Select the text and copy manually.');return}
+ if(!success){flash('Clipboard was blocked. Select the text and copy manually.');return false}
  document.querySelectorAll('.copy-tick').forEach(x=>x.remove());
  const tick=document.createElement('span');tick.className='copy-tick';tick.setAttribute('aria-label','Copied');tick.textContent='✓';
  (row?.querySelector?.('.unit-body')||row)?.appendChild(tick);
  clearTimeout(copyTickTimer);copyTickTimer=setTimeout(()=>tick.remove(),1400);
- flash('Copied this line only.');
+ flash('Copied.');
+ return true;
 }
 function handleEscape(e){
  if(e.key!=='Escape'||!loaded)return;
@@ -1399,8 +1481,7 @@ document.addEventListener('keydown',e=>{
  if(!node)return;
  if(e.shiftKey){go(id);return;}
  quickCopyResult(node,document.querySelector(`.search-results .unit[data-result-index="${searchSelection}"]`));
- // Copy is an output action; it does not close the search or switch modes.
- if(document.activeElement!==input)input.focus({preventScroll:true});
+ // Copy success clears search and highlights its source; a blocked copy does not.
 },true);
 // v0.6.22: Type-to-filter in Navigation AND Copy Mode, as in live Pocket.
 // A printable character starts a search without requiring the search button.
@@ -1472,8 +1553,8 @@ document.addEventListener('click',e=>{
  const onControl=e.target.closest('button,a,input,textarea,select,summary,[data-open]');
  if(copyMode&&loaded&&!onControl&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
   const row=e.target.closest('.outline .unit');
-  if(row?.dataset.id){const n=byId.get(row.dataset.id);if(n){copyVisibleText(n.label,row);return}}
-  if(row?.dataset.peOwner){const n=byId.get(row.dataset.peOwner),line=n&&peLines(n)[Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)];if(line){copyVisibleText(line.text,row);return}}
+  if(row?.dataset.id){const n=byId.get(row.dataset.id);if(n){copyVisibleText(n.label,row).then(ok=>{if(ok){lastCopiedId=n.id;lastCopiedPe=null;document.querySelectorAll('.copied-unit,.copied-pe').forEach(x=>x.classList.remove('copied-unit','copied-pe'));row.classList.add('copied-unit')}});return}}
+  if(row?.dataset.peOwner){const n=byId.get(row.dataset.peOwner),line=n&&peLines(n)[Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)];if(line){copyVisibleText(line.text,row).then(ok=>{if(ok){lastCopiedId=null;lastCopiedPe={owner:n.id,index:Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)};document.querySelectorAll('.copied-unit,.copied-pe').forEach(x=>x.classList.remove('copied-unit','copied-pe'));row.classList.add('copied-pe')}});return}}
   const title=e.target.closest('[data-copy-current]');
   if(title){const n=byId.get(title.dataset.copyCurrent);if(n){copyVisibleText(n.label,title);return}}
  }
