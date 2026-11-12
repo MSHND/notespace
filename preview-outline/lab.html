@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Pocket v0.6.29 EDIT / SIBLING DRAG LAB, 12 Nov 2026. Lab only. Do not promote to work-ready root without human testing. -->
+<!-- Pocket v0.6.30 CONDITIONAL UNDO LAB, 12 Nov 2026. In-view Undo/Redo applies immediately; cross-view remains 700ms. Edit/drag lab retained. LAB ONLY. -->
 <!--
 POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
 Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
@@ -438,7 +438,7 @@ function changeReadingSize(step){
  if(asideId)positionAside();
  flash(label);
 }
-// Deliberate visible beat between returning to a thought and applying its change.
+// Preview pause is only for finding a changed thought elsewhere; local Undo is immediate.
 const DRAFT_PREVIEW_MS=700;
 let pendingDraftAction=null, queuedDraftActions=[], undoSpotTimer=null;
 function flash(msg){const t=$('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.add('hidden'),2400)}
@@ -763,6 +763,31 @@ function completeDraftAction(){
  // Multiple quick presses are still distinct steps, each with its own preview.
  if(queuedDraftActions.length){const next=queuedDraftActions.shift();setTimeout(()=>runDraftAction(next),50)}
 }
+// A visible unit is already the user's location: do not delay Undo/Redo or
+// unexpectedly jump to its parent. A row existing off-screen does NOT count.
+// Structural moves between different parents still need location preview.
+function undoTargetIsAlreadyInView(a,forward){
+ if(!loaded||searchMode||asideId)return false;
+ const target=preActionLocation(a,forward);
+ if(!target)return false;
+ if(a.kind==='struct'&&a.targetId){
+  const beforeParent=a.before?.find(x=>x[0]===a.targetId)?.[1];
+  const afterParent=a.after?.find(x=>x[0]===a.targetId)?.[1];
+  if(!beforeParent||!afterParent||beforeParent!==afterParent)return false;
+ }
+ const rows=target.kind==='pe'
+  ?document.querySelectorAll('.outline .unit[data-pe-owner]')
+  :document.querySelectorAll('.outline .unit[data-id]');
+ const row=Array.from(rows).find(el=>target.kind==='pe'
+  ?el.dataset.peOwner===target.owner&&Number(el.querySelector('[data-pe-index]')?.dataset.peIndex)===target.index
+  :el.dataset.id===target.id);
+ if(!row||!row.getClientRects().length)return false;
+ const box=row.getBoundingClientRect();
+ const viewportBottom=window.innerHeight||document.documentElement.clientHeight||0;
+ const headerBottom=Math.max(0,document.querySelector('.topbar')?.getBoundingClientRect().bottom||0);
+ const overlap=Math.max(0,Math.min(box.bottom,viewportBottom)-Math.max(box.top,headerBottom));
+ return box.height>0 && overlap>=Math.min(16,box.height*.5);
+}
 function runDraftAction(isRedo){
  if(pendingDraftAction){
   if(queuedDraftActions.length<20)queuedDraftActions.push(isRedo);
@@ -776,8 +801,11 @@ function runDraftAction(isRedo){
   flash('Undo paused: removing this thought would be unsafe. Your content is unchanged.');
   return;
  }
- // Navigate while the original content is still visible, before changing it.
+ // Do not add a 700ms preview when the affected row is already in view.
+ // Keep the authoritative guard and action path identical in both cases.
+ const alreadyHere=undoTargetIsAlreadyInView(a,isRedo);
  pendingDraftAction={isRedo,action:a,timer:null};
+ if(alreadyHere){completeDraftAction();return;}
  previewActionFocus(a,isRedo);
  flash(isRedo?'Showing the thought before Redo…':'Showing the thought before Undo…');
  pendingDraftAction.timer=setTimeout(completeDraftAction,DRAFT_PREVIEW_MS);
@@ -1253,7 +1281,7 @@ function locateActionRow(target,{preview=false,sharedView=null}={}){
   // both the old and new parent contexts. Only navigate when necessary.
   if(searchMode||!ancestorView(current,sharedView))go(destination);
   revealOutlinePath(id);
- }else if(current!==destination||searchMode||!findRow())go(destination);
+ }else if(searchMode||!findRow())go(destination);
  const row=findRow();
  if(!row)return false;
  row.scrollIntoView({block:'center',behavior:'instant'});
