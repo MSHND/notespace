@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Pocket v0.6.30 CONDITIONAL UNDO LAB, 12 Nov 2026. In-view Undo/Redo applies immediately; cross-view remains 700ms. Edit/drag lab retained. LAB ONLY. -->
+<!-- Pocket v0.6.31 NAV + EDIT SQUARE DRAG LAB, 12 Nov 2026. The metadata square can reorder siblings in Navigate OR Edit. Click still opens Unit Sheet. Conditional local Undo retained. LAB ONLY. -->
 <!--
 POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
 Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
@@ -337,8 +337,8 @@ body{color:var(--ink);background:var(--page)}
 
 /* v0.6.29 experimental: the metadata square retains its click action and is
    a drag handle ONLY while editing. Target guides show legal sibling drops. */
-.write-mode .outline .unit-marker[data-drag-handle]{cursor:grab;touch-action:none}
-.write-mode .outline .unit-marker[data-drag-handle]:active{cursor:grabbing}
+.nav-mode .outline .unit-marker[data-drag-handle],.write-mode .outline .unit-marker[data-drag-handle]{cursor:grab;touch-action:none}
+.nav-mode .outline .unit-marker[data-drag-handle]:active,.write-mode .outline .unit-marker[data-drag-handle]:active{cursor:grabbing}
 .outline .unit.drag-target-before{outline:2px solid #6d8994;outline-offset:2px}
 .outline .unit.drag-target-after{box-shadow:0 3px 0 #6d8994}
 </style>
@@ -528,7 +528,7 @@ function travel(shift){
  rememberRouteView();routePos=p;go(route[p],{history:false,restore:routeViews[p]});return true;
 }
 function fold(id){finishEdit();if(expanded.has(id))expanded.delete(id);else expanded.add(id);renderViewer()}
-function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-drag-handle="${esc(n.id)}" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="${writeMode?'Click for Unit Sheet; drag to reorder siblings':'Unit metadata and relationships'}"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
+function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-drag-handle="${esc(n.id)}" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="${copyMode?'Click for Unit Sheet':'Click for Unit Sheet; drag to reorder siblings'}"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
 function detailsOf(n){
  const d=typeof n.details==='string'?n.details:''; const e=n.editor;
  const editor=e?(typeof e.text==='string'?e.text:Array.isArray(e.outline)?e.outline.map(x=>' '.repeat(Math.min(12,Number(x.depth)||0)*2)+String(x.text||'')).join('\n'):''):'';
@@ -1603,7 +1603,8 @@ function clickAfterLine(e){
 
 // v0.6.29 experimental Unit Sheet square pointer gesture.
 // Small motion is a CLICK: the existing metadata sheet still opens.
-// Only a deliberate >9px drag while editing may reorder SAME-PARENT units.
+// A deliberate >9px handle drag in Navigate or Edit creates one structural edit.
+// Copy mode is excluded; SAME-PARENT units only; navigation alone remains non-undoable.
 let pendingUnitDrag=null,suppressUnitHandleClickUntil=0;
 function clearUnitDrag(){
  document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(n=>n.classList.remove('drag-target-before','drag-target-after'));
@@ -1611,7 +1612,7 @@ function clearUnitDrag(){
  if(d?.button?.hasPointerCapture?.(d.pointerId))try{d.button.releasePointerCapture(d.pointerId)}catch(_){}
 }
 document.addEventListener('pointerdown',e=>{
- if(!loaded||!writeMode||copyMode||searchMode||pendingDraftAction||e.button!==0)return;
+ if(!loaded||copyMode||searchMode||pendingDraftAction||e.button!==0)return;
  const button=e.target.closest?.('.outline .unit-marker[data-drag-handle]');
  const row=button?.closest('.outline .unit[data-id]');
  const node=row&&byId.get(row.dataset.id);
