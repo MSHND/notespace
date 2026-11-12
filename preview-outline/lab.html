@@ -1,4 +1,5 @@
 <!doctype html>
+<!-- Pocket v0.6.29 EDIT / SIBLING DRAG LAB, 12 Nov 2026. Lab only. Do not promote to work-ready root without human testing. -->
 <!--
 POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
 Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
@@ -333,6 +334,13 @@ body{color:var(--ink);background:var(--page)}
 .lab-note{background:#f1f5f9;border-color:#91b1c5;color:#4e6476}
 .lab-note strong{color:#2b4961}
 @media(max-width:720px){.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 20px));max-height:65vh;padding:14px}}
+
+/* v0.6.29 experimental: the metadata square retains its click action and is
+   a drag handle ONLY while editing. Target guides show legal sibling drops. */
+.write-mode .outline .unit-marker[data-drag-handle]{cursor:grab;touch-action:none}
+.write-mode .outline .unit-marker[data-drag-handle]:active{cursor:grabbing}
+.outline .unit.drag-target-before{outline:2px solid #6d8994;outline-offset:2px}
+.outline .unit.drag-target-after{box-shadow:0 3px 0 #6d8994}
 </style>
 </head>
 <body>
@@ -520,7 +528,7 @@ function travel(shift){
  rememberRouteView();routePos=p;go(route[p],{history:false,restore:routeViews[p]});return true;
 }
 function fold(id){finishEdit();if(expanded.has(id))expanded.delete(id);else expanded.add(id);renderViewer()}
-function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="Unit metadata and relationships"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
+function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-drag-handle="${esc(n.id)}" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="${writeMode?'Click for Unit Sheet; drag to reorder siblings':'Unit metadata and relationships'}"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
 function detailsOf(n){
  const d=typeof n.details==='string'?n.details:''; const e=n.editor;
  const editor=e?(typeof e.text==='string'?e.text:Array.isArray(e.outline)?e.outline.map(x=>' '.repeat(Math.min(12,Number(x.depth)||0)*2)+String(x.text||'')).join('\n'):''):'';
@@ -991,7 +999,7 @@ function rebuildIndex(){
  roots=children.get('root')||[];
 }
 function writingHelp(){
- if(writeMode)return '<p class="write-note">WRITE · Enter: next thought · <strong>Shift+Enter: same unit, new line</strong> · Tab / Shift+Tab: nest / unnest · Esc: navigate. New multiline storage is not yet approved for normal JSON saving.</p>';
+ if(writeMode)return '<p class="write-note">EDIT · Enter: next thought · <strong>Shift+Enter: same unit, new line</strong> · Tab / Shift+Tab: nest / unnest · Alt+↑/↓: move unit · Drag the square: reorder siblings · Esc: navigate. New multiline storage is not yet approved for normal JSON saving.</p>';
  if(copyMode)return '<p class="write-note">COPY · Single-click a thought or a PE text line to copy only its text · Esc: Navigate. No content or History change.</p>';
  return '';
 }
@@ -1001,8 +1009,8 @@ function syncModeButtons(){
  b.setAttribute('aria-label',copyMode?'Turn off Copy Mode':'Turn on Copy Mode');
  b.title=copyMode?'Copy mode: on. Click to return to navigation':'Copy mode: off. Click to copy individual lines';
  const w=$('menu-write');
- w.innerHTML=writeMode?'Finish writing <span>Esc</span>':'Start writing <span>F2</span>';
- w.setAttribute('aria-label',writeMode?'Finish writing and return to navigation':'Start writing');
+ w.innerHTML=writeMode?'Finish editing <span>Esc</span>':'Start editing <span>F2</span>';
+ w.setAttribute('aria-label',writeMode?'Finish editing and return to navigation':'Start editing');
 }
 function setMode(mode,{announce=true}={}){
  if(!['navigate','write','copy'].includes(mode))return;
@@ -1010,7 +1018,7 @@ function setMode(mode,{announce=true}={}){
  if(prior===mode)return;
  finishEdit();writeMode=mode==='write';copyMode=mode==='copy';
  closePeek();closeAside();closeMenu();syncModeButtons();render();
- if(announce)flash(mode==='write'?'Writing here. Your source JSON remains untouched.':mode==='copy'?'Copy mode. Click a thought to copy its text.': 'Navigation mode. Click a thought to focus.');
+ if(announce)flash(mode==='write'?'Editing here. Your source JSON remains untouched.':mode==='copy'?'Copy mode. Click a thought to copy its text.': 'Navigation mode. Click a thought to focus.');
 }
 function activeLocation(){
  const el=document.activeElement?.closest?.('[data-edit-node],[data-edit-pe]');
@@ -1075,6 +1083,7 @@ async function copyVisibleText(text,row){
 }
 function handleEscape(e){
  if(e.key!=='Escape'||!loaded)return;
+ if(pendingUnitDrag?.active){e.preventDefault();e.stopImmediatePropagation();clearUnitDrag();flash('Unit move cancelled.');return;}
  const visible=id=>!$(id).classList.contains('hidden');
  if(visible('peek')||visible('aside')||visible('moremenu')||visible('searchdock')){
   e.preventDefault();e.stopImmediatePropagation();closePeek();closeAside();closeMenu();closeSearch();return;
@@ -1337,6 +1346,25 @@ function splitThought(el){
 }
 function snapshotStruct(){return nodes.map(n=>[n.id,n.parentId,Number(n.order)||0])}
 function restoreStructure(entries){if(!entries)return;for(const [id,p,o] of entries){const n=byId.get(id);if(n){n.parentId=p;n.order=o}}rebuildIndex()}
+
+// v0.6.29 experiment: reorder a complete unit subtree by assigning order only
+// to its EXISTING siblings. Parent IDs, unit IDs, PE text and links are untouched.
+// This is one provisional structural Undo action, not an adopted Core event.
+function reorderUnitBySiblingDrop(sourceId,targetId,position){
+ finishEdit();
+ const source=byId.get(sourceId),target=byId.get(targetId);
+ if(!source||!target||sourceId===targetId||source.parentId!==target.parentId)return false;
+ const before=snapshotStruct(),prior=[...kids(source.parentId)];
+ const order=prior.filter(n=>n.id!==sourceId),index=order.findIndex(n=>n.id===targetId);
+ if(index<0)return false;
+ order.splice(index+(position==='after'?1:0),0,source);
+ if(order.every((n,i)=>n.id===prior[i].id))return false;
+ order.forEach((n,i)=>{n.order=1000+i;});
+ rebuildIndex();
+ register({kind:'struct',targetId:sourceId,before,after:snapshotStruct()});
+ render();flash('Moved unit and its children. Undo is available.');
+ return true;
+}
 function rearrange(id,kind){
  finishEdit();const n=byId.get(id);if(!n)return;
  const before=snapshotStruct(),siblings=[...kids(n.parentId)],at=siblings.findIndex(x=>x.id===id);
@@ -1544,6 +1572,52 @@ function clickAfterLine(e){
  if(ok)rememberCaret(field);
  return ok;
 }
+
+// v0.6.29 experimental Unit Sheet square pointer gesture.
+// Small motion is a CLICK: the existing metadata sheet still opens.
+// Only a deliberate >9px drag while editing may reorder SAME-PARENT units.
+let pendingUnitDrag=null,suppressUnitHandleClickUntil=0;
+function clearUnitDrag(){
+ document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(n=>n.classList.remove('drag-target-before','drag-target-after'));
+ const d=pendingUnitDrag;pendingUnitDrag=null;
+ if(d?.button?.hasPointerCapture?.(d.pointerId))try{d.button.releasePointerCapture(d.pointerId)}catch(_){}
+}
+document.addEventListener('pointerdown',e=>{
+ if(!loaded||!writeMode||copyMode||searchMode||pendingDraftAction||e.button!==0)return;
+ const button=e.target.closest?.('.outline .unit-marker[data-drag-handle]');
+ const row=button?.closest('.outline .unit[data-id]');
+ const node=row&&byId.get(row.dataset.id);
+ if(!node)return; // Never drag legacy PE text, heading or search result.
+ pendingUnitDrag={pointerId:e.pointerId,button,id:node.id,parentId:node.parentId,x:e.clientX,y:e.clientY,active:false,dropId:null,side:null};
+ try{button.setPointerCapture(e.pointerId)}catch(_){}
+},true);
+document.addEventListener('pointermove',e=>{
+ const d=pendingUnitDrag;if(!d||d.pointerId!==e.pointerId)return;
+ if(!d.active&&Math.hypot(e.clientX-d.x,e.clientY-d.y)<=9)return;
+ d.active=true;e.preventDefault();
+ document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(n=>n.classList.remove('drag-target-before','drag-target-after'));
+ d.dropId=null;d.side=null;
+ const row=document.elementFromPoint(e.clientX,e.clientY)?.closest?.('.outline .unit[data-id]');
+ const target=row&&byId.get(row.dataset.id);
+ if(!target||target.id===d.id||target.parentId!==d.parentId)return;
+ d.dropId=target.id;
+ d.side=e.clientY<(row.getBoundingClientRect().top+row.getBoundingClientRect().height/2)?'before':'after';
+ row.classList.add(d.side==='before'?'drag-target-before':'drag-target-after');
+},{capture:true,passive:false});
+document.addEventListener('pointerup',e=>{
+ const d=pendingUnitDrag;if(!d||e.pointerId!==d.pointerId)return;
+ const moved=d.active,source=d.id,target=d.dropId,side=d.side;
+ if(moved){e.preventDefault();e.stopPropagation();suppressUnitHandleClickUntil=Date.now()+700;}
+ clearUnitDrag();
+ if(moved){if(target){reorderUnitBySiblingDrop(source,target,side);}
+ else flash('Drop beside a sibling to move. No changes made.');}
+},true);
+document.addEventListener('pointercancel',e=>{if(pendingUnitDrag&&e.pointerId===pendingUnitDrag.pointerId)clearUnitDrag()},true);
+document.addEventListener('click',e=>{
+ if(Date.now()<suppressUnitHandleClickUntil&&e.target.closest?.('[data-drag-handle]')){
+  e.preventDefault();e.stopImmediatePropagation();suppressUnitHandleClickUntil=0;
+ }
+},true);
 document.addEventListener('click',e=>{
  if(clickRightToStartWriting(e)||clickAfterLine(e))return;
  const unitText=e.target.closest('[data-unittext]');
