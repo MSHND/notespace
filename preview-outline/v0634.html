@@ -1593,11 +1593,16 @@ document.addEventListener('pointerup',e=>{
  const d=editSelectionGesture;
  if(!d||d.pointerId!==e.pointerId)return;
  editSelectionGesture=null;
- const selection=window.getSelection();
- const range=selection?.rangeCount===1?selection.getRangeAt(0):null;
- if(range&&nativeSelectedUnitPassage(range)!==null)return;
- restoreEditSelectionFields();
- if(!selection?.toString())placeCaret(d.field,d.at);
+ // Browser default selection finalisation happens after pointerup. Inspect
+ // the completed range next frame so a fresh click can restore editability.
+ requestAnimationFrame(()=>{
+  if(editSelectionGesture||!writeMode||!d.field.isConnected)return;
+  const selection=window.getSelection();
+  const range=selection?.rangeCount===1?selection.getRangeAt(0):null;
+  if(range&&nativeSelectedUnitPassage(range)!==null)return;
+  restoreEditSelectionFields();
+  if(!selection?.toString())placeCaret(d.field,d.at);
+ });
 },true);
 document.addEventListener('pointercancel',e=>{
  if(editSelectionGesture?.pointerId!==e.pointerId)return;
