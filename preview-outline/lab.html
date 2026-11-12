@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Pocket v0.6.31 NAV + EDIT SQUARE DRAG LAB, 12 Nov 2026. The metadata square can reorder siblings in Navigate OR Edit. Click still opens Unit Sheet. Conditional local Undo retained. LAB ONLY. -->
+<!-- Pocket v0.6.32 COLLAPSED HEAD DRAG LAB, 12 Nov 2026. Clear sibling insertion lines; hover-to-expand a collapsed legal sibling head; NO cross-parent nesting; pointer-stable drag. Undo retained. LAB ONLY. -->
 <!--
 POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
 Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
@@ -335,12 +335,14 @@ body{color:var(--ink);background:var(--page)}
 .lab-note strong{color:#2b4961}
 @media(max-width:720px){.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 20px));max-height:65vh;padding:14px}}
 
-/* v0.6.29 experimental: the metadata square retains its click action and is
-   a drag handle ONLY while editing. Target guides show legal sibling drops. */
+/* v0.6.32 experimental: the same metadata square opens Unit Sheet on click.
+   While intentionally dragging, ONLY horizontal insertion lines indicate legal
+   sibling positions; "after" is drawn below the entire visible subtree. */
 .nav-mode .outline .unit-marker[data-drag-handle],.write-mode .outline .unit-marker[data-drag-handle]{cursor:grab;touch-action:none}
 .nav-mode .outline .unit-marker[data-drag-handle]:active,.write-mode .outline .unit-marker[data-drag-handle]:active{cursor:grabbing}
-.outline .unit.drag-target-before{outline:2px solid #6d8994;outline-offset:2px}
-.outline .unit.drag-target-after{box-shadow:0 3px 0 #6d8994}
+.outline .unit.drag-target-before::before,.outline .unit.drag-target-after::after{content:"";position:absolute;left:7px;right:6px;height:3px;border-radius:2px;background:#537c98;z-index:5;pointer-events:none}
+.outline .unit.drag-target-before::before{top:-2px}
+.outline .unit.drag-target-after::after{bottom:-2px}
 </style>
 </head>
 <body>
@@ -1111,7 +1113,7 @@ async function copyVisibleText(text,row){
 }
 function handleEscape(e){
  if(e.key!=='Escape'||!loaded)return;
- if(pendingUnitDrag?.active){e.preventDefault();e.stopImmediatePropagation();clearUnitDrag();flash('Unit move cancelled.');return;}
+ if(pendingUnitDrag?.active){e.preventDefault();e.stopImmediatePropagation();suppressUnitHandleClickUntil=Date.now()+700;clearUnitDrag();flash('Unit move cancelled.');return;}
  const visible=id=>!$(id).classList.contains('hidden');
  if(visible('peek')||visible('aside')||visible('moremenu')||visible('searchdock')){
   e.preventDefault();e.stopImmediatePropagation();closePeek();closeAside();closeMenu();closeSearch();return;
@@ -1601,15 +1603,63 @@ function clickAfterLine(e){
  return ok;
 }
 
-// v0.6.29 experimental Unit Sheet square pointer gesture.
-// Small motion is a CLICK: the existing metadata sheet still opens.
-// A deliberate >9px handle drag in Navigate or Edit creates one structural edit.
-// Copy mode is excluded; SAME-PARENT units only; navigation alone remains non-undoable.
+// v0.6.32 isolated gesture. The square remains click-to-Unit Sheet; >9px
+// deliberate movement reorders SAME-PARENT siblings only. No implicit nesting.
+// Hovering a collapsed legal sibling head opens it as a VIEW change, not Undo.
+const DRAG_HOVER_OPEN_MS=600;
 let pendingUnitDrag=null,suppressUnitHandleClickUntil=0;
+function clearDragGuide(){
+ document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(row=>row.classList.remove('drag-target-before','drag-target-after'));
+}
+function clearDragHover(d){
+ if(d?.openTimer)clearTimeout(d.openTimer);
+ if(d){d.openTimer=null;d.hoverId=null;}
+}
+// A row's descendants (including PE rows) follow it in DOM order. A sibling
+// inserted AFTER a head belongs after its whole subtree, not inside its children.
+function dropGuideRow(row,side){
+ if(!row||side!=='after')return row;
+ const depth=Number(row.dataset.depth)||0;
+ let last=row;
+ for(let next=row.nextElementSibling;next?.classList?.contains('unit')&&Number(next.dataset.depth)>depth;next=next.nextElementSibling)last=next;
+ return last;
+}
+function legalUnitDropAt(d,x,y){
+ const row=document.elementFromPoint(x,y)?.closest?.('.outline .unit[data-id]');
+ const target=row&&byId.get(row.dataset.id);
+ if(!target||target.id===d.id||target.parentId!==d.parentId)return null;
+ const box=row.getBoundingClientRect();
+ return {id:target.id,side:y<box.top+box.height/2?'before':'after',row};
+}
+function paintUnitDrop(d,hit){
+ clearDragGuide();
+ d.dropId=hit?.id||null;d.side=hit?.side||null;
+ if(hit)dropGuideRow(hit.row,hit.side)?.classList.add(hit.side==='before'?'drag-target-before':'drag-target-after');
+}
+function scheduleDragHeadOpen(d,hit){
+ const node=hit&&byId.get(hit.id);
+ const collapsedHead=node&&!expanded.has(node.id)&&(kids(node.id).length||peLines(node).some(line=>!!line.text));
+ if(!collapsedHead){clearDragHover(d);return;}
+ if(d.hoverId===node.id)return;
+ clearDragHover(d);
+ d.hoverId=node.id;
+ d.openTimer=setTimeout(()=>{
+  d.openTimer=null;
+  if(pendingUnitDrag!==d||!d.active||d.hoverId!==node.id||expanded.has(node.id))return;
+  expanded.add(node.id); // View-only expansion, never a structural/Undo event.
+  renderViewer(); // Body owns pointer capture so replacing rows is safe.
+  d.hoverId=null;
+  const hitNow=legalUnitDropAt(d,d.lastX,d.lastY);
+  paintUnitDrop(d,hitNow);
+  scheduleDragHeadOpen(d,hitNow);
+ },DRAG_HOVER_OPEN_MS);
+}
 function clearUnitDrag(){
- document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(n=>n.classList.remove('drag-target-before','drag-target-after'));
+ clearDragGuide();
  const d=pendingUnitDrag;pendingUnitDrag=null;
- if(d?.button?.hasPointerCapture?.(d.pointerId))try{d.button.releasePointerCapture(d.pointerId)}catch(_){}
+ clearDragHover(d);
+ const capture=d?.captureTarget||d?.button;
+ if(capture?.hasPointerCapture?.(d.pointerId))try{capture.releasePointerCapture(d.pointerId)}catch(_){}
 }
 document.addEventListener('pointerdown',e=>{
  if(!loaded||copyMode||searchMode||pendingDraftAction||e.button!==0)return;
@@ -1617,29 +1667,36 @@ document.addEventListener('pointerdown',e=>{
  const row=button?.closest('.outline .unit[data-id]');
  const node=row&&byId.get(row.dataset.id);
  if(!node)return; // Never drag legacy PE text, heading or search result.
- pendingUnitDrag={pointerId:e.pointerId,button,id:node.id,parentId:node.parentId,x:e.clientX,y:e.clientY,active:false,dropId:null,side:null};
+ pendingUnitDrag={pointerId:e.pointerId,button,captureTarget:button,id:node.id,parentId:node.parentId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,active:false,dropId:null,side:null,hoverId:null,openTimer:null};
  try{button.setPointerCapture(e.pointerId)}catch(_){}
 },true);
 document.addEventListener('pointermove',e=>{
  const d=pendingUnitDrag;if(!d||d.pointerId!==e.pointerId)return;
  if(!d.active&&Math.hypot(e.clientX-d.x,e.clientY-d.y)<=9)return;
- d.active=true;e.preventDefault();
- document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(n=>n.classList.remove('drag-target-before','drag-target-after'));
- d.dropId=null;d.side=null;
- const row=document.elementFromPoint(e.clientX,e.clientY)?.closest?.('.outline .unit[data-id]');
- const target=row&&byId.get(row.dataset.id);
- if(!target||target.id===d.id||target.parentId!==d.parentId)return;
- d.dropId=target.id;
- d.side=e.clientY<(row.getBoundingClientRect().top+row.getBoundingClientRect().height/2)?'before':'after';
- row.classList.add(d.side==='before'?'drag-target-before':'drag-target-after');
+ if(!d.active){
+  d.active=true;
+  clearTimeout(hoverTimer);hovering=null;closePeek();
+  // Once dragging, the stable body retains capture during head expansion.
+  // Without this transfer, renderViewer removes the source button mid-gesture.
+  try{document.body.setPointerCapture(e.pointerId);d.captureTarget=document.body}catch(_){}
+ }
+ e.preventDefault();
+ d.lastX=e.clientX;d.lastY=e.clientY;
+ const hit=legalUnitDropAt(d,e.clientX,e.clientY);
+ paintUnitDrop(d,hit);
+ scheduleDragHeadOpen(d,hit);
 },{capture:true,passive:false});
 document.addEventListener('pointerup',e=>{
  const d=pendingUnitDrag;if(!d||e.pointerId!==d.pointerId)return;
- const moved=d.active,source=d.id,target=d.dropId,side=d.side;
+ const moved=d.active,source=d.id;
+ // Re-check the actual pointer position, never trust an old highlighted row.
+ const hit=moved?legalUnitDropAt(d,e.clientX,e.clientY):null;
  if(moved){e.preventDefault();e.stopPropagation();suppressUnitHandleClickUntil=Date.now()+700;}
  clearUnitDrag();
- if(moved){if(target){reorderUnitBySiblingDrop(source,target,side);}
- else flash('Drop beside a sibling to move. No changes made.');}
+ if(moved){
+  if(hit){if(!reorderUnitBySiblingDrop(source,hit.id,hit.side))flash('Already at that position. No changes made.');}
+  else flash('Only insert before or after a sibling. No changes made.');
+ }
 },true);
 document.addEventListener('pointercancel',e=>{if(pendingUnitDrag&&e.pointerId===pendingUnitDrag.pointerId)clearUnitDrag()},true);
 document.addEventListener('click',e=>{
@@ -1672,7 +1729,7 @@ document.addEventListener('dblclick',e=>{if(writeMode||copyMode)return;const t=e
 window.addEventListener('scroll',()=>{if(peekId)closePeek();if(asideId)positionAside()},{passive:true});
 window.addEventListener('resize',()=>{if(asideId)positionAside()});
 let hovering=null;
-document.addEventListener('pointerover',e=>{if(e.pointerType==='touch'||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;const b=e.target.closest('[data-door]');if(!b)return;clearTimeout(peekTimer);if(asideLocked)return;clearTimeout(hoverTimer);hovering=b;hoverTimer=setTimeout(()=>{if(hovering===b)openPeek(b)},270)});
+document.addEventListener('pointerover',e=>{if(pendingUnitDrag?.active||e.pointerType==='touch'||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;const b=e.target.closest('[data-door]');if(!b)return;clearTimeout(peekTimer);if(asideLocked)return;clearTimeout(hoverTimer);hovering=b;hoverTimer=setTimeout(()=>{if(hovering===b)openPeek(b)},270)});
 document.addEventListener('pointerout',e=>{const b=e.target.closest('[data-door]');if(!b||b.contains(e.relatedTarget))return;hovering=null;clearTimeout(hoverTimer);schedulePeekClose()});
 document.addEventListener('input',e=>{if(e.target.id==='aside-find')asideMatches(e.target.value)});
 document.addEventListener('keydown',e=>{if(loaded&&(e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==='s'){e.preventDefault();e.stopImmediatePropagation();savePocketJSON();return;}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openSearch()}if(e.altKey&&e.key==='ArrowLeft'){e.preventDefault();travel(-1)}if(e.altKey&&e.key==='ArrowRight'){e.preventDefault();travel(1)}});
