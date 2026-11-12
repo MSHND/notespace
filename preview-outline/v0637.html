@@ -1,0 +1,1985 @@
+<!doctype html>
+<!-- Pocket v0.6.37 ISOLATED QUIET UNIT-BOUNDARY STUDY, 12 Nov 2026. Rounded unit-text outlines are hidden at rest and revealed when the associated superscript square is hovered or keyboard-focused. Undo/copy feedback, draggable square, Core, Save, and Sync unchanged. -->
+<!--
+POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
+Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
+Shift+Enter within a genuine unit inserts a newline in the interface/in-memory label
+without creating a new unit. This is NOT a durable Pocket body schema; normal
+Pocket JSON save is blocked if multiline text exists. Normal JSON saves are
+always blocked for the synthetic fixture. Legacy PE remains unconverted.
+No changed Core, source, frozen N1 contract, or live Pocket importer.
+-->
+<!--
+V0.6.26 OPTIONAL SAME-FILE SAVE (10 November 2026):
+* Native File System Access, when available, lets the user explicitly open a
+  JSON file and later save back to the SAME file with browser permission.
+* Before each direct write, compare on-disk text with the last opened/saved
+  text to reject external changes. A one-time overwrite warning is required.
+* Save As always allows a separate selected copy. Unsupported browsers fall
+  back to downloads. The JSON serializer and validations are unchanged.
+* Direct saving is a convenience experiment, NOT certification of the live
+  Pocket importer. Keep a backup of the source JSON.
+
+V0.6.25 LOCAL WORKING JSON EXPERIMENT (10 November 2026):
+* New Save Pocket JSON downloads a validated full-format snapshot without
+  touching the opened file or browser storage. It retains original IDs,
+  tombstones, unknown fields, source guard metadata and mirrored trees.
+* Preview-only reference proposals cannot silently disappear during saving;
+  Pocket JSON save refuses them until separately resolved.
+* This is NOT a verified live Pocket import or a Core acceptance.
+
+V0.6.24 INTERACTION EXPERIMENT (10 November 2026):
+When filtering, Enter copies the selected result in BOTH Navigate and Copy.
+Shift+Enter explicitly opens the selected result; a click in Navigate still
+opens it. The default selection is first, and Up/Down change it. Search
+remains open after copying; no source change, structural edit or Undo step.
+
+V0.6.23 INTERACTION EXPERIMENT (10 November 2026):
+The first search hit is selected by default. In Copy Mode Enter copies that
+hit without leaving search; in Navigate Mode Enter opens it. Up/Down change
+selection. Neither navigation nor copying enters Undo/History or changes data.
+
+V0.6.22 INTERACTION EXPERIMENT (10 November 2026):
+Type-to-filter works identically in Navigate and Copy Mode. Search-result
+clicks still follow current mode: Navigate opens, Copy copies title in-place.
+Escape closes search first, then exits Copy. No source/Undo changes.
+
+V0.6.20 INTERACTION EXPERIMENT (9 November 2026):
+Escape in Navigate Mode retraces the actual view path, one step per press.
+Temporary search-result context and outline position are restored.
+Mode changes and navigation do not enter Undo/History.
+One seamless Navigate/Write surface, natural right-side click to write,
+Escape to leave, single discreet Copy toggle, F2 / More as accessible alternatives.
+A visual/interaction proposal only. No frozen Core or N1 contract changes.
+
+POCKET INTERACTION RESEARCH NOTES — FOLDED 7 NOVEMBER 2026
+Status: working design principles only; not Core implementation, N1 amendment,
+accepted contract, permission to modify live data, or technical acceptance.
+
+ONE CORE, MANY INPUTS AND VIEWS
+* Preserve stable thought identity, relationships, meaningful change history,
+  undo/redo and recovery independently of input or presentation method.
+* Input possibilities: typing, voice, conversational capture, handwriting,
+  drawing, files and photographs. Keep source material intact; do not force
+  structure at capture time. Nara may propose structure but may not silently
+  apply it.
+* Presentation possibilities: outline, document, map, floating papers,
+  conversation, touch and e-ink. Platform UI and adapters may differ while
+  Core semantics remain consistent.
+
+POSITION VERSUS MEANING
+* Moving a visual paper/box only changes its view position; connections
+  follow visually and relationship meaning does not silently change.
+* Re-parenting, connecting and disconnecting are distinct intentional
+  structural operations, with validation, authorisation, reversible change
+  and history. Never infer reconnection from physical dragging alone.
+* Voice, touch, mouse and keyboard can express the same intended structural
+  operation. Confirm the expected current parent before re-parenting, and
+  stop for a mismatch rather than overriding it silently.
+* Proposal, user consent, validation and execution remain separate steps.
+
+CURRENT ONE-TEST FOCUS
+* v0.6.12 visual study: whisper-faint rounded outlines hug only thought text,
+  not the full row; the small connection doorway remains visible outside each
+  outline. Expand/collapse controls have a little more breathing room. PE text remains unframed except when specifically highlighted.
+  Undo/Redo highlights the affected thought or PE line before changing it.
+* v0.6.17: For structural Undo and Redo, preview inside a shared outline
+  view so the affected thought stays visible through its indentation change.
+* v0.6.18: In Navigate Mode, click the blank part of the SAME outline row
+  to the right of a thought or PE text line to enter Write Mode with the
+  caret at the end. Clicking the text navigates normally. No history step.
+* After editing two existing thoughts, return to Everything and Undo twice.
+  Check the affected thought is shown BEFORE a 0.7 s pause, then its change
+  reverses; original identities and unrelated content remain intact.
+* Judge whether the faint resting outlines help, or feel too busy.
+* This is a disposable local HTML prototype; original imported JSON stays
+  untouched; it does not prove N1 Core behaviour.
+END NOTES
+-->
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Pocket · v0.6.32 Work-ready Preview</title>
+<style>
+:root {--page:#f8f7f2;--paper:#fffefa;--ink:#333c34;--muted:#8c968c;--soft:#69766c;--quiet:#dce2d9;--accent:#466b58;--tint:#f0f4ef;--line:#e9ebe3;--focus:#527390;--rail:320px;--font:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--page);font:15px/1.62 var(--font);color:var(--ink)}button,input{font:inherit;color:inherit}button{cursor:pointer}button:disabled{opacity:.28;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px}::selection{background:#dcece0}.hidden{display:none!important}
+.topbar{height:57px;position:sticky;top:0;z-index:110;background:rgba(249,248,244,.97);backdrop-filter:blur(12px);border-bottom:1px solid #edeee7;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 clamp(15px,4vw,46px)}
+.trail{display:flex;align-items:center;gap:5px;min-width:0;overflow:hidden;white-space:nowrap}.trail button{background:none;border:0;padding:5px 4px;color:#56695c;font-size:13px;white-space:nowrap;max-width:190px;overflow:hidden;text-overflow:ellipsis}.trail button:last-of-type{color:#293a2f;font-weight:600}.trail button:hover{color:var(--accent)}.trail .sep{font-size:12px;color:#aeb7ad}.tools{display:flex;gap:4px;align-items:center;flex-shrink:0}.tool{width:34px;height:34px;display:grid;place-items:center;background:transparent;border:0;border-radius:8px;color:#748278;font-size:19px}.tool:hover:not(:disabled),.tool.active{color:#395f4b;background:#eaf0e8}.tool.small{font-size:16px}.menu-holder{position:relative}.moremenu{position:absolute;right:0;top:calc(100% + 10px);width:min(260px,calc(100vw - 25px));background:var(--paper);box-shadow:0 9px 35px #25382b1d;border:1px solid var(--line);border-radius:10px;padding:9px;z-index:120}.moremenu button,.moremenu label{display:flex;align-items:center;justify-content:space-between;width:100%;border:0;background:none;border-radius:5px;padding:9px 10px;font-size:13px;text-align:left;color:#46594b}.moremenu button:hover,.moremenu label:hover{background:var(--tint)}.moremenu .rule{border-top:1px solid var(--line);margin:5px 0}.moremenu .subtle{color:var(--muted);font-size:11px;padding:8px 9px;line-height:1.5}.moremenu input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}.moremenu input[type=file]{position:absolute;width:1px;height:1px;opacity:0}.searchdock{background:var(--page);border-bottom:1px solid var(--line);padding:8px clamp(15px,4vw,46px);position:sticky;top:57px;z-index:99}.searchdock input{width:100%;max-width:580px;background:var(--paper);border:1px solid #dce4db;border-radius:6px;padding:9px 12px;outline-offset:2px}
+.workspace{max-width:1000px;margin:20px auto 40px;padding:0 18px;display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start;transition:max-width .16s}.workspace.has-aside{max-width:1270px;grid-template-columns:minmax(0,1fr) var(--rail)}
+.page{min-width:0;background:var(--paper);border:1px solid #eaece4;border-radius:4px;min-height:75vh;padding:42px clamp(22px,5vw,76px) 80px;box-shadow:0 2px 14px #42514408}
+.page h1{font-size:29px;line-height:1.3;letter-spacing:-.034em;font-weight:580;margin:0 0 28px}.page h1.compact{font-size:28px}.page .eyebrow{font-size:12px;color:var(--muted);margin:0 0 13px}.page .helper{font-size:13px;color:var(--muted);margin:0 0 19px}.page .bodycopy{white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.68 var(--font);margin:5px 0 28px;color:#3b453d;user-select:text;cursor:text}.page .bodycopy.collapsed{max-height:250px;overflow:hidden;mask-image:linear-gradient(to bottom,#000 80%,transparent)}
+.outline{font-size:15px;margin-top:8px}.unit{display:flex;align-items:baseline;min-height:29px;gap:0;position:relative;margin:0 -6px;padding:0 6px;line-height:1.6}.unit:hover{background:linear-gradient(90deg,#f4f7f100,#f2f6ef77 40%,#f2f6ef33)}.indent{flex:0 0 auto}.fold{flex:0 0 21px;width:21px;height:23px;border:none;border-radius:4px;background:transparent;color:#a7b2a7;padding:0;text-align:center;font-size:13px;line-height:1.8}.fold:hover{color:#4c775e;background:#eef3ed}.fold.placeholder{display:inline-block;opacity:.18;pointer-events:none}.unit-body{display:inline;min-width:0;max-width:100%;flex:0 1 auto;white-space:normal;overflow-wrap:anywhere}.unit-text{font-size:14px;font-weight:400;cursor:text;user-select:text;white-space:pre-wrap;overflow-wrap:anywhere}.unit[data-depth="0"]{margin-top:9px}.unit[data-depth="0"] .unit-text{font-size:16px;font-weight:590}.unit[data-depth="1"] .unit-text{font-weight:470}.unit-text.quickopen{cursor:pointer}.unit-text.quickopen:hover{color:#3d6950}.unit:focus-within{background:#f5f7f4}.unit-marker{display:inline-flex;width:24px;height:23px;align-items:center;justify-content:center;vertical-align:baseline;border:0;background:transparent;border-radius:4px;padding:0;margin-left:1px;position:relative;top:3px;color:#9db1a1}.unit-marker .symbol{width:11px;height:11px;border:1px solid #b1beb1;border-radius:2px;display:grid;place-items:center;font-size:8px;line-height:1;font-weight:700;transform:translateY(-1px);transition:background .12s,border-color .12s}.unit-marker .symbol.has-children:before{content:'·';font-size:15px;line-height:0}.unit-marker .symbol.has-link{background:#9db8a6;border-color:#7da28d;color:white}.unit-marker .symbol.has-link:before{content:'↗';line-height:1}.unit-marker:hover .symbol,.unit-marker[aria-expanded=true] .symbol,.unit-marker:focus-visible .symbol{background:#dfece1;border-color:#4a8060;color:#446a53}.unit-marker .symbol.has-link:hover{color:white}.unit-marker:focus-visible{outline-offset:1px}.unit.note-line{align-items:baseline}.unit.note-line .unit-text{font-weight:400}
+.search-results .unit{border-radius:7px;transition:background-color .12s ease}
+.search-results .unit.search-selected{background:rgba(95,139,105,.115);box-shadow:inset 2px 0 0 rgba(82,132,93,.48)}
+.search-results .unit.search-selected [data-search-result]{color:#315e44!important}
+@media(prefers-reduced-motion:reduce){.search-results .unit{transition:none}}
+.understated{border:0;background:none;color:var(--soft);font-size:13px;padding:4px 0;text-align:left}.understated:hover{color:#2d6344}.understated-row{display:flex;gap:17px;align-items:center;margin:14px 0 7px;opacity:.12;transition:opacity .12s}.page:hover .understated-row,.understated-row:focus-within{opacity:.8}.gentle{color:#9aa69b;font-size:12px;margin:17px 0}.sub-section{margin:29px 0 10px;border-top:1px solid #eff0e9;padding-top:14px}.source-meta{font-size:11px;color:var(--muted);margin-top:38px}.source-meta summary{cursor:pointer}
+.aside{background:var(--paper);border:1px solid #e5eae3;border-radius:9px;position:sticky;top:78px;max-height:calc(100vh - 94px);overflow:auto;min-width:0;padding:18px 18px 20px;box-shadow:0 4px 18px #35493910}.aside.hidden{display:none}.aside-head{display:flex;justify-content:space-between;align-items:center;gap:7px;margin-bottom:14px}.aside-head h2{font-size:16px;line-height:1.35;margin:0;font-weight:560;overflow-wrap:anywhere}.aside-close{border:0;background:transparent;font-size:21px;color:var(--muted);border-radius:5px;width:27px;height:27px}.aside-close:hover{color:var(--ink);background:var(--tint)}.aside .section{margin:17px 0}.aside .section:first-of-type{margin-top:3px}.aside .section-head{color:#79877b;font-size:11px;letter-spacing:.02em;margin:0 0 5px}.aside .item{border:0;background:none;display:block;text-align:left;padding:7px 5px;margin:0 -5px;border-radius:5px;width:calc(100% + 10px);font-size:13px;overflow-wrap:anywhere;line-height:1.35}.aside .item:hover{background:#eff4ee}.aside .item small{display:block;color:var(--muted);font-size:11px;line-height:1.4;font-weight:400;margin-top:1px}.aside .quiet{font-size:12px;color:var(--muted);line-height:1.6;margin:5px 0}.aside .mini{font-size:12px;color:var(--accent);border:0;background:transparent;padding:3px 0 6px;text-align:left}.aside .mini:hover{text-decoration:underline}.aside details{font-size:12px}.aside details summary{cursor:pointer;color:#607466;margin:11px 0 9px}.aside input[type=search]{width:100%;background:#fdfefa;border:1px solid #e1e6dc;padding:9px 10px;border-radius:6px;margin:2px 0 9px;font-size:12px}.aside .proposal{display:flex;justify-content:space-between;align-items:center;gap:8px}.aside .proposal button{font-size:12px;color:#a0a99f;background:transparent;border:0;padding:5px}.aside .proposal button:hover{color:#7c4d4b}.aside .action{border:1px solid #dbe4db;background:var(--tint);border-radius:5px;padding:5px 7px;font-size:11px;color:#3e6b50;margin:4px 0}.aside .action:hover{background:#e0ede3}.aside .divider{border-top:1px solid #edf0e8;margin:15px 0}.aside .hint{font-size:11px;color:#9ba49b;margin-top:10px}.aside .asidepath{font-size:11px;color:#8b9c8b;margin:-7px 0 11px;overflow-wrap:anywhere}
+.welcome{max-width:600px;padding:40px 0}.welcome h1{font-size:34px;font-weight:500;line-height:1.35;margin-bottom:15px}.welcome p{max-width:490px;font-size:15px;color:#607065;line-height:1.75}.filechoose{display:inline-flex;align-items:center;justify-content:center;position:relative;cursor:pointer;background:#4b745d;color:#fff;border-radius:6px;padding:11px 18px;font-size:14px;margin:18px 0 13px}.filechoose:focus-within{outline:2px solid var(--focus);outline-offset:3px}.filechoose input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}.welcome .privacy{font-size:12px;color:#909b91;line-height:1.7}.loaderr{font-size:13px;color:#9d524e;margin-top:15px}.foot{max-width:1000px;margin:0 auto 32px;padding:0 18px;font-size:11px;color:#a1aba1}.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);border-radius:8px;padding:10px 16px;background:#344f3d;color:#fff;z-index:200;box-shadow:0 5px 25px #1d2f2040;font-size:12px;max-width:90vw;text-align:center}
+@media(max-width:980px){.workspace.has-aside{grid-template-columns:minmax(0,1fr) 270px;gap:12px}.page{padding:34px 33px 65px}.aside{padding:14px}.workspace{padding:0 12px}}
+@media(max-width:720px){.topbar{padding:0 10px}.trail button{max-width:105px;font-size:12px}.topbar .tool{width:31px}.workspace{margin:9px auto 25px;padding:0 7px}.workspace.has-aside{display:flex;flex-direction:column;align-items:stretch}.workspace.has-aside .aside{order:-1;position:relative;top:auto;max-height:55vh;overflow:auto}.page{padding:28px 18px 58px;min-height:65vh;width:100%}.page h1{font-size:25px}.unit[data-depth="0"] .unit-text{font-size:15px}.indent{max-width:112px}.searchdock{padding:9px 12px}.understated-row{opacity:.6}.aside{width:100%}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important}}
+
+/* v0.5: never change the document width or scroll position when opening contextual actions. */
+.workspace,.workspace.has-aside{width:min(900px,calc(100% - 24px));max-width:900px;display:block;margin:20px auto 40px;padding:0 8px;transition:none}
+.page{width:100%;min-width:0}
+.aside,.workspace.has-aside .aside{position:fixed;z-index:95;width:min(262px,calc(100vw - 24px));max-height:min(60vh,560px);overflow:auto;top:70px;left:12px;right:auto;padding:13px 14px 15px;border-radius:9px;box-shadow:0 12px 35px #263f3024;scroll-margin:0}
+.aside .aside-head{margin-bottom:8px}.aside .aside-head h2{font-size:14px}.aside .section{margin:10px 0}.aside .divider{margin:11px 0}.aside .item{font-size:12px;padding:5px 4px}.aside .asidepath{font-size:10px}.aside .hint{font-size:10px;margin-top:9px}.aside .section-head{font-size:10px}
+.unit-marker{display:inline-flex;width:14px;height:15px;vertical-align:super;align-items:center;justify-content:center;padding:0;margin:0 0 0 3px;top:-.18em;opacity:.25;transition:opacity .1s}
+.unit-marker .symbol{width:9px;height:9px;border-radius:2px;transform:none;border-color:#9dad9d}
+.unit-marker .symbol.has-children:before{font-size:11px}
+.unit-marker .symbol.has-link:before{font-size:7px}
+.unit:hover .unit-marker,.unit:focus-within .unit-marker,.unit-marker:hover,.unit-marker:focus-visible,.unit-marker[aria-expanded=true]{opacity:1}
+.page h1 .unit-marker{top:-.42em;transform:translateY(-2px);margin-left:4px;opacity:.6}
+.unit-text{cursor:text;user-select:text}.unit-text.quickopen{cursor:pointer}
+/* Structural controls stay clickable/draggable but do not pollute native text highlighting. */
+.outline .indent,.outline .fold,.outline .unit-marker,.outline .pe-gutter{user-select:none;-webkit-user-select:none}
+.focused-outline{margin:0 0 12px}.pe-line{color:#465149;min-height:24px}.pe-line .unit-text{font-size:14px;font-weight:400!important;line-height:1.58}
+.pe-line:hover{background:transparent}.pe-line .pe-gutter{flex:0 0 21px;width:21px;opacity:.14;text-align:center;font-size:10px;user-select:none}
+.pe-gap{height:11px;min-height:0;line-height:0}.pe-gap .pe-gutter{display:none}
+.pe-line .unit-text{white-space:pre-wrap}
+.page h1{margin-bottom:17px}
+.outline .unit[data-depth="0"]{margin-top:5px}
+@media(max-width:720px){
+ .workspace,.workspace.has-aside{width:100%;padding:0 7px;margin:9px auto 25px;display:block}
+ .aside,.workspace.has-aside .aside{width:min(310px,calc(100vw - 24px));max-height:min(54vh,460px);padding:12px;position:fixed;top:68px;left:12px;order:initial}
+ .page{width:100%;padding:28px 18px 58px}
+ .unit-marker{opacity:.65;min-width:17px;min-height:19px}
+}
+
+.peek{position:fixed;z-index:145;width:194px;max-width:calc(100vw - 22px);background:var(--paper);border:1px solid #e0e7df;border-radius:8px;box-shadow:0 7px 28px #2b453025;padding:8px;line-height:1.4}
+.peek .peek-name{font-size:12px;font-weight:600;padding:4px 7px 6px;overflow-wrap:anywhere;color:#344b3c}
+.peek .peek-hint{color:#88978b;font-size:10px;font-weight:400;margin-top:2px}
+.peek button{border:0;background:transparent;display:block;text-align:left;width:100%;padding:6px 7px;border-radius:5px;font-size:12px;color:#496554}
+.peek button:hover,.peek button:focus-visible{background:#eff4ee}
+@media(max-width:720px){.peek{width:182px}}
+/* v0.6: the page keeps its quiet look while text can become a temporary draft. */
+.tool.write-toggle{font-size:17px;position:relative}
+.tool.mode-toggle.active:after{content:'';position:absolute;bottom:3px;width:4px;height:4px;background:#497e60;border-radius:50%}
+.mode-group{display:flex;align-items:center;gap:1px;padding:2px;border:1px solid #e7ede4;border-radius:9px;background:#f6f8f2}
+.tool.mode-toggle{position:relative;font-size:16px;width:31px;height:30px}
+.tool.mode-toggle.active{background:#e6efe5;color:#315d45}
+.nav-mode .outline .unit[data-id] .unit-text,.nav-mode .outline .unit[data-id]{cursor:pointer}
+.copy-mode .outline .unit .unit-text,.copy-mode .outline .unit,.copy-mode h1[data-copy-current]{cursor:pointer}
+.copy-mode .outline .unit:hover{background:#edf5e9}
+.copy-mode .outline .unit [data-search-result]{cursor:pointer}
+.copy-mode .outline .unit [data-search-result]:hover{color:#2f6545!important}
+.copy-tick{position:absolute;right:7px;top:3px;display:inline-block;color:#39734a;font-weight:700;font-size:12px;pointer-events:none;background:var(--tint);border-radius:4px;padding:0 4px}
+@media(max-width:420px){.tool.mode-toggle{width:28px}.topbar{gap:3px}.tools{gap:1px}.tool{width:29px;height:32px}.trail button{max-width:90px}}
+[contenteditable="plaintext-only"],[contenteditable="true"]{cursor:text!important;white-space:pre-wrap;outline:none;min-width:4px;display:inline-block;vertical-align:baseline;border-radius:2px;caret-color:#376e4e}
+[contenteditable]:focus{background:#f3f7ef;box-shadow:0 1px 0 #95b49d;outline:none}
+[contenteditable]:empty:before{content:attr(data-empty);color:#a0aaa0;pointer-events:none}
+/* Blank PE lines should look like breathing room, not a series of prompts. */
+.pe-line.pe-gap [contenteditable]:empty:before{content:''}
+.pe-line.pe-gap:focus-within [contenteditable]:empty:before,.pe-line.pe-gap:hover [contenteditable]:empty:before{content:attr(data-empty)}
+.write-note{font-size:12px;color:#899789;margin:15px 0 6px;line-height:1.7;opacity:.8}
+.write-row{margin-top:19px;opacity:.34;transition:opacity .15s}
+.write-row:hover,.write-row:focus-within{opacity:1}
+.write-row button{border:0;background:transparent;color:#597e66;font-size:13px;padding:5px 2px}
+.write-row button:hover{text-decoration:underline}
+.write-mode .unit-body{flex:1;max-width:100%}
+.write-mode .unit-text[data-edit-node]{min-width:6px;max-width:calc(100% - 24px)}
+.write-mode .unit:hover{background:#f7faf5}
+.write-mode .unit-marker{opacity:.35}
+.write-mode .unit:focus-within .unit-marker{opacity:.7}
+.write-mode .pe-line [data-edit-pe]{min-width:9px}
+.write-mode .unit-text.quickopen{cursor:text!important}
+.draft-flag{font-size:10px;color:#8da18f;margin-left:6px;vertical-align:super}
+@media(max-width:720px){.write-note{font-size:11px}.write-mode .unit-body{max-width:calc(100% - 10px)}}
+/* v0.6.12: the row remains a generous click target, but the quiet boundary
+   hugs only genuine thought TEXT. The connection square is OUTSIDE the ring. */
+.outline .unit[data-id]{outline:none;border-radius:0}
+.outline .unit[data-id] .unit-body{display:inline-flex;align-items:baseline;flex:0 1 auto;min-width:0;max-width:100%}
+.outline .unit[data-id] .thought-frame{
+ display:inline-flex;align-items:baseline;flex:0 1 auto;min-width:0;
+ padding:0 7px;margin-left:-7px;border-radius:11px;
+ box-shadow:0 0 0 1px rgba(88,130,99,.055);
+ transition:box-shadow .16s ease,background-color .16s ease;
+}
+.outline .unit[data-id]:hover .thought-frame{box-shadow:0 0 0 1px rgba(80,124,91,.17)}
+.outline .unit[data-id]:focus-within .thought-frame{box-shadow:0 0 0 1px rgba(80,124,91,.25)}
+/* Move only the chevron's visible/control area left by five pixels;
+   leave the text, round outline and doorway aligned exactly as they were. */
+.outline .unit[data-id] .fold:not(.placeholder){transform:translateX(-5px)}
+/* Superscript connection doorway: always perceptible, outside the border. */
+.outline .unit[data-id] .unit-marker{opacity:.70;flex-shrink:0;margin-left:6px;top:-.20em}
+.outline .unit[data-id] .unit-marker .symbol{width:10px;height:10px;border-color:#a3b5a6}
+.outline .unit[data-id]:hover .unit-marker,.outline .unit[data-id]:focus-within .unit-marker,
+.outline .unit[data-id] .unit-marker:hover,.outline .unit[data-id] .unit-marker:focus-visible{opacity:1}
+.write-mode .outline .unit[data-id] .unit-body{flex:0 1 auto}
+.write-mode .outline .unit[data-id] .unit-text[data-edit-node]{max-width:100%}
+/* See, then Undo: accent the tight boundary, never an entire page-wide row. */
+.outline .unit[data-id].undo-preview .thought-frame{
+ box-shadow:0 0 0 2px rgba(74,124,91,.86),0 0 0 5px rgba(76,120,87,.12);
+ background:rgba(196,220,198,.17)
+}
+.outline .unit[data-id].undo-spot .thought-frame{
+ box-shadow:0 0 0 2px rgba(89,135,100,.68),0 0 0 4px rgba(76,120,87,.08);
+ background:rgba(196,220,198,.10)
+}
+/* PE lines have no permanent frame because they are not independent units.
+   They still need a visible target when an edit to PE text is undone. */
+.outline .unit.pe-line.undo-preview .unit-text,.outline .unit.pe-line.undo-spot .unit-text{
+ display:inline-block;border-radius:10px;padding:0 6px;margin-left:-6px;
+ background:rgba(196,220,198,.13)
+}
+.outline .unit.pe-line.undo-preview .unit-text{box-shadow:0 0 0 2px rgba(74,124,91,.82),0 0 0 5px rgba(76,120,87,.10)}
+.outline .unit.pe-line.undo-spot .unit-text{box-shadow:0 0 0 2px rgba(89,135,100,.6)}
+@media(prefers-reduced-motion:reduce){.outline .unit[data-id] .thought-frame{transition:none}}
+
+/* v0.6.13: PE content lines and real thoughts share the same baseline row
+   minimum. Keep intentionally blank PE lines compact, and preserve the
+   slight extra space above a top-level thought. Layout-only, no data changes. */
+.outline .unit.pe-line:not(.pe-gap){min-height:29px;line-height:1.6}
+.outline .unit.pe-line:not(.pe-gap) .unit-text{line-height:1.6}
+
+/* v0.6.14: presentation-only reading-size control. No JSON, draft timeline,
+   relationships, history or browser storage are affected. */
+:root{
+ --read-size:14px;--read-group:16px;--read-title:29px;
+ --read-body:15px;--read-support:13px;--read-row-min:29px;
+}
+.font-controls{display:flex;align-items:center;gap:1px;margin:0 3px;border:1px solid #e7ede4;border-radius:9px;padding:2px;background:#f6f8f2}
+.font-controls .font-tool{font-family:var(--font);font-size:13px;font-weight:600;width:28px;height:30px;line-height:1}
+.font-controls .font-tool:disabled{opacity:.3}
+.outline .unit{min-height:var(--read-row-min)}
+.outline .unit.pe-gap{min-height:0;height:11px}
+.outline .unit.pe-line:not(.pe-gap){min-height:var(--read-row-min)}
+.outline .unit .unit-text,.outline .unit.pe-line .unit-text{font-size:var(--read-size);line-height:1.6}
+.outline .unit[data-depth="0"] .unit-text{font-size:var(--read-group)}
+.page h1,.page h1.compact{font-size:var(--read-title)}
+.page .bodycopy{font-size:var(--read-body)}
+.page .helper,.page .write-note{font-size:var(--read-support)}
+#viewer .outline [data-search-result]{font-size:var(--read-size)!important}
+.aside .item{font-size:var(--read-support)}
+.aside .aside-head h2{font-size:calc(var(--read-support) + 2px)}
+@media(max-width:720px){
+ /* Preserve the compact original mobile typography at the default size,
+    then grow it proportionately when the user taps A+. */
+ .outline .unit[data-depth="0"] .unit-text{font-size:calc(var(--read-size) + 1px)}
+ .page h1,.page h1.compact{font-size:calc(var(--read-size) + 11px)}
+}
+@media(max-width:420px){.font-controls{margin:0 1px;padding:1px}.font-controls .font-tool{width:24px;height:29px;font-size:12px}.topbar .trail button{max-width:65px}}
+/* v0.6.19: Copy is the only visible interaction-mode switch.
+   Inactive state whispers; pressed state remains unmistakable and accessible. */
+.topbar .quiet-copy-toggle{color:#748478;opacity:.47;width:30px;height:31px;border-radius:8px;transition:opacity .14s ease,background-color .14s ease}
+.topbar .quiet-copy-toggle:hover,.topbar .quiet-copy-toggle:focus-visible{opacity:.90}
+.topbar .quiet-copy-toggle[aria-pressed="true"]{opacity:1;color:#315c45;background:rgba(92,142,106,.13);box-shadow:inset 0 0 0 1px rgba(83,128,95,.15)}
+.topbar .quiet-copy-toggle[aria-pressed="true"]:after{content:'';position:absolute;width:4px;height:4px;background:#5b8e6b;border-radius:50%;transform:translate(10px,10px)}
+@media(max-width:420px){.topbar .quiet-copy-toggle{width:27px}}
+@media(prefers-reduced-motion:reduce){.topbar .quiet-copy-toggle{transition:none}}
+/* Working-file save is visible without turning the interface into a toolbar. */
+.topbar .save-pocket{width:auto;min-width:48px;padding:0 8px;font-size:12px;font-weight:550;letter-spacing:.01em;white-space:nowrap;color:#58725f}
+.topbar .save-pocket:hover:not(:disabled){background:#edf3e9;color:#31583f}
+#file-status{max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#98a397;font-size:11px;margin-left:5px}
+@media(max-width:720px){#file-status{display:none}.topbar .save-pocket{min-width:39px;padding:0 4px}}
+/* v0.6.27: UI-only experiment. Preserve one thought identity across line breaks. */
+.outline .unit .unit-text{white-space:pre-wrap}
+.outline .unit.multiline{align-items:flex-start}
+.outline .unit.multiline .unit-body{white-space:pre-wrap}
+.search-results .quick-source{font-size:11px;color:#4a6178;margin-left:9px;white-space:nowrap}
+.search-results .alias-pill{font-size:10px;letter-spacing:.03em;color:#537285;background:#e9eff5;border-radius:5px;padding:1px 5px;margin-left:7px}
+.search-results .ambiguous{font-size:12px;color:#586d81;margin:0 0 12px}
+.welcome .demo-button{margin:8px 0 0;border:1px solid #cbd8df;border-radius:7px;padding:10px 15px;color:#38566c;background:#eff4f7;font-size:14px}
+.welcome .demo-button:hover{background:#e4eef4}
+.lab-note{border-left:2px solid #b2c5d0;padding:8px 12px;font-size:12px;color:#5b6f7c;margin:4px 0 19px;line-height:1.55;background:#f5f8fa}
+.lab-note strong{color:#344e61}
+
+/* v0.6.28: OG-inspired readability with restrained cool blue-grey states.
+   Presentation only. No change to Core semantics or JSON format. */
+:root{--page:#f5f6f7;--paper:#fffefd;--ink:#263543;--muted:#6d7b87;--soft:#586d7a;--quiet:#dce5eb;--accent:#42647b;--tint:#eef3f7;--line:#e1e7eb;--focus:#527b9a}
+body{color:var(--ink);background:var(--page)}
+.topbar{background:rgba(250,251,251,.97);border-bottom-color:#e1e7ea}
+.page{border-color:#e0e5e9;background:#fefefe;box-shadow:0 3px 15px #31485d0c}
+.page h1{color:#263644}.trail button,.trail button:last-of-type{color:#364b5b}
+.page .helper,.page .write-note,.source-meta,.pe-line{color:#627482}
+.unit-text{color:#283947}
+.outline .unit[data-id]:hover{background:linear-gradient(90deg,rgba(232,239,244,.65),rgba(232,239,244,.12) 90%)}
+.outline .unit[data-id] .thought-frame{box-shadow:0 0 0 1px rgba(97,132,159,.055)}
+.outline .unit[data-id]:hover .thought-frame{box-shadow:0 0 0 1px rgba(94,126,154,.22)}
+.outline .unit[data-id]:focus-within .thought-frame{box-shadow:0 0 0 1px rgba(82,119,151,.26)}
+.outline .unit[data-id] .fold:not(.placeholder){color:#8c9fae}
+.outline .unit[data-id] .fold:not(.placeholder):hover{background:#e9f0f5;color:#49677c}
+.outline .unit[data-id] .unit-marker .symbol{border-color:#a4b7c4}
+.unit-marker:hover .symbol,.unit-marker[aria-expanded=true] .symbol{background:#dfeaf1;border-color:#6386a1;color:#41637c}
+.search-results .unit.search-selected{background:#e9eef8;box-shadow:inset 3px 0 0 #849ec1}
+.search-results .unit.search-selected [data-search-result]{color:#284867!important}
+.search-results .quick-source{color:#526b80}
+.search-results .alias-pill{color:#48647c;background:#e9eff6}
+/* Keep the exact source visible after copying, without implying a data change. */
+.outline .unit[data-id].copied-unit{background:#e9eefb;border-radius:8px}
+.outline .unit[data-id].copied-unit .thought-frame{background:rgba(227,235,251,.8);box-shadow:0 0 0 1.5px #9aadd3}
+.outline .unit.pe-line.copied-pe .unit-text{background:#e9eefb;border-radius:7px;box-shadow:0 0 0 2px #9aadd3}
+.outline .unit[data-id].undo-preview .thought-frame{box-shadow:0 0 0 2px rgba(64,113,160,.87),0 0 0 5px rgba(61,115,169,.12);background:#e4eefa}
+.outline .unit[data-id].undo-spot .thought-frame{box-shadow:0 0 0 2px rgba(79,126,171,.68);background:#ebf2fb}
+/* The little square opens a floating metadata sheet, never a PE/body panel. */
+.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 22px));max-height:min(77vh,730px);padding:18px 19px;z-index:150;border-radius:14px;background:#fff;border:1px solid #dce4ec;box-shadow:0 18px 48px #273e5629}
+.aside .aside-head{align-items:flex-start;margin-bottom:9px;gap:12px}
+.aside .aside-head h2{font-size:calc(var(--read-support) + 5px);color:#26394a;font-weight:650;line-height:1.25;margin:3px 0 0}
+.aside .asidepath{font-size:11px;color:#6f8090;margin-bottom:17px}
+.aside .section,.aside .sheet-section{border-top:1px solid #e8edf1;padding:12px 0 8px;margin:0}
+.aside .sheet-eyebrow{font-size:9px;letter-spacing:.11em;font-weight:700;color:#64829a}
+.aside .sheet-label{font-size:10px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;color:#627a8a;margin-bottom:7px}
+.aside .sheet-property{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;font-size:12px;line-height:1.5;margin:6px 0;color:#304557}
+.aside .sheet-property>span:first-child{color:#738493}
+.aside .sheet-property>span:last-child,.aside .sheet-property code{overflow-wrap:anywhere;min-width:0}
+.aside .sheet-property code{font-size:11px;color:#30485b;background:#f2f5f8;padding:3px 6px;border-radius:5px}
+.aside .sheet-hint,.aside .sheet-foot{font-size:11px;color:#81919e;line-height:1.55;margin:7px 0}
+.aside .sheet-foot{padding-top:10px;border-top:1px solid #e8edf1}
+.aside .item{color:#3e5870;font-size:12px;border-radius:6px}
+.aside .item:hover,.aside .action:hover{background:#ebf2f7}
+.aside .action{background:#eff4f8;border-color:#d8e4ed;color:#47677e}
+.peek{border-color:#dce5ed;background:#fff;box-shadow:0 9px 27px #314b6628}
+.lab-note{background:#f1f5f9;border-color:#91b1c5;color:#4e6476}
+.lab-note strong{color:#2b4961}
+@media(max-width:720px){.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 20px));max-height:65vh;padding:14px}}
+
+/* v0.6.32 experimental: the same metadata square opens Unit Sheet on click.
+   While intentionally dragging, ONLY horizontal insertion lines indicate legal
+   sibling positions; "after" is drawn below the entire visible subtree. */
+.nav-mode .outline .unit-marker[data-drag-handle],.write-mode .outline .unit-marker[data-drag-handle]{cursor:grab;touch-action:none}
+.nav-mode .outline .unit-marker[data-drag-handle]:active,.write-mode .outline .unit-marker[data-drag-handle]:active{cursor:grabbing}
+.outline .unit.drag-target-before::before,.outline .unit.drag-target-after::after{content:"";position:absolute;left:7px;right:6px;height:3px;border-radius:2px;background:#537c98;z-index:5;pointer-events:none}
+.outline .unit.drag-target-before::before{top:-2px}
+.outline .unit.drag-target-after::after{bottom:-2px}
+
+/* v0.6.37: Unit outlines are structural cues, not permanently visible frames.
+   A pointer on the little superscript square reveals ONLY that unit's text
+   boundary. Keyboard focus on the square gives equivalent discoverability.
+   Undo/copy and their distinct feedback remain visible independently.
+   CSS only: no event, drag, Save, history or Core changes. */
+.outline .unit[data-id]:not(.undo-preview):not(.undo-spot):not(.copied-unit) .thought-frame{
+ box-shadow:none;
+}
+.outline .unit[data-id]:not(.undo-preview):not(.undo-spot):not(.copied-unit)
+  .unit-body:has(> .unit-marker:is(:hover,:focus-visible)) > .thought-frame{
+ box-shadow:0 0 0 1px rgba(94,126,154,.46);
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <nav class="trail" id="trail" aria-label="Current place"><button id="home" title="Everything">Pocket</button><span class="sep">/</span><button>Everything</button></nav>
+  <div class="tools">
+    <button class="tool" id="back" title="Go back (Alt+Left)" aria-label="Go back">‹</button>
+    <button class="tool" id="forward" title="Go forward (Alt+Right)" aria-label="Go forward">›</button>
+    <div class="font-controls" role="group" aria-label="Reading size">
+      <button class="tool font-tool" type="button" id="font-smaller" title="Decrease reading size" aria-label="Decrease reading size">A−</button>
+      <button class="tool font-tool" type="button" id="font-larger" title="Increase reading size" aria-label="Increase reading size">A+</button>
+    </div>
+    <button class="tool small" id="show-search" title="Find a thought (start typing, or Ctrl/⌘ K)" aria-label="Find a thought">⌕</button>
+    <button type="button" class="tool save-pocket" id="save-pocket" title="Save Pocket JSON (Ctrl/⌘ S). Direct save when opened with file permission; otherwise choose a file or download a copy" aria-label="Save Pocket JSON" disabled>Save</button>
+    <button type="button" class="tool quiet-copy-toggle" id="copy-mode" title="Copy mode: off. Click to copy individual lines" aria-label="Turn on Copy Mode" aria-pressed="false"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/></svg></button>
+    <div class="menu-holder">
+      <button class="tool small" id="more" title="More" aria-label="More options" aria-expanded="false" aria-controls="moremenu">···</button>
+      <div class="moremenu hidden" id="moremenu">
+        <button type="button" id="menu-write" title="Start or finish writing without needing a mouse">Start writing <span>F2</span></button>
+        <div class="rule"></div>
+        <button id="undo" title="Undo a draft change">Undo change <span>↶</span></button>
+        <button id="redo" title="Redo a draft change">Redo change <span>↷</span></button>
+        <button id="save-pocket-menu" title="Save to your opened JSON file when permission is available" disabled>Save Pocket JSON <span>⌘S</span></button>
+        <button id="save-pocket-as" title="Choose a different JSON filename or download a copy" disabled>Save As… <span>⇩</span></button>
+        <button id="export" title="Save a separate experimental draft file">Save proposal draft… <span>⇩</span></button>
+        <div class="rule"></div>
+        <button type="button" id="open-another" title="Choose a JSON with direct-save access when supported">Open another JSON…</button>
+        <label style="position:relative;cursor:pointer" id="fallback-open-menu">Open via file upload (save as copy)<input id="again" type="file" accept=".json,application/json"></label>
+        <div class="rule"></div>
+        <div class="subtle">Click text to explore; click blank space to its right to write. Start typing in navigation or Copy Mode to filter. Escape closes the filter, exits writing or Copy, then retraces navigation. F2 opens writing from the keyboard. Save writes back to your opened JSON only with explicit browser file access and permission; Save As chooses a new file. File-upload fallback downloads a copy. Keep a backup. Experimental reference proposals remain draft-only.</div>
+      </div>
+    </div>
+  </div>
+</header>
+<div class="searchdock hidden" id="searchdock"><input type="search" id="search" autocomplete="off" placeholder="Find a thought…" aria-label="Search all thoughts" aria-controls="search-results" aria-describedby="search-keyboard-hint"></div>
+<div class="workspace" id="workspace">
+  <main class="page" id="page">
+    <section class="welcome" id="welcome">
+      <p class="eyebrow">POCKET / A QUIETER OUTLINE</p>
+      <h1>A place to think.</h1>
+      <p>Your thoughts in one calm outline. Click a thought to explore, or click the blank space to its right to write at the end. Escape finishes writing, closes a search, or steps back through visited thoughts. The quiet Copy icon enables one-click copying; click a thought's tiny square for its Unit Sheet, or drag it deliberately to reorder among siblings. Holding over a collapsed sibling head opens its children; the line marks the landing position. For keyboard and touch access, Start writing is also in the More menu.</p>
+      <button type="button" class="filechoose" id="open-native" title="Choose a local Pocket JSON. In supported browsers you can save back to this file.">Open Pocket JSON…</button>
+      <label class="filechoose" id="fallback-open-welcome" class="hidden" style="margin-left:8px">Open via file upload<input id="filepicker" type="file" accept=".json,application/json"></label>
+      <p class="privacy"><strong>v0.6.37 Quiet unit-boundary study.</strong> Rounded outlines around unit text are hidden until you hover the little square (or keyboard-focus it). In Edit Mode, ↑/↓ move through visible unit text; Shift+↑/↓ extends a text selection. Drag selection and Ctrl/⌘ C still work. Cross-unit cut/delete/replacement are blocked until Core defines them; Copy Mode remains optional. Sibling drop guides and collapsed-head hover expansion are human-tested. Drag does not move a unit into another parent. Experimental Copy-body and alias retrieval remain preview-only, not saved Pocket properties.</p>
+      <p class="privacy">Your JSON stays local, with no server upload. Keep an untouched backup and use Save As first when working with important data. Direct Save requires browser file access and explicit permission, with an overwrite warning. Unsupported browsers download a separate copy. This preview blocks normal JSON save after Shift+Enter multiline unit edits, because that representation is not yet part of the approved Pocket format. Normal saved snapshots have not been certified for live Pocket import. New relationship proposals remain draft-only.</p>
+      <div class="loaderr" id="loaderror" role="alert"></div>
+    </section>
+    <section id="viewer" class="hidden"></section>
+  </main>
+  <aside id="aside" class="aside hidden" role="dialog" aria-label="Unit metadata and relationships" tabindex="-1"></aside>
+</div>
+<div id="peek" class="peek hidden" role="group" aria-label="Quick thought navigation"></div>
+<div class="foot" id="foot">Pocket · v0.6.37 Quiet Boundaries · Hover or keyboard-focus a unit square to reveal its text boundary · Arrow selection and right-hand end-caret retained · Local JSON saving unchanged · No Core/Sync changes · Browser acceptance pending</div>
+<div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=x=>String(x??'').trim().toLocaleLowerCase('en-AU').replace(/\s+/g,' ');
+const ALL='__everything__';
+let nodes=[], byId=new Map(),children=new Map(),names=new Map(),roots=[],counts=new Map();
+let loaded=false,current=ALL,route=[ALL],routePos=0,routeViews=[null],expanded=new Set(),expandedText=true,expandedAlt=true,editorOpen=false,quickNav=false,doubleNav=true;
+let sourceName='',proposed=new Map(),undoStack=[],redoStack=[],asideId=null,asideLocked=false,hoverTimer=null,hideTimer=null,noteCache=new Map();
+let searchQ='',searchMode=false,searchReturn=ALL,searchSelection=0,searchResultIds=[],toastTimer=null,peekId=null,peekTimer=null;
+let writeMode=false, copyMode=false, copyTickTimer=null, originalNodes=new Map(), sessionNew=new Set(), noteDrafts=new Map(), textChanged=new Set(), sessionSerial=0, activeEdit=null, pendingBlank=new Map();
+let originalExport=null, usedIds=new Set(), savedStateKey=null, lastSavedFile='';
+// Session-only retrieval settings. Never include these in the original export or normal saves.
+let retrievalPreview=new Map(), syntheticLab=false, searchNeedsDisambiguation=false;
+let lastCopiedId=null, lastCopiedPe=null; // Presentation-only cues, never data or Undo changes.
+
+// A file input or drag-and-drop does NOT give write permission to a source file.
+// Only a browser-granted native handle permits same-file saving.
+let sourceHandle=null, sourceFileText=null, directSaveConfirmed=false;
+const supportsDirectFiles=typeof window.showOpenFilePicker==='function'&&typeof window.showSaveFilePicker==='function';
+// Readability is presentation, not a mutation. Never put this in Undo/History.
+// Keep the increase/decrease controls independent from editable focus and caret.
+const READ_MIN=12, READ_MAX=28, READ_STEP=2;
+let readingSize=14;
+function changeReadingSize(step){
+ readingSize=Math.max(READ_MIN,Math.min(READ_MAX,readingSize+step*READ_STEP));
+ const delta=readingSize-14;
+ const root=document.documentElement;
+ root.style.setProperty('--read-size',readingSize+'px');
+ root.style.setProperty('--read-group',(readingSize+2)+'px');
+ root.style.setProperty('--read-title',(29+delta)+'px');
+ root.style.setProperty('--read-body',(readingSize+1)+'px');
+ root.style.setProperty('--read-support',(Math.max(12,13+delta))+'px');
+ root.style.setProperty('--read-row-min',Math.max(29,Math.round(readingSize*1.65+6))+'px');
+ $('font-smaller').disabled=readingSize===READ_MIN;
+ $('font-larger').disabled=readingSize===READ_MAX;
+ const label='Reading size: '+readingSize+' pixels';
+ $('font-smaller').title='Decrease reading size ('+readingSize+' px)';
+ $('font-larger').title='Increase reading size ('+readingSize+' px)';
+ if(asideId)positionAside();
+ flash(label);
+}
+// Preview pause is only for finding a changed thought elsewhere; local Undo is immediate.
+const DRAFT_PREVIEW_MS=700;
+let pendingDraftAction=null, queuedDraftActions=[], undoSpotTimer=null;
+function flash(msg){const t=$('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.add('hidden'),2400)}
+function chain(n){const a=[],seen=new Set();let x=n;while(x&&!seen.has(x.id)&&a.length<55){a.unshift(x);seen.add(x.id);x=byId.get(x.parentId)}return a}
+function path(n){return chain(n).map(x=>x.label).join(' / ')}
+function kids(id){return children.get(id)||[]}
+function subtree(id){if(counts.has(id))return counts.get(id);const v=kids(id).reduce((a,n)=>a+1+subtree(n.id),0);counts.set(id,v);return v}
+function linkKey(a,b){return JSON.stringify([a,b])}
+function linkCount(id){let c=0;for(const l of proposed.values())if(l.from===id||l.to===id)c++;return c}
+function load(data,name){
+ // A new source must never inherit an in-flight Undo from the previous one.
+ if(pendingDraftAction){clearTimeout(pendingDraftAction.timer);pendingDraftAction=null}
+ queuedDraftActions=[];clearUndoSpot();
+ if(data?.schema!=='portal.export.v1'||!Array.isArray(data.mainThoughtTree))throw Error('This does not look like a supported Pocket export. Nothing was imported.');
+ const arr=data.mainThoughtTree,ids=new Map(),index=new Map();
+ if(arr.length>50000)throw Error('This export is too large for this experimental view.');
+ for(const n of arr){if(typeof n.id!=='string'||!n.id||typeof n.parentId!=='string'||typeof n.label!=='string'||ids.has(n.id))throw Error('Missing or duplicate thought identity. Nothing was imported.');ids.set(n.id,n);if(!index.has(n.parentId))index.set(n.parentId,[]);index.get(n.parentId).push(n)}
+ for(const n of arr){if(n.parentId!=='root'&&!ids.has(n.parentId))throw Error('One thought has an unresolved parent. Nothing was imported.');let p=n.parentId;const seen=new Set([n.id]);while(p!=='root'){if(seen.has(p))throw Error('A circular parent relation was found. Nothing was imported.');seen.add(p);p=ids.get(p)?.parentId;if(!p)throw Error('An incomplete parent relation was found.')}}
+ for(const v of index.values())v.sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||a.label.localeCompare(b.label));
+ if(!index.has('root'))throw Error('No top-level thoughts found.');
+ const same=new Map();for(const n of arr){const k=norm(n.label);if(!same.has(k))same.set(k,[]);same.get(k).push(n)}
+ originalExport=structuredClone(data);
+ syntheticLab=data.__pocketSyntheticRetrievalLab===true;
+ retrievalPreview=new Map(syntheticLab?[
+  ['lab-raise-gr',{aliases:['RG','GRX'],copySource:'body'}],
+  ['lab-other-rg',{aliases:['ZZ'],copySource:'body'}],
+  ['lab-duplicate-rg',{aliases:['ZZ'],copySource:'title'}],
+  ['lab-title-only',{aliases:['AP'],copySource:'title'}],
+  ['lab-conflict',{aliases:['CF'],copySource:'body'}]
+ ]:[]);
+ searchNeedsDisambiguation=false;lastCopiedId=null;lastCopiedPe=null;
+ sourceHandle=null;sourceFileText=null;directSaveConfirmed=false;
+ usedIds=new Set([...arr.map(n=>n.id),...(Array.isArray(data.mainThoughtTreeTombstones)?data.mainThoughtTreeTombstones.map(x=>x.id):[])]);
+ for(const n of arr){if(Array.isArray(n.editor?.outline))for(const l of n.editor.outline)if(typeof l.id==='string')usedIds.add(l.id)}
+ originalNodes=new Map(arr.map(n=>[n.id,n]));nodes=arr.map(n=>({...n}));
+  byId=new Map(nodes.map(n=>[n.id,n]));rebuildIndex();names=same;counts=new Map();noteCache=new Map();noteDrafts=new Map();textChanged=new Set();sessionNew=new Set();sessionSerial=0;pendingBlank=new Map();activeEdit=null;writeMode=false;copyMode=false;syncModeButtons();loaded=true;sourceName=name;
+ current=ALL;route=[ALL];routePos=0;routeViews=[null];expanded=new Set();expandedText=true;expandedAlt=true;editorOpen=false;proposed.clear();undoStack=[];redoStack=[];asideId=null;asideLocked=false;searchQ='';searchMode=false;searchSelection=0;searchResultIds=[];$('search').value='';$('welcome').classList.add('hidden');$('viewer').classList.remove('hidden');$('loaderror').textContent='';closeAside();savedStateKey=currentStateKey();lastSavedFile='';render();flash('Pocket JSON opened. Save As is available; direct Save requires opening with file permission.');
+}
+// View trail is presentation-only. Do not mix it with the draft Undo timeline.
+// Save the actual place the person came from, rather than assuming a stored parent.
+function openSyntheticLab(){
+ if(loaded&&currentStateKey()!==savedStateKey&&!confirmLeavingDirty())return;
+ const fixed=(id,label,parentId,order,more={})=>({id,label,parentId,order,source:'synthetic-content-retrieval-lab',...more});
+ const tree=[
+  fixed('lab-work','Template examples','root',10),
+  fixed('lab-raise-gr','Raise Goods Receipt','lab-work',10,{details:'Please raise the goods receipt.\nThanks.'}),
+  fixed('lab-title-only','Approval requested','lab-work',20),
+  fixed('lab-other-rg','Review request','lab-work',30,{details:'Please review the request.'}),
+  fixed('lab-duplicate-rg','Other Zed example','lab-work',40),
+  fixed('lab-conflict','Legacy conflicting versions','lab-work',50,{details:'Legacy details version',editor:{schema:'pocket.nodeEditor.v2',text:'Different editor version'}}),
+  fixed('lab-multiline','Type here and press Shift+Enter','lab-work',60)
+ ];
+ const data={schema:'portal.export.v1',__pocketSyntheticRetrievalLab:true,exportedAt:new Date().toISOString(),mainThoughtTree:tree,mainThoughtTreeTombstones:[],data:{mainThoughtTree:structuredClone(tree),mainThoughtTreeTombstones:[]}};
+ load(data,'SYNTHETIC LAB · not real Pocket data');
+ expanded.add('lab-work');render();
+ flash('Safe example loaded. Type RG and press Enter to copy its body.');
+}
+function rememberRouteView(){
+ if(!loaded)return;
+ routeViews[routePos]={id:current,expanded:[...expanded],searchMode,searchQ,
+  searchDockVisible:!$('searchdock').classList.contains('hidden'),searchSelection,scrollY:window.scrollY};
+}
+function go(id,{history=true,restore=null}={}){
+ if(id!==ALL&&!byId.has(id))return;
+ if(history)rememberRouteView();
+ finishEdit();
+ const wasSearching=searchMode;
+ current=id;expanded=new Set(id===ALL?[]:kids(id).map(n=>n.id));expandedText=true;expandedAlt=true;editorOpen=false;
+ searchMode=false;searchQ='';searchSelection=0;searchResultIds=[];$('search').value='';$('searchdock').classList.add('hidden');
+ closeAside();closeMenu();
+ if(history){
+  route=route.slice(0,routePos+1);routeViews=routeViews.slice(0,routePos+1);
+  // Even when a search result is the same thought, entering it is a distinct view.
+  if(route[routePos]!==id||wasSearching){route.push(id);routeViews.push(null);routePos++}
+ }
+ if(restore){
+  expanded=new Set((restore.expanded||[]).filter(x=>byId.has(x)));
+  searchQ=restore.searchQ||'';searchMode=!!restore.searchMode&&!!searchQ;searchSelection=restore.searchSelection??0;
+  $('search').value=searchQ;
+  $('searchdock').classList.toggle('hidden',!restore.searchDockVisible);
+ }
+ render();
+ window.scrollTo({top:restore?.scrollY??0,behavior:'instant'});
+}
+function travel(shift){
+ const p=routePos+shift;if(p<0||p>=route.length)return false;
+ rememberRouteView();routePos=p;go(route[p],{history:false,restore:routeViews[p]});return true;
+}
+function fold(id){finishEdit();if(expanded.has(id))expanded.delete(id);else expanded.add(id);renderViewer()}
+function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-drag-handle="${esc(n.id)}" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="${copyMode?'Click for Unit Sheet':'Click for Unit Sheet; drag to reorder siblings'}"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
+function detailsOf(n){
+ const d=typeof n.details==='string'?n.details:''; const e=n.editor;
+ const editor=e?(typeof e.text==='string'?e.text:Array.isArray(e.outline)?e.outline.map(x=>' '.repeat(Math.min(12,Number(x.depth)||0)*2)+String(x.text||'')).join('\n'):''):'';
+ return {d,editor,hasAlternate:!!d&&!!editor&&d!==editor};
+}
+function peLines(n){
+ if(noteDrafts.has(n.id))return noteDrafts.get(n.id);
+ if(noteCache.has(n.id))return noteCache.get(n.id);
+ const e=n.editor, text=(e&&typeof e.text==='string'&&e.text.trim())?e.text:(n.details||'');
+ let lines=[];
+ if(e&&Array.isArray(e.outline)&&e.outline.length){
+  lines=e.outline.slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)).map(x=>({...x,text:String(x.text||''),depth:Math.max(0,Math.min(12,Number(x.depth)||0))}));
+ }else if(typeof text==='string'&&text.length){
+  lines=text.replace(/\r\n?/g,'\n').split('\n').map(line=>{
+   const prefix=(line.match(/^[ \t]*/)||[''])[0],level=prefix.replace(/\t/g,'  ').length;
+   const depth=Math.min(12,Math.floor(level/2)),normalised=line.slice(prefix.length).replace(/\s+$/g,'');
+   return {text:normalised,depth,originalText:normalised,originalDepth:depth,originalRaw:line};
+  });
+ }
+ noteCache.set(n.id,lines);return lines;
+}
+function peRows(n,parentDepth){
+ const lines=peLines(n);let out='';
+ for(let i=0;i<lines.length;i++){const l=lines[i],depth=Math.min(15,parentDepth+1+l.depth),blank=!l.text;
+  const edit=writeMode?`contenteditable="plaintext-only" role="textbox" data-empty="Write…" aria-label="Edit text line ${i+1} inside ${esc(n.label)}" spellcheck="true"`:'';
+  out+=`<div class="unit pe-line${blank?' pe-gap':''}${lastCopiedPe?.owner===n.id&&lastCopiedPe?.index===i?' copied-pe':''}" data-pe-owner="${esc(n.id)}" data-depth="${depth}" title="Text within ${esc(n.label)}; not a separate unit"><span class="indent" style="width:${Math.min(15,depth)*17}px"></span><span class="pe-gutter" aria-hidden="true">${blank?'':'·'}</span><span class="unit-body"><span class="unit-text" data-edit-pe="${esc(n.id)}" data-pe-index="${i}" ${edit}>${esc(l.text)}</span></span></div>`;
+ }
+ return out;
+}
+function outline(items,depth=0){
+ let str='';
+ for(const n of items){
+  const c=kids(n.id),hasPe=peLines(n).some(x=>!!x.text),opened=expanded.has(n.id),isHeading=c.length>0||hasPe;
+  const editable=writeMode?`contenteditable="plaintext-only" role="textbox" data-empty="${pendingBlank.has(n.id)?'':'A thought…'}" aria-label="Edit thought ${esc(n.label||'new thought')}" spellcheck="true"`:'';
+  const name=`<span class="unit-text" data-unittext="${esc(n.id)}" data-edit-node="${esc(n.id)}" ${editable} title="${writeMode?'Edit thought':copyMode?'Click to copy thought text':'Click to focus thought'}">${esc(n.label)}</span>`;
+  str+=`<div class="unit${n.label.includes('\n')?' multiline':''}${lastCopiedId===n.id?' copied-unit':''}" data-depth="${depth}" data-id="${esc(n.id)}"><span class="indent" style="width:${Math.min(14,depth)*17}px"></span>${isHeading?`<button class="fold" data-fold="${esc(n.id)}" title="${opened?'Fold':'Unfold'} this thought" aria-label="${opened?'Collapse':'Expand'} ${esc(n.label)}" aria-expanded="${opened}">${opened?'⌄':'›'}</button>`:'<span class="fold placeholder" aria-hidden="true">·</span>'}<span class="unit-body"><span class="thought-frame">${name}</span>${marker(n)}</span></div>`;
+  if(opened&&depth<50){str+=peRows(n,depth);if(c.length)str+=outline(c,depth+1)}
+ }
+ return str;
+}
+function humanHead(){const node=byId.get(current),c=node?chain(node):[];let html=`<button data-open="${ALL}" title="All your thoughts">Everything</button>`;for(const n of c){html+=`<span class="sep">/</span><button data-open="${esc(n.id)}" title="${esc(n.label)}">${esc(n.label)}</button>`}return html}
+function renderTrail(){$('trail').innerHTML=loaded?humanHead():`<button id="home" data-open="${ALL}">Pocket</button><span class="sep">/</span><button data-open="${ALL}">Everything</button>`}
+
+function note(text,which){const isAlt=which==='alt',expanded=isAlt?expandedAlt:expandedText;const long=text.length>850||text.split('\n').length>22;return `<div class="bodycopy${long&&!expanded?' collapsed':''}">${esc(text)}</div>${long?`<button class="understated" data-text="${which}">${expanded?'Show less':'Continue reading…'}</button>`:''}`}
+function previewAliases(n){return retrievalPreview.get(n.id)?.aliases||[]}
+function exactAlias(n,q){return previewAliases(n).some(alias=>norm(alias)===q)}
+function sourceBody(n){
+ // Cross-check every available legacy representation; do not privilege one
+ // when details, editor.text and the old editor outline disagree.
+ const editor=n.editor||null;
+ const possible=[];
+ if(typeof n.details==='string'&&n.details)possible.push(n.details);
+ if(typeof editor?.text==='string'&&editor.text)possible.push(editor.text);
+ if(Array.isArray(editor?.outline)&&editor.outline.length){
+  possible.push(editor.outline.slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0))
+   .map(x=>String(x.text??'')).join('\n'));
+ }
+ const distinct=[...new Set(possible)];
+ if(distinct.length>1)return {ok:false,reason:'Different legacy body versions exist. Choose a source explicitly before copying.'};
+ const text=distinct[0]||'';
+ return text?{ok:true,text}:{ok:false,reason:'No unambiguous body content.'};
+}
+function quickCopyInfo(n){
+ const pref=retrievalPreview.get(n.id);
+ if(pref?.copySource==='body'){
+  const body=sourceBody(n);
+  return body.ok?{kind:'body',text:body.text}:{kind:'blocked',text:'',reason:body.reason};
+ }
+ return {kind:'title',text:n.label};
+}
+async function quickCopyResult(n,row){
+ const info=quickCopyInfo(n);
+ if(info.kind==='blocked'){flash('Copy blocked: '+info.reason);return false}
+ const success=await copyVisibleText(info.text,row);
+ if(!success)return false;
+ // A successful quick copy clears the filter and brings the source into view.
+ // This is presentation only: no identity, relationship, history or Undo change.
+ revealCopiedUnit(n.id);
+ return true;
+}
+function revealCopiedUnit(id){
+ const n=byId.get(id);if(!n)return;
+ lastCopiedId=id;lastCopiedPe=null;
+ if(searchMode)closeSearch();
+ const findRow=()=>[...document.querySelectorAll('#viewer .unit[data-id]')].find(r=>r.dataset.id===id);
+ if(!findRow()){
+  // Show the copied unit as a line in its parent context, rather than opening
+  // that unit or copying any of its descendants. Preserve a reversible view trail.
+  const parent=byId.has(n.parentId)?n.parentId:ALL;
+  if(current!==parent)go(parent);else renderViewer();
+ }
+ const row=findRow();
+ if(row){row.classList.add('copied-unit');row.scrollIntoView({block:'center',behavior:'instant'});}
+ // Don't leave keyboard focus in the now-hidden search field: the next typed
+ // character must be able to start another filter naturally.
+ const page=$('page');page.setAttribute('tabindex','-1');page.focus({preventScroll:true});
+}
+function matchingSearchNodes(q){
+ const matching=nodes.filter(n=>norm(n.label).includes(q)||norm(n.details||'').includes(q)||norm(n.editor?.text||'').includes(q)||previewAliases(n).some(a=>norm(a).includes(q)));
+ return matching.sort((a,b)=>{
+  const rank=n=>exactAlias(n,q)?0:norm(n.label)===q?1:norm(n.label).startsWith(q)?2:3;
+  return rank(a)-rank(b)||path(a).localeCompare(path(b));
+ });
+}
+function renderViewer(){if(!loaded)return;const v=$('viewer');if(searchMode){
+  const q=norm(searchQ),all=matchingSearchNodes(q),found=all.slice(0,90);
+  searchResultIds=found.map(n=>n.id);
+  const exact=found.filter(n=>exactAlias(n,q));
+  const ambiguous=exact.length>1;
+  if(ambiguous&&!searchNeedsDisambiguation)searchSelection=-1;
+  else searchSelection=found.length?Math.max(0,Math.min(searchSelection,found.length-1)):-1;
+  const hint=found.length?'Enter copies the highlighted result · Shift+Enter opens it.':'Nothing matching that phrase.';
+  const aliasWarning=ambiguous?`<p class="ambiguous" role="status">${exact.length} exact matches for “${esc(searchQ)}”. Choose with ↑/↓ or click before copying.</p>`:'';
+  v.innerHTML=`<h1 class="compact">Find a thought</h1><p class="helper" id="search-keyboard-hint">${hint}${found.length?' ↑/↓ to choose · Escape to close.':''}</p>${aliasWarning}<div class="outline search-results" id="search-results">${found.map((n,i)=>{
+   const info=quickCopyInfo(n),aliases=previewAliases(n);return `<div class="unit${i===searchSelection?' search-selected':''}" data-result-index="${i}"><button id="search-result-${i}" class="understated" data-open="${esc(n.id)}" data-search-result="${esc(n.id)}" data-search-index="${i}" aria-current="${i===searchSelection?'true':'false'}" title="${copyMode?'Click to copy':'Click to open'} · Enter copies · Shift+Enter opens" style="font-size:14px;color:#35483b">${esc(n.label)}</button>${aliases.length?`<span class="alias-pill">${esc(aliases.join(', '))}</span>`:''}<span class="quick-source">${info.kind==='body'?'Copy body':info.kind==='blocked'?'Body ambiguous':'Copy title'}</span>${marker(n)}<span style="color:var(--muted);font-size:11px;margin-left:8px">${esc(path(n))}</span></div>`
+  }).join('')}</div>${all.length>90?'<p class="gentle">Showing the first 90 matches.</p>':''}`;
+  return;
+ }
+ if(current===ALL){v.innerHTML=`<h1>Everything</h1>${syntheticLab?'<div class="lab-note"><strong>Synthetic test data only.</strong> Try RG → Enter → paste. The filter will clear and highlight Raise GR. Click its tiny square for the Unit Sheet. Try ZZ to check alias ambiguity. Try CF to see conflicting legacy body copies blocked. Open "Type here" and use Shift+Enter; no new unit should appear. No normal JSON saves from this demonstration.</div>':''}${writingHelp()}<div class="outline">${outline(roots)}</div>${writeMode?`<div class="write-row"><button data-write-new="root">+ A thought</button></div>`:''}`;return}
+ const n=byId.get(current);if(!n){v.innerHTML='<p>This thought is unavailable.</p>';return}
+ const {d,editor,hasAlternate}=detailsOf(n);const c=kids(n.id);
+ v.innerHTML=`<h1 data-copy-current="${esc(n.id)}" title="${copyMode?'Click the title to copy this thought':''}">${esc(n.label||'Untitled thought')} ${marker(n)}</h1>${writingHelp()}<div class="outline focused-outline">${peRows(n,0)}${outline(c)}</div>${writeMode?`<div class="write-row"><button data-write-new="${esc(n.id)}">+ A thought</button></div>`:''}${hasAlternate?`<details class="source-meta" ${editorOpen?'open':''} id="alternate"><summary>Other saved version of this text</summary><p class="gentle">Pocket exported two different versions of this text. The editor's text appears in the outline above; the other copy is preserved here.</p>${note(d,'alt')}</details>`:''}<div class="understated-row" id="outlineactions">${c.length?`<button class="understated" data-action="foldall">Fold all</button><button class="understated" data-action="unfoldall">Unfold headings</button>`:''}</div><details class="source-meta"><summary>About this thought</summary><div>Source identity: ${esc(n.id)}. Parent: ${esc(byId.get(n.parentId)?.label||'Everything')}. Text inside PE remains part of this thought rather than independent, invented units. Use Save for a new working JSON. This prototype has not been certified for live Pocket import.</div></details>`;
+ const alt=$('alternate');if(alt)alt.addEventListener('toggle',()=>{editorOpen=alt.open});
+}
+function render(){renderTrail();$('back').disabled=routePos===0;$('forward').disabled=routePos>=route.length-1;$('undo').disabled=!undoStack.length;$('redo').disabled=!redoStack.length;$('export').disabled=!hasDraft();$('save-pocket').disabled=!loaded;$('save-pocket-menu').disabled=!loaded;$('save-pocket-as').disabled=!loaded;$('file-status')&&($('file-status').textContent=sourceName);$('page').classList.toggle('write-mode',writeMode);$('page').classList.toggle('copy-mode',copyMode);$('page').classList.toggle('nav-mode',!writeMode&&!copyMode);renderViewer();if(asideId){renderAside();positionAside();}}
+function closeAside(){clearTimeout(hoverTimer);clearTimeout(hideTimer);asideId=null;asideLocked=false;$('aside').classList.add('hidden');$('workspace').classList.remove('has-aside');document.querySelectorAll('[data-door]').forEach(x=>x.setAttribute('aria-expanded','false'))}
+function scheduleClose(){if(asideLocked)return;clearTimeout(hideTimer);hideTimer=setTimeout(()=>{if(!asideLocked)closeAside()},1200)}
+function positionAside(){
+ if(!asideId||$('aside').classList.contains('hidden'))return;
+ const active=[...document.querySelectorAll('[data-door]')].find(el=>el.dataset.door===asideId);
+ const a=$('aside'),rect=active?.getBoundingClientRect(),paper=$('page').getBoundingClientRect();
+ const width=a.getBoundingClientRect().width||Math.min(262,window.innerWidth-24),room=window.innerWidth-paper.right;
+ let left=room>=width+12?paper.right+10:paper.left>=width+12?paper.left-width-10:Math.max(12,Math.min(window.innerWidth-width-12,(rect?.right||paper.right)+9));
+ const effectiveHeight=Math.min(a.scrollHeight||300,window.innerHeight*.6,560);
+ const top=Math.max(66,Math.min(window.innerHeight-effectiveHeight-10,(rect?.top||85)-10));
+ a.style.left=`${Math.round(left)}px`;a.style.top=`${Math.round(top)}px`;
+}
+function openAside(id,locked=false){
+ if(!loaded||!byId.has(id))return;
+ clearTimeout(hideTimer);clearTimeout(hoverTimer);closePeek();asideId=id;asideLocked=locked;
+ $('aside').classList.remove('hidden');renderAside();positionAside();
+ document.querySelectorAll('[data-door]').forEach(x=>x.setAttribute('aria-expanded',String(x.dataset.door===id)));
+}
+function linkRow(n,subtitle,extra=''){return `<button class="item" data-open="${esc(n.id)}">${esc(n.label)}${subtitle?`<small>${esc(subtitle)}</small>`:''}</button>${extra}`}
+function renderAside(){
+ if(!asideId)return;
+ const n=byId.get(asideId);if(!n){closeAside();return}
+ const parent=byId.get(n.parentId),same=(names.get(norm(n.label))||[]).filter(x=>x.id!==n.id),
+  links=[...proposed.values()].filter(l=>l.from===n.id||l.to===n.id),c=kids(n.id),a=$('aside'),pref=retrievalPreview.get(n.id);
+ const aliasDisplay=pref?.aliases?.length?pref.aliases.join(', '):'Not configured in this lab';
+ const copyDisplay=pref?.copySource==='body'?'Body (preview only)':'Title';
+ const meta=`<div class="sheet-section"><div class="sheet-label">Unit identity</div><div class="sheet-property"><span>ID</span><code>${esc(n.id)}</code></div><div class="sheet-property"><span>Parent</span><span>${esc(parent?.label||'Everything')}</span></div><div class="sheet-property"><span>Child units</span><span>${c.length}</span></div><div class="sheet-property"><span>Order</span><span>${esc(Number(n.order)||0)}</span></div></div>`;
+ const retrieval=`<div class="sheet-section"><div class="sheet-label">Retrieval</div><div class="sheet-property"><span>Aliases</span><span>${esc(aliasDisplay)}</span></div><div class="sheet-property"><span>Quick copy</span><span>${esc(copyDisplay)}</span></div><p class="sheet-hint">Aliases and copy sources are preview settings only. They are not written to normal Pocket JSON.</p></div>`;
+ const hierarchy=`<div class="sheet-section"><div class="sheet-label">Hierarchy & navigation</div>${linkRow(n,'Focus this unit')}${parent?linkRow(parent,'Stored parent: '+parent.label):`<button class="item" data-open="${ALL}">Everything</button>`}${c.length?`<details><summary>Children (${c.length})</summary>${c.slice(0,12).map(x=>linkRow(x,'')).join('')}${c.length>12?'<p class="quiet">Focus this unit to see all children.</p>':''}</details>`:''}</div>`;
+ const connections=`<div class="sheet-section"><div class="sheet-label">Other relationships (session proposals)</div>${links.length?links.map(l=>{const other=byId.get(l.from===n.id?l.to:l.from);return other?`<div class="proposal"><div style="flex:1">${linkRow(other,path(other))}</div><button data-remove="${esc(l.from)}|${esc(l.to)}" title="Remove temporary link" aria-label="Remove temporary link to ${esc(other.label)}">×</button></div>`:''}).join(''):'<p class="quiet">No additional relationship proposals this session.</p>'}<p class="sheet-hint">This does not claim to list every relationship in the original Pocket Core.</p></div>`;
+ const sameNames=same.length?`<div class="sheet-section"><div class="sheet-label">Same name elsewhere</div>${same.slice(0,5).map(x=>`<div>${linkRow(x,path(x))}<button class="action" data-add="${esc(n.id)}|${esc(x.id)}" ${proposed.has(linkKey(n.id,x.id))?'disabled':''}>${proposed.has(linkKey(n.id,x.id))?'Linked in this session':'Propose a link'}</button></div>`).join('')}${same.length>5?'<p class="quiet">More matches available in search.</p>':''}<p class="sheet-hint">Matching names need not share identity.</p></div>`:'';
+ const find=`<div class="sheet-section"><details><summary>Propose another relationship…</summary><input type="search" id="aside-find" autocomplete="off" placeholder="Search names" aria-label="Find a unit to link"><div id="aside-results"><p class="quiet">Find a unit to propose a session-only link.</p></div></details></div>`;
+ a.innerHTML=`<div class="aside-head"><div><div class="sheet-eyebrow">UNIT SHEET · METADATA ONLY</div><h2>${esc(n.label)}</h2></div><button class="aside-close" id="aside-close" aria-label="Close unit sheet" title="Close">×</button></div><div class="asidepath">${esc(path(n))}</div>${meta}${retrieval}${hierarchy}${connections}${sameNames}${find}<div class="sheet-section"><div class="sheet-label">History</div><p class="sheet-hint">Not displayed in this interface lab. No history is inferred or rewritten here.</p></div><p class="sheet-foot">Text, legacy PE and paragraphs stay in the main outline, not in this sheet. Any proposed links are temporary.</p>`;
+}
+
+function closePeek(){clearTimeout(peekTimer);$('peek').classList.add('hidden');peekId=null}
+function schedulePeekClose(){clearTimeout(peekTimer);peekTimer=setTimeout(closePeek,700)}
+function openPeek(button){
+ if(!button||!loaded)return;
+ const id=button.dataset.door,n=byId.get(id);if(!n)return;
+ clearTimeout(peekTimer);peekId=id;const same=Math.max(0,(names.get(norm(n.label))||[]).length-1);
+ const refs=linkCount(id),p=$('peek');
+ const hint=refs?`${refs} connection${refs!==1?'s':''}`:same?`${same} same-name possibility${same!==1?'ies':''}`:'';
+ p.innerHTML=`<div class="peek-name">${esc(n.label)}${hint?`<div class="peek-hint">${esc(hint)}</div>`:''}</div><button data-open="${esc(id)}">Focus here</button><button data-peek-full="${esc(id)}">Open unit metadata…</button>`;
+ p.classList.remove('hidden');const r=button.getBoundingClientRect(),width=p.getBoundingClientRect().width,height=p.getBoundingClientRect().height;
+ let left=r.right+8;if(left+width>window.innerWidth-12)left=r.left-width-8;
+ left=Math.max(10,Math.min(left,window.innerWidth-width-10));
+ const top=Math.max(62,Math.min(r.top-6,window.innerHeight-height-10));
+ p.style.left=`${Math.round(left)}px`;p.style.top=`${Math.round(top)}px`;
+}
+function asideMatches(text){const box=$('aside-results');if(!box||!asideId)return;const q=norm(text);if(q.length<2){box.innerHTML='<p class="quiet">Enter at least two letters.</p>';return}const found=nodes.filter(n=>n.id!==asideId&&norm(n.label).includes(q)).slice(0,9);box.innerHTML=found.length?found.map(n=>`${linkRow(n,path(n))}<button class="action" data-add="${esc(asideId)}|${esc(n.id)}" ${proposed.has(linkKey(asideId,n.id))?'disabled':''}>${proposed.has(linkKey(asideId,n.id))?'Linked in this session':'Link these thoughts'}</button>`).join(''):'<p class="quiet">No matching names.</p>'}
+function suggest(a,b){if(a===b||!byId.has(a)||!byId.has(b)||proposed.has(linkKey(a,b)))return;const item={from:a,to:b};proposed.set(linkKey(a,b),item);undoStack.push({kind:'add',item});redoStack=[];flash('Connected for this visit. Your Pocket file is unchanged.');render()}
+function remove(a,b){const item=proposed.get(linkKey(a,b));if(!item)return;proposed.delete(linkKey(a,b));undoStack.push({kind:'remove',item});redoStack=[];flash('Temporary link removed.');render()}
+function apply(a,forward){
+ if(a.kind==='add'||a.kind==='remove'){
+  const adding=(a.kind==='add')===forward;
+  if(adding)proposed.set(linkKey(a.item.from,a.item.to),a.item);else proposed.delete(linkKey(a.item.from,a.item.to));
+ }else if(a.kind==='text'){
+  const n=byId.get(a.id);if(n)n.label=forward?a.after:a.before;
+  rebuildIndex();
+ }else if(a.kind==='pe'){
+  noteDrafts.set(a.owner,cloneLines(forward?a.after:a.before));
+ }else if(a.kind==='split'){
+  const n=byId.get(a.id);if(n)n.label=forward?a.head:a.original;
+  if(forward){if(!byId.has(a.newNode.id))nodes.push({...a.newNode});sessionNew.add(a.newNode.id)}
+  else {nodes=nodes.filter(n=>n.id!==a.newNode.id);sessionNew.delete(a.newNode.id)}
+  rebuildIndex();restoreStructure(forward?a.afterStruct:a.beforeStruct);
+ }else if(a.kind==='new'){
+  if(forward){if(!byId.has(a.node.id))nodes.push({...a.node});sessionNew.add(a.node.id)}
+  else {nodes=nodes.filter(n=>n.id!==a.node.id);sessionNew.delete(a.node.id)}
+  rebuildIndex();restoreStructure(forward?a.afterStruct:a.beforeStruct);
+ }else if(a.kind==='delete-empty'){
+  if(forward){nodes=nodes.filter(n=>n.id!==a.node.id);sessionNew.delete(a.node.id)}
+  else {if(!byId.has(a.node.id))nodes.push({...a.node});sessionNew.add(a.node.id)}
+  rebuildIndex();restoreStructure(forward?a.afterStruct:a.beforeStruct);
+ }else if(a.kind==='struct'){
+  for(const [id,p,o] of (forward?a.after:a.before)){const n=byId.get(id);if(n){n.parentId=p;n.order=o}}
+  rebuildIndex();
+ }
+}
+// A source thought is never an insertion to be reversed by removing the whole unit.
+// This is a prototype safety check, not a proof of all Core identity guarantees.
+function unsafeRemoval(a,forward){
+ const id=a.kind==='new'?a.node?.id:a.kind==='split'?a.newNode?.id:a.kind==='delete-empty'?a.node?.id:null;
+ const removing=(a.kind==='new'||a.kind==='split')?!forward:a.kind==='delete-empty'?forward:false;
+ if(!removing||!id)return false;
+ if(originalNodes.has(id)||!sessionNew.has(id))return true;
+ const descendants=kids(id);
+ return descendants.length>0||linkCount(id)>0;
+}
+function completeDraftAction(){
+ const job=pendingDraftAction;if(!job)return;
+ clearTimeout(job.timer);pendingDraftAction=null;
+ const from=job.isRedo?redoStack:undoStack,to=job.isRedo?undoStack:redoStack;
+ // Never apply a delayed change against a different timeline or source.
+ if(from[from.length-1]!==job.action){
+  clearUndoSpot();flash('The draft changed while Undo was locating it. No delayed change was applied.');
+  queuedDraftActions=[];return;
+ }
+ if(unsafeRemoval(job.action,job.isRedo)){
+  clearUndoSpot();flash('Undo paused: removing this thought would be unsafe. Your content is unchanged.');
+  queuedDraftActions=[];return;
+ }
+ from.pop();apply(job.action,job.isRedo);to.push(job.action);
+ render();restoreActionFocus(job.action,job.isRedo);
+ flash(job.isRedo?'Redo applied to this thought.':'Undo applied to this thought.');
+ // Multiple quick presses are still distinct steps, each with its own preview.
+ if(queuedDraftActions.length){const next=queuedDraftActions.shift();setTimeout(()=>runDraftAction(next),50)}
+}
+// A visible unit is already the user's location: do not delay Undo/Redo or
+// unexpectedly jump to its parent. A row existing off-screen does NOT count.
+// Structural moves between different parents still need location preview.
+function undoTargetIsAlreadyInView(a,forward){
+ if(!loaded||searchMode||asideId)return false;
+ const target=preActionLocation(a,forward);
+ if(!target)return false;
+ if(a.kind==='struct'&&a.targetId){
+  const beforeParent=a.before?.find(x=>x[0]===a.targetId)?.[1];
+  const afterParent=a.after?.find(x=>x[0]===a.targetId)?.[1];
+  if(!beforeParent||!afterParent||beforeParent!==afterParent)return false;
+ }
+ const rows=target.kind==='pe'
+  ?document.querySelectorAll('.outline .unit[data-pe-owner]')
+  :document.querySelectorAll('.outline .unit[data-id]');
+ const row=Array.from(rows).find(el=>target.kind==='pe'
+  ?el.dataset.peOwner===target.owner&&Number(el.querySelector('[data-pe-index]')?.dataset.peIndex)===target.index
+  :el.dataset.id===target.id);
+ if(!row||!row.getClientRects().length)return false;
+ const box=row.getBoundingClientRect();
+ const viewportBottom=window.innerHeight||document.documentElement.clientHeight||0;
+ const headerBottom=Math.max(0,document.querySelector('.topbar')?.getBoundingClientRect().bottom||0);
+ const overlap=Math.max(0,Math.min(box.bottom,viewportBottom)-Math.max(box.top,headerBottom));
+ return box.height>0 && overlap>=Math.min(16,box.height*.5);
+}
+function runDraftAction(isRedo){
+ if(pendingDraftAction){
+  if(queuedDraftActions.length<20)queuedDraftActions.push(isRedo);
+  return;
+ }
+ finishEdit();
+ const from=isRedo?redoStack:undoStack;
+ if(!from.length)return;
+ const a=from[from.length-1];
+ if(unsafeRemoval(a,isRedo)){
+  flash('Undo paused: removing this thought would be unsafe. Your content is unchanged.');
+  return;
+ }
+ // Do not add a 700ms preview when the affected row is already in view.
+ // Keep the authoritative guard and action path identical in both cases.
+ const alreadyHere=undoTargetIsAlreadyInView(a,isRedo);
+ pendingDraftAction={isRedo,action:a,timer:null};
+ if(alreadyHere){completeDraftAction();return;}
+ previewActionFocus(a,isRedo);
+ flash(isRedo?'Showing the thought before Redo…':'Showing the thought before Undo…');
+ pendingDraftAction.timer=setTimeout(completeDraftAction,DRAFT_PREVIEW_MS);
+}
+function undo(){runDraftAction(false)}
+function redo(){runDraftAction(true)}
+function hasDraft(){return proposed.size>0||sessionNew.size>0||[...noteDrafts].some(([id,lines])=>JSON.stringify(lines)!==JSON.stringify(noteCache.get(id)||[]))||nodes.some(n=>{const o=originalNodes.get(n.id);return o&&(n.label!==o.label||n.parentId!==o.parentId||n.order!==o.order)})}
+
+// A local, complete, source-shaped snapshot. Native file writes require an
+// explicit browser-granted handle; otherwise we offer Save As or download.
+// Unknown fields (including guards, deletion markers and duplicate tree fields)
+// must survive untouched unless they mirror the active tree we explicitly edited.
+function currentStateKey(){
+ return JSON.stringify({units:nodes.map(n=>[n.id,n.parentId,n.label,n.order]),
+  pe:[...noteDrafts].filter(([id,lines])=>JSON.stringify(lines)!==JSON.stringify(noteCache.get(id)||[])),
+  links:[...proposed.values()]});
+}
+function validateTree(tree,tombstones){
+ const ids=new Map(),tomb=new Set((tombstones||[]).map(x=>x.id));
+ for(const n of tree){
+  if(!n||typeof n.id!=='string'||!n.id||ids.has(n.id)||tomb.has(n.id)||typeof n.label!=='string'||typeof n.parentId!=='string'||!Number.isFinite(Number(n.order)))throw Error('Duplicate, deleted or malformed thought identity detected. Nothing saved.');
+  ids.set(n.id,n);
+ }
+ for(const n of tree){
+  let p=n.parentId,seen=new Set([n.id]);
+  while(p!=='root'){
+   if(!ids.has(p)||seen.has(p))throw Error('A missing parent or parent cycle was found. Nothing saved.');
+   seen.add(p);p=ids.get(p).parentId;
+  }
+  if(Array.isArray(n.editor?.outline)){
+   const lineIds=new Set();
+   for(const line of n.editor.outline){if(!line||typeof line.id!=='string'||!line.id||lineIds.has(line.id))throw Error('A PE line has an ambiguous identity. Nothing saved.');lineIds.add(line.id)}
+  }
+ }
+ if(!tree.some(n=>n.parentId==='root'))throw Error('There are no top-level thoughts. Nothing saved.');
+ for(const [id,old] of originalNodes){
+  const n=ids.get(id);if(!n)throw Error('An imported thought disappeared. Save blocked to protect source identity.');
+  if(!sessionNew.has(id))for(const key of Object.keys(old)){
+   if(!(key in n))throw Error('An existing thought lost an original field. Nothing saved.');
+  }
+ }
+ return ids;
+}
+function persistPeContent(n,lines){
+ const e=n.editor;
+ if(e?.schema==='pocket.nodeEditor.v1'&&Array.isArray(e.outline)){
+  const oldById=new Map(e.outline.map(x=>[x.id,x]));
+  const sortedOriginal=e.outline.slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0));
+  const sameLineOrder=lines.length===sortedOriginal.length&&lines.every((line,i)=>line.id===sortedOriginal[i].id);
+  const entries=lines.map((line,i)=>{
+   const old=oldById.get(line.id);const id=line.id||newStableId('b');
+   return {...(old||{}),id,text:String(line.text??''),depth:Math.max(0,Math.min(12,Number(line.depth)||0)),
+    collapsed:old?.collapsed??false,order:sameLineOrder&&old?old.order:i+1};
+  });
+  // Every original PE identity must remain present; blanking text is not deletion.
+  if(e.outline.some(x=>!entries.some(l=>l.id===x.id)))throw Error('An original PE line ID would be lost. Nothing saved.');
+  e.outline=entries;
+ }else{
+  // Preserve each unchanged raw text line exactly, including whitespace, if possible.
+  const text=lines.map(l=>l.originalRaw!==undefined&&l.text===l.originalText&&l.depth===l.originalDepth
+   ?l.originalRaw:' '.repeat(Math.min(12,Math.max(0,Number(l.depth)||0))*2)+String(l.text??'')).join('\n');
+  if(e?.schema==='pocket.nodeEditor.v2'&&typeof e.text==='string')e.text=text;
+  else if(!e&&typeof n.details==='string')n.details=text;
+  else throw Error('This PE text uses an unsupported editor representation. Save is blocked.');
+ }
+}
+function buildPocketSnapshot(){
+ if(!loaded||!originalExport)throw Error('Open your Pocket JSON first.');
+ if(syntheticLab)throw Error('This is synthetic test data. No normal Pocket JSON can be saved from this demonstration.');
+ if(nodes.some(n=>n.label.includes('\n')))throw Error('Multiline unit content is an experimental interface only. Normal JSON saving is blocked until a shared-model format and live importer are approved. Undo the multiline change or use the preserved v0.6.26 working version.');
+ if(pendingDraftAction||queuedDraftActions.length)throw Error('Let Undo/Redo finish before saving.');
+ finishEdit();
+ // Unused, untyped insertion points should never turn into real imported units.
+ for(const id of [...pendingBlank.keys()]){
+  if(byId.get(id)?.label?.trim())finishEdit();
+  if(pendingBlank.has(id))discardPendingBlank(id);
+ }
+ if(proposed.size)throw Error('There are experimental connection proposals that this JSON format cannot safely persist. Remove them or save a separate proposal draft first.');
+ const out=structuredClone(originalExport);
+ const originalTree=originalExport.mainThoughtTree;
+ const originals=new Map(originalTree.map(n=>[n.id,n]));
+ const now=new Date().toISOString();
+ const updated=nodes.map(n=>{
+  const prior=originals.get(n.id);
+  let result=prior?structuredClone(prior):{id:n.id,parentId:n.parentId,label:n.label,order:n.order,source:'manual',updatedAt:now};
+  result.label=n.label;result.parentId=n.parentId;result.order=n.order;
+  if(noteDrafts.has(n.id)&&JSON.stringify(noteDrafts.get(n.id))!==JSON.stringify(noteCache.get(n.id)||[])){
+   persistPeContent(result,noteDrafts.get(n.id));
+  }
+  if(!prior||n.label!==prior.label||n.parentId!==prior.parentId||n.order!==prior.order||
+    (noteDrafts.has(n.id)&&JSON.stringify(noteDrafts.get(n.id))!==JSON.stringify(noteCache.get(n.id)||[])))result.updatedAt=now;
+  return result;
+ });
+ const outputIds=validateTree(updated,out.mainThoughtTreeTombstones);
+ if(outputIds.size!==updated.length)throw Error('Identity count mismatch. Nothing saved.');
+ if(originals.size>updated.length)throw Error('A source thought was unexpectedly removed. Nothing saved.');
+ // Do not change the guard object: its provenance is part of the original.
+ out.mainThoughtTree=updated;
+ if(out.data&&typeof out.data==='object'){
+  if(Array.isArray(out.data.mainThoughtTree))out.data.mainThoughtTree=structuredClone(updated);
+  if(Array.isArray(out.data.mainThoughtTreeTombstones)&&JSON.stringify(out.data.mainThoughtTreeTombstones)!==JSON.stringify(out.mainThoughtTreeTombstones))
+   throw Error('The two copies of source deletion history disagree. Nothing saved.');
+  if(out.data.pocketGuard&&JSON.stringify(out.data.pocketGuard)!==JSON.stringify(out.pocketGuard))
+   throw Error('The source guard copies disagree. Nothing saved.');
+ }
+ // These describe the newly downloaded snapshot, not the original file's
+ // guard provenance (which remains exactly as imported).
+ out.exportedAt=now;out.writtenAt=now;
+ if(JSON.stringify(out.data?.mainThoughtTree)!==JSON.stringify(out.mainThoughtTree))throw Error('The two trees were not identical. Nothing saved.');
+ if(JSON.stringify(out.mainThoughtTreeTombstones)!==JSON.stringify(originalExport.mainThoughtTreeTombstones))throw Error('Deletion history changed. Nothing saved.');
+ if(JSON.stringify(out.pocketGuard)!==JSON.stringify(originalExport.pocketGuard))throw Error('Source guard changed. Nothing saved.');
+ return out;
+}
+function downloadJSON(data,name){
+ const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=name;a.style.display='none';document.body.appendChild(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),5000);
+}
+function jsonSaveText(out){return JSON.stringify(out,null,2)+'\n'}
+function suggestedSaveName(){
+ const d=new Date(),p=x=>String(x).padStart(2,'0');
+ const suffix=d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes());
+ const stem=(sourceName.replace(/\.json$/i,'')||'Pocket').replace(/_working_\d{4}-\d{2}-\d{2}_\d{4}$/i,'');
+ return stem+'_working_'+suffix+'.json';
+}
+function canOpenWritable(){return typeof window.showOpenFilePicker==='function'}
+function canSaveWritable(){return typeof window.showSaveFilePicker==='function'}
+function confirmLeavingDirty(){
+ if(!loaded||currentStateKey()===savedStateKey)return true;
+ return window.confirm('You have unsaved Pocket edits. Open another JSON and discard those unsaved edits?');
+}
+async function openPocketPicker(){
+ closeMenu();if(!confirmLeavingDirty())return;
+ if(!canOpenWritable()){
+  flash('This browser does not support direct-file opening. Use the file upload option; saving will download a copy.');
+  $('filepicker').click();return;
+ }
+ try{
+  // Keep native picker call directly in the click handler's user activation.
+  const [handle]=await window.showOpenFilePicker({multiple:false,types:[{description:'Pocket JSON',accept:{'application/json':['.json']}}]});
+  if(!handle)return;
+  const file=await handle.getFile(),raw=await file.text();
+  const data=JSON.parse(raw);
+  load(data,file.name);
+  sourceHandle=handle;sourceFileText=raw;directSaveConfirmed=false;
+  flash('Opened '+file.name+'. Save can write to this same file with your permission. Keep a backup.');
+ }catch(err){if(err?.name==='AbortError')return;flash('Could not open JSON: '+(err.message||err));}
+}
+async function writeToHandle(handle,content,{sameFile=false,saveKey=null}={}){
+ if(sameFile){
+  // An external editor or another tab may have changed this file since we opened it.
+  const disk=await (await handle.getFile()).text();
+  if(sourceFileText===null||disk!==sourceFileText)throw Error('This file changed outside Pocket. Save blocked. Reopen it or use Save As to avoid overwriting someone else’s changes.');
+  if(!directSaveConfirmed){
+   const ok=window.confirm('Overwrite the opened JSON file?\n\nThis is an experimental Pocket prototype, NOT verified for import into live Pocket. Make sure you have a separate backup first.\n\nCancel keeps the file unchanged.');
+   if(!ok)return false;
+  }
+ }
+ let writable;
+ try{
+  writable=await handle.createWritable();
+  await writable.write(content);
+  await writable.close();writable=null;
+ }catch(err){
+  if(writable)try{await writable.abort()}catch(_){}
+  throw err;
+ }
+ sourceHandle=handle;sourceFileText=content;directSaveConfirmed=true;
+ sourceName=handle.name||sourceName;lastSavedFile=sourceName;
+ savedStateKey=saveKey??currentStateKey();render();
+ flash('Saved '+sourceName+' to disk.');
+ return true;
+}
+async function savePocketJSON({asNew=false}={}){
+ try{
+  closeMenu();
+  // Validate and prepare before any permission dialog or write.
+  const out=buildPocketSnapshot(),content=jsonSaveText(out),saveKey=currentStateKey();
+  if(!asNew&&sourceHandle){
+   await writeToHandle(sourceHandle,content,{sameFile:true,saveKey});
+   return;
+  }
+  if(canSaveWritable()){
+   // A file-input opening cannot silently overwrite the original. The user
+   // chooses a target in the OS picker, even if they choose the old filename.
+   const handle=await window.showSaveFilePicker({suggestedName:asNew?suggestedSaveName():(sourceName||suggestedSaveName()),types:[{description:'Pocket JSON',accept:{'application/json':['.json']}}]});
+   if(!handle)return;
+   await writeToHandle(handle,content,{sameFile:false,saveKey});
+   flash('Saved '+(handle.name||'Pocket JSON')+'. Later saves will use this chosen file. Keep the original backup.');
+   return;
+  }
+  const filename=suggestedSaveName();
+  downloadJSON(out,filename);lastSavedFile=filename;
+  // Browser downloads cannot be confirmed as completed, so do not mark clean.
+  flash('Download started: '+filename+'. This browser cannot overwrite the source; reopen the downloaded copy to continue.');
+ }catch(err){
+  if(err?.name==='AbortError')return;
+  flash('Not saved: '+(err.message||err));
+ }
+}
+
+function exportLinks(){
+ finishEdit();if(!hasDraft())return;
+ const changes=nodes.filter(n=>{const orig=originalNodes.get(n.id);return orig&&!sessionNew.has(n.id)&&(n.label!==orig.label||n.parentId!==orig.parentId||n.order!==orig.order)}).map(n=>({id:n.id,...(n.label!==originalNodes.get(n.id).label?{newText:n.label}:{}),...(n.parentId!==originalNodes.get(n.id).parentId?{proposedParentId:n.parentId}:{}),...(n.order!==originalNodes.get(n.id).order?{proposedOrder:n.order}:{})}));
+ const data={schema:'pocket.writing.study.draft.v0.6',createdAt:new Date().toISOString(),sourceFileName:sourceName,notice:'Disposable study proposal only. NOT a valid Pocket import. May contain sensitive personal/work content. Original JSON unchanged.',textChanges:changes,newThoughts:nodes.filter(n=>sessionNew.has(n.id)).map(n=>({temporaryId:n.id,proposedParentId:n.parentId,text:n.label,order:n.order})),peTextDrafts:[...noteDrafts].filter(([id,lines])=>JSON.stringify(lines)!==JSON.stringify(noteCache.get(id)||[])).map(([owner,lines])=>({sourceThoughtId:owner,lines:lines.map(l=>({text:l.text,depth:l.depth})),warning:'These are text lines, NOT new core units.'})),references:[...proposed.values()].map(x=>({fromId:x.from,toId:x.to,relation:'reference'}))};
+ const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='Pocket_writing_study_draft_v06.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1200);flash('A separate draft was saved. Your source JSON is untouched.');
+}
+function closeMenu(){$('moremenu').classList.add('hidden');$('more').setAttribute('aria-expanded','false')}
+function openSearch(){if(!loaded)return;$('searchdock').classList.remove('hidden');$('search').focus();$('search').select();closeMenu()}
+function searchChange(value){finishEdit();if(!loaded)return;const q=value.trim();if(q!==searchQ){searchSelection=0;searchNeedsDisambiguation=false}if(q&&!searchMode)searchReturn=current;searchQ=q;searchMode=!!q;if(!searchMode)searchResultIds=[];renderViewer()}
+function closeSearch(){const active=searchMode;searchMode=false;searchQ='';searchSelection=0;searchNeedsDisambiguation=false;searchResultIds=[];$('search').value='';$('searchdock').classList.add('hidden');if(active)renderViewer()}
+async function takeFile(f){if(!f)return;try{const data=JSON.parse(await f.text());load(data,f.name)}catch(e){$('loaderror').textContent=`Couldn't open this file: ${e.message}`;flash('That file could not be opened.')}}
+// v0.6 writing study: local in-memory proposals only, never a source import/write.
+function cloneLines(lines){return lines.map(l=>({...l,text:String(l.text??''),depth:Number(l.depth)||0}))}
+function rebuildIndex(){
+ byId=new Map(nodes.map(n=>[n.id,n]));children=new Map();names=new Map();counts.clear();
+ for(const n of nodes){if(!children.has(n.parentId))children.set(n.parentId,[]);children.get(n.parentId).push(n);const k=norm(n.label);if(!names.has(k))names.set(k,[]);names.get(k).push(n)}
+ for(const v of children.values())v.sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0)||a.label.localeCompare(b.label));
+ roots=children.get('root')||[];
+}
+function writingHelp(){
+ if(writeMode)return '<p class="write-note">EDIT · Enter: next thought · <strong>Shift+Enter: same unit, new line</strong> · Tab / Shift+Tab: nest / unnest · Alt+↑/↓: move unit · Drag the square: reorder siblings · Esc: navigate. New multiline storage is not yet approved for normal JSON saving.</p>';
+ if(copyMode)return '<p class="write-note">COPY · Single-click a thought or a PE text line to copy only its text · Esc: Navigate. No content or History change.</p>';
+ return '';
+}
+function syncModeButtons(){
+ const b=$('copy-mode');
+ b.setAttribute('aria-pressed',String(copyMode));
+ b.setAttribute('aria-label',copyMode?'Turn off Copy Mode':'Turn on Copy Mode');
+ b.title=copyMode?'Copy mode: on. Click to return to navigation':'Copy mode: off. Click to copy individual lines';
+ const w=$('menu-write');
+ w.innerHTML=writeMode?'Finish editing <span>Esc</span>':'Start editing <span>F2</span>';
+ w.setAttribute('aria-label',writeMode?'Finish editing and return to navigation':'Start editing');
+}
+function setMode(mode,{announce=true}={}){
+ if(!['navigate','write','copy'].includes(mode))return;
+ const prior=writeMode?'write':copyMode?'copy':'navigate';
+ if(prior===mode)return;
+ finishEdit();writeMode=mode==='write';copyMode=mode==='copy';
+ closePeek();closeAside();closeMenu();syncModeButtons();render();
+ if(announce)flash(mode==='write'?'Editing here. Your source JSON remains untouched.':mode==='copy'?'Copy mode. Click a thought to copy its text.': 'Navigation mode. Click a thought to focus.');
+}
+function activeLocation(){
+ const el=document.activeElement?.closest?.('[data-edit-node],[data-edit-pe]');
+ if(!el)return null;
+ if(el.hasAttribute('data-edit-node'))return {kind:'node',id:el.dataset.editNode,at:caretOffset(el)};
+ return {kind:'pe',owner:el.dataset.editPe,index:Number(el.dataset.peIndex),at:caretOffset(el)};
+}
+function focusLocation(loc){
+ if(!loc)return false;
+ return loc.kind==='pe'?focusPE(loc.owner,loc.index,loc.at):focusEdit(loc.id,false,loc.at);
+}
+function previousLocation(el){
+ const row=el.closest('.outline .unit');let prev=row?.previousElementSibling;
+ while(prev){const field=prev.querySelector?.('[data-edit-node],[data-edit-pe]');if(field){
+   return field.hasAttribute('data-edit-node')?{kind:'node',id:field.dataset.editNode,at:field.textContent.length}:
+   {kind:'pe',owner:field.dataset.editPe,index:Number(field.dataset.peIndex),at:field.textContent.length};
+ }prev=prev.previousElementSibling}
+ return null;
+}
+function escapeNewBlank(el){
+ if(!writeMode||!el?.hasAttribute('data-edit-node'))return false;
+ const id=el.dataset.editNode,n=byId.get(id);
+ if(!n||!sessionNew.has(id)||n.label.trim()||kids(id).length||linkCount(id))return false;
+ const pending=pendingBlank.get(id),origin=pending?.origin||previousLocation(el);
+ // A pending blank has never been committed: cancelling it is not another Undo step.
+ // A previously committed new thought that becomes empty is removed reversibly.
+ if(pending){activeEdit=null;discardPendingBlank(id)}
+ else{const prior=activeEdit?.kind==='node'&&activeEdit.id===id?activeEdit.before:null;activeEdit=null;removeEmptySessionThought(id,prior)}
+ render();
+ if(!focusLocation(origin)){
+  const parent=byId.get(pending?.id||n.parentId);
+  if(parent)focusEdit(parent.id,true);
+ }
+ flash('Empty new thought cancelled. Still in Write mode.');
+ return true;
+}
+function clipboardFallback(text){
+ const oldFocus=document.activeElement,selection=window.getSelection(),ranges=[];
+ if(selection)for(let i=0;i<selection.rangeCount;i++)ranges.push(selection.getRangeAt(i).cloneRange());
+ const t=document.createElement('textarea');t.value=text;t.setAttribute('readonly','');
+ t.style.cssText='position:fixed;top:-10000px;left:-10000px;opacity:0';document.body.appendChild(t);
+ t.focus();t.select();let ok=false;
+ try{ok=document.execCommand('copy')}catch(_){ok=false}
+ t.remove();
+ if(oldFocus?.isConnected&&typeof oldFocus.focus==='function')oldFocus.focus({preventScroll:true});
+ if(selection){selection.removeAllRanges();for(const r of ranges)selection.addRange(r)}
+ return ok;
+}
+async function copyVisibleText(text,row){
+ // Never copy descendants, fabricate identifiers or mutate the saved source.
+ let success=false;
+ try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);success=true}}
+ catch(_){/* the local-file or permission fallback below may still work */}
+ if(!success)success=clipboardFallback(text);
+ if(!success){flash('Clipboard was blocked. Select the text and copy manually.');return false}
+ document.querySelectorAll('.copy-tick').forEach(x=>x.remove());
+ const tick=document.createElement('span');tick.className='copy-tick';tick.setAttribute('aria-label','Copied');tick.textContent='✓';
+ (row?.querySelector?.('.unit-body')||row)?.appendChild(tick);
+ clearTimeout(copyTickTimer);copyTickTimer=setTimeout(()=>tick.remove(),1400);
+ flash('Copied.');
+ return true;
+}
+function handleEscape(e){
+ if(e.key!=='Escape'||!loaded)return;
+ if(pendingUnitDrag?.active){e.preventDefault();e.stopImmediatePropagation();suppressUnitHandleClickUntil=Date.now()+700;clearUnitDrag();flash('Unit move cancelled.');return;}
+ const visible=id=>!$(id).classList.contains('hidden');
+ if(visible('peek')||visible('aside')||visible('moremenu')||visible('searchdock')){
+  e.preventDefault();e.stopImmediatePropagation();closePeek();closeAside();closeMenu();closeSearch();return;
+ }
+ if(writeMode){
+  const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');
+  if(el&&escapeNewBlank(el)){e.preventDefault();e.stopImmediatePropagation();return}
+  e.preventDefault();e.stopImmediatePropagation();setMode('navigate');return;
+ }
+ if(copyMode){e.preventDefault();e.stopImmediatePropagation();setMode('navigate');return;}
+ // At rest, Escape means 'back out one visited view', not 'change parent'.
+ // A reference or search-result entry therefore returns to its origin.
+ if(routePos>0){e.preventDefault();e.stopImmediatePropagation();travel(-1);}
+}
+function register(a){undoStack.push(a);redoStack=[];$('undo').disabled=false;$('redo').disabled=true;$('export').disabled=false}
+// An untyped Enter row is a draft insertion point, not an accepted new thought.
+// Keep it in memory only while editing; never turn it into an orphan placeholder.
+function discardPendingBlank(id){
+ const n=byId.get(id);
+ if(!pendingBlank.has(id)||!n||n.label.trim()||kids(id).length||linkCount(id))return false;
+ const pending=pendingBlank.get(id);
+ pendingBlank.delete(id);sessionNew.delete(id);
+ if(pending.kind==='split'){
+  const original=byId.get(pending.id);
+  if(original)original.label=pending.original;
+ }
+ nodes=nodes.filter(x=>x.id!==id);rebuildIndex();
+ // Remove just this row, not the whole document: preserve the field the user clicked next.
+ for(const row of document.querySelectorAll('.outline .unit[data-id]'))if(row.dataset.id===id)row.remove();
+ $('export').disabled=!hasDraft();
+ return true;
+}
+function removeEmptySessionThought(id,restoreLabel=null){
+ const n=byId.get(id);
+ if(!n||!sessionNew.has(id)||n.label.trim()||kids(id).length||linkCount(id))return false;
+ if(pendingBlank.has(id))return discardPendingBlank(id);
+ // An already-written and subsequently emptied draft thought is a reversible removal.
+ const beforeStruct=snapshotStruct(),removed={...n,label:restoreLabel===null?n.label:restoreLabel};
+ nodes=nodes.filter(x=>x.id!==id);sessionNew.delete(id);rebuildIndex();
+ register({kind:'delete-empty',node:removed,beforeStruct,afterStruct:snapshotStruct(),returnToUndo:{kind:'node',id,at:removed.label.length}});
+ for(const row of document.querySelectorAll('.outline .unit[data-id]'))if(row.dataset.id===id)row.remove();
+ return true;
+}
+function finishEdit(){
+ if(!activeEdit)return;
+ const a=activeEdit;activeEdit=null;
+ if(a.kind==='node'){
+  const n=byId.get(a.id);if(!n)return;
+  const pending=pendingBlank.get(a.id);
+  if(pending){
+   if(!n.label.trim()){discardPendingBlank(n.id);return}
+   pendingBlank.delete(n.id);
+   const action=pending.kind==='split'
+    ?{kind:'split',id:pending.id,original:pending.original,head:pending.head,newNode:{...n},beforeStruct:pending.beforeStruct,afterStruct:snapshotStruct(),returnToRedo:{kind:'node',id:n.id,at:a.at}}
+    :{kind:'new',node:{...n},beforeStruct:pending.beforeStruct,afterStruct:snapshotStruct(),returnToRedo:{kind:'node',id:n.id,at:a.at}};
+   register(action);rebuildIndex();return;
+  }
+  if(sessionNew.has(n.id)&&!n.label.trim()&&!kids(n.id).length&&!linkCount(n.id)){removeEmptySessionThought(n.id,a.before);return}
+  if(n.label!==a.before){register({kind:'text',id:a.id,before:a.before,after:n.label,returnTo:{kind:'node',id:a.id,at:a.at}});textChanged.add(a.id);rebuildIndex()}
+ }else if(a.kind==='pe'){
+  const currentLines=cloneLines(peLines(byId.get(a.owner)));
+  if(JSON.stringify(currentLines)!==JSON.stringify(a.before))register({kind:'pe',owner:a.owner,before:a.before,after:currentLines,returnTo:{kind:'pe',owner:a.owner,index:a.index,at:a.at}});
+ }
+}
+function editableFocus(el){
+ if(!writeMode)return;
+ if(activeEdit){
+  const same=activeEdit.kind==='node'?activeEdit.id===el.dataset.editNode:activeEdit.owner===el.dataset.editPe&&activeEdit.index===Number(el.dataset.peIndex);
+  if(same)return;
+  finishEdit();
+ }
+ if(el.hasAttribute('data-edit-node')){const n=byId.get(el.dataset.editNode);if(n)activeEdit={kind:'node',id:n.id,before:n.label,at:caretOffset(el)}}
+ else if(el.hasAttribute('data-edit-pe')){const n=byId.get(el.dataset.editPe);if(n)activeEdit={kind:'pe',owner:n.id,index:Number(el.dataset.peIndex),before:cloneLines(peLines(n)),at:caretOffset(el)}}
+}
+function rememberCaret(el){
+ if(!activeEdit||!el)return;
+ const match=activeEdit.kind==='node'?activeEdit.id===el.dataset.editNode:activeEdit.owner===el.dataset.editPe&&activeEdit.index===Number(el.dataset.peIndex);
+ if(match)activeEdit.at=caretOffset(el);
+}
+function caretOffset(el){const sel=window.getSelection();if(!sel||!sel.rangeCount||!el.contains(sel.anchorNode))return el.textContent.length;const range=sel.getRangeAt(0).cloneRange();range.selectNodeContents(el);range.setEnd(sel.anchorNode,sel.anchorOffset);return range.toString().replace(/\u2060/g,'').length}
+function placeCaret(el,at=null,end=false){
+ if(!el)return false;
+ el.focus();const sel=window.getSelection(),r=document.createRange();
+ if(typeof at==='number'&&Number.isFinite(at)){
+  let remain=Math.max(0,at),walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),last=null,node;
+  while((node=walker.nextNode())){last=node;if(remain<=node.textContent.length){r.setStart(node,remain);r.collapse(true);break}remain-=node.textContent.length}
+  if(!node){if(last)r.setStart(last,last.textContent.length);else r.selectNodeContents(el);r.collapse(true)}
+ }else{r.selectNodeContents(el);r.collapse(!end)}
+ sel.removeAllRanges();sel.addRange(r);el.scrollIntoView({block:'nearest'});return true;
+}
+function focusEdit(id,end=false,at=null){const el=[...document.querySelectorAll('[data-edit-node]')].find(x=>x.dataset.editNode===id);return placeCaret(el,at,end)}
+function focusPE(owner,index,at=null){const el=[...document.querySelectorAll('[data-edit-pe]')].find(x=>x.dataset.editPe===owner&&Number(x.dataset.peIndex)===index);return placeCaret(el,at)}
+function clearUndoSpot(){
+ clearTimeout(undoSpotTimer);
+ document.querySelectorAll('.undo-spot,.undo-preview').forEach(row=>row.classList.remove('undo-spot','undo-preview'));
+}
+function actionLocation(a,forward){
+ let target=forward?(a.returnToRedo||a.returnTo):(a.returnToUndo||a.returnTo);
+ if(!target&&a.kind==='text')target={kind:'node',id:a.id,at:(forward?a.after:a.before).length};
+ if(!target&&a.kind==='pe')target={kind:'pe',owner:a.owner,index:0,at:0};
+ if(!target&&a.kind==='split')target=forward?{kind:'node',id:a.newNode.id,at:0}:{kind:'node',id:a.id,at:a.head.length};
+ if(!target&&a.kind==='new')target={kind:'node',id:forward?a.node.id:a.node.parentId};
+ if(!target&&a.kind==='struct'&&a.targetId)target={kind:'node',id:a.targetId};
+ if(!target&&a.kind==='delete-empty')target={kind:'node',id:forward?a.node.parentId:a.node.id};
+ return target;
+}
+function preActionLocation(a,forward){
+ // For inserted lines, show what is about to disappear rather than their parent.
+ if(a.kind==='new')return {kind:'node',id:forward?a.node.parentId:a.node.id};
+ if(a.kind==='split')return {kind:'node',id:forward?a.id:a.newNode.id};
+ if(a.kind==='delete-empty')return {kind:'node',id:forward?a.node.id:a.node.parentId};
+ if((a.kind==='add'||a.kind==='remove')&&a.item?.from)return {kind:'node',id:a.item.from};
+ return actionLocation(a,forward);
+}
+// A structural Undo can move a thought between parents. Preview it in a
+// shared outline context, rather than opening its current parent and then
+// jumping back to its old sibling level when the change is applied.
+function ancestorView(view,id){
+ if(view===ALL)return true;
+ let p=id,seen=new Set();
+ while(p&&p!=='root'&&!seen.has(p)){
+  if(p===view)return true;
+  seen.add(p);p=byId.get(p)?.parentId;
+ }
+ return false;
+}
+function sharedStructureView(a){
+ if(a.kind!=='struct'||!a.targetId)return null;
+ const oldParent=a.before?.find(x=>x[0]===a.targetId)?.[1];
+ const newParent=a.after?.find(x=>x[0]===a.targetId)?.[1];
+ if(!oldParent||!newParent)return null;
+ const path=p=>p==='root'?[ALL]:byId.has(p)?[ALL,...chain(byId.get(p)).map(n=>n.id)]:[ALL];
+ const before=path(oldParent),after=path(newParent);
+ let shared=ALL;
+ for(let i=0;i<Math.min(before.length,after.length);i++){
+  if(before[i]!==after[i])break;
+  shared=before[i];
+ }
+ return shared;
+}
+function revealOutlinePath(id){
+ // The whole ancestor chain needs expanding when a target sits several levels
+ // beneath Everything or beneath the shared parent view.
+ if(!ancestorView(current,id))return false;
+ let p=byId.get(id)?.parentId,changed=false;
+ while(p&&p!=='root'&&p!==current){
+  if(!expanded.has(p)){expanded.add(p);changed=true}
+  p=byId.get(p)?.parentId;
+ }
+ if(changed)renderViewer();
+ return true;
+}
+function locateActionRow(target,{preview=false,sharedView=null}={}){
+ if(!loaded||!target)return false;
+ clearUndoSpot();
+ let id=target.kind==='pe'?target.owner:target.id;
+ // An undone insertion no longer exists. Show its real parent rather than
+ // inventing a stand-in unit to receive focus.
+ if(!byId.has(id))return false;
+ const n=byId.get(id);
+ const destination=sharedView!==null?sharedView:(target.kind==='pe'?id:(n.parentId==='root'?ALL:n.parentId));
+ const findRow=()=>target.kind==='pe'
+  ?[...document.querySelectorAll('.outline .unit[data-pe-owner]')].find(r=>r.dataset.peOwner===target.owner&&Number(r.querySelector('[data-pe-index]')?.dataset.peIndex)===target.index)
+  :[...document.querySelectorAll('.outline .unit[data-id]')].find(r=>r.dataset.id===id);
+ if(sharedView!==null){
+  // Retain Everything (or an already useful ancestor view) whenever it shows
+  // both the old and new parent contexts. Only navigate when necessary.
+  if(searchMode||!ancestorView(current,sharedView))go(destination);
+  revealOutlinePath(id);
+ }else if(searchMode||!findRow())go(destination);
+ const row=findRow();
+ if(!row)return false;
+ row.scrollIntoView({block:'center',behavior:'instant'});
+ if(!preview&&writeMode&&focusLocation(target)){
+  row.classList.add('undo-spot');
+ }else{
+  // Preview must not put the caret into an editable field before the change.
+  row.tabIndex=-1;row.classList.add(preview?'undo-preview':'undo-spot');row.focus({preventScroll:true});
+ }
+ if(!preview)undoSpotTimer=setTimeout(clearUndoSpot,1750);
+ return true;
+}
+function previewActionFocus(a,forward){
+ const target=preActionLocation(a,forward),sharedView=sharedStructureView(a);
+ if(locateActionRow(target,{preview:true,sharedView}))return;
+ // The target might not yet exist (e.g. a redo of an insertion).
+ locateActionRow(actionLocation(a,forward),{preview:true,sharedView});
+}
+function restoreActionFocus(a,forward){
+ const target=actionLocation(a,forward),sharedView=sharedStructureView(a);
+ if(locateActionRow(target,{sharedView}))return;
+ const related=a.node||a.newNode;
+ if(related&&byId.has(related.parentId))locateActionRow({kind:'node',id:related.parentId});
+}
+// The location highlight is transient and clears when the user chooses another interaction.
+document.addEventListener('pointerdown',e=>{
+ if(pendingDraftAction&&e.target.closest?.('#viewer')){e.preventDefault();e.stopImmediatePropagation();return}
+ clearUndoSpot();
+},true);
+
+function newStableId(prefix='node'){
+ // Persist identities across sessions. Do not reuse a source or tombstone ID.
+ let id;
+ do{
+  const r=globalThis.crypto?.randomUUID?.().replace(/-/g,'') ||
+    (globalThis.crypto?.getRandomValues?Array.from(globalThis.crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join(''):
+    Date.now().toString(36)+'_'+(++sessionSerial).toString(36)+'_'+Math.random().toString(36).slice(2));
+  id=prefix+'_'+r;
+ }while(usedIds.has(id)||byId.has(id));
+ usedIds.add(id);return id;
+}
+function newId(){return newStableId('node')}
+function orderAfter(parent,afterId=null){
+ const peers=kids(parent),at=afterId?peers.findIndex(n=>n.id===afterId):peers.length-1;
+ if(at<0)return peers.length?Number(peers[0].order)-10:10;
+ const left=Number(peers[at]?.order)||0,right=peers[at+1]?Number(peers[at+1].order):null;
+ if(right===null)return left+10;
+ if(right>left)return left+(right-left)/2;
+ // Equal neighbouring sort keys are rare in older exports: give this draft a small positive offset.
+ return left+0.00001;
+}
+function addThought(parent,afterId=null,label=''){
+ const origin=activeLocation();
+ finishEdit();if(parent!=='root'&&!byId.has(parent))return;
+ const beforeStruct=snapshotStruct();
+ const id=newId(),node={id,parentId:parent,label,order:orderAfter(parent,afterId),source:'session-only',updatedAt:new Date().toISOString()};
+ nodes.push(node);sessionNew.add(id);rebuildIndex();expanded.add(parent);
+ if(!label.trim())pendingBlank.set(id,{kind:'new',beforeStruct,origin});
+ else register({kind:'new',node:{...node},beforeStruct,afterStruct:snapshotStruct()});
+ render();focusEdit(id);
+ return id;
+}
+function insertMultilineInUnit(el){
+ const id=el.dataset.editNode,n=byId.get(id);if(!n)return;
+ const sel=window.getSelection();if(!sel||!sel.rangeCount)return;
+ const range=sel.getRangeAt(0);if(!el.contains(range.commonAncestorContainer))return;
+ const old=n.label,pos=caretOffset(el);
+ const head=old.slice(0,pos),tail=old.slice(pos);
+ n.label=head+'\n'+tail;
+ // A trailing newline in a contenteditable needs a temporary caret anchor
+ // so the next keystroke lands AFTER the break, not before it.
+ el.textContent=head+'\n'+'\u2060'+tail;
+ placeCaret(el,pos+1);
+ rememberCaret(el);
+ $('export').disabled=false;
+}
+function splitThought(el){
+ const id=el.dataset.editNode,n=byId.get(id);if(!n)return;
+ // Enter on a still-empty insertion point must not stack up empty sibling units.
+ if(pendingBlank.has(id)&&!n.label.trim()){placeCaret(el,0);return}
+ const before=n.label,pos=caretOffset(el),head=before.slice(0,pos),tail=before.slice(pos);
+ finishEdit(); // commit typing before structural action
+ if(!byId.has(id))return;
+ const beforeStruct=snapshotStruct();
+ const next={id:newId(),parentId:n.parentId,label:tail,order:orderAfter(n.parentId,id),source:'session-only',updatedAt:new Date().toISOString()};
+ n.label=head;nodes.push(next);sessionNew.add(next.id);rebuildIndex();
+ if(!tail.trim())pendingBlank.set(next.id,{kind:'split',id,original:before,head,beforeStruct,origin:{kind:'node',id,at:pos}});
+ else register({kind:'split',id,original:before,head,newNode:{...next},beforeStruct,afterStruct:snapshotStruct()});
+ render();focusEdit(next.id);
+}
+function snapshotStruct(){return nodes.map(n=>[n.id,n.parentId,Number(n.order)||0])}
+function restoreStructure(entries){if(!entries)return;for(const [id,p,o] of entries){const n=byId.get(id);if(n){n.parentId=p;n.order=o}}rebuildIndex()}
+
+// v0.6.29 experiment: reorder a complete unit subtree by assigning order only
+// to its EXISTING siblings. Parent IDs, unit IDs, PE text and links are untouched.
+// This is one provisional structural Undo action, not an adopted Core event.
+function reorderUnitBySiblingDrop(sourceId,targetId,position){
+ finishEdit();
+ const source=byId.get(sourceId),target=byId.get(targetId);
+ if(!source||!target||sourceId===targetId||source.parentId!==target.parentId)return false;
+ const before=snapshotStruct(),prior=[...kids(source.parentId)];
+ const order=prior.filter(n=>n.id!==sourceId),index=order.findIndex(n=>n.id===targetId);
+ if(index<0)return false;
+ order.splice(index+(position==='after'?1:0),0,source);
+ if(order.every((n,i)=>n.id===prior[i].id))return false;
+ order.forEach((n,i)=>{n.order=1000+i;});
+ rebuildIndex();
+ register({kind:'struct',targetId:sourceId,before,after:snapshotStruct()});
+ render();flash('Moved unit and its children. Undo is available.');
+ return true;
+}
+function rearrange(id,kind){
+ finishEdit();const n=byId.get(id);if(!n)return;
+ const before=snapshotStruct(),siblings=[...kids(n.parentId)],at=siblings.findIndex(x=>x.id===id);
+ if(kind==='indent'){
+  if(at===0){
+   const parent=byId.get(n.parentId),peAbove=parent&&peLines(parent).some(line=>!!line.text.trim());
+   return flash(peAbove?`The line above is text inside “${parent.label}”, not a separate thought yet. It cannot be a parent in this draft.`:'This is the first thought at this level. There is no earlier thought to nest under.');
+  }
+  const prev=siblings[at-1];n.parentId=prev.id;n.order=orderAfter(prev.id);expanded.add(prev.id);
+ }else if(kind==='outdent'){
+  const parent=byId.get(n.parentId);if(!parent)return flash('This thought is already at the front level.');
+  n.order=orderAfter(parent.parentId,parent.id);n.parentId=parent.parentId;
+ }else if(kind==='up'||kind==='down'){
+  const swap=kind==='up'?at-1:at+1;if(swap<0||swap>=siblings.length)return;
+  const other=siblings[swap],order=n.order;n.order=other.order;other.order=order;
+ }
+ rebuildIndex();register({kind:'struct',targetId:id,before,after:snapshotStruct()});render();focusEdit(id);flash('Thought moved in this draft.');
+}
+function editPE(el){const n=byId.get(el.dataset.editPe);if(!n)return;
+ if(!noteDrafts.has(n.id))noteDrafts.set(n.id,cloneLines(peLines(n)));
+ const lines=noteDrafts.get(n.id),index=Number(el.dataset.peIndex);if(!lines[index])return;
+ lines[index].text=(el.innerText||el.textContent||'').replace(/[\r\n]+/g,' ');
+ $('export').disabled=false;
+}
+function peKey(el,e){const n=byId.get(el.dataset.editPe);if(!n)return;
+ finishEdit(); // commit the typing first; Enter/Tab is a separate reversible action
+ const index=Number(el.dataset.peIndex),lines=cloneLines(peLines(n)),before=cloneLines(lines),target=lines[index];if(!target)return;
+ // Committed current line text, including typing before a structural action.
+ target.text=(el.innerText||el.textContent||'').replace(/[\r\n]+/g,' ');
+ if(e.key==='Enter'){
+  e.preventDefault();const offset=caretOffset(el),head=target.text.slice(0,offset),tail=target.text.slice(offset);
+  target.text=head;lines.splice(index+1,0,{text:tail,depth:target.depth,...(n.editor?.schema==='pocket.nodeEditor.v1'?{id:newStableId('b')}: {})});
+ }else if(e.key==='Tab'){
+  e.preventDefault();target.depth=Math.max(0,Math.min(12,target.depth+(e.shiftKey?-1:1)));
+ }else return;
+ activeEdit=null;noteDrafts.set(n.id,lines);
+ register({kind:'pe',owner:n.id,before,after:cloneLines(lines),returnToUndo:{kind:'pe',owner:n.id,index,at:target.text.length},returnToRedo:{kind:'pe',owner:n.id,index:e.key==='Enter'?index+1:index,at:0}});render();
+ const nextIndex=e.key==='Enter'?index+1:index;
+ const field=[...document.querySelectorAll('[data-edit-pe]')].find(x=>x.dataset.editPe===n.id&&Number(x.dataset.peIndex)===nextIndex);
+ field?.focus();flash('Text stays inside this thought.');
+}
+// Event capture prevents ordinary browser paragraph insertion inside one unit.
+document.addEventListener('focusin',e=>{const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(el)editableFocus(el)});
+document.addEventListener('input',e=>{const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(!el||!writeMode)return;
+ if(el.hasAttribute('data-edit-node')){const n=byId.get(el.dataset.editNode);if(n){n.label=(el.innerText||el.textContent||'').replace(/\r\n?/g,'\n').replace(/\u2060/g,'');$('export').disabled=false}}
+ else editPE(el);
+ rememberCaret(el);
+});
+document.addEventListener('keyup',e=>{const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(el)rememberCaret(el)});
+document.addEventListener('pointerup',e=>{const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(el)rememberCaret(el)});
+document.addEventListener('focusout',e=>{if(e.target.closest?.('[data-edit-node],[data-edit-pe]'))finishEdit()});
+document.addEventListener('keydown',e=>{
+ if(e.isComposing||!loaded)return;
+ // During the brief preview, preserve the before-state; repeated Undo/Redo is
+ // queued below, other typing/navigation is deferred until the change applies.
+ if(pendingDraftAction){
+  const mod=e.ctrlKey||e.metaKey,low=e.key.toLowerCase();
+  const timelineKey=mod&&(low==='z'||(low==='y'&&e.ctrlKey&&!e.metaKey));
+  if(!timelineKey){e.preventDefault();e.stopPropagation();return}
+ }
+ if(e.key==='Escape'){handleEscape(e);return;}
+ // Handle the draft timeline globally, not just inside the editor currently holding focus.
+ // Keep ordinary native text editing in the search field and other form controls.
+ const inForm=e.target.closest?.('input,textarea,select'),modifier=e.ctrlKey||e.metaKey,key=e.key.toLowerCase();
+ if(modifier&&!inForm&&(key==='z'||(key==='y'&&e.ctrlKey&&!e.metaKey))&&(writeMode||undoStack.length||redoStack.length)){
+  e.preventDefault();e.stopPropagation();
+  if(key==='y'||e.shiftKey)redo();else undo();return;
+ }
+ if(!writeMode)return;
+ const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(!el)return;
+ if(el.hasAttribute('data-edit-pe')){if(e.key==='Enter'&&e.shiftKey){e.preventDefault();flash('Legacy PE stays unchanged: Shift+Enter currently applies to genuine units only.');return;}if(e.key==='Enter'||e.key==='Tab')peKey(el,e);return}
+ if((e.key==='Backspace'||e.key==='Delete')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+  const id=el.dataset.editNode,n=byId.get(id);
+  if(n&&sessionNew.has(id)&&!n.label.trim()&&!kids(id).length&&!linkCount(id)){
+   e.preventDefault();
+   const row=el.closest('.unit'),sibling=row?.previousElementSibling;
+   const previous=sibling?.querySelector?.('[data-edit-node],[data-edit-pe]');
+   // Commit prior typing changes (if any), then delete this blank draft only.
+   if(pendingBlank.has(id)){activeEdit=null;discardPendingBlank(id)}
+   else {finishEdit();removeEmptySessionThought(id)}
+   if(previous)placeCaret(previous,previous.textContent.length);
+   return;
+  }
+ }
+ if(e.key==='Enter'&&e.shiftKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();insertMultilineInUnit(el);return}
+ if(e.key==='Enter'&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();splitThought(el);return}
+ if(e.key==='Tab'){e.preventDefault();rearrange(el.dataset.editNode,e.shiftKey?'outdent':'indent');return}
+ if(e.altKey&&(e.key==='ArrowUp'||e.key==='ArrowDown')){e.preventDefault();rearrange(el.dataset.editNode,e.key==='ArrowUp'?'up':'down');return}
+},true);
+document.addEventListener('click',e=>{const b=e.target.closest?.('[data-write-new]');if(b&&writeMode){e.preventDefault();addThought(b.dataset.writeNew)}},true);
+window.addEventListener('beforeunload',e=>{if(loaded&&currentStateKey()!==savedStateKey){e.preventDefault();e.returnValue=''}});
+$('filepicker').addEventListener('change',e=>takeFile(e.target.files?.[0]));$('again').addEventListener('change',e=>takeFile(e.target.files?.[0]));
+// Only Copy remains a visible mode toggle. F2 and More provide keyboard/touch
+// access to writing; Escape returns to navigating without recording a change.
+$('copy-mode').addEventListener('click',()=>setMode(copyMode?'navigate':'copy'));
+function enterWritingFromControl(){
+ if(!loaded)return;
+ setMode('write',{announce:false});
+ const field=document.querySelector('#viewer [data-edit-node][contenteditable],#viewer [data-edit-pe][contenteditable]');
+ if(field){placeCaret(field,field.textContent.length);rememberCaret(field)}
+ else{const add=document.querySelector('#viewer [data-write-new]');if(add)add.focus()}
+ flash('Writing mode. Escape returns to navigation.');
+}
+$('menu-write').addEventListener('click',()=>{
+ if(writeMode){setMode('navigate');return}
+ enterWritingFromControl();
+});
+window.addEventListener('keydown',e=>{
+ if(e.key!=='F2'||e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||!loaded||e.target.closest?.('input,textarea,select'))return;
+ e.preventDefault();
+ if(writeMode)setMode('navigate',{announce:false});else enterWritingFromControl();
+},true);
+$('back').addEventListener('click',()=>travel(-1));$('forward').addEventListener('click',()=>travel(1));$('undo').addEventListener('click',undo);$('redo').addEventListener('click',redo);$('export').addEventListener('click',exportLinks);$('save-pocket').addEventListener('click',()=>savePocketJSON());$('save-pocket-menu').addEventListener('click',()=>savePocketJSON());$('save-pocket-as').addEventListener('click',()=>savePocketJSON({asNew:true}));
+$('open-native').addEventListener('click',openPocketPicker);$('open-another').addEventListener('click',openPocketPicker);
+$('font-smaller').addEventListener('click',()=>changeReadingSize(-1));
+$('font-larger').addEventListener('click',()=>changeReadingSize(1));
+$('more').addEventListener('click',e=>{e.stopPropagation();$('moremenu').classList.toggle('hidden');$('more').setAttribute('aria-expanded',String(!$('moremenu').classList.contains('hidden')))});
+$('show-search').addEventListener('click',()=>{$('searchdock').classList.contains('hidden')?openSearch():closeSearch()});$('search').addEventListener('input',e=>searchChange(e.target.value));
+// v0.6.24: In any search, Enter means copy, even when Navigation is active.
+// Shift+Enter is an explicit keyboard navigation command. Capturing before
+ // a focused search-result button's native Enter click avoids accidental opening.
+// Do not intercept Enter in editing, menus, other form fields or outside search.
+document.addEventListener('keydown',e=>{
+ if(!loaded||!searchMode||$('searchdock').classList.contains('hidden')||!searchResultIds.length||e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
+ const input=$('search');
+ const inSearch=e.target===input||!!e.target.closest?.('#search-results');
+ if(!inSearch)return;
+ if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+  e.preventDefault();e.stopImmediatePropagation();
+  searchNeedsDisambiguation=true;searchSelection=Math.max(0,Math.min(searchResultIds.length-1,searchSelection<0?0:searchSelection+(e.key==='ArrowDown'?1:-1)));
+  renderViewer();
+  // Keep typing fluid after keyboard selection.
+  if(document.activeElement!==input)input.focus({preventScroll:true});
+  document.querySelector(`.search-results .unit[data-result-index="${searchSelection}"]`)?.scrollIntoView({block:'nearest'});
+  return;
+ }
+ if(e.key!=='Enter')return;
+ e.preventDefault();e.stopImmediatePropagation();
+ if(searchSelection<0){flash('Choose between the matching aliases with ↑ or ↓ before copying.');return;}
+ const id=searchResultIds[searchSelection],node=byId.get(id);
+ if(!node)return;
+ if(e.shiftKey){go(id);return;}
+ quickCopyResult(node,document.querySelector(`.search-results .unit[data-result-index="${searchSelection}"]`));
+ // Copy success clears search and highlights its source; a blocked copy does not.
+},true);
+// v0.6.22: Type-to-filter in Navigation AND Copy Mode, as in live Pocket.
+// A printable character starts a search without requiring the search button.
+// Never intercept typing in an editor, form control, browser shortcut,
+// or while a transient menu or Undo preview is open. This is presentation only.
+document.addEventListener('keydown',e=>{
+ if(!loaded||writeMode||pendingDraftAction||e.defaultPrevented||e.isComposing||e.repeat)return;
+ if(e.ctrlKey||e.metaKey||e.altKey||e.key.length!==1||!e.key.trim())return;
+ if(e.target.closest?.('input,textarea,select,[contenteditable="true"],[role="textbox"]'))return;
+ if(!$('moremenu').classList.contains('hidden')||!$('aside').classList.contains('hidden')||!$('peek').classList.contains('hidden'))return;
+ e.preventDefault();
+ const input=$('search');
+ // If the search dock is already open, continue the existing filter.
+ const continuing=!$('searchdock').classList.contains('hidden');
+ const prior=continuing?input.value:'';
+ openSearch();
+ input.value=prior+e.key;
+ searchChange(input.value);
+},true);
+
+// v0.6.34: Native mouse selection is confined to each contenteditable host.
+// Temporarily disable contenteditable for the drag. If the resulting range
+// covers two or more visible unit texts, keep it selectable until the next
+// click. Restoring contenteditable immediately collapses the range in Chrome.
+// This gesture changes no Pocket unit, saved content or history.
+let editSelectionGesture=null;
+function editSelectionFields(){
+ return [...document.querySelectorAll('#viewer .outline .unit-text[data-edit-node],#viewer .outline .unit-text[data-edit-pe]')];
+}
+function restoreEditSelectionFields(){
+ if(!writeMode)return;
+ for(const el of editSelectionFields())el.setAttribute('contenteditable','plaintext-only');
+}
+function editCaretPosition(field,x,y){
+ const r=document.caretRangeFromPoint?.(x,y);
+ if(!r||!field.contains(r.startContainer))return field.textContent.length;
+ const before=document.createRange();before.selectNodeContents(field);
+ try{before.setEnd(r.startContainer,r.startOffset)}catch(_){return field.textContent.length}
+ return before.toString().length;
+}
+document.addEventListener('pointerdown',e=>{
+ if(!loaded||!writeMode||pendingDraftAction||e.button!==0)return;
+ const field=e.target.closest?.('#viewer .outline .unit-text[data-edit-node],#viewer .outline .unit-text[data-edit-pe]');
+ if(!field)return;
+ const at=editCaretPosition(field,e.clientX,e.clientY);
+ finishEdit();
+ editSelectionGesture={field,pointerId:e.pointerId,x:e.clientX,y:e.clientY,at};
+ for(const el of editSelectionFields())el.removeAttribute('contenteditable');
+},true);
+document.addEventListener('pointerup',e=>{
+ const d=editSelectionGesture;
+ if(!d||d.pointerId!==e.pointerId)return;
+ editSelectionGesture=null;
+ // Browser default selection finalisation happens after pointerup. Inspect
+ // the completed range next frame so a fresh click can restore editability.
+ requestAnimationFrame(()=>{
+  if(editSelectionGesture||!writeMode||!d.field.isConnected)return;
+  const selection=window.getSelection();
+  const range=selection?.rangeCount===1?selection.getRangeAt(0):null;
+  if(range&&nativeSelectedUnitPassage(range)!==null)return;
+  restoreEditSelectionFields();
+  if(!selection?.toString())placeCaret(d.field,d.at);
+ });
+},true);
+document.addEventListener('pointercancel',e=>{
+ if(editSelectionGesture?.pointerId!==e.pointerId)return;
+ editSelectionGesture=null;restoreEditSelectionFields();
+},true);
+function hasCrossUnitEditSelection(){
+ if(!writeMode||!hasNativeOutlineSelection())return false;
+ const sel=window.getSelection();
+ return sel?.rangeCount===1&&nativeSelectedUnitPassage(sel.getRangeAt(0))!==null;
+}
+function blockCrossUnitModification(e){
+ if(!hasCrossUnitEditSelection())return false;
+ e.preventDefault();
+ e.stopImmediatePropagation();
+ flash('Cross-unit text is selected. Copy works; editing across units awaits Pocket Core.');
+ return true;
+}
+document.addEventListener('keydown',e=>{
+ if(e.target.closest?.('input,textarea,select')||!hasCrossUnitEditSelection())return;
+ const k=e.key.toLowerCase(),mod=e.ctrlKey||e.metaKey;
+ const typing=e.key.length===1&&!mod&&!e.altKey;
+ if(typing||k==='backspace'||k==='delete'||k==='enter'||
+    (mod&&(k==='x'||k==='v')))blockCrossUnitModification(e);
+},true);
+document.addEventListener('beforeinput',e=>{
+ if(hasCrossUnitEditSelection())blockCrossUnitModification(e);
+},true);
+document.addEventListener('cut',e=>{if(hasCrossUnitEditSelection())blockCrossUnitModification(e)},true);
+document.addEventListener('paste',e=>{if(hasCrossUnitEditSelection())blockCrossUnitModification(e)},true);
+
+// v0.6.36: In Edit Mode, arrow movement follows visible text flow.
+// Browser-native Up/Down still handles wrapped lines WITHIN a unit.
+// Crossing a unit boundary changes caret/selection only, never Core, Save or Undo.
+let verticalTextColumn=null;
+function fieldContainingTextNode(node){
+ const el=node?.nodeType===Node.ELEMENT_NODE?node:node?.parentElement;
+ const field=el?.closest?.('.outline .unit-text[data-edit-node],.outline .unit-text[data-edit-pe]');
+ return field&&$('viewer').contains(field)?field:null;
+}
+function offsetInTextField(field,node,offset){
+ const range=document.createRange();range.selectNodeContents(field);
+ try{range.setEnd(node,offset);return range.toString().replace(/\u2060/g,'').length}
+ catch(_){return 0}
+}
+function textPointAt(field,index){
+ const walker=document.createTreeWalker(field,NodeFilter.SHOW_TEXT);
+ let node,last=null,left=Math.max(0,index);
+ while((node=walker.nextNode())){
+  last=node;
+  if(left<=node.textContent.length)return {node,offset:left};
+  left-=node.textContent.length;
+ }
+ return last?{node:last,offset:last.textContent.length}:{node:field,offset:0};
+}
+function textCaretRect(field,node,offset){
+ try{
+  const range=document.createRange();range.setStart(node,offset);range.collapse(true);
+  const box=range.getClientRects()[0]||range.getBoundingClientRect();
+  if(box&&Number.isFinite(box.top)&&box.height>0)return box;
+ }catch(_){}
+ const boxes=[...field.getClientRects()];
+ return boxes.length?boxes[0]:field.getBoundingClientRect();
+}
+function isOnEdgeTextLine(field,node,offset,direction){
+ const lines=[...field.getClientRects()].filter(box=>box.height>0);
+ if(lines.length<2)return true;
+ const caret=textCaretRect(field,node,offset);
+ const edge=direction<0?lines[0]:lines[lines.length-1];
+ return Math.abs(caret.top-edge.top)<=Math.max(3,edge.height*.3);
+}
+function destinationCaretOffset(field,column,direction){
+ const lines=[...field.getClientRects()].filter(box=>box.height>0);
+ if(!lines.length)return direction<0?field.textContent.length:0;
+ const fragment=direction<0?lines[lines.length-1]:lines[0];
+ const x=Math.min(fragment.right-.5,Math.max(fragment.left+.5,fragment.left+column));
+ const y=(fragment.top+fragment.bottom)/2;
+ const hit=document.caretRangeFromPoint?.(x,y);
+ if(hit&&field.contains(hit.startContainer))return offsetInTextField(field,hit.startContainer,hit.startOffset);
+ const hitPosition=document.caretPositionFromPoint?.(x,y);
+ if(hitPosition&&field.contains(hitPosition.offsetNode))
+  return offsetInTextField(field,hitPosition.offsetNode,hitPosition.offset);
+ return direction<0?field.textContent.length:0;
+}
+document.addEventListener('pointerdown',()=>{verticalTextColumn=null},true);
+document.addEventListener('keydown',e=>{
+ if(e.key!=='ArrowUp'&&e.key!=='ArrowDown'){if(!e.shiftKey)verticalTextColumn=null;return}
+ if(!loaded||!writeMode||searchMode||pendingDraftAction||e.isComposing||
+    e.altKey||e.ctrlKey||e.metaKey||e.target.closest?.('input,textarea,select'))return;
+ const selection=window.getSelection();
+ if(!selection||selection.rangeCount!==1)return;
+ const cross=hasCrossUnitEditSelection();
+ const direction=e.key==='ArrowUp'?-1:1;
+ // A plain arrow on a highlighted passage collapses the selection to its edge.
+ if(cross&&!e.shiftKey){
+  const range=selection.getRangeAt(0);
+  const node=direction<0?range.startContainer:range.endContainer;
+  const at=direction<0?range.startOffset:range.endOffset;
+  const field=fieldContainingTextNode(node);
+  if(!field)return;
+  e.preventDefault();e.stopImmediatePropagation();
+  restoreEditSelectionFields();verticalTextColumn=null;
+  placeCaret(field,offsetInTextField(field,node,at));
+  return;
+ }
+ if(!cross&&!selection.isCollapsed)return; // native single-unit selection
+ const field=fieldContainingTextNode(selection.focusNode);
+ const fields=editSelectionFields();
+ const idx=fields.indexOf(field);
+ if(idx<0||(!field.isContentEditable&&!cross))return;
+ if(!isOnEdgeTextLine(field,selection.focusNode,selection.focusOffset,direction))return;
+ const destination=fields[idx+direction];
+ if(!destination)return;
+ const caret=textCaretRect(field,selection.focusNode,selection.focusOffset);
+ if(verticalTextColumn===null)verticalTextColumn=Math.max(0,caret.left-field.getBoundingClientRect().left);
+ const newOffset=destinationCaretOffset(destination,verticalTextColumn,direction);
+ e.preventDefault();e.stopImmediatePropagation();
+ if(e.shiftKey){
+  const anchorNode=selection.anchorNode,anchorOffset=selection.anchorOffset;
+  for(const el of fields)el.removeAttribute('contenteditable');
+  const endpoint=textPointAt(destination,newOffset);
+  selection.setBaseAndExtent(anchorNode,anchorOffset,endpoint.node,endpoint.offset);
+ }else{
+  restoreEditSelectionFields();
+  placeCaret(destination,newOffset);
+ }
+},true);
+
+// v0.6.33: The browser owns text selection; Pocket owns semantic units.
+// Read selected visible text from the cloned DOM fragment so partial first/last
+// lines are exact, while fold glyphs, indentation, Unit Sheet and drag controls
+// never leak into Ctrl/⌘ C. No data/model/history/save mutation occurs.
+function nativeSelectedUnitPassage(range){
+ const outline=$('viewer')?.querySelector('.outline');
+ if(!range||range.collapsed||!outline||
+    !outline.contains(range.startContainer)||!outline.contains(range.endContainer))return null;
+ const fragment=range.cloneContents();
+ const parts=[...fragment.querySelectorAll('.unit-text[data-edit-node],.unit-text[data-edit-pe]')]
+   .map(el=>el.textContent||'');
+ return parts.length>1?parts.join('\n'):null;
+}
+function hasNativeOutlineSelection(){
+ const selection=window.getSelection();
+ if(!selection||selection.isCollapsed||!selection.rangeCount||!selection.toString())return false;
+ const range=selection.getRangeAt(0),outline=$('viewer')?.querySelector('.outline');
+ return !!outline&&outline.contains(range.startContainer)&&outline.contains(range.endContainer);
+}
+document.addEventListener('copy',e=>{
+ if(!loaded||e.defaultPrevented||!e.clipboardData||
+   e.target.closest?.('input,textarea'))return;
+ const selection=window.getSelection();
+ if(!selection||selection.isCollapsed||selection.rangeCount!==1)return;
+ const passage=nativeSelectedUnitPassage(selection.getRangeAt(0));
+ if(passage===null)return; // one unit: leave native text clipboard untouched
+ e.clipboardData.setData('text/plain',passage);
+ e.preventDefault();
+},true);
+
+$('peek').addEventListener('pointerenter',()=>clearTimeout(peekTimer));$('peek').addEventListener('pointerleave',schedulePeekClose);$('aside').addEventListener('pointerenter',()=>clearTimeout(hideTimer));$('aside').addEventListener('pointerleave',scheduleClose);
+// v0.6.18: the blank space to the right of a line is an invitation to write.
+// This deliberately uses the same-row hit area rather than the rest of the page.
+// Resolve the location BEFORE changing modes: setMode rerenders the outline.
+function clickRightToStartWriting(e){
+ if(!loaded||writeMode||copyMode||e.button!==0||e.detail>1||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey)return false;
+ if(e.target.closest?.('button,a,input,textarea,select,summary,[contenteditable]'))return false;
+ if(window.getSelection()?.toString())return false; // preserve drag selection
+ const row=e.target.closest?.('.outline .unit[data-id],.outline .unit[data-pe-owner]');
+ if(!row)return false;
+ const field=row.querySelector('.unit-text[data-edit-node],.unit-text[data-edit-pe]');
+ if(!field)return false;
+ const bounds=field.getBoundingClientRect();
+ // Clicking the visible text remains Navigation. Only the right-hand area
+ // of the very same line switches modes; margins and unrelated whitespace do not.
+ if(e.clientX<=bounds.right+3||e.clientY<bounds.top-6||e.clientY>bounds.bottom+7)return false;
+ const where=row.dataset.id
+  ?{kind:'node',id:row.dataset.id,at:field.textContent.length}
+  :{kind:'pe',owner:row.dataset.peOwner,index:Number(field.dataset.peIndex),at:field.textContent.length};
+ e.preventDefault();
+ setMode('write',{announce:false});
+ focusLocation(where);
+ return true;
+}
+// v0.6.35: distinguish a deliberate short click to the right of a unit
+// from the end of a drag-selection. This makes the end-caret reliable even
+// after v0.6.34 has left the text temporarily non-editable for selection.
+let rightWhitespaceDown=null;
+document.addEventListener('pointerdown',e=>{
+ rightWhitespaceDown=null;
+ if(!loaded||!writeMode||e.button!==0||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey)return;
+ if(e.target.closest?.('button,a,input,textarea,select,summary,[contenteditable]'))return;
+ const row=e.target.closest?.('#viewer .outline .unit');
+ const field=row?.querySelector('.unit-text[data-edit-node],.unit-text[data-edit-pe]');
+ if(!field)return;
+ const bounds=field.getBoundingClientRect();
+ if(e.clientX<=bounds.right+1||e.clientY<bounds.top-6||e.clientY>bounds.bottom+7)return;
+ rightWhitespaceDown={pointerId:e.pointerId,row,x:e.clientX,y:e.clientY};
+},true);
+document.addEventListener('pointermove',e=>{
+ const d=rightWhitespaceDown;
+ if(d&&d.pointerId===e.pointerId&&Math.hypot(e.clientX-d.x,e.clientY-d.y)>5)rightWhitespaceDown=null;
+},true);
+document.addEventListener('pointercancel',e=>{
+ if(rightWhitespaceDown?.pointerId===e.pointerId)rightWhitespaceDown=null;
+},true);
+// The superscript square, fold controls, text selection and modifier-navigation retain their own actions.
+function clickAfterLine(e){
+ if(!writeMode||!loaded||e.button!==0||e.detail>1||e.ctrlKey||e.metaKey||e.altKey||e.shiftKey)return false;
+ if(e.target.closest?.('button,a,input,textarea,select,summary,[contenteditable]'))return false;
+ const row=e.target.closest?.('.outline .unit');
+ if(!row)return false;
+ const field=row.querySelector('.unit-text[data-edit-node],.unit-text[data-edit-pe]');
+ if(!field)return false;
+ const bounds=field.getBoundingClientRect();
+ if(e.clientX<=bounds.right+1||e.clientY<bounds.top-6||e.clientY>bounds.bottom+7)return false;
+ const d=rightWhitespaceDown;
+ const deliberateClick=!!d&&d.row===row&&Math.hypot(e.clientX-d.x,e.clientY-d.y)<=5;
+ rightWhitespaceDown=null;
+ const selection=window.getSelection();
+ // Preserve a completed drag-selection: it was not a fresh right-side click.
+ if(selection?.toString()&&!deliberateClick)return false;
+ if(deliberateClick&&selection?.toString())selection.removeAllRanges();
+ // Re-enable inline editing if cross-unit selection temporarily disabled it.
+ if(!field.isContentEditable)restoreEditSelectionFields();
+ // Placing the caret at a known position also lets cross-thought Undo restore it.
+ const ok=placeCaret(field,field.textContent.length);
+ if(ok)rememberCaret(field);
+ return ok;
+}
+
+// v0.6.32 isolated gesture. The square remains click-to-Unit Sheet; >9px
+// deliberate movement reorders SAME-PARENT siblings only. No implicit nesting.
+// Hovering a collapsed legal sibling head opens it as a VIEW change, not Undo.
+const DRAG_HOVER_OPEN_MS=600;
+let pendingUnitDrag=null,suppressUnitHandleClickUntil=0;
+function clearDragGuide(){
+ document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(row=>row.classList.remove('drag-target-before','drag-target-after'));
+}
+function clearDragHover(d){
+ if(d?.openTimer)clearTimeout(d.openTimer);
+ if(d){d.openTimer=null;d.hoverId=null;}
+}
+// A row's descendants (including PE rows) follow it in DOM order. A sibling
+// inserted AFTER a head belongs after its whole subtree, not inside its children.
+function dropGuideRow(row,side){
+ if(!row||side!=='after')return row;
+ const depth=Number(row.dataset.depth)||0;
+ let last=row;
+ for(let next=row.nextElementSibling;next?.classList?.contains('unit')&&Number(next.dataset.depth)>depth;next=next.nextElementSibling)last=next;
+ return last;
+}
+function legalUnitDropAt(d,x,y){
+ const row=document.elementFromPoint(x,y)?.closest?.('.outline .unit[data-id]');
+ const target=row&&byId.get(row.dataset.id);
+ if(!target||target.id===d.id||target.parentId!==d.parentId)return null;
+ const box=row.getBoundingClientRect();
+ return {id:target.id,side:y<box.top+box.height/2?'before':'after',row};
+}
+function paintUnitDrop(d,hit){
+ clearDragGuide();
+ d.dropId=hit?.id||null;d.side=hit?.side||null;
+ if(hit)dropGuideRow(hit.row,hit.side)?.classList.add(hit.side==='before'?'drag-target-before':'drag-target-after');
+}
+function scheduleDragHeadOpen(d,hit){
+ const node=hit&&byId.get(hit.id);
+ const collapsedHead=node&&!expanded.has(node.id)&&(kids(node.id).length||peLines(node).some(line=>!!line.text));
+ if(!collapsedHead){clearDragHover(d);return;}
+ if(d.hoverId===node.id)return;
+ clearDragHover(d);
+ d.hoverId=node.id;
+ d.openTimer=setTimeout(()=>{
+  d.openTimer=null;
+  if(pendingUnitDrag!==d||!d.active||d.hoverId!==node.id||expanded.has(node.id))return;
+  expanded.add(node.id); // View-only expansion, never a structural/Undo event.
+  renderViewer(); // Body owns pointer capture so replacing rows is safe.
+  d.hoverId=null;
+  const hitNow=legalUnitDropAt(d,d.lastX,d.lastY);
+  paintUnitDrop(d,hitNow);
+  scheduleDragHeadOpen(d,hitNow);
+ },DRAG_HOVER_OPEN_MS);
+}
+function clearUnitDrag(){
+ clearDragGuide();
+ const d=pendingUnitDrag;pendingUnitDrag=null;
+ clearDragHover(d);
+ const capture=d?.captureTarget||d?.button;
+ if(capture?.hasPointerCapture?.(d.pointerId))try{capture.releasePointerCapture(d.pointerId)}catch(_){}
+}
+document.addEventListener('pointerdown',e=>{
+ if(!loaded||copyMode||searchMode||pendingDraftAction||e.button!==0)return;
+ const button=e.target.closest?.('.outline .unit-marker[data-drag-handle]');
+ const row=button?.closest('.outline .unit[data-id]');
+ const node=row&&byId.get(row.dataset.id);
+ if(!node)return; // Never drag legacy PE text, heading or search result.
+ pendingUnitDrag={pointerId:e.pointerId,button,captureTarget:button,id:node.id,parentId:node.parentId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,active:false,dropId:null,side:null,hoverId:null,openTimer:null};
+ try{button.setPointerCapture(e.pointerId)}catch(_){}
+},true);
+document.addEventListener('pointermove',e=>{
+ const d=pendingUnitDrag;if(!d||d.pointerId!==e.pointerId)return;
+ if(!d.active&&Math.hypot(e.clientX-d.x,e.clientY-d.y)<=9)return;
+ if(!d.active){
+  d.active=true;
+  clearTimeout(hoverTimer);hovering=null;closePeek();
+  // Once dragging, the stable body retains capture during head expansion.
+  // Without this transfer, renderViewer removes the source button mid-gesture.
+  try{document.body.setPointerCapture(e.pointerId);d.captureTarget=document.body}catch(_){}
+ }
+ e.preventDefault();
+ d.lastX=e.clientX;d.lastY=e.clientY;
+ const hit=legalUnitDropAt(d,e.clientX,e.clientY);
+ paintUnitDrop(d,hit);
+ scheduleDragHeadOpen(d,hit);
+},{capture:true,passive:false});
+document.addEventListener('pointerup',e=>{
+ const d=pendingUnitDrag;if(!d||e.pointerId!==d.pointerId)return;
+ const moved=d.active,source=d.id;
+ // Re-check the actual pointer position, never trust an old highlighted row.
+ const hit=moved?legalUnitDropAt(d,e.clientX,e.clientY):null;
+ if(moved){e.preventDefault();e.stopPropagation();suppressUnitHandleClickUntil=Date.now()+700;}
+ clearUnitDrag();
+ if(moved){
+  if(hit){if(!reorderUnitBySiblingDrop(source,hit.id,hit.side))flash('Already at that position. No changes made.');}
+  else flash('Only insert before or after a sibling. No changes made.');
+ }
+},true);
+document.addEventListener('pointercancel',e=>{if(pendingUnitDrag&&e.pointerId===pendingUnitDrag.pointerId)clearUnitDrag()},true);
+document.addEventListener('click',e=>{
+ if(Date.now()<suppressUnitHandleClickUntil&&e.target.closest?.('[data-drag-handle]')){
+  e.preventDefault();e.stopImmediatePropagation();suppressUnitHandleClickUntil=0;
+ }
+},true);
+document.addEventListener('click',e=>{
+ if(clickRightToStartWriting(e)||clickAfterLine(e))return;
+ // A completed drag-selection must not be interpreted as Navigate or Copy Mode.
+ // Controls remain clickable and a later ordinary click still navigates.
+ if(hasNativeOutlineSelection()&&e.target.closest?.('#viewer')&&
+    !e.target.closest?.('button,a,input,textarea,select,summary'))return;
+ const unitText=e.target.closest('[data-unittext]');
+ if(unitText&&writeMode&&(e.ctrlKey||e.metaKey)&&!e.altKey){finishEdit();e.preventDefault();go(unitText.dataset.unittext);return}
+ // In Copy Mode, one click on a thought's row or PE text line copies exactly its text.
+ // Tiny doorways, fold controls, menus and navigation controls retain their own actions.
+ const onControl=e.target.closest('button,a,input,textarea,select,summary,[data-open]');
+ if(copyMode&&loaded&&!onControl&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
+  const row=e.target.closest('.outline .unit');
+  if(row?.dataset.id){const n=byId.get(row.dataset.id);if(n){copyVisibleText(n.label,row).then(ok=>{if(ok){lastCopiedId=n.id;lastCopiedPe=null;document.querySelectorAll('.copied-unit,.copied-pe').forEach(x=>x.classList.remove('copied-unit','copied-pe'));row.classList.add('copied-unit')}});return}}
+  if(row?.dataset.peOwner){const n=byId.get(row.dataset.peOwner),line=n&&peLines(n)[Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)];if(line){copyVisibleText(line.text,row).then(ok=>{if(ok){lastCopiedId=null;lastCopiedPe={owner:n.id,index:Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)};document.querySelectorAll('.copied-unit,.copied-pe').forEach(x=>x.classList.remove('copied-unit','copied-pe'));row.classList.add('copied-pe')}});return}}
+  const title=e.target.closest('[data-copy-current]');
+  if(title){const n=byId.get(title.dataset.copyCurrent);if(n){copyVisibleText(n.label,title);return}}
+ }
+ const b=e.target.closest('[data-open],[data-door],[data-fold],[data-add],[data-remove],[data-text],[data-action],[data-peek-full],#aside-close');if(b){if(b.dataset.searchResult&&searchMode&&b.dataset.searchIndex!==undefined){searchSelection=Number(b.dataset.searchIndex);searchNeedsDisambiguation=true;}if(b.dataset.searchResult&&copyMode&&searchMode){e.preventDefault();const n=byId.get(b.dataset.searchResult);if(n)quickCopyResult(n,b.closest('.unit'));return}if(b.dataset.peekFull){openAside(b.dataset.peekFull,true);return}if(b.dataset.door){e.stopPropagation();if(asideId===b.dataset.door&&asideLocked)closeAside();else openAside(b.dataset.door,true);return}if(b.id==='aside-close'){closeAside();return}if(b.dataset.open){go(b.dataset.open);return}if(b.dataset.fold){fold(b.dataset.fold);return}if(b.dataset.add){const [a,c]=b.dataset.add.split('|');suggest(a,c);return}if(b.dataset.remove){const [a,c]=b.dataset.remove.split('|');remove(a,c);return}if(b.dataset.text){if(b.dataset.text==='alt')expandedAlt=!expandedAlt;else expandedText=!expandedText;renderViewer();return}if(b.dataset.action==='foldall'){expanded.clear();renderViewer();return}if(b.dataset.action==='unfoldall'){expanded=new Set(kids(current).map(n=>n.id));renderViewer();return}}if(!e.target.closest('#peek,[data-door]'))closePeek();if(!e.target.closest('#moremenu,#more'))closeMenu();if(asideId&&!e.target.closest('#aside')){if(!e.target.closest('[data-door]'))closeAside()}
+ // Navigate mode uses a direct single click on a genuine thought, never a PE text line.
+ if(!writeMode&&!copyMode&&!onControl&&!e.shiftKey&&!e.altKey){
+  const row=e.target.closest('.outline .unit[data-id]');
+  if(row?.dataset.id){e.preventDefault();go(row.dataset.id)}
+ }
+});
+document.addEventListener('dblclick',e=>{if(writeMode||copyMode||hasNativeOutlineSelection())return;const t=e.target.closest('[data-unittext]');if(t&&!e.target.closest('button')){e.preventDefault();go(t.dataset.unittext)}});
+window.addEventListener('scroll',()=>{if(peekId)closePeek();if(asideId)positionAside()},{passive:true});
+window.addEventListener('resize',()=>{if(asideId)positionAside()});
+let hovering=null;
+document.addEventListener('pointerover',e=>{if(pendingUnitDrag?.active||e.pointerType==='touch'||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;const b=e.target.closest('[data-door]');if(!b)return;clearTimeout(peekTimer);if(asideLocked)return;clearTimeout(hoverTimer);hovering=b;hoverTimer=setTimeout(()=>{if(hovering===b)openPeek(b)},270)});
+document.addEventListener('pointerout',e=>{const b=e.target.closest('[data-door]');if(!b||b.contains(e.relatedTarget))return;hovering=null;clearTimeout(hoverTimer);schedulePeekClose()});
+document.addEventListener('input',e=>{if(e.target.id==='aside-find')asideMatches(e.target.value)});
+document.addEventListener('keydown',e=>{if(loaded&&(e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==='s'){e.preventDefault();e.stopImmediatePropagation();savePocketJSON();return;}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openSearch()}if(e.altKey&&e.key==='ArrowLeft'){e.preventDefault();travel(-1)}if(e.altKey&&e.key==='ArrowRight'){e.preventDefault();travel(1)}});
+window.addEventListener('dragover',e=>{e.preventDefault()});window.addEventListener('drop',e=>{e.preventDefault();if(!loaded)takeFile(e.dataTransfer?.files?.[0])});
+$('back').disabled=$('forward').disabled=$('undo').disabled=$('redo').disabled=$('export').disabled=$('save-pocket').disabled=$('save-pocket-menu').disabled=true;
+</script>
+</body>
+</html>
