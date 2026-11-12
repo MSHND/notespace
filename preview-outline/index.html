@@ -1,4 +1,14 @@
 <!doctype html>
+<!-- Pocket v0.6.32 WORK-READY PREVIEW, 12 Nov 2026. Human-accepted sibling drag, hover-to-expand and Undo/Esc/invalid drop controls. Isolated non-branded preview only, not Core or production. Normal Pocket JSON saver preserves source/guard, refuses incompatible multiline and synthetic data; live importer and real-save round-trip remain unverified. Lab fixture is not reachable from this entrypoint. -->
+<!--
+POCKET v0.6.28 · UNIT SHEET AND RETRIEVAL LAB · 11 NOVEMBER 2026
+Synthetic fixture: alias RG -> copied body. Alias ZZ intentionally ambiguous.
+Shift+Enter within a genuine unit inserts a newline in the interface/in-memory label
+without creating a new unit. This is NOT a durable Pocket body schema; normal
+Pocket JSON save is blocked if multiline text exists. Normal JSON saves are
+always blocked for the synthetic fixture. Legacy PE remains unconverted.
+No changed Core, source, frozen N1 contract, or live Pocket importer.
+-->
 <!--
 V0.6.26 OPTIONAL SAME-FILE SAVE (10 November 2026):
 * Native File System Access, when available, lets the user explicitly open a
@@ -92,7 +102,7 @@ END NOTES
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; connect-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
-<title>Pocket · v0.6.25 Local working JSON</title>
+<title>Pocket · v0.6.32 Work-ready Preview</title>
 <style>
 :root {--page:#f8f7f2;--paper:#fffefa;--ink:#333c34;--muted:#8c968c;--soft:#69766c;--quiet:#dce2d9;--accent:#466b58;--tint:#f0f4ef;--line:#e9ebe3;--focus:#527390;--rail:320px;--font:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
 *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--page);font:15px/1.62 var(--font);color:var(--ink)}button,input{font:inherit;color:inherit}button{cursor:pointer}button:disabled{opacity:.28;cursor:default}button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px}::selection{background:#dcece0}.hidden{display:none!important}
@@ -264,6 +274,75 @@ END NOTES
 .topbar .save-pocket:hover:not(:disabled){background:#edf3e9;color:#31583f}
 #file-status{max-width:165px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#98a397;font-size:11px;margin-left:5px}
 @media(max-width:720px){#file-status{display:none}.topbar .save-pocket{min-width:39px;padding:0 4px}}
+/* v0.6.27: UI-only experiment. Preserve one thought identity across line breaks. */
+.outline .unit .unit-text{white-space:pre-wrap}
+.outline .unit.multiline{align-items:flex-start}
+.outline .unit.multiline .unit-body{white-space:pre-wrap}
+.search-results .quick-source{font-size:11px;color:#4a6178;margin-left:9px;white-space:nowrap}
+.search-results .alias-pill{font-size:10px;letter-spacing:.03em;color:#537285;background:#e9eff5;border-radius:5px;padding:1px 5px;margin-left:7px}
+.search-results .ambiguous{font-size:12px;color:#586d81;margin:0 0 12px}
+.welcome .demo-button{margin:8px 0 0;border:1px solid #cbd8df;border-radius:7px;padding:10px 15px;color:#38566c;background:#eff4f7;font-size:14px}
+.welcome .demo-button:hover{background:#e4eef4}
+.lab-note{border-left:2px solid #b2c5d0;padding:8px 12px;font-size:12px;color:#5b6f7c;margin:4px 0 19px;line-height:1.55;background:#f5f8fa}
+.lab-note strong{color:#344e61}
+
+/* v0.6.28: OG-inspired readability with restrained cool blue-grey states.
+   Presentation only. No change to Core semantics or JSON format. */
+:root{--page:#f5f6f7;--paper:#fffefd;--ink:#263543;--muted:#6d7b87;--soft:#586d7a;--quiet:#dce5eb;--accent:#42647b;--tint:#eef3f7;--line:#e1e7eb;--focus:#527b9a}
+body{color:var(--ink);background:var(--page)}
+.topbar{background:rgba(250,251,251,.97);border-bottom-color:#e1e7ea}
+.page{border-color:#e0e5e9;background:#fefefe;box-shadow:0 3px 15px #31485d0c}
+.page h1{color:#263644}.trail button,.trail button:last-of-type{color:#364b5b}
+.page .helper,.page .write-note,.source-meta,.pe-line{color:#627482}
+.unit-text{color:#283947}
+.outline .unit[data-id]:hover{background:linear-gradient(90deg,rgba(232,239,244,.65),rgba(232,239,244,.12) 90%)}
+.outline .unit[data-id] .thought-frame{box-shadow:0 0 0 1px rgba(97,132,159,.055)}
+.outline .unit[data-id]:hover .thought-frame{box-shadow:0 0 0 1px rgba(94,126,154,.22)}
+.outline .unit[data-id]:focus-within .thought-frame{box-shadow:0 0 0 1px rgba(82,119,151,.26)}
+.outline .unit[data-id] .fold:not(.placeholder){color:#8c9fae}
+.outline .unit[data-id] .fold:not(.placeholder):hover{background:#e9f0f5;color:#49677c}
+.outline .unit[data-id] .unit-marker .symbol{border-color:#a4b7c4}
+.unit-marker:hover .symbol,.unit-marker[aria-expanded=true] .symbol{background:#dfeaf1;border-color:#6386a1;color:#41637c}
+.search-results .unit.search-selected{background:#e9eef8;box-shadow:inset 3px 0 0 #849ec1}
+.search-results .unit.search-selected [data-search-result]{color:#284867!important}
+.search-results .quick-source{color:#526b80}
+.search-results .alias-pill{color:#48647c;background:#e9eff6}
+/* Keep the exact source visible after copying, without implying a data change. */
+.outline .unit[data-id].copied-unit{background:#e9eefb;border-radius:8px}
+.outline .unit[data-id].copied-unit .thought-frame{background:rgba(227,235,251,.8);box-shadow:0 0 0 1.5px #9aadd3}
+.outline .unit.pe-line.copied-pe .unit-text{background:#e9eefb;border-radius:7px;box-shadow:0 0 0 2px #9aadd3}
+.outline .unit[data-id].undo-preview .thought-frame{box-shadow:0 0 0 2px rgba(64,113,160,.87),0 0 0 5px rgba(61,115,169,.12);background:#e4eefa}
+.outline .unit[data-id].undo-spot .thought-frame{box-shadow:0 0 0 2px rgba(79,126,171,.68);background:#ebf2fb}
+/* The little square opens a floating metadata sheet, never a PE/body panel. */
+.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 22px));max-height:min(77vh,730px);padding:18px 19px;z-index:150;border-radius:14px;background:#fff;border:1px solid #dce4ec;box-shadow:0 18px 48px #273e5629}
+.aside .aside-head{align-items:flex-start;margin-bottom:9px;gap:12px}
+.aside .aside-head h2{font-size:calc(var(--read-support) + 5px);color:#26394a;font-weight:650;line-height:1.25;margin:3px 0 0}
+.aside .asidepath{font-size:11px;color:#6f8090;margin-bottom:17px}
+.aside .section,.aside .sheet-section{border-top:1px solid #e8edf1;padding:12px 0 8px;margin:0}
+.aside .sheet-eyebrow{font-size:9px;letter-spacing:.11em;font-weight:700;color:#64829a}
+.aside .sheet-label{font-size:10px;font-weight:700;letter-spacing:.055em;text-transform:uppercase;color:#627a8a;margin-bottom:7px}
+.aside .sheet-property{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;font-size:12px;line-height:1.5;margin:6px 0;color:#304557}
+.aside .sheet-property>span:first-child{color:#738493}
+.aside .sheet-property>span:last-child,.aside .sheet-property code{overflow-wrap:anywhere;min-width:0}
+.aside .sheet-property code{font-size:11px;color:#30485b;background:#f2f5f8;padding:3px 6px;border-radius:5px}
+.aside .sheet-hint,.aside .sheet-foot{font-size:11px;color:#81919e;line-height:1.55;margin:7px 0}
+.aside .sheet-foot{padding-top:10px;border-top:1px solid #e8edf1}
+.aside .item{color:#3e5870;font-size:12px;border-radius:6px}
+.aside .item:hover,.aside .action:hover{background:#ebf2f7}
+.aside .action{background:#eff4f8;border-color:#d8e4ed;color:#47677e}
+.peek{border-color:#dce5ed;background:#fff;box-shadow:0 9px 27px #314b6628}
+.lab-note{background:#f1f5f9;border-color:#91b1c5;color:#4e6476}
+.lab-note strong{color:#2b4961}
+@media(max-width:720px){.aside,.workspace.has-aside .aside{width:min(354px,calc(100vw - 20px));max-height:65vh;padding:14px}}
+
+/* v0.6.32 experimental: the same metadata square opens Unit Sheet on click.
+   While intentionally dragging, ONLY horizontal insertion lines indicate legal
+   sibling positions; "after" is drawn below the entire visible subtree. */
+.nav-mode .outline .unit-marker[data-drag-handle],.write-mode .outline .unit-marker[data-drag-handle]{cursor:grab;touch-action:none}
+.nav-mode .outline .unit-marker[data-drag-handle]:active,.write-mode .outline .unit-marker[data-drag-handle]:active{cursor:grabbing}
+.outline .unit.drag-target-before::before,.outline .unit.drag-target-after::after{content:"";position:absolute;left:7px;right:6px;height:3px;border-radius:2px;background:#537c98;z-index:5;pointer-events:none}
+.outline .unit.drag-target-before::before{top:-2px}
+.outline .unit.drag-target-after::after{bottom:-2px}
 </style>
 </head>
 <body>
@@ -304,18 +383,19 @@ END NOTES
     <section class="welcome" id="welcome">
       <p class="eyebrow">POCKET / A QUIETER OUTLINE</p>
       <h1>A place to think.</h1>
-      <p>Your thoughts in one calm outline. Click a thought to explore, or click the blank space to its right to write at the end. Escape finishes writing, closes a search, or steps back through visited thoughts. The quiet Copy icon enables one-click copying; the tiny square reveals connections. For keyboard and touch access, Start writing is also in the More menu.</p>
+      <p>Your thoughts in one calm outline. Click a thought to explore, or click the blank space to its right to write at the end. Escape finishes writing, closes a search, or steps back through visited thoughts. The quiet Copy icon enables one-click copying; click a thought's tiny square for its Unit Sheet, or drag it deliberately to reorder among siblings. Holding over a collapsed sibling head opens its children; the line marks the landing position. For keyboard and touch access, Start writing is also in the More menu.</p>
       <button type="button" class="filechoose" id="open-native" title="Choose a local Pocket JSON. In supported browsers you can save back to this file.">Open Pocket JSON…</button>
       <label class="filechoose" id="fallback-open-welcome" class="hidden" style="margin-left:8px">Open via file upload<input id="filepicker" type="file" accept=".json,application/json"></label>
-      <p class="privacy">Your JSON stays local. In supported browsers, opening with file access enables Save back to that same file, with permission and a warning before first overwrite. Save As creates another file. If your browser does not allow direct file access, Save downloads a new copy instead. Keep a backup of your original: this experimental save has NOT been certified for importing into live Pocket. Proposed new links remain draft-only.</p>
+      <p class="privacy"><strong>v0.6.32 work-ready preview.</strong> Sibling drop guides and collapsed-head hover expansion are human-tested. Drag does not move a unit into another parent. Experimental Copy-body and alias retrieval remain preview-only, not saved Pocket properties.</p>
+      <p class="privacy">Your JSON stays local, with no server upload. Keep an untouched backup and use Save As first when working with important data. Direct Save requires browser file access and explicit permission, with an overwrite warning. Unsupported browsers download a separate copy. This preview blocks normal JSON save after Shift+Enter multiline unit edits, because that representation is not yet part of the approved Pocket format. Normal saved snapshots have not been certified for live Pocket import. New relationship proposals remain draft-only.</p>
       <div class="loaderr" id="loaderror" role="alert"></div>
     </section>
     <section id="viewer" class="hidden"></section>
   </main>
-  <aside id="aside" class="aside hidden" aria-label="Connections and navigation" tabindex="-1"></aside>
+  <aside id="aside" class="aside hidden" role="dialog" aria-label="Unit metadata and relationships" tabindex="-1"></aside>
 </div>
 <div id="peek" class="peek hidden" role="group" aria-label="Quick thought navigation"></div>
-<div class="foot" id="foot">Pocket · v0.6.26 Open / Save / Save As (permission-based) · type → Enter → paste · natural writing · quiet Copy · 0.7s See, Then Undo · Local-only · Not verified for live Pocket import or N1 technical acceptance</div>
+<div class="foot" id="foot">Pocket · v0.6.32 Work-ready Preview · Predictable sibling drag and hover expansion · Source-safe local JSON · No Core or migration changes · Live import and save round-trip unverified</div>
 <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 <script>
 'use strict';
@@ -329,6 +409,10 @@ let sourceName='',proposed=new Map(),undoStack=[],redoStack=[],asideId=null,asid
 let searchQ='',searchMode=false,searchReturn=ALL,searchSelection=0,searchResultIds=[],toastTimer=null,peekId=null,peekTimer=null;
 let writeMode=false, copyMode=false, copyTickTimer=null, originalNodes=new Map(), sessionNew=new Set(), noteDrafts=new Map(), textChanged=new Set(), sessionSerial=0, activeEdit=null, pendingBlank=new Map();
 let originalExport=null, usedIds=new Set(), savedStateKey=null, lastSavedFile='';
+// Session-only retrieval settings. Never include these in the original export or normal saves.
+let retrievalPreview=new Map(), syntheticLab=false, searchNeedsDisambiguation=false;
+let lastCopiedId=null, lastCopiedPe=null; // Presentation-only cues, never data or Undo changes.
+
 // A file input or drag-and-drop does NOT give write permission to a source file.
 // Only a browser-granted native handle permits same-file saving.
 let sourceHandle=null, sourceFileText=null, directSaveConfirmed=false;
@@ -355,7 +439,7 @@ function changeReadingSize(step){
  if(asideId)positionAside();
  flash(label);
 }
-// Deliberate visible beat between returning to a thought and applying its change.
+// Preview pause is only for finding a changed thought elsewhere; local Undo is immediate.
 const DRAFT_PREVIEW_MS=700;
 let pendingDraftAction=null, queuedDraftActions=[], undoSpotTimer=null;
 function flash(msg){const t=$('toast');t.textContent=msg;t.classList.remove('hidden');clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.add('hidden'),2400)}
@@ -378,6 +462,15 @@ function load(data,name){
  if(!index.has('root'))throw Error('No top-level thoughts found.');
  const same=new Map();for(const n of arr){const k=norm(n.label);if(!same.has(k))same.set(k,[]);same.get(k).push(n)}
  originalExport=structuredClone(data);
+ syntheticLab=data.__pocketSyntheticRetrievalLab===true;
+ retrievalPreview=new Map(syntheticLab?[
+  ['lab-raise-gr',{aliases:['RG','GRX'],copySource:'body'}],
+  ['lab-other-rg',{aliases:['ZZ'],copySource:'body'}],
+  ['lab-duplicate-rg',{aliases:['ZZ'],copySource:'title'}],
+  ['lab-title-only',{aliases:['AP'],copySource:'title'}],
+  ['lab-conflict',{aliases:['CF'],copySource:'body'}]
+ ]:[]);
+ searchNeedsDisambiguation=false;lastCopiedId=null;lastCopiedPe=null;
  sourceHandle=null;sourceFileText=null;directSaveConfirmed=false;
  usedIds=new Set([...arr.map(n=>n.id),...(Array.isArray(data.mainThoughtTreeTombstones)?data.mainThoughtTreeTombstones.map(x=>x.id):[])]);
  for(const n of arr){if(Array.isArray(n.editor?.outline))for(const l of n.editor.outline)if(typeof l.id==='string')usedIds.add(l.id)}
@@ -387,6 +480,23 @@ function load(data,name){
 }
 // View trail is presentation-only. Do not mix it with the draft Undo timeline.
 // Save the actual place the person came from, rather than assuming a stored parent.
+function openSyntheticLab(){
+ if(loaded&&currentStateKey()!==savedStateKey&&!confirmLeavingDirty())return;
+ const fixed=(id,label,parentId,order,more={})=>({id,label,parentId,order,source:'synthetic-content-retrieval-lab',...more});
+ const tree=[
+  fixed('lab-work','Template examples','root',10),
+  fixed('lab-raise-gr','Raise Goods Receipt','lab-work',10,{details:'Please raise the goods receipt.\nThanks.'}),
+  fixed('lab-title-only','Approval requested','lab-work',20),
+  fixed('lab-other-rg','Review request','lab-work',30,{details:'Please review the request.'}),
+  fixed('lab-duplicate-rg','Other Zed example','lab-work',40),
+  fixed('lab-conflict','Legacy conflicting versions','lab-work',50,{details:'Legacy details version',editor:{schema:'pocket.nodeEditor.v2',text:'Different editor version'}}),
+  fixed('lab-multiline','Type here and press Shift+Enter','lab-work',60)
+ ];
+ const data={schema:'portal.export.v1',__pocketSyntheticRetrievalLab:true,exportedAt:new Date().toISOString(),mainThoughtTree:tree,mainThoughtTreeTombstones:[],data:{mainThoughtTree:structuredClone(tree),mainThoughtTreeTombstones:[]}};
+ load(data,'SYNTHETIC LAB · not real Pocket data');
+ expanded.add('lab-work');render();
+ flash('Safe example loaded. Type RG and press Enter to copy its body.');
+}
 function rememberRouteView(){
  if(!loaded)return;
  routeViews[routePos]={id:current,expanded:[...expanded],searchMode,searchQ,
@@ -419,7 +529,7 @@ function travel(shift){
  rememberRouteView();routePos=p;go(route[p],{history:false,restore:routeViews[p]});return true;
 }
 function fold(id){finishEdit();if(expanded.has(id))expanded.delete(id);else expanded.add(id);renderViewer()}
-function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-door="${esc(n.id)}" aria-label="Open choices for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="More about this thought"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
+function marker(n){let state=linkCount(n.id)?'has-link':kids(n.id).length?'has-children':'';return `<button type="button" class="unit-marker" data-drag-handle="${esc(n.id)}" data-door="${esc(n.id)}" aria-label="Open metadata sheet for ${esc(n.label)}" aria-expanded="${asideId===n.id}" aria-controls="aside" title="${copyMode?'Click for Unit Sheet':'Click for Unit Sheet; drag to reorder siblings'}"><span class="symbol ${state}" aria-hidden="true"></span></button>`}
 function detailsOf(n){
  const d=typeof n.details==='string'?n.details:''; const e=n.editor;
  const editor=e?(typeof e.text==='string'?e.text:Array.isArray(e.outline)?e.outline.map(x=>' '.repeat(Math.min(12,Number(x.depth)||0)*2)+String(x.text||'')).join('\n'):''):'';
@@ -445,7 +555,7 @@ function peRows(n,parentDepth){
  const lines=peLines(n);let out='';
  for(let i=0;i<lines.length;i++){const l=lines[i],depth=Math.min(15,parentDepth+1+l.depth),blank=!l.text;
   const edit=writeMode?`contenteditable="plaintext-only" role="textbox" data-empty="Write…" aria-label="Edit text line ${i+1} inside ${esc(n.label)}" spellcheck="true"`:'';
-  out+=`<div class="unit pe-line${blank?' pe-gap':''}" data-pe-owner="${esc(n.id)}" data-depth="${depth}" title="Text within ${esc(n.label)}; not a separate unit"><span class="indent" style="width:${Math.min(15,depth)*17}px"></span><span class="pe-gutter" aria-hidden="true">${blank?'':'·'}</span><span class="unit-body"><span class="unit-text" data-edit-pe="${esc(n.id)}" data-pe-index="${i}" ${edit}>${esc(l.text)}</span></span></div>`;
+  out+=`<div class="unit pe-line${blank?' pe-gap':''}${lastCopiedPe?.owner===n.id&&lastCopiedPe?.index===i?' copied-pe':''}" data-pe-owner="${esc(n.id)}" data-depth="${depth}" title="Text within ${esc(n.label)}; not a separate unit"><span class="indent" style="width:${Math.min(15,depth)*17}px"></span><span class="pe-gutter" aria-hidden="true">${blank?'':'·'}</span><span class="unit-body"><span class="unit-text" data-edit-pe="${esc(n.id)}" data-pe-index="${i}" ${edit}>${esc(l.text)}</span></span></div>`;
  }
  return out;
 }
@@ -455,7 +565,7 @@ function outline(items,depth=0){
   const c=kids(n.id),hasPe=peLines(n).some(x=>!!x.text),opened=expanded.has(n.id),isHeading=c.length>0||hasPe;
   const editable=writeMode?`contenteditable="plaintext-only" role="textbox" data-empty="${pendingBlank.has(n.id)?'':'A thought…'}" aria-label="Edit thought ${esc(n.label||'new thought')}" spellcheck="true"`:'';
   const name=`<span class="unit-text" data-unittext="${esc(n.id)}" data-edit-node="${esc(n.id)}" ${editable} title="${writeMode?'Edit thought':copyMode?'Click to copy thought text':'Click to focus thought'}">${esc(n.label)}</span>`;
-  str+=`<div class="unit" data-depth="${depth}" data-id="${esc(n.id)}"><span class="indent" style="width:${Math.min(14,depth)*17}px"></span>${isHeading?`<button class="fold" data-fold="${esc(n.id)}" title="${opened?'Fold':'Unfold'} this thought" aria-label="${opened?'Collapse':'Expand'} ${esc(n.label)}" aria-expanded="${opened}">${opened?'⌄':'›'}</button>`:'<span class="fold placeholder" aria-hidden="true">·</span>'}<span class="unit-body"><span class="thought-frame">${name}</span>${marker(n)}</span></div>`;
+  str+=`<div class="unit${n.label.includes('\n')?' multiline':''}${lastCopiedId===n.id?' copied-unit':''}" data-depth="${depth}" data-id="${esc(n.id)}"><span class="indent" style="width:${Math.min(14,depth)*17}px"></span>${isHeading?`<button class="fold" data-fold="${esc(n.id)}" title="${opened?'Fold':'Unfold'} this thought" aria-label="${opened?'Collapse':'Expand'} ${esc(n.label)}" aria-expanded="${opened}">${opened?'⌄':'›'}</button>`:'<span class="fold placeholder" aria-hidden="true">·</span>'}<span class="unit-body"><span class="thought-frame">${name}</span>${marker(n)}</span></div>`;
   if(opened&&depth<50){str+=peRows(n,depth);if(c.length)str+=outline(c,depth+1)}
  }
  return str;
@@ -464,15 +574,81 @@ function humanHead(){const node=byId.get(current),c=node?chain(node):[];let html
 function renderTrail(){$('trail').innerHTML=loaded?humanHead():`<button id="home" data-open="${ALL}">Pocket</button><span class="sep">/</span><button data-open="${ALL}">Everything</button>`}
 
 function note(text,which){const isAlt=which==='alt',expanded=isAlt?expandedAlt:expandedText;const long=text.length>850||text.split('\n').length>22;return `<div class="bodycopy${long&&!expanded?' collapsed':''}">${esc(text)}</div>${long?`<button class="understated" data-text="${which}">${expanded?'Show less':'Continue reading…'}</button>`:''}`}
+function previewAliases(n){return retrievalPreview.get(n.id)?.aliases||[]}
+function exactAlias(n,q){return previewAliases(n).some(alias=>norm(alias)===q)}
+function sourceBody(n){
+ // Cross-check every available legacy representation; do not privilege one
+ // when details, editor.text and the old editor outline disagree.
+ const editor=n.editor||null;
+ const possible=[];
+ if(typeof n.details==='string'&&n.details)possible.push(n.details);
+ if(typeof editor?.text==='string'&&editor.text)possible.push(editor.text);
+ if(Array.isArray(editor?.outline)&&editor.outline.length){
+  possible.push(editor.outline.slice().sort((a,b)=>(Number(a.order)||0)-(Number(b.order)||0))
+   .map(x=>String(x.text??'')).join('\n'));
+ }
+ const distinct=[...new Set(possible)];
+ if(distinct.length>1)return {ok:false,reason:'Different legacy body versions exist. Choose a source explicitly before copying.'};
+ const text=distinct[0]||'';
+ return text?{ok:true,text}:{ok:false,reason:'No unambiguous body content.'};
+}
+function quickCopyInfo(n){
+ const pref=retrievalPreview.get(n.id);
+ if(pref?.copySource==='body'){
+  const body=sourceBody(n);
+  return body.ok?{kind:'body',text:body.text}:{kind:'blocked',text:'',reason:body.reason};
+ }
+ return {kind:'title',text:n.label};
+}
+async function quickCopyResult(n,row){
+ const info=quickCopyInfo(n);
+ if(info.kind==='blocked'){flash('Copy blocked: '+info.reason);return false}
+ const success=await copyVisibleText(info.text,row);
+ if(!success)return false;
+ // A successful quick copy clears the filter and brings the source into view.
+ // This is presentation only: no identity, relationship, history or Undo change.
+ revealCopiedUnit(n.id);
+ return true;
+}
+function revealCopiedUnit(id){
+ const n=byId.get(id);if(!n)return;
+ lastCopiedId=id;lastCopiedPe=null;
+ if(searchMode)closeSearch();
+ const findRow=()=>[...document.querySelectorAll('#viewer .unit[data-id]')].find(r=>r.dataset.id===id);
+ if(!findRow()){
+  // Show the copied unit as a line in its parent context, rather than opening
+  // that unit or copying any of its descendants. Preserve a reversible view trail.
+  const parent=byId.has(n.parentId)?n.parentId:ALL;
+  if(current!==parent)go(parent);else renderViewer();
+ }
+ const row=findRow();
+ if(row){row.classList.add('copied-unit');row.scrollIntoView({block:'center',behavior:'instant'});}
+ // Don't leave keyboard focus in the now-hidden search field: the next typed
+ // character must be able to start another filter naturally.
+ const page=$('page');page.setAttribute('tabindex','-1');page.focus({preventScroll:true});
+}
+function matchingSearchNodes(q){
+ const matching=nodes.filter(n=>norm(n.label).includes(q)||norm(n.details||'').includes(q)||norm(n.editor?.text||'').includes(q)||previewAliases(n).some(a=>norm(a).includes(q)));
+ return matching.sort((a,b)=>{
+  const rank=n=>exactAlias(n,q)?0:norm(n.label)===q?1:norm(n.label).startsWith(q)?2:3;
+  return rank(a)-rank(b)||path(a).localeCompare(path(b));
+ });
+}
 function renderViewer(){if(!loaded)return;const v=$('viewer');if(searchMode){
-  const q=norm(searchQ),all=nodes.filter(n=>norm(n.label).includes(q)||norm(n.details||'').includes(q)||norm(n.editor?.text||'').includes(q)),found=all.slice(0,90);
+  const q=norm(searchQ),all=matchingSearchNodes(q),found=all.slice(0,90);
   searchResultIds=found.map(n=>n.id);
-  searchSelection=found.length?Math.max(0,Math.min(searchSelection,found.length-1)):0;
-  const hint=found.length?'Enter copies the highlighted thought text · Shift+Enter opens it.':'Nothing matching that phrase.';
-  v.innerHTML=`<h1 class="compact">Find a thought</h1><p class="helper" id="search-keyboard-hint">${hint}${found.length?' ↑/↓ to choose · Escape to close.':''}</p><div class="outline search-results" id="search-results">${found.map((n,i)=>`<div class="unit${i===searchSelection?' search-selected':''}" data-result-index="${i}"><button id="search-result-${i}" class="understated" data-open="${esc(n.id)}" data-search-result="${esc(n.id)}" data-search-index="${i}" aria-current="${i===searchSelection?'true':'false'}" title="${copyMode?'Click to copy':'Click to open'} · Enter copies · Shift+Enter opens" style="font-size:14px;color:#35483b">${esc(n.label)}</button>${marker(n)}<span style="color:var(--muted);font-size:11px;margin-left:8px">${esc(path(n))}</span></div>`).join('')}</div>${all.length>90?'<p class="gentle">Showing the first 90 matches.</p>':''}`;
+  const exact=found.filter(n=>exactAlias(n,q));
+  const ambiguous=exact.length>1;
+  if(ambiguous&&!searchNeedsDisambiguation)searchSelection=-1;
+  else searchSelection=found.length?Math.max(0,Math.min(searchSelection,found.length-1)):-1;
+  const hint=found.length?'Enter copies the highlighted result · Shift+Enter opens it.':'Nothing matching that phrase.';
+  const aliasWarning=ambiguous?`<p class="ambiguous" role="status">${exact.length} exact matches for “${esc(searchQ)}”. Choose with ↑/↓ or click before copying.</p>`:'';
+  v.innerHTML=`<h1 class="compact">Find a thought</h1><p class="helper" id="search-keyboard-hint">${hint}${found.length?' ↑/↓ to choose · Escape to close.':''}</p>${aliasWarning}<div class="outline search-results" id="search-results">${found.map((n,i)=>{
+   const info=quickCopyInfo(n),aliases=previewAliases(n);return `<div class="unit${i===searchSelection?' search-selected':''}" data-result-index="${i}"><button id="search-result-${i}" class="understated" data-open="${esc(n.id)}" data-search-result="${esc(n.id)}" data-search-index="${i}" aria-current="${i===searchSelection?'true':'false'}" title="${copyMode?'Click to copy':'Click to open'} · Enter copies · Shift+Enter opens" style="font-size:14px;color:#35483b">${esc(n.label)}</button>${aliases.length?`<span class="alias-pill">${esc(aliases.join(', '))}</span>`:''}<span class="quick-source">${info.kind==='body'?'Copy body':info.kind==='blocked'?'Body ambiguous':'Copy title'}</span>${marker(n)}<span style="color:var(--muted);font-size:11px;margin-left:8px">${esc(path(n))}</span></div>`
+  }).join('')}</div>${all.length>90?'<p class="gentle">Showing the first 90 matches.</p>':''}`;
   return;
  }
- if(current===ALL){v.innerHTML=`<h1>Everything</h1>${writingHelp()}<div class="outline">${outline(roots)}</div>${writeMode?`<div class="write-row"><button data-write-new="root">+ A thought</button></div>`:''}`;return}
+ if(current===ALL){v.innerHTML=`<h1>Everything</h1>${syntheticLab?'<div class="lab-note"><strong>Synthetic test data only.</strong> Try RG → Enter → paste. The filter will clear and highlight Raise GR. Click its tiny square for the Unit Sheet. Try ZZ to check alias ambiguity. Try CF to see conflicting legacy body copies blocked. Open "Type here" and use Shift+Enter; no new unit should appear. No normal JSON saves from this demonstration.</div>':''}${writingHelp()}<div class="outline">${outline(roots)}</div>${writeMode?`<div class="write-row"><button data-write-new="root">+ A thought</button></div>`:''}`;return}
  const n=byId.get(current);if(!n){v.innerHTML='<p>This thought is unavailable.</p>';return}
  const {d,editor,hasAlternate}=detailsOf(n);const c=kids(n.id);
  v.innerHTML=`<h1 data-copy-current="${esc(n.id)}" title="${copyMode?'Click the title to copy this thought':''}">${esc(n.label||'Untitled thought')} ${marker(n)}</h1>${writingHelp()}<div class="outline focused-outline">${peRows(n,0)}${outline(c)}</div>${writeMode?`<div class="write-row"><button data-write-new="${esc(n.id)}">+ A thought</button></div>`:''}${hasAlternate?`<details class="source-meta" ${editorOpen?'open':''} id="alternate"><summary>Other saved version of this text</summary><p class="gentle">Pocket exported two different versions of this text. The editor's text appears in the outline above; the other copy is preserved here.</p>${note(d,'alt')}</details>`:''}<div class="understated-row" id="outlineactions">${c.length?`<button class="understated" data-action="foldall">Fold all</button><button class="understated" data-action="unfoldall">Unfold headings</button>`:''}</div><details class="source-meta"><summary>About this thought</summary><div>Source identity: ${esc(n.id)}. Parent: ${esc(byId.get(n.parentId)?.label||'Everything')}. Text inside PE remains part of this thought rather than independent, invented units. Use Save for a new working JSON. This prototype has not been certified for live Pocket import.</div></details>`;
@@ -498,13 +674,22 @@ function openAside(id,locked=false){
  document.querySelectorAll('[data-door]').forEach(x=>x.setAttribute('aria-expanded',String(x.dataset.door===id)));
 }
 function linkRow(n,subtitle,extra=''){return `<button class="item" data-open="${esc(n.id)}">${esc(n.label)}${subtitle?`<small>${esc(subtitle)}</small>`:''}</button>${extra}`}
-function renderAside(){if(!asideId)return;const n=byId.get(asideId);if(!n){closeAside();return}const parent=byId.get(n.parentId),same=(names.get(norm(n.label))||[]).filter(x=>x.id!==n.id),links=[...proposed.values()].filter(l=>l.from===n.id||l.to===n.id),c=kids(n.id),a=$('aside');
- const existing=`<div class="section"><p class="section-head">Go to</p>${linkRow(n,'Focus on this thought','').replace(`data-open="${esc(n.id)}"`,`data-open="${esc(n.id)}"`)}${parent?linkRow(parent,'Up to '+parent.label):`<button class="item" data-open="${ALL}">Everything</button>`}${c.length?`<details><summary>${c.length===1?'1 thought inside':'Thoughts inside'} (${c.length})</summary>${c.slice(0,12).map(x=>linkRow(x,'')).join('')}${c.length>12?'<p class="quiet">Open this thought to see the rest.</p>':''}</details>`:''}</div>`;
- const relation=`<div class="section"><p class="section-head">Connections</p>${links.length?links.map(l=>{const other=byId.get(l.from===n.id?l.to:l.from);return `<div class="proposal"><div style="flex:1">${linkRow(other,path(other))}</div><button data-remove="${esc(l.from)}|${esc(l.to)}" title="Remove temporary link" aria-label="Remove temporary link to ${esc(other.label)}">×</button></div>`}).join(''):'<p class="quiet">No links added here yet.</p>'}</div>`;
- const maybe=same.length?`<div class="section"><p class="section-head">Same name elsewhere</p>${same.slice(0,5).map(x=>`<div>${linkRow(x,path(x))}<button class="action" data-add="${esc(n.id)}|${esc(x.id)}" ${proposed.has(linkKey(n.id,x.id))?'disabled':''}>${proposed.has(linkKey(n.id,x.id))?'Linked in this session':'Link these thoughts'}</button></div>`).join('')}${same.length>5?'<p class="quiet">More matches available through search.</p>':''}<p class="hint">Matching names may describe different things.</p></div>`:'';
- const find=`<div class="divider"></div><details><summary>Link another thought…</summary><input type="search" id="aside-find" autocomplete="off" placeholder="Search names" aria-label="Find another thought to link"><div id="aside-results"><p class="quiet">Search for a thought, then choose whether to link it.</p></div></details>`;
- a.innerHTML=`<div class="aside-head"><h2>${esc(n.label)}</h2><button class="aside-close" id="aside-close" aria-label="Close choices" title="Close">×</button></div><div class="asidepath">${esc(path(n))}</div>${existing}<div class="divider"></div>${relation}${maybe}${find}<p class="hint">Links made here are temporary. Nothing is moved or duplicated.</p>`;
+function renderAside(){
+ if(!asideId)return;
+ const n=byId.get(asideId);if(!n){closeAside();return}
+ const parent=byId.get(n.parentId),same=(names.get(norm(n.label))||[]).filter(x=>x.id!==n.id),
+  links=[...proposed.values()].filter(l=>l.from===n.id||l.to===n.id),c=kids(n.id),a=$('aside'),pref=retrievalPreview.get(n.id);
+ const aliasDisplay=pref?.aliases?.length?pref.aliases.join(', '):'Not configured in this lab';
+ const copyDisplay=pref?.copySource==='body'?'Body (preview only)':'Title';
+ const meta=`<div class="sheet-section"><div class="sheet-label">Unit identity</div><div class="sheet-property"><span>ID</span><code>${esc(n.id)}</code></div><div class="sheet-property"><span>Parent</span><span>${esc(parent?.label||'Everything')}</span></div><div class="sheet-property"><span>Child units</span><span>${c.length}</span></div><div class="sheet-property"><span>Order</span><span>${esc(Number(n.order)||0)}</span></div></div>`;
+ const retrieval=`<div class="sheet-section"><div class="sheet-label">Retrieval</div><div class="sheet-property"><span>Aliases</span><span>${esc(aliasDisplay)}</span></div><div class="sheet-property"><span>Quick copy</span><span>${esc(copyDisplay)}</span></div><p class="sheet-hint">Aliases and copy sources are preview settings only. They are not written to normal Pocket JSON.</p></div>`;
+ const hierarchy=`<div class="sheet-section"><div class="sheet-label">Hierarchy & navigation</div>${linkRow(n,'Focus this unit')}${parent?linkRow(parent,'Stored parent: '+parent.label):`<button class="item" data-open="${ALL}">Everything</button>`}${c.length?`<details><summary>Children (${c.length})</summary>${c.slice(0,12).map(x=>linkRow(x,'')).join('')}${c.length>12?'<p class="quiet">Focus this unit to see all children.</p>':''}</details>`:''}</div>`;
+ const connections=`<div class="sheet-section"><div class="sheet-label">Other relationships (session proposals)</div>${links.length?links.map(l=>{const other=byId.get(l.from===n.id?l.to:l.from);return other?`<div class="proposal"><div style="flex:1">${linkRow(other,path(other))}</div><button data-remove="${esc(l.from)}|${esc(l.to)}" title="Remove temporary link" aria-label="Remove temporary link to ${esc(other.label)}">×</button></div>`:''}).join(''):'<p class="quiet">No additional relationship proposals this session.</p>'}<p class="sheet-hint">This does not claim to list every relationship in the original Pocket Core.</p></div>`;
+ const sameNames=same.length?`<div class="sheet-section"><div class="sheet-label">Same name elsewhere</div>${same.slice(0,5).map(x=>`<div>${linkRow(x,path(x))}<button class="action" data-add="${esc(n.id)}|${esc(x.id)}" ${proposed.has(linkKey(n.id,x.id))?'disabled':''}>${proposed.has(linkKey(n.id,x.id))?'Linked in this session':'Propose a link'}</button></div>`).join('')}${same.length>5?'<p class="quiet">More matches available in search.</p>':''}<p class="sheet-hint">Matching names need not share identity.</p></div>`:'';
+ const find=`<div class="sheet-section"><details><summary>Propose another relationship…</summary><input type="search" id="aside-find" autocomplete="off" placeholder="Search names" aria-label="Find a unit to link"><div id="aside-results"><p class="quiet">Find a unit to propose a session-only link.</p></div></details></div>`;
+ a.innerHTML=`<div class="aside-head"><div><div class="sheet-eyebrow">UNIT SHEET · METADATA ONLY</div><h2>${esc(n.label)}</h2></div><button class="aside-close" id="aside-close" aria-label="Close unit sheet" title="Close">×</button></div><div class="asidepath">${esc(path(n))}</div>${meta}${retrieval}${hierarchy}${connections}${sameNames}${find}<div class="sheet-section"><div class="sheet-label">History</div><p class="sheet-hint">Not displayed in this interface lab. No history is inferred or rewritten here.</p></div><p class="sheet-foot">Text, legacy PE and paragraphs stay in the main outline, not in this sheet. Any proposed links are temporary.</p>`;
 }
+
 function closePeek(){clearTimeout(peekTimer);$('peek').classList.add('hidden');peekId=null}
 function schedulePeekClose(){clearTimeout(peekTimer);peekTimer=setTimeout(closePeek,700)}
 function openPeek(button){
@@ -513,7 +698,7 @@ function openPeek(button){
  clearTimeout(peekTimer);peekId=id;const same=Math.max(0,(names.get(norm(n.label))||[]).length-1);
  const refs=linkCount(id),p=$('peek');
  const hint=refs?`${refs} connection${refs!==1?'s':''}`:same?`${same} same-name possibility${same!==1?'ies':''}`:'';
- p.innerHTML=`<div class="peek-name">${esc(n.label)}${hint?`<div class="peek-hint">${esc(hint)}</div>`:''}</div><button data-open="${esc(id)}">Focus here</button><button data-peek-full="${esc(id)}">Connections and options…</button>`;
+ p.innerHTML=`<div class="peek-name">${esc(n.label)}${hint?`<div class="peek-hint">${esc(hint)}</div>`:''}</div><button data-open="${esc(id)}">Focus here</button><button data-peek-full="${esc(id)}">Open unit metadata…</button>`;
  p.classList.remove('hidden');const r=button.getBoundingClientRect(),width=p.getBoundingClientRect().width,height=p.getBoundingClientRect().height;
  let left=r.right+8;if(left+width>window.innerWidth-12)left=r.left-width-8;
  left=Math.max(10,Math.min(left,window.innerWidth-width-10));
@@ -579,6 +764,31 @@ function completeDraftAction(){
  // Multiple quick presses are still distinct steps, each with its own preview.
  if(queuedDraftActions.length){const next=queuedDraftActions.shift();setTimeout(()=>runDraftAction(next),50)}
 }
+// A visible unit is already the user's location: do not delay Undo/Redo or
+// unexpectedly jump to its parent. A row existing off-screen does NOT count.
+// Structural moves between different parents still need location preview.
+function undoTargetIsAlreadyInView(a,forward){
+ if(!loaded||searchMode||asideId)return false;
+ const target=preActionLocation(a,forward);
+ if(!target)return false;
+ if(a.kind==='struct'&&a.targetId){
+  const beforeParent=a.before?.find(x=>x[0]===a.targetId)?.[1];
+  const afterParent=a.after?.find(x=>x[0]===a.targetId)?.[1];
+  if(!beforeParent||!afterParent||beforeParent!==afterParent)return false;
+ }
+ const rows=target.kind==='pe'
+  ?document.querySelectorAll('.outline .unit[data-pe-owner]')
+  :document.querySelectorAll('.outline .unit[data-id]');
+ const row=Array.from(rows).find(el=>target.kind==='pe'
+  ?el.dataset.peOwner===target.owner&&Number(el.querySelector('[data-pe-index]')?.dataset.peIndex)===target.index
+  :el.dataset.id===target.id);
+ if(!row||!row.getClientRects().length)return false;
+ const box=row.getBoundingClientRect();
+ const viewportBottom=window.innerHeight||document.documentElement.clientHeight||0;
+ const headerBottom=Math.max(0,document.querySelector('.topbar')?.getBoundingClientRect().bottom||0);
+ const overlap=Math.max(0,Math.min(box.bottom,viewportBottom)-Math.max(box.top,headerBottom));
+ return box.height>0 && overlap>=Math.min(16,box.height*.5);
+}
 function runDraftAction(isRedo){
  if(pendingDraftAction){
   if(queuedDraftActions.length<20)queuedDraftActions.push(isRedo);
@@ -592,8 +802,11 @@ function runDraftAction(isRedo){
   flash('Undo paused: removing this thought would be unsafe. Your content is unchanged.');
   return;
  }
- // Navigate while the original content is still visible, before changing it.
+ // Do not add a 700ms preview when the affected row is already in view.
+ // Keep the authoritative guard and action path identical in both cases.
+ const alreadyHere=undoTargetIsAlreadyInView(a,isRedo);
  pendingDraftAction={isRedo,action:a,timer:null};
+ if(alreadyHere){completeDraftAction();return;}
  previewActionFocus(a,isRedo);
  flash(isRedo?'Showing the thought before Redo…':'Showing the thought before Undo…');
  pendingDraftAction.timer=setTimeout(completeDraftAction,DRAFT_PREVIEW_MS);
@@ -662,6 +875,8 @@ function persistPeContent(n,lines){
 }
 function buildPocketSnapshot(){
  if(!loaded||!originalExport)throw Error('Open your Pocket JSON first.');
+ if(syntheticLab)throw Error('This is synthetic test data. No normal Pocket JSON can be saved from this demonstration.');
+ if(nodes.some(n=>n.label.includes('\n')))throw Error('Multiline unit content is an experimental interface only. Normal JSON saving is blocked until a shared-model format and live importer are approved. Undo the multiline change or use the preserved v0.6.26 working version.');
  if(pendingDraftAction||queuedDraftActions.length)throw Error('Let Undo/Redo finish before saving.');
  finishEdit();
  // Unused, untyped insertion points should never turn into real imported units.
@@ -801,8 +1016,8 @@ function exportLinks(){
 }
 function closeMenu(){$('moremenu').classList.add('hidden');$('more').setAttribute('aria-expanded','false')}
 function openSearch(){if(!loaded)return;$('searchdock').classList.remove('hidden');$('search').focus();$('search').select();closeMenu()}
-function searchChange(value){finishEdit();if(!loaded)return;const q=value.trim();if(q!==searchQ)searchSelection=0;if(q&&!searchMode)searchReturn=current;searchQ=q;searchMode=!!q;if(!searchMode)searchResultIds=[];renderViewer()}
-function closeSearch(){const active=searchMode;searchMode=false;searchQ='';searchSelection=0;searchResultIds=[];$('search').value='';$('searchdock').classList.add('hidden');if(active)renderViewer()}
+function searchChange(value){finishEdit();if(!loaded)return;const q=value.trim();if(q!==searchQ){searchSelection=0;searchNeedsDisambiguation=false}if(q&&!searchMode)searchReturn=current;searchQ=q;searchMode=!!q;if(!searchMode)searchResultIds=[];renderViewer()}
+function closeSearch(){const active=searchMode;searchMode=false;searchQ='';searchSelection=0;searchNeedsDisambiguation=false;searchResultIds=[];$('search').value='';$('searchdock').classList.add('hidden');if(active)renderViewer()}
 async function takeFile(f){if(!f)return;try{const data=JSON.parse(await f.text());load(data,f.name)}catch(e){$('loaderror').textContent=`Couldn't open this file: ${e.message}`;flash('That file could not be opened.')}}
 // v0.6 writing study: local in-memory proposals only, never a source import/write.
 function cloneLines(lines){return lines.map(l=>({...l,text:String(l.text??''),depth:Number(l.depth)||0}))}
@@ -813,7 +1028,7 @@ function rebuildIndex(){
  roots=children.get('root')||[];
 }
 function writingHelp(){
- if(writeMode)return '<p class="write-note">WRITE · Enter: new thought / text line · Tab / Shift+Tab: indent / outdent · Esc: leave an empty new thought, or return to Navigate · Ctrl/⌘ Z: Undo anywhere. Temporary draft.</p>';
+ if(writeMode)return '<p class="write-note">EDIT · Enter: next thought · <strong>Shift+Enter: same unit, new line</strong> · Tab / Shift+Tab: nest / unnest · Alt+↑/↓: move unit · Drag the square: reorder siblings · Esc: navigate. New multiline storage is not yet approved for normal JSON saving.</p>';
  if(copyMode)return '<p class="write-note">COPY · Single-click a thought or a PE text line to copy only its text · Esc: Navigate. No content or History change.</p>';
  return '';
 }
@@ -823,8 +1038,8 @@ function syncModeButtons(){
  b.setAttribute('aria-label',copyMode?'Turn off Copy Mode':'Turn on Copy Mode');
  b.title=copyMode?'Copy mode: on. Click to return to navigation':'Copy mode: off. Click to copy individual lines';
  const w=$('menu-write');
- w.innerHTML=writeMode?'Finish writing <span>Esc</span>':'Start writing <span>F2</span>';
- w.setAttribute('aria-label',writeMode?'Finish writing and return to navigation':'Start writing');
+ w.innerHTML=writeMode?'Finish editing <span>Esc</span>':'Start editing <span>F2</span>';
+ w.setAttribute('aria-label',writeMode?'Finish editing and return to navigation':'Start editing');
 }
 function setMode(mode,{announce=true}={}){
  if(!['navigate','write','copy'].includes(mode))return;
@@ -832,7 +1047,7 @@ function setMode(mode,{announce=true}={}){
  if(prior===mode)return;
  finishEdit();writeMode=mode==='write';copyMode=mode==='copy';
  closePeek();closeAside();closeMenu();syncModeButtons();render();
- if(announce)flash(mode==='write'?'Writing here. Your source JSON remains untouched.':mode==='copy'?'Copy mode. Click a thought to copy its text.': 'Navigation mode. Click a thought to focus.');
+ if(announce)flash(mode==='write'?'Editing here. Your source JSON remains untouched.':mode==='copy'?'Copy mode. Click a thought to copy its text.': 'Navigation mode. Click a thought to focus.');
 }
 function activeLocation(){
  const el=document.activeElement?.closest?.('[data-edit-node],[data-edit-pe]');
@@ -887,15 +1102,17 @@ async function copyVisibleText(text,row){
  try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);success=true}}
  catch(_){/* the local-file or permission fallback below may still work */}
  if(!success)success=clipboardFallback(text);
- if(!success){flash('Clipboard was blocked. Select the text and copy manually.');return}
+ if(!success){flash('Clipboard was blocked. Select the text and copy manually.');return false}
  document.querySelectorAll('.copy-tick').forEach(x=>x.remove());
  const tick=document.createElement('span');tick.className='copy-tick';tick.setAttribute('aria-label','Copied');tick.textContent='✓';
  (row?.querySelector?.('.unit-body')||row)?.appendChild(tick);
  clearTimeout(copyTickTimer);copyTickTimer=setTimeout(()=>tick.remove(),1400);
- flash('Copied this line only.');
+ flash('Copied.');
+ return true;
 }
 function handleEscape(e){
  if(e.key!=='Escape'||!loaded)return;
+ if(pendingUnitDrag?.active){e.preventDefault();e.stopImmediatePropagation();suppressUnitHandleClickUntil=Date.now()+700;clearUnitDrag();flash('Unit move cancelled.');return;}
  const visible=id=>!$(id).classList.contains('hidden');
  if(visible('peek')||visible('aside')||visible('moremenu')||visible('searchdock')){
   e.preventDefault();e.stopImmediatePropagation();closePeek();closeAside();closeMenu();closeSearch();return;
@@ -975,7 +1192,7 @@ function rememberCaret(el){
  const match=activeEdit.kind==='node'?activeEdit.id===el.dataset.editNode:activeEdit.owner===el.dataset.editPe&&activeEdit.index===Number(el.dataset.peIndex);
  if(match)activeEdit.at=caretOffset(el);
 }
-function caretOffset(el){const sel=window.getSelection();if(!sel||!sel.rangeCount||!el.contains(sel.anchorNode))return el.textContent.length;const range=sel.getRangeAt(0).cloneRange();range.selectNodeContents(el);range.setEnd(sel.anchorNode,sel.anchorOffset);return range.toString().length}
+function caretOffset(el){const sel=window.getSelection();if(!sel||!sel.rangeCount||!el.contains(sel.anchorNode))return el.textContent.length;const range=sel.getRangeAt(0).cloneRange();range.selectNodeContents(el);range.setEnd(sel.anchorNode,sel.anchorOffset);return range.toString().replace(/\u2060/g,'').length}
 function placeCaret(el,at=null,end=false){
  if(!el)return false;
  el.focus();const sel=window.getSelection(),r=document.createRange();
@@ -1065,7 +1282,7 @@ function locateActionRow(target,{preview=false,sharedView=null}={}){
   // both the old and new parent contexts. Only navigate when necessary.
   if(searchMode||!ancestorView(current,sharedView))go(destination);
   revealOutlinePath(id);
- }else if(current!==destination||searchMode||!findRow())go(destination);
+ }else if(searchMode||!findRow())go(destination);
  const row=findRow();
  if(!row)return false;
  row.scrollIntoView({block:'center',behavior:'instant'});
@@ -1128,6 +1345,20 @@ function addThought(parent,afterId=null,label=''){
  render();focusEdit(id);
  return id;
 }
+function insertMultilineInUnit(el){
+ const id=el.dataset.editNode,n=byId.get(id);if(!n)return;
+ const sel=window.getSelection();if(!sel||!sel.rangeCount)return;
+ const range=sel.getRangeAt(0);if(!el.contains(range.commonAncestorContainer))return;
+ const old=n.label,pos=caretOffset(el);
+ const head=old.slice(0,pos),tail=old.slice(pos);
+ n.label=head+'\n'+tail;
+ // A trailing newline in a contenteditable needs a temporary caret anchor
+ // so the next keystroke lands AFTER the break, not before it.
+ el.textContent=head+'\n'+'\u2060'+tail;
+ placeCaret(el,pos+1);
+ rememberCaret(el);
+ $('export').disabled=false;
+}
 function splitThought(el){
  const id=el.dataset.editNode,n=byId.get(id);if(!n)return;
  // Enter on a still-empty insertion point must not stack up empty sibling units.
@@ -1144,6 +1375,25 @@ function splitThought(el){
 }
 function snapshotStruct(){return nodes.map(n=>[n.id,n.parentId,Number(n.order)||0])}
 function restoreStructure(entries){if(!entries)return;for(const [id,p,o] of entries){const n=byId.get(id);if(n){n.parentId=p;n.order=o}}rebuildIndex()}
+
+// v0.6.29 experiment: reorder a complete unit subtree by assigning order only
+// to its EXISTING siblings. Parent IDs, unit IDs, PE text and links are untouched.
+// This is one provisional structural Undo action, not an adopted Core event.
+function reorderUnitBySiblingDrop(sourceId,targetId,position){
+ finishEdit();
+ const source=byId.get(sourceId),target=byId.get(targetId);
+ if(!source||!target||sourceId===targetId||source.parentId!==target.parentId)return false;
+ const before=snapshotStruct(),prior=[...kids(source.parentId)];
+ const order=prior.filter(n=>n.id!==sourceId),index=order.findIndex(n=>n.id===targetId);
+ if(index<0)return false;
+ order.splice(index+(position==='after'?1:0),0,source);
+ if(order.every((n,i)=>n.id===prior[i].id))return false;
+ order.forEach((n,i)=>{n.order=1000+i;});
+ rebuildIndex();
+ register({kind:'struct',targetId:sourceId,before,after:snapshotStruct()});
+ render();flash('Moved unit and its children. Undo is available.');
+ return true;
+}
 function rearrange(id,kind){
  finishEdit();const n=byId.get(id);if(!n)return;
  const before=snapshotStruct(),siblings=[...kids(n.parentId)],at=siblings.findIndex(x=>x.id===id);
@@ -1188,7 +1438,7 @@ function peKey(el,e){const n=byId.get(el.dataset.editPe);if(!n)return;
 // Event capture prevents ordinary browser paragraph insertion inside one unit.
 document.addEventListener('focusin',e=>{const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(el)editableFocus(el)});
 document.addEventListener('input',e=>{const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(!el||!writeMode)return;
- if(el.hasAttribute('data-edit-node')){const n=byId.get(el.dataset.editNode);if(n){n.label=(el.innerText||el.textContent||'').replace(/[\r\n]+/g,' ');$('export').disabled=false}}
+ if(el.hasAttribute('data-edit-node')){const n=byId.get(el.dataset.editNode);if(n){n.label=(el.innerText||el.textContent||'').replace(/\r\n?/g,'\n').replace(/\u2060/g,'');$('export').disabled=false}}
  else editPE(el);
  rememberCaret(el);
 });
@@ -1214,7 +1464,7 @@ document.addEventListener('keydown',e=>{
  }
  if(!writeMode)return;
  const el=e.target.closest?.('[data-edit-node],[data-edit-pe]');if(!el)return;
- if(el.hasAttribute('data-edit-pe')){if(e.key==='Enter'||e.key==='Tab')peKey(el,e);return}
+ if(el.hasAttribute('data-edit-pe')){if(e.key==='Enter'&&e.shiftKey){e.preventDefault();flash('Legacy PE stays unchanged: Shift+Enter currently applies to genuine units only.');return;}if(e.key==='Enter'||e.key==='Tab')peKey(el,e);return}
  if((e.key==='Backspace'||e.key==='Delete')&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
   const id=el.dataset.editNode,n=byId.get(id);
   if(n&&sessionNew.has(id)&&!n.label.trim()&&!kids(id).length&&!linkCount(id)){
@@ -1228,6 +1478,7 @@ document.addEventListener('keydown',e=>{
    return;
   }
  }
+ if(e.key==='Enter'&&e.shiftKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();insertMultilineInUnit(el);return}
  if(e.key==='Enter'&&!e.shiftKey&&!e.ctrlKey&&!e.metaKey){e.preventDefault();splitThought(el);return}
  if(e.key==='Tab'){e.preventDefault();rearrange(el.dataset.editNode,e.shiftKey?'outdent':'indent');return}
  if(e.altKey&&(e.key==='ArrowUp'||e.key==='ArrowDown')){e.preventDefault();rearrange(el.dataset.editNode,e.key==='ArrowUp'?'up':'down');return}
@@ -1272,7 +1523,7 @@ document.addEventListener('keydown',e=>{
  if(!inSearch)return;
  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
   e.preventDefault();e.stopImmediatePropagation();
-  searchSelection=Math.max(0,Math.min(searchResultIds.length-1,searchSelection+(e.key==='ArrowDown'?1:-1)));
+  searchNeedsDisambiguation=true;searchSelection=Math.max(0,Math.min(searchResultIds.length-1,searchSelection<0?0:searchSelection+(e.key==='ArrowDown'?1:-1)));
   renderViewer();
   // Keep typing fluid after keyboard selection.
   if(document.activeElement!==input)input.focus({preventScroll:true});
@@ -1281,12 +1532,12 @@ document.addEventListener('keydown',e=>{
  }
  if(e.key!=='Enter')return;
  e.preventDefault();e.stopImmediatePropagation();
+ if(searchSelection<0){flash('Choose between the matching aliases with ↑ or ↓ before copying.');return;}
  const id=searchResultIds[searchSelection],node=byId.get(id);
  if(!node)return;
  if(e.shiftKey){go(id);return;}
- copyVisibleText(node.label,document.querySelector(`.search-results .unit[data-result-index="${searchSelection}"]`));
- // Copy is an output action; it does not close the search or switch modes.
- if(document.activeElement!==input)input.focus({preventScroll:true});
+ quickCopyResult(node,document.querySelector(`.search-results .unit[data-result-index="${searchSelection}"]`));
+ // Copy success clears search and highlights its source; a blocked copy does not.
 },true);
 // v0.6.22: Type-to-filter in Navigation AND Copy Mode, as in live Pocket.
 // A printable character starts a search without requiring the search button.
@@ -1349,6 +1600,108 @@ function clickAfterLine(e){
  if(ok)rememberCaret(field);
  return ok;
 }
+
+// v0.6.32 isolated gesture. The square remains click-to-Unit Sheet; >9px
+// deliberate movement reorders SAME-PARENT siblings only. No implicit nesting.
+// Hovering a collapsed legal sibling head opens it as a VIEW change, not Undo.
+const DRAG_HOVER_OPEN_MS=600;
+let pendingUnitDrag=null,suppressUnitHandleClickUntil=0;
+function clearDragGuide(){
+ document.querySelectorAll('.drag-target-before,.drag-target-after').forEach(row=>row.classList.remove('drag-target-before','drag-target-after'));
+}
+function clearDragHover(d){
+ if(d?.openTimer)clearTimeout(d.openTimer);
+ if(d){d.openTimer=null;d.hoverId=null;}
+}
+// A row's descendants (including PE rows) follow it in DOM order. A sibling
+// inserted AFTER a head belongs after its whole subtree, not inside its children.
+function dropGuideRow(row,side){
+ if(!row||side!=='after')return row;
+ const depth=Number(row.dataset.depth)||0;
+ let last=row;
+ for(let next=row.nextElementSibling;next?.classList?.contains('unit')&&Number(next.dataset.depth)>depth;next=next.nextElementSibling)last=next;
+ return last;
+}
+function legalUnitDropAt(d,x,y){
+ const row=document.elementFromPoint(x,y)?.closest?.('.outline .unit[data-id]');
+ const target=row&&byId.get(row.dataset.id);
+ if(!target||target.id===d.id||target.parentId!==d.parentId)return null;
+ const box=row.getBoundingClientRect();
+ return {id:target.id,side:y<box.top+box.height/2?'before':'after',row};
+}
+function paintUnitDrop(d,hit){
+ clearDragGuide();
+ d.dropId=hit?.id||null;d.side=hit?.side||null;
+ if(hit)dropGuideRow(hit.row,hit.side)?.classList.add(hit.side==='before'?'drag-target-before':'drag-target-after');
+}
+function scheduleDragHeadOpen(d,hit){
+ const node=hit&&byId.get(hit.id);
+ const collapsedHead=node&&!expanded.has(node.id)&&(kids(node.id).length||peLines(node).some(line=>!!line.text));
+ if(!collapsedHead){clearDragHover(d);return;}
+ if(d.hoverId===node.id)return;
+ clearDragHover(d);
+ d.hoverId=node.id;
+ d.openTimer=setTimeout(()=>{
+  d.openTimer=null;
+  if(pendingUnitDrag!==d||!d.active||d.hoverId!==node.id||expanded.has(node.id))return;
+  expanded.add(node.id); // View-only expansion, never a structural/Undo event.
+  renderViewer(); // Body owns pointer capture so replacing rows is safe.
+  d.hoverId=null;
+  const hitNow=legalUnitDropAt(d,d.lastX,d.lastY);
+  paintUnitDrop(d,hitNow);
+  scheduleDragHeadOpen(d,hitNow);
+ },DRAG_HOVER_OPEN_MS);
+}
+function clearUnitDrag(){
+ clearDragGuide();
+ const d=pendingUnitDrag;pendingUnitDrag=null;
+ clearDragHover(d);
+ const capture=d?.captureTarget||d?.button;
+ if(capture?.hasPointerCapture?.(d.pointerId))try{capture.releasePointerCapture(d.pointerId)}catch(_){}
+}
+document.addEventListener('pointerdown',e=>{
+ if(!loaded||copyMode||searchMode||pendingDraftAction||e.button!==0)return;
+ const button=e.target.closest?.('.outline .unit-marker[data-drag-handle]');
+ const row=button?.closest('.outline .unit[data-id]');
+ const node=row&&byId.get(row.dataset.id);
+ if(!node)return; // Never drag legacy PE text, heading or search result.
+ pendingUnitDrag={pointerId:e.pointerId,button,captureTarget:button,id:node.id,parentId:node.parentId,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,active:false,dropId:null,side:null,hoverId:null,openTimer:null};
+ try{button.setPointerCapture(e.pointerId)}catch(_){}
+},true);
+document.addEventListener('pointermove',e=>{
+ const d=pendingUnitDrag;if(!d||d.pointerId!==e.pointerId)return;
+ if(!d.active&&Math.hypot(e.clientX-d.x,e.clientY-d.y)<=9)return;
+ if(!d.active){
+  d.active=true;
+  clearTimeout(hoverTimer);hovering=null;closePeek();
+  // Once dragging, the stable body retains capture during head expansion.
+  // Without this transfer, renderViewer removes the source button mid-gesture.
+  try{document.body.setPointerCapture(e.pointerId);d.captureTarget=document.body}catch(_){}
+ }
+ e.preventDefault();
+ d.lastX=e.clientX;d.lastY=e.clientY;
+ const hit=legalUnitDropAt(d,e.clientX,e.clientY);
+ paintUnitDrop(d,hit);
+ scheduleDragHeadOpen(d,hit);
+},{capture:true,passive:false});
+document.addEventListener('pointerup',e=>{
+ const d=pendingUnitDrag;if(!d||e.pointerId!==d.pointerId)return;
+ const moved=d.active,source=d.id;
+ // Re-check the actual pointer position, never trust an old highlighted row.
+ const hit=moved?legalUnitDropAt(d,e.clientX,e.clientY):null;
+ if(moved){e.preventDefault();e.stopPropagation();suppressUnitHandleClickUntil=Date.now()+700;}
+ clearUnitDrag();
+ if(moved){
+  if(hit){if(!reorderUnitBySiblingDrop(source,hit.id,hit.side))flash('Already at that position. No changes made.');}
+  else flash('Only insert before or after a sibling. No changes made.');
+ }
+},true);
+document.addEventListener('pointercancel',e=>{if(pendingUnitDrag&&e.pointerId===pendingUnitDrag.pointerId)clearUnitDrag()},true);
+document.addEventListener('click',e=>{
+ if(Date.now()<suppressUnitHandleClickUntil&&e.target.closest?.('[data-drag-handle]')){
+  e.preventDefault();e.stopImmediatePropagation();suppressUnitHandleClickUntil=0;
+ }
+},true);
 document.addEventListener('click',e=>{
  if(clickRightToStartWriting(e)||clickAfterLine(e))return;
  const unitText=e.target.closest('[data-unittext]');
@@ -1358,12 +1711,12 @@ document.addEventListener('click',e=>{
  const onControl=e.target.closest('button,a,input,textarea,select,summary,[data-open]');
  if(copyMode&&loaded&&!onControl&&!e.altKey&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){
   const row=e.target.closest('.outline .unit');
-  if(row?.dataset.id){const n=byId.get(row.dataset.id);if(n){copyVisibleText(n.label,row);return}}
-  if(row?.dataset.peOwner){const n=byId.get(row.dataset.peOwner),line=n&&peLines(n)[Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)];if(line){copyVisibleText(line.text,row);return}}
+  if(row?.dataset.id){const n=byId.get(row.dataset.id);if(n){copyVisibleText(n.label,row).then(ok=>{if(ok){lastCopiedId=n.id;lastCopiedPe=null;document.querySelectorAll('.copied-unit,.copied-pe').forEach(x=>x.classList.remove('copied-unit','copied-pe'));row.classList.add('copied-unit')}});return}}
+  if(row?.dataset.peOwner){const n=byId.get(row.dataset.peOwner),line=n&&peLines(n)[Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)];if(line){copyVisibleText(line.text,row).then(ok=>{if(ok){lastCopiedId=null;lastCopiedPe={owner:n.id,index:Number(row.querySelector('[data-pe-index]')?.dataset.peIndex)};document.querySelectorAll('.copied-unit,.copied-pe').forEach(x=>x.classList.remove('copied-unit','copied-pe'));row.classList.add('copied-pe')}});return}}
   const title=e.target.closest('[data-copy-current]');
   if(title){const n=byId.get(title.dataset.copyCurrent);if(n){copyVisibleText(n.label,title);return}}
  }
- const b=e.target.closest('[data-open],[data-door],[data-fold],[data-add],[data-remove],[data-text],[data-action],[data-peek-full],#aside-close');if(b){if(b.dataset.searchResult&&searchMode&&b.dataset.searchIndex!==undefined)searchSelection=Number(b.dataset.searchIndex);if(b.dataset.searchResult&&copyMode&&searchMode){e.preventDefault();const n=byId.get(b.dataset.searchResult);if(n)copyVisibleText(n.label,b.closest('.unit'));return}if(b.dataset.peekFull){openAside(b.dataset.peekFull,true);return}if(b.dataset.door){e.stopPropagation();if(asideId===b.dataset.door&&asideLocked)closeAside();else openAside(b.dataset.door,true);return}if(b.id==='aside-close'){closeAside();return}if(b.dataset.open){go(b.dataset.open);return}if(b.dataset.fold){fold(b.dataset.fold);return}if(b.dataset.add){const [a,c]=b.dataset.add.split('|');suggest(a,c);return}if(b.dataset.remove){const [a,c]=b.dataset.remove.split('|');remove(a,c);return}if(b.dataset.text){if(b.dataset.text==='alt')expandedAlt=!expandedAlt;else expandedText=!expandedText;renderViewer();return}if(b.dataset.action==='foldall'){expanded.clear();renderViewer();return}if(b.dataset.action==='unfoldall'){expanded=new Set(kids(current).map(n=>n.id));renderViewer();return}}if(!e.target.closest('#peek,[data-door]'))closePeek();if(!e.target.closest('#moremenu,#more'))closeMenu();if(asideId&&!e.target.closest('#aside')){if(!e.target.closest('[data-door]'))closeAside()}
+ const b=e.target.closest('[data-open],[data-door],[data-fold],[data-add],[data-remove],[data-text],[data-action],[data-peek-full],#aside-close');if(b){if(b.dataset.searchResult&&searchMode&&b.dataset.searchIndex!==undefined){searchSelection=Number(b.dataset.searchIndex);searchNeedsDisambiguation=true;}if(b.dataset.searchResult&&copyMode&&searchMode){e.preventDefault();const n=byId.get(b.dataset.searchResult);if(n)quickCopyResult(n,b.closest('.unit'));return}if(b.dataset.peekFull){openAside(b.dataset.peekFull,true);return}if(b.dataset.door){e.stopPropagation();if(asideId===b.dataset.door&&asideLocked)closeAside();else openAside(b.dataset.door,true);return}if(b.id==='aside-close'){closeAside();return}if(b.dataset.open){go(b.dataset.open);return}if(b.dataset.fold){fold(b.dataset.fold);return}if(b.dataset.add){const [a,c]=b.dataset.add.split('|');suggest(a,c);return}if(b.dataset.remove){const [a,c]=b.dataset.remove.split('|');remove(a,c);return}if(b.dataset.text){if(b.dataset.text==='alt')expandedAlt=!expandedAlt;else expandedText=!expandedText;renderViewer();return}if(b.dataset.action==='foldall'){expanded.clear();renderViewer();return}if(b.dataset.action==='unfoldall'){expanded=new Set(kids(current).map(n=>n.id));renderViewer();return}}if(!e.target.closest('#peek,[data-door]'))closePeek();if(!e.target.closest('#moremenu,#more'))closeMenu();if(asideId&&!e.target.closest('#aside')){if(!e.target.closest('[data-door]'))closeAside()}
  // Navigate mode uses a direct single click on a genuine thought, never a PE text line.
  if(!writeMode&&!copyMode&&!onControl&&!e.shiftKey&&!e.altKey){
   const row=e.target.closest('.outline .unit[data-id]');
@@ -1374,7 +1727,7 @@ document.addEventListener('dblclick',e=>{if(writeMode||copyMode)return;const t=e
 window.addEventListener('scroll',()=>{if(peekId)closePeek();if(asideId)positionAside()},{passive:true});
 window.addEventListener('resize',()=>{if(asideId)positionAside()});
 let hovering=null;
-document.addEventListener('pointerover',e=>{if(e.pointerType==='touch'||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;const b=e.target.closest('[data-door]');if(!b)return;clearTimeout(peekTimer);if(asideLocked)return;clearTimeout(hoverTimer);hovering=b;hoverTimer=setTimeout(()=>{if(hovering===b)openPeek(b)},270)});
+document.addEventListener('pointerover',e=>{if(pendingUnitDrag?.active||e.pointerType==='touch'||!window.matchMedia('(hover:hover) and (pointer:fine)').matches)return;const b=e.target.closest('[data-door]');if(!b)return;clearTimeout(peekTimer);if(asideLocked)return;clearTimeout(hoverTimer);hovering=b;hoverTimer=setTimeout(()=>{if(hovering===b)openPeek(b)},270)});
 document.addEventListener('pointerout',e=>{const b=e.target.closest('[data-door]');if(!b||b.contains(e.relatedTarget))return;hovering=null;clearTimeout(hoverTimer);schedulePeekClose()});
 document.addEventListener('input',e=>{if(e.target.id==='aside-find')asideMatches(e.target.value)});
 document.addEventListener('keydown',e=>{if(loaded&&(e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==='s'){e.preventDefault();e.stopImmediatePropagation();savePocketJSON();return;}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openSearch()}if(e.altKey&&e.key==='ArrowLeft'){e.preventDefault();travel(-1)}if(e.altKey&&e.key==='ArrowRight'){e.preventDefault();travel(1)}});
