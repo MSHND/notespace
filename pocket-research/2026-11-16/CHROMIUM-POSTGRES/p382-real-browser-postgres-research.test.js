@@ -31,7 +31,9 @@ const KEY = process.env.POCKET_P382_KEY;
 const CHROME = process.env.CHROME_BIN;
 
 test("P382 real Chromium loads Pocket against an isolated PostgreSQL-backed Sync server and durable Head CAS", { timeout: 180000 }, async () => {
-  assert.ok(db && db.includes("localhost"), "Only a loopback disposable PostgreSQL DSN is allowed");
+  const databaseHost = db ? new URL(db).hostname : null;
+  assert.ok(["localhost", "127.0.0.1"].includes(databaseHost),
+    "Only a loopback disposable PostgreSQL DSN is allowed");
   assert.ok(CERT && KEY && CHROME, "Research TLS and Chromium configuration are required");
 
   const pool1 = new Pool({ connectionString: db });
