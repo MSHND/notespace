@@ -27,8 +27,8 @@ jobs:
 
     env:
       POCKET_SYNC_DATABASE_URL: postgresql://postgres:p382_disposable_test_only@127.0.0.1:5432/pocket_p382_research
-      POCKET_P382_CERT: ${{ runner.temp }}/p382.crt
-      POCKET_P382_KEY: ${{ runner.temp }}/p382.key
+      POCKET_P382_CERT: /tmp/pocket-p382-research.crt
+      POCKET_P382_KEY: /tmp/pocket-p382-research.key
       CI: "true"
 
     steps:
