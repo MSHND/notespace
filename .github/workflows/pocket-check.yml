@@ -111,3 +111,34 @@ jobs:
 
       - name: Pocket static check
         run: npm run check
+
+      - name: Alpha read-only auth contracts and public gate preflight
+        if: github.ref == 'refs/heads/research/pocket-alpha-readonly-preflight-20261116'
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 120s node --test --test-reporter=tap \
+            tests/p349-project-documents-auth.test.js \
+            tests/p349xn-auth0-multi-audience.test.js \
+            tests/p349xh-verified-subject-binding.test.js \
+            tests/p349c-project-documents-production-dormancy.test.js \
+            tests/p349-project-documents-production-composition.test.js \
+            tests/p349-project-documents-schema.test.js \
+            tests/p349-project-documents-store.test.js
+          host='https://pocket.murrayhenderson.com.au'
+          status_code() {
+            curl -sS --connect-timeout 8 --max-time 20 \
+              -o /dev/null -w '%{http_code}' "$1"
+          }
+          root_status="$(status_code "$host/")"
+          gate_status="$(status_code "$host/pocket-alpha")"
+          api_status="$(status_code "$host/pocket-sync/v1/account/discovery")"
+          printf 'P385_READONLY_HOST_CHECK root=%s gate=%s api=%s tls=verified-by-curl\n' \
+            "$root_status" "$gate_status" "$api_status"
+          test "$gate_status" = '200'
+          test "$api_status" != '200'
+          case "$root_status" in
+            301|302|303|307|308|401|403) ;;
+            *) echo "P385 unauthorised root did not enforce an admission boundary"; exit 1 ;;
+          esac
+          printf 'P385_SCOPE=read-only-GET-no-secrets-no-live-DB-queries-no-deploy\n'
