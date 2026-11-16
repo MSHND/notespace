@@ -10,6 +10,18 @@ permissions:
 jobs:
   pocket-check:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: p386_synthetic_ci_only
+          POSTGRES_DB: pocket_p386_synthetic
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pocket_p386_synthetic"
+          --health-interval 5s --health-timeout 3s --health-retries 15
     timeout-minutes: 25
     steps:
       - name: Checkout exact workflow commit and ancestry
@@ -111,3 +123,14 @@ jobs:
 
       - name: Pocket static check
         run: npm run check
+
+      - name: P386 deployed migration vs current and disposable PostgreSQL rerun
+        if: github.ref == 'refs/heads/research/pocket-alpha-schema-rollback-20261117'
+        shell: bash
+        env:
+          POCKET_SYNC_DATABASE_URL: postgresql://postgres:p386_synthetic_ci_only@127.0.0.1:5432/pocket_p386_synthetic
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=10s 150s \
+            node --test --test-reporter=tap pocket-research/2026-11-17/ALPHA-PREFLIGHT/p386-legacy-migration-compat-research.test.js
+          echo 'P386_SCOPE=synthetic-disposable-pg-only-no-live-render-queries-no-data-copy-no-deploy'
