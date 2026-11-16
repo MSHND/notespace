@@ -1,0 +1,75 @@
+name: Pocket P382 Chromium PostgreSQL research
+
+on:
+  push:
+    branches:
+      - research/pocket-chromium-postgres-20261116
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-browser-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: p382_disposable_test_only
+          POSTGRES_DB: pocket_p382_research
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pocket_p382_research"
+          --health-interval 5s --health-timeout 3s --health-retries 15
+
+    env:
+      POCKET_SYNC_DATABASE_URL: postgresql://postgres:p382_disposable_test_only@127.0.0.1:5432/pocket_p382_research
+      POCKET_P382_CERT: ${{ runner.temp }}/p382.crt
+      POCKET_P382_KEY: ${{ runner.temp }}/p382.key
+      CI: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify isolation and install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git branch --show-current)" = "research/pocket-chromium-postgres-20261116" || test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test "$(node --version | cut -c1-3)" = "v24"
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright-core@1.55.0
+          command -v google-chrome || command -v chromium || command -v chromium-browser
+
+      - name: Migrate disposable PostgreSQL 18 using real Pocket migrations
+        run: npm run sync:db:migrate
+
+      - name: Create local-only ephemeral TLS credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+            -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout "$POCKET_P382_KEY" -out "$POCKET_P382_CERT" >/dev/null 2>&1
+          chmod 600 "$POCKET_P382_KEY"
+
+      - name: Run actual Chromium + PostgreSQL + Pocket Sync service bounded witness
+        shell: bash
+        run: |
+          set -euo pipefail
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          export CHROME_BIN
+          timeout --signal=TERM --kill-after=10s 240s \
+            node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p382-real-browser-postgres-research.test.js
+          echo "P382_SCOPE=real-chromium-https-and-real-pg-head-cas-with-production-source-modules"
+          echo "P382_EXCLUDED=real-work-data-real-credentials-production-service-and-full-browser-save"
