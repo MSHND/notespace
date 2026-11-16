@@ -31,6 +31,10 @@ const REQUIRED_OBSERVATIONS = Object.freeze([
 ]);
 
 test("P381 automated synthetic source-integrated Open -> Edit -> Save -> independent remote readback and Device B control", { timeout: 480000 }, () => {
+  // Node sets NODE_TEST_CONTEXT for its test-worker children. Passing it to a
+  // nested test runner causes Node to silently skip the requested suites.
+  const childEnv = { ...process.env, POCKET_P381_RESEARCH_DISPOSABLE: "1" };
+  delete childEnv.NODE_TEST_CONTEXT;
   const run = spawnSync(process.execPath, [
     "--test", "--test-reporter=tap", "--test-concurrency=1", ...SOURCE_SUITES,
   ], {
@@ -38,7 +42,7 @@ test("P381 automated synthetic source-integrated Open -> Edit -> Save -> indepen
     encoding: "utf8",
     maxBuffer: 16 * 1024 * 1024,
     timeout: 450000,
-    env: { ...process.env, POCKET_P381_RESEARCH_DISPOSABLE: "1" },
+    env: childEnv,
   });
 
   const output = String(run.stdout || "");
