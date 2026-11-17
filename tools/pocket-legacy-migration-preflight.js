@@ -164,4 +164,4 @@ if (require.main === module) {
   process.exitCode = result.ok ? 0 : 1;
 }
 
-module.exports = { preflightLegacyMigration };
+module.exports = { parseSource, preflightLegacyMigration };
