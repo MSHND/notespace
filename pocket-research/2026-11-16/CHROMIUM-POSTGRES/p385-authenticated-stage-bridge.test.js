@@ -76,20 +76,20 @@ source = source.replace(anchor, `
   assert.deepEqual(independent.value, pending.value);
   const savedCredentials = await a.cdp.send("WebAuthn.getCredentials", { authenticatorId: a.authenticatorId });
   await a.cdp.send("Browser.crash").catch(() => {});
-  const reopened = await openBrowser(browser, origin);
-  await reopened.page.addScriptTag({ path: adapter });
-  assert.equal(await reopened.page.evaluate(async () => {
+  const resumedBrowser = await openBrowser(browser, origin);
+  await resumedBrowser.page.addScriptTag({ path: adapter });
+  assert.equal(await resumedBrowser.page.evaluate(async () => {
     try { await PocketH1AuthStageResearch.install(); return true; } catch { return false; }
   }), false);
-  assert.equal(await reopened.page.locator("#h1AuthStageStatus").count(), 0);
-  const signed = await openWithSyncedFixturePasskey(reopened,
+  assert.equal(await resumedBrowser.page.locator("#h1AuthStageStatus").count(), 0);
+  const signed = await openWithSyncedFixturePasskey(resumedBrowser,
     { cdp: { send: async () => savedCredentials }, authenticatorId: "synthetic-transfer" }, prf);
   assert.equal(signed.ok, true);
-  await reopened.page.evaluate(() => PocketH1AuthStageResearch.install());
-  const recovered = await reopened.page.evaluate(() => PocketH1AuthStageResearch.inspect());
+  await resumedBrowser.page.evaluate(() => PocketH1AuthStageResearch.install());
+  const recovered = await resumedBrowser.page.evaluate(() => PocketH1AuthStageResearch.inspect());
   assert.deepEqual(recovered, pending);
-  assert.equal((await contents(reopened.page)).find(row => row.id === "alpha").label, "Research alpha");
-  assert.equal((await reopened.page.evaluate(() => exportTree())).reason, "h1-stage-research-held");
+  assert.equal((await contents(resumedBrowser.page)).find(row => row.id === "alpha").label, "Research alpha");
+  assert.equal((await resumedBrowser.page.evaluate(() => exportTree())).reason, "h1-stage-research-held");
   assert.deepEqual(await sqlState(sql, activated.pocket), h2);
   console.info("P385_STAGE_WITNESS=" + JSON.stringify({
     verdict: "AUTHENTICATED ENCRYPTED STAGING PROVED (synthetic)",
