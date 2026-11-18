@@ -125,7 +125,7 @@ jobs:
         run: npm run check
 
       - name: P382 and P383 real Chromium and disposable PostgreSQL research
-        if: github.ref == 'refs/heads/research/pocket-chromium-postgres-20261116' || github.ref == 'refs/heads/codex/pocket-h1-browser-recovery-20261118' || github.ref == 'refs/heads/codex/pocket-auth-stage-bridge-20261118'
+        if: github.ref == 'refs/heads/research/pocket-chromium-postgres-20261116' || github.ref == 'refs/heads/codex/pocket-h1-browser-recovery-20261118' || github.ref == 'refs/heads/codex/pocket-auth-stage-bridge-20261118' || github.ref == 'refs/heads/research/pocket-p386-chatgpt-20261118'
         shell: bash
         env:
           POCKET_SYNC_DATABASE_URL: postgresql://postgres:p382_disposable_test_only@127.0.0.1:5432/pocket_p382_research
@@ -146,3 +146,5 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p383-authenticated-open-save-readback.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p384-title-staging-gap.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p385-authenticated-stage-bridge.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p386-pending-guard.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p386-aborted-stage.test.js
