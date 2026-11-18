@@ -16,6 +16,7 @@ function replaceOnce(a,b) {
 replaceOnce("P385 authenticated owner encrypted title staging and fresh process readback",
  "P388 verified pending-to-native-offsite acceptance and independent browser readback");
 replaceOnce("  const savedCredentials = await a.cdp.send", [
+  "  {",
   "  const saveStart = a.responses.length;",
   "  const settled = await a.page.evaluate(() => PocketH1AuthStageResearch.acceptPending());",
   '  assert.equal(settled.ok, true, "Native pending-to-CAS acceptance: "+settled.reason);',
@@ -68,6 +69,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "    stageSettled: true, independentAuthorisedDevice: true, wholeRecordUploads: 0",
   "  }));",
   "  return;",
+  "  }",
   "  const savedCredentials = await a.cdp.send",
 ].join("\n"));
 const runner = new Module(filename, module);
