@@ -148,3 +148,4 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p385-authenticated-stage-bridge.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p386-pending-guard.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p386-aborted-stage.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p387-authority-repeat-recovery.test.js
