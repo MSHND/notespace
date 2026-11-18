@@ -105,7 +105,8 @@
     // Only render text already visible in this verified owner projection. A changed
     // accepted Head or different placement means there is no lawful comparison.
     if (!node || !draft || typeof draft.text !== "string"
-        || node.parentId !== draft.parentId || node.label !== draft.original
+        || node.parentId !== draft.parentId
+        || (node.label !== draft.original && node.label !== draft.text)
         || stage?.baseHead?.revision !== session.head.revision
         || stage?.baseHead?.sealRef !== session.head.sealRef
         || !Array.isArray(operation) || operation.length !== 1
@@ -117,7 +118,9 @@
     view.setAttribute("role", "group");
     view.setAttribute("aria-label", "Pending change, read only");
     const currentTitle = document.createElement("p");
-    currentTitle.textContent = "Current title: " + node.label;
+    // Main may already display the still-Pending working title. The only
+    // accepted value is the originally verified base stored with this stage.
+    currentTitle.textContent = "Current title: " + draft.original;
     const pendingTitle = document.createElement("p");
     pendingTitle.textContent = "Pending title: " + draft.text;
     view.append(currentTitle, pendingTitle);
