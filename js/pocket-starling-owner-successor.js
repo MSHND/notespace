@@ -1758,6 +1758,38 @@ into a user-facing failure.
       } } });
     }
 
+    // Dormant P390 research-only, authority-bound seal ancestry check. The
+    // actual nonextractable master key stays INSIDE the current owner
+    // controller, never in the browser adapter, ledger, logs or test output.
+    async function reconcileResearchNativeCandidate(candidate) {
+      if (!global.PocketH1AuthStageResearch?.reconcileLostAck
+          || !candidate || typeof candidate !== "object" || Array.isArray(candidate)
+          || Object.keys(candidate).length !== 3
+          || !Object.prototype.hasOwnProperty.call(candidate, "syncedPocketId")
+          || !Object.prototype.hasOwnProperty.call(candidate, "expectedHead")
+          || !Object.prototype.hasOwnProperty.call(candidate, "candidateSealStorageRef")) return null;
+      const current = currentPrivate();
+      if (!current || candidate.syncedPocketId !== current.owner.syncedPocketId
+          || !await refreshPrivateOwner()) return null;
+      const refreshed = currentPrivate();
+      const coordinator = global.PocketStarlingDurablePublication?.createCoordinator?.({
+        objectHeadService: options.objectHeadService,
+        operationIdFactory: options.operationIdFactory,
+      });
+      if (!coordinator || typeof coordinator.reconcileCandidate !== "function"
+          || !refreshed || !base.isSyncedOwnerSaveSessionCurrent(refreshed.session)) return null;
+      try {
+        const outcome = await coordinator.reconcileCandidate({
+          descriptor: candidate,
+          masterKey: refreshed.owner.masterKey,
+          context: { syncedPocketId: refreshed.owner.syncedPocketId },
+        });
+        if (!base.isSyncedOwnerSaveSessionCurrent(refreshed.session)) return null;
+        return outcome && ["committed", "committed-and-superseded", "not-committed",
+          "conflict", "unknown"].includes(outcome.outcome) ? outcome : null;
+      } catch (_error) { return null; }
+    }
+
     return Object.freeze({
       canAdoptSyncedOwner: base.canAdoptSyncedOwner,
       adoptSyncedOwner,
@@ -1771,6 +1803,7 @@ into a user-facing failure.
       admitAcceptedDeleteRestore,
       bootstrapInitialStarlingBase,
       getStarlingBootstrapState,
+      reconcileResearchNativeCandidate,
     });
   }
 
