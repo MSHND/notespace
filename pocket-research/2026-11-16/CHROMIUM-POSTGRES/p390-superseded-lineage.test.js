@@ -92,7 +92,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   '    { cdp: { send: async () => newestCredentials }, authenticatorId: "synthetic-transfer" }, prf);',
   '  assert.equal(opened.ok, true, "Second independent verified Open: "+opened.reason);',
   "  const visible = await contents(b.page);",
-  "  assert.deepEqual(visible.map(node => node.id), ['alpha','restore','beta']);",
+  "  assert.deepEqual(visible.map(node => node.id), ['alpha','beta','restore']);",
   '  assert.equal(visible.find(node => node.id === "alpha").label, "Fictional final title");',
   '  assert.equal(visible.find(node => node.id === "alpha").details, "Synthetic notes for alpha");',
   "  assert.equal(b.responses.filter(({ route }) =>",
