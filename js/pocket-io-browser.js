@@ -1660,6 +1660,11 @@ async function exportTree(options = {}) {
     if (!isPocketFileSaveSessionCurrent(saveSession)) {
       return exportTreeResult(options, false, "file-session-changed");
     }
+    // Dormant P386 research gate: fail closed before any source/Canon mutation.
+    // Do not rely on replacing the public exportTree function as authority.
+    if (window.PocketH1AuthStageResearch?.blocksNativeSave?.() === true) {
+      return exportTreeResult(options, false, "h1-stage-research-held");
+    }
     const vaultDialogSaveAllowed = !!(
       options.vaultDialogToken
       && window.PocketVaultBrowserIo

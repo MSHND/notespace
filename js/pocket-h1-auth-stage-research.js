@@ -5,7 +5,7 @@
   const DB = "pocket.h1.auth-stage.research.v1";
   const encoder = new TextEncoder();
   let session = null, queue = Promise.resolve(), held = false, version = 0, installed = false;
-  let currentDraft = null, notice = null, completing = false;
+  let currentDraft = null, notice = null, completing = false, insideCommit = false;
   const plain = value => JSON.parse(JSON.stringify(value));
   const reject = () => { throw new Error("h1-authority-unavailable"); };
   const current = proof => proof && session === proof &&
@@ -93,8 +93,45 @@
     if (confirmed.revision !== context.revision || JSON.stringify(confirmed.value) !== JSON.stringify(value)) reject();
     return confirmed.value;
   }
+  function clearPendingReview() {
+    document.getElementById("h1AuthStageReview")?.remove();
+  }
+  function showPendingReview(value) {
+    clearPendingReview();
+    if (!current(session) || !value || !Array.isArray(value.stages) || value.stages.length !== 1) return;
+    const stage = value.stages[0], draft = stage?.draft;
+    const node = Array.isArray(state?.nodes) ? state.nodes.find(item => item.id === draft?.nodeId) : null;
+    const operation = stage?.operation?.operations;
+    // Only render text already visible in this verified owner projection. A changed
+    // accepted Head or different placement means there is no lawful comparison.
+    if (!node || !draft || typeof draft.text !== "string"
+        || node.parentId !== draft.parentId
+        || (node.label !== draft.original && node.label !== draft.text)
+        || stage?.baseHead?.revision !== session.head.revision
+        || stage?.baseHead?.sealRef !== session.head.sealRef
+        || !Array.isArray(operation) || operation.length !== 1
+        || operation[0]?.type !== "payload"
+        || operation[0]?.input?.nodeId !== node.id
+        || operation[0]?.input?.payload?.label !== draft.text) return;
+    const view = document.createElement("section");
+    view.id = "h1AuthStageReview";
+    view.setAttribute("role", "group");
+    view.setAttribute("aria-label", "Pending change, read only");
+    const currentTitle = document.createElement("p");
+    // Main may already display the still-Pending working title. The only
+    // accepted value is the originally verified base stored with this stage.
+    currentTitle.textContent = "Current title: " + draft.original;
+    const pendingTitle = document.createElement("p");
+    pendingTitle.textContent = "Pending title: " + draft.text;
+    view.append(currentTitle, pendingTitle);
+    document.body.appendChild(view);
+  }
   function show(text) {
-    if (!current(session)) return;
+    if (!current(session)) {
+      clearPendingReview();
+      notice?.remove(); notice = null;
+      return;
+    }
     if (!notice) {
       notice = document.createElement("p");
       notice.id = "h1AuthStageStatus";
@@ -108,7 +145,7 @@
     return queue;
   }
   function capture(input) {
-    if (!current(session) || held || !input.isConnected) return;
+    if (!current(session) || held || completing || !input.isConnected) return;
     const nodeId = input.getAttribute("data-edit-id"), node = state.nodes.find(node => node.id === nodeId);
     if (!node || state.inlineEdit.isNew) return;
     currentDraft = { id: currentDraft?.nodeId === nodeId ? currentDraft.id : crypto.randomUUID(),
@@ -119,7 +156,19 @@
   async function complete(input) {
     if (!current(session) || held || !currentDraft) reject();
     const draft = plain(currentDraft);
-    const result = commitInlineEdit(draft.nodeId, draft.text);
+    const edit = state.inlineEdit;
+    const node = Array.isArray(state.nodes) ? state.nodes.find(item => item.id === draft.nodeId) : null;
+    if (!input.isConnected || edit?.id !== draft.nodeId || edit.isNew
+        || input.getAttribute("data-edit-id") !== draft.nodeId
+        || input.value !== draft.text || !node || node.parentId !== draft.parentId
+        || node.label !== draft.original) reject();
+    let result;
+    insideCommit = true;
+    try {
+      result = commitInlineEdit(draft.nodeId, draft.text);
+    } finally {
+      insideCommit = false;
+    }
     const operation = freezePocketStarlingOwnerWorkingSetThrough(getPocketHighestOperationSequence());
     if (!result?.ok || operation.operations?.length !== 1 ||
         operation.operations[0].type !== "payload" || operation.operations[0].input.nodeId !== draft.nodeId ||
@@ -133,15 +182,25 @@
     currentDraft = null;
     held = true;
     show("Pending offsite work needs review.");
+    const confirmed = await read(session);
+    showPendingReview(confirmed.value);
   }
   async function install() {
     session = null;
+    currentDraft = null;
+    completing = false;
+    clearPendingReview();
     notice?.remove(); notice = null;
     const proof = await authenticate();
     session = proof;
     const restored = await read(proof);
-    held = restored.value.stages.length > 0;
-    if (held) show("Pending offsite work needs review.");
+    held = restored.value.stages.length > 0 || !!restored.value.draft;
+    if (restored.value.stages.length) {
+      show("Pending offsite work needs review.");
+      showPendingReview(restored.value);
+    } else if (restored.value.draft) {
+      show("Protected draft needs review. Not Saved offsite.");
+    }
     if (!installed) {
       installed = true;
       // No public staging gate exists in this source. Hold the normal Save entry
@@ -155,7 +214,12 @@
       }, true);
       document.addEventListener("keydown", event => {
         if (held && event.key === "F2") { event.preventDefault(); event.stopImmediatePropagation(); }
-        if (event.key !== "Enter" || event.isComposing || !event.target.matches("input.labelEdit")) return;
+        if (event.key !== "Enter" || !event.target.matches("input.labelEdit")) return;
+        if (event.isComposing || event.keyCode === 229) {
+          // Permit the browser/IME default, never the Main semantic Enter handler.
+          event.stopImmediatePropagation();
+          return;
+        }
         event.preventDefault(); event.stopImmediatePropagation();
         if (!held && !completing) {
           capture(event.target);
@@ -168,8 +232,22 @@
   }
   global.PocketH1AuthStageResearch = Object.freeze({
     install,
-    async inspect() { const fresh = await authenticate(); if (!current(session) || fresh.scope !== session.scope ||
-      fresh.sessionTag !== session.sessionTag) reject(); return read(session); },
+    // These fail-closed hooks are read by the original Main completion/Save boundaries.
+    // Only this dormant research adapter exposes them, and only after installation.
+    blocksNativeSave: () => installed,
+    blocksUnstagedInline: () => installed && (!current(session) || held || (completing && !insideCommit)),
+    async inspect() {
+      try {
+        const fresh = await authenticate();
+        if (!current(session) || fresh.scope !== session.scope ||
+            fresh.sessionTag !== session.sessionTag) reject();
+        return read(session);
+      } catch (error) {
+        clearPendingReview();
+        notice?.remove(); notice = null;
+        throw error;
+      }
+    },
     flush: () => queue,
   });
 })(window);
