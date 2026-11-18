@@ -125,7 +125,7 @@ jobs:
         run: npm run check
 
       - name: P382 and P383 real Chromium and disposable PostgreSQL research
-        if: github.ref == 'refs/heads/research/pocket-chromium-postgres-20261116' || github.ref == 'refs/heads/codex/pocket-h1-browser-recovery-20261118' || github.ref == 'refs/heads/codex/pocket-auth-stage-bridge-20261118' || github.ref == 'refs/heads/research/pocket-p386-chatgpt-20261118'
+        if: github.ref == 'refs/heads/research/pocket-chromium-postgres-20261116' || github.ref == 'refs/heads/codex/pocket-h1-browser-recovery-20261118' || github.ref == 'refs/heads/codex/pocket-auth-stage-bridge-20261118' || github.ref == 'refs/heads/research/pocket-p386-chatgpt-20261118' || github.event_name == 'pull_request'
         shell: bash
         env:
           POCKET_SYNC_DATABASE_URL: postgresql://postgres:p382_disposable_test_only@127.0.0.1:5432/pocket_p382_research
