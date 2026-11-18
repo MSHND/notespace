@@ -230,7 +230,7 @@
     // These fail-closed hooks are read by the original Main completion/Save boundaries.
     // Only this dormant research adapter exposes them, and only after installation.
     blocksNativeSave: () => installed,
-    blocksUnstagedInline: () => installed && (held || (completing && !insideCommit)),
+    blocksUnstagedInline: () => installed && (!current(session) || held || (completing && !insideCommit)),
     async inspect() {
       try {
         const fresh = await authenticate();
