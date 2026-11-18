@@ -61,7 +61,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   '  assert.equal(await reopenedBrowser.page.locator("#h1AuthStageStatus").count(), 0);',
   "  const signed = await openWithSyncedFixturePasskey(reopenedBrowser,",
   '    { cdp: { send: async () => currentTransferCredentials }, authenticatorId: "synthetic-transfer" }, prf);',
-  '  assert.equal(signed.ok, true, "Reopened authoritative owner");',
+  '  assert.equal(signed.ok, true, "Reopened after H4: "+signed.reason);',
   "  const auto = await reopenedBrowser.page.evaluate(() =>",
   "    PocketH1AuthStageResearch.install({ autoReconcileOnOpen: true }));",
   '  assert.equal(auto.autoReconciliation?.ok, true, "Open auto recovery: "+auto.autoReconciliation?.reason);',
