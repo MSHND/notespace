@@ -103,6 +103,27 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
     });
   }
 
+  // Research-only: the accepted encrypted candidate may be older than the
+  // current Head. For lineage READS, new opaque publication records are not
+  // needed: the authentic native stage already holds the exact CAS candidate.
+  // This does not grant write/commit authority or accept a bare Head number.
+  function validateLineageCandidate(input) {
+    const { head, starlingCrypto } = dependencies();
+    if (!exact(input, ["syncedPocketId", "expectedHead", "candidateSealStorageRef"])
+        || !identifier(input.syncedPocketId)
+        || !head.validHead(input.expectedHead)
+        || input.expectedHead.revision < 1
+        || !storageRef(input.expectedHead.sealRef, starlingCrypto)
+        || !storageRef(input.candidateSealStorageRef, starlingCrypto)) {
+      throw fail("lineage-candidate-invalid");
+    }
+    return Object.freeze({
+      syncedPocketId: input.syncedPocketId,
+      expectedHead: snapshotHead(input.expectedHead, head),
+      candidateSealStorageRef: input.candidateSealStorageRef,
+    });
+  }
+
   function descriptorFromPrepared(prepared) {
     const { storage, head } = dependencies();
     if (!prepared || prepared.outcome !== "prepared" || !prepared.stage
@@ -265,7 +286,7 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
       throw fail("head-outcome-unknown");
     }
 
-    async function reconcile(inputValue) {
+    async function reconcileCore(inputValue, candidateOnly = false) {
       if (!inputValue || typeof inputValue !== "object" || Array.isArray(inputValue)
           || Object.keys(inputValue).length !== 3
           || !Object.prototype.hasOwnProperty.call(inputValue, "descriptor")
@@ -273,7 +294,8 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
           || !Object.prototype.hasOwnProperty.call(inputValue, "context")) {
         throw fail("reconcile-input-invalid");
       }
-      const descriptor = validateDescriptor(inputValue.descriptor);
+      const descriptor = candidateOnly ? validateLineageCandidate(inputValue.descriptor)
+        : validateDescriptor(inputValue.descriptor);
       const { head, storage, starlingCrypto, syncCrypto } = dependencies();
       let masterKey;
       let context;
@@ -355,7 +377,15 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
       return Object.freeze({ outcome: head.OUTCOME.CONFLICT, examined: delta });
     }
 
-    return Object.freeze({ ensureObjects, attemptHead, reconcile });
+    // Keep the prior descriptor-based reconciliation unchanged for all
+    // existing callers. Only the protected P390 research owner proof may
+    // ask to trace a bare, but exact, content-addressed native candidate.
+    async function reconcile(input) { return reconcileCore(input, false); }
+    async function reconcileCandidate(input) {
+      return reconcileCore(input, true);
+    }
+
+    return Object.freeze({ ensureObjects, attemptHead, reconcile, reconcileCandidate });
   }
 
   global.PocketStarlingDurablePublication = Object.freeze({
