@@ -17,6 +17,7 @@ replaceOnce("P385 authenticated owner encrypted title staging and fresh process 
 replaceOnce("  const savedCredentials = await a.cdp.send", [
   '  await a.page.route("**" + SERVICE_ROOT + ROUTES.compareAndSetShadowHead,',
   '    route => route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));',
+  "  {",
   "  const saveStart = a.responses.length;",
   "  const refused = await a.page.evaluate(() => PocketH1AuthStageResearch.acceptPending());",
   "  assert.equal(refused.ok, false);",
@@ -45,6 +46,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "    attempted: true, repeatedCas: false, acceptedHead: h2.revision, savedClaim: false",
   "  }));",
   "  return;",
+  "  }",
   "  const savedCredentials = await a.cdp.send",
 ].join("\n"));
 const runner = new Module(filename, module);
