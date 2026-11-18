@@ -6,6 +6,7 @@
   const encoder = new TextEncoder();
   let session = null, queue = Promise.resolve(), held = false, version = 0, installed = false;
   let currentDraft = null, notice = null, completing = false, insideCommit = false;
+  let nativeSave = null, saveToken = null, saving = false;
   const plain = value => JSON.parse(JSON.stringify(value));
   const reject = () => { throw new Error("h1-authority-unavailable"); };
   const current = proof => proof && session === proof &&
@@ -194,10 +195,109 @@
     const confirmed = await read(session);
     showPendingReview(confirmed.value);
   }
+
+  // P388: One authenticated, source-integrated, synthetic research admission.
+  // Never send directly to the Head endpoint. Native exportTree and its owner
+  // Starling/CAS gate remain the sole authority for offsite acceptance.
+  async function acceptPending() {
+    if (!installed || saving || !held || !current(session) || !nativeSave) reject();
+    saving = true;
+    try {
+      await queue;
+      const proof = session;
+      const checked = await global.PocketH1AuthStageResearch.inspect();
+      const value = checked.value;
+      if (value.draft || value.stages?.length !== 1) reject();
+      const stage = value.stages[0], draft = stage?.draft;
+      const operation = stage?.operation, change = operation?.operations?.[0];
+      const node = state.nodes?.find(item => item.id === draft?.nodeId);
+      const seq = getPocketHighestOperationSequence();
+      const currentWorkingSet = freezePocketStarlingOwnerWorkingSetThrough(seq);
+      if (!stage?.id || stage.attempt || !draft || !operation
+          || stage.baseHead?.revision !== proof.head.revision
+          || stage.baseHead?.sealRef !== proof.head.sealRef
+          || node?.parentId !== draft.parentId || node?.label !== draft.text
+          || change?.type !== "payload" || operation.operations.length !== 1
+          || change.input?.nodeId !== node.id
+          || change.input?.payload?.label !== draft.text
+          || operation.ceiling !== seq
+          || JSON.stringify(currentWorkingSet?.operations) !== JSON.stringify(operation.operations)
+          || !hasPocketUnsavedChanges()) reject();
+      // Mark one exact operation as possibly sent BEFORE any network mutation.
+      // This is a durable no-blind-retry fence even if the reply is lost.
+      await write(ledger => {
+        if (ledger.stages?.length !== 1 || ledger.stages[0]?.id !== stage.id
+            || ledger.stages[0].attempt || ledger.draft) reject();
+        ledger.stages[0].attempt = { kind: "possibly-sent", stageId: stage.id,
+          baseRevision: stage.baseHead.revision, ceiling: operation.ceiling };
+      });
+      const reserved = await read(proof);
+      if (reserved.value.stages?.[0]?.attempt?.stageId !== stage.id) reject();
+      saveToken = crypto.randomUUID();
+      let result = null;
+      try {
+        result = await nativeSave({
+          returnDetails: true, downloadFallback: false, h1ResearchSaveToken: saveToken,
+        });
+      } catch (_error) {}
+      // The native gate consumes this token at the only admitted Save boundary.
+      const consumed = saveToken === null;
+      saveToken = null;
+      if (!consumed || result?.ok !== true || result.reason !== "synced-save") {
+        held = true;
+        show("Save outcome unconfirmed. Editing is paused.");
+        return { ok: false, reason: "outcome-unconfirmed", stageId: stage.id };
+      }
+      let fresh;
+      try { fresh = await authenticate(); } catch (_error) {}
+      if (!fresh || !current(proof) || fresh.scope !== proof.scope
+          || fresh.sessionTag !== proof.sessionTag
+          || fresh.head?.revision !== proof.head.revision + 1
+          || fresh.head?.sealRef === proof.head.sealRef) {
+        held = true;
+        show("Save outcome unconfirmed. Editing is paused.");
+        return { ok: false, reason: "acceptance-not-independently-verified", stageId: stage.id };
+      }
+      // Preserve exact stage-to-Head receipt evidence, while removing the
+      // Pending stage only AFTER native acceptance and fresh Head verification.
+      session = fresh;
+      const accepted = { stageId: stage.id, nodeId: draft.nodeId, baseHead: stage.baseHead,
+        acceptedHead: fresh.head, operation: plain(operation) };
+      try {
+        await write(ledger => {
+          if (ledger.stages?.length !== 1 || ledger.stages[0]?.id !== stage.id
+              || ledger.stages[0]?.attempt?.stageId !== stage.id) reject();
+          ledger.acceptedReceipts = [...(ledger.acceptedReceipts || []), accepted];
+          ledger.stages = [];
+          ledger.draft = null;
+        });
+        const settled = await read(session);
+        if (settled.value.stages?.length !== 0
+            || settled.value.acceptedReceipts?.at(-1)?.stageId !== stage.id
+            || settled.value.acceptedReceipts.at(-1).acceptedHead.sealRef !== fresh.head.sealRef) reject();
+      } catch (_error) {
+        held = true;
+        show("Accepted offsite; local receipt settlement needs review.");
+        return { ok: false, reason: "local-receipt-unsettled", stageId: stage.id,
+          acceptedHead: fresh.head };
+      }
+      held = false;
+      clearPendingReview();
+      show("Saved.");
+      return { ok: true, reason: "verified-saved", stageId: stage.id,
+        acceptedHead: fresh.head };
+    } finally {
+      saving = false;
+      saveToken = null;
+    }
+  }
+
   async function install() {
     session = null;
     currentDraft = null;
     completing = false;
+    saving = false;
+    saveToken = null;
     clearPendingReview();
     notice?.remove(); notice = null;
     const proof = await authenticate();
@@ -205,15 +305,18 @@
     const restored = await read(proof);
     held = restored.value.stages.length > 0 || !!restored.value.draft;
     if (restored.value.stages.length) {
-      show("Pending offsite work needs review.");
+      show(restored.value.stages.some(stage => stage.attempt)
+        ? "Save outcome unconfirmed. Editing is paused."
+        : "Pending offsite work needs review.");
       showPendingReview(restored.value);
     } else if (restored.value.draft) {
       show("Protected draft needs review. Not Saved offsite.");
     }
     if (!installed) {
       installed = true;
-      // No public staging gate exists in this source. Hold the normal Save entry
-      // while the research adapter owns unfinished or Pending work.
+      // Keep the actual native Save function privately for ONE opaque P388
+      // admission; the ordinary UI remains held throughout research.
+      nativeSave = global.exportTree;
       global.exportTree = async () => ({ ok: false, reason: "h1-stage-research-held" });
       document.addEventListener("input", event => {
         if (event.target.matches("input.labelEdit")) capture(event.target);
@@ -244,9 +347,17 @@
     install,
     // These fail-closed hooks are read by the original Main completion/Save boundaries.
     // Only this dormant research adapter exposes them, and only after installation.
-    blocksNativeSave: () => {
+    blocksNativeSave: (options = {}) => {
       concealWhenOwnerIsNotCurrent();
-      return installed;
+      if (!installed) return false;
+      // A one-use, private token admits ONLY the internally initiated native
+      // exportTree call. Unrelated Save routes always remain blocked.
+      if (saving && saveToken && options.h1ResearchSaveToken === saveToken
+          && current(session)) {
+        saveToken = null;
+        return false;
+      }
+      return true;
     },
     blocksUnstagedInline: () => {
       concealWhenOwnerIsNotCurrent();
@@ -267,6 +378,7 @@
         throw error;
       }
     },
+    acceptPending,
     flush: () => queue,
   });
 })(window);

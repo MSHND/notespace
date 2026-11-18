@@ -1662,7 +1662,7 @@ async function exportTree(options = {}) {
     }
     // Dormant P386 research gate: fail closed before any source/Canon mutation.
     // Do not rely on replacing the public exportTree function as authority.
-    if (window.PocketH1AuthStageResearch?.blocksNativeSave?.() === true) {
+    if (window.PocketH1AuthStageResearch?.blocksNativeSave?.(options) === true) {
       return exportTreeResult(options, false, "h1-stage-research-held");
     }
     const vaultDialogSaveAllowed = !!(
