@@ -260,26 +260,50 @@
         || change.input?.nodeId !== draft.nodeId
         || change.input?.payload?.label !== draft.text) reject();
     const head = proof.head;
-    if (head?.revision !== request.expectedHead.revision + 1
-        || head?.sealRef !== request.candidateSealStorageRef
-        || visible?.id !== draft.nodeId || visible?.parentId !== draft.parentId
-        || visible?.label !== draft.text) {
+    // A verified current Head number alone cannot settle historical Pending.
+    // Exact H3 must have the native candidate Seal and the authorised visible
+    // title. A later H4+ requires the native encrypted Seal-chain proof that
+    // this exact pre-CAS candidate is an ancestor of the current accepted Head.
+    const direct = head?.revision === request.expectedHead.revision + 1
+      && head?.sealRef === request.candidateSealStorageRef
+      && visible?.id === draft.nodeId && visible?.parentId === draft.parentId
+      && visible?.label === draft.text;
+    let superseded = false;
+    if (!direct && head?.revision > request.expectedHead.revision + 1
+        && visible?.id === draft.nodeId && visible?.parentId === draft.parentId
+        && typeof proof.owner?.controller?.reconcileResearchNativeCandidate === "function") {
+      let lineage = null;
+      try {
+        lineage = await proof.owner.controller.reconcileResearchNativeCandidate({
+          syncedPocketId: proof.pocket,
+          expectedHead: plain(request.expectedHead),
+          candidateSealStorageRef: request.candidateSealStorageRef,
+        });
+      } catch (_error) {}
+      superseded = current(proof) && lineage?.outcome === "committed-and-superseded"
+        && lineage.examined === head.revision - request.expectedHead.revision;
+    }
+    if (!direct && !superseded) {
       held = true;
       clearPendingReview();
       show("Save outcome unconfirmed. Editing is paused.");
       return { ok: false, reason: "exact-operation-unconfirmed", stageId: stage.id };
     }
-    // The native candidate Head is bound to THIS original stage by the durable
-    // pre-CAS request. We still retain the exact request ID in encrypted receipt.
+    const candidateHead = { schema: request.expectedHead.schema,
+      revision: request.expectedHead.revision + 1,
+      sealRef: request.candidateSealStorageRef };
+    // The accepted receipt records the original H3, not the newer visible
+    // H4+ when a later unrelated legitimate change superseded that Head.
     const receipt = { stageId: stage.id, nativeOperationId: request.operationId,
       candidateSealStorageRef: request.candidateSealStorageRef,
       nodeId: draft.nodeId, baseHead: plain(stage.baseHead),
-      acceptedHead: plain(head), operation: plain(stage.operation) };
+      acceptedHead: candidateHead, currentHeadAtReconcile: plain(head),
+      operation: plain(stage.operation) };
     try {
       await write(ledger => {
         if (ledger.stages?.length !== 1 || ledger.stages[0]?.id !== stage.id
             || ledger.stages[0]?.attempt?.nativeRequest?.operationId !== request.operationId
-            || ledger.stages[0]?.attempt.nativeRequest.candidateSealStorageRef !== head.sealRef) reject();
+            || ledger.stages[0]?.attempt.nativeRequest.candidateSealStorageRef !== candidateHead.sealRef) reject();
         ledger.acceptedReceipts = [...(ledger.acceptedReceipts || []), receipt];
         ledger.stages = [];
         ledger.draft = null;
@@ -288,7 +312,7 @@
       if (readback.value.stages?.length !== 0
           || readback.value.acceptedReceipts?.at(-1)?.stageId !== stage.id
           || readback.value.acceptedReceipts.at(-1).nativeOperationId !== request.operationId
-          || readback.value.acceptedReceipts.at(-1).acceptedHead.sealRef !== head.sealRef) reject();
+          || readback.value.acceptedReceipts.at(-1).acceptedHead.sealRef !== candidateHead.sealRef) reject();
     } catch (_error) {
       held = true;
       show("Accepted offsite; local receipt settlement needs review.");
@@ -296,9 +320,10 @@
     }
     held = false;
     clearPendingReview();
-    show("Saved.");
+    show(superseded ? "Saved. Later changes are also present." : "Saved.");
     return { ok: true, reason: "verified-lost-ack-recovered", stageId: stage.id,
-      nativeOperationId: request.operationId, acceptedHead: head };
+      nativeOperationId: request.operationId, acceptedHead: candidateHead,
+      superseded, currentHead: head };
   }
 
   // P388: One authenticated, source-integrated, synthetic research admission.
@@ -397,7 +422,7 @@
     }
   }
 
-  async function install() {
+  async function install(options = {}) {
     session = null;
     currentDraft = null;
     completing = false;
@@ -445,6 +470,24 @@
           enqueue(() => complete(event.target));
         }
       }, true);
+    }
+    // Research Open integration: deliberately opt-in so historical P385-P389
+    // frozen witnesses retain their prior explicit-reconcile behaviour.
+    // Automatic means invoked *inside* authenticated install, never an
+    // unauthorised offline retry, extra CAS or arbitrary background work.
+    if (options.autoReconcileOnOpen === true && restored.value.stages.length === 1
+        && restored.value.stages[0]?.attempt?.nativeRequest && current(proof)) {
+      try {
+        const outcome = await reconcileLostAck();
+        return { scope: proof.scope, pending: outcome.ok ? 0 : 1,
+          autoReconciliation: outcome };
+      } catch (_error) {
+        held = true;
+        clearPendingReview();
+        show("Save outcome unconfirmed. Editing is paused.");
+        return { scope: proof.scope, pending: 1,
+          autoReconciliation: { ok: false, reason: "unconfirmed" } };
+      }
     }
     return { scope: proof.scope, pending: restored.value.stages.length };
   }
