@@ -21,21 +21,10 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "  const adapterLoaded = path.join(ROOT, 'js/pocket-h1-auth-stage-research.js');",
   '  const savedCredentials = await a.cdp.send("WebAuthn.getCredentials",',
   '    { authenticatorId: a.authenticatorId });',
-  "  let accepted;",
   "  let notify;",
   "  const acceptedWait = new Promise(resolve => { notify = resolve; });",
-  "  let unlock;",
-  "  const holdBrowserReply = new Promise(resolve => { unlock = resolve; });",
-  "  const casPath = SERVICE_ROOT + ROUTES.compareAndSetShadowHead;",
-  '  await a.page.route("**" + casPath, async route => {',
-  '    const request = route.request().postDataJSON();',
-  '    const nativeReply = await route.fetch();',
-  '    const response = await nativeReply.json();',
-  '    accepted = { request, response, status: nativeReply.status() };',
-  '    notify(accepted);',
-  '    await holdBrowserReply;',
-  '    try { await route.abort("failed"); } catch {}',
-  "  });",
+  '  await a.page.exposeFunction("__p389NativeCasAccepted", value => { notify(value); });',
+  "  await a.page.evaluate(() => { window.__p389HoldCas = true; });",
   "  const pendingSave = a.page.evaluate(() =>",
   "    PocketH1AuthStageResearch.acceptPending()).catch(() => null);",
   "  const attempted = await Promise.race([acceptedWait,",
@@ -50,8 +39,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "  // PostgreSQL accepted H3 while Chromium has NOT received the 200.",
   "  // Crash NOW, before native result or local accepted receipt settlement.",
   '  await a.cdp.send("Browser.crash").catch(() => {});',
-  "  unlock();",
-  "  await pendingSave;",
+  "  await Promise.race([pendingSave, new Promise(resolve => setTimeout(resolve, 1200))]);",
   "  const reopenedBrowser = await openBrowser(browser, origin);",
   '  await reopenedBrowser.page.addScriptTag({ path: adapterLoaded });',
   "  assert.equal(await reopenedBrowser.page.evaluate(async () => {",
@@ -119,6 +107,10 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "  }",
   "  const savedCredentials = await a.cdp.send",
 ].join("\n"));
+// This source transforms P385, which in turn expands P383. Install this
+// synthetic-only native-fetch wrapper BEFORE the real transport captures fetch.
+// HTTP reaches actual server; the Starling caller never gets its reply.
+source = source.replace("  const page = await context.newPage();", "  await context.addInitScript({ content: \"(() => {\\n  const native = window.fetch.bind(window);\\n  window.fetch = async (input, options) => {\\n    const response = await native(input, options);\\n    const target = typeof input === 'string' ? input : input?.url;\\n    if (window.__p389HoldCas && typeof target === 'string'\\n      && target.includes('/pockets/head/compare-and-set')) {\\n      const request = JSON.parse(options.body);\\n      const acceptedResponse = await response.clone().json();\\n      await window.__p389NativeCasAccepted({ request, response: acceptedResponse, status: response.status });\\n      return new Promise(() => {});\\n    }\\n    return response;\\n  };\\n})();\" });\n  const page = await context.newPage();");
 const runner = new Module(filename, module);
 runner.filename = filename;
 runner.paths = module.paths;
