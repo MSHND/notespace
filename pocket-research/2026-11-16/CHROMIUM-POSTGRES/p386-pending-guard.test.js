@@ -32,6 +32,17 @@ replaceOnce('  const savedCredentials = await a.cdp.send("WebAuthn.getCredential
   "  assert.deepEqual(await sqlState(sql, activated.pocket), h2);",
   '  const savedCredentials = await a.cdp.send("WebAuthn.getCredentials", { authenticatorId: a.authenticatorId });',
 ].join("\n"));
+replaceOnce('  await input.press("Enter");', [
+  '  await a.page.evaluate(() => {',
+  '    const input = document.querySelector("input.labelEdit");',
+  '    input.dispatchEvent(new KeyboardEvent("keydown", {',
+  '      key: "Enter", bubbles: true, cancelable: true, isComposing: true',
+  '    }));',
+  '  });',
+  '  assert.equal(await a.page.locator("input.labelEdit").count(), 1);',
+  '  assert.equal((await a.page.evaluate(() => PocketH1AuthStageResearch.inspect())).value.stages.length, 0);',
+  '  await input.press("Enter");',
+].join("\n"));
 replaceOnce("  assert.deepEqual(recovered, pending);", [
   "  assert.deepEqual(recovered, pending);",
   '  const resumedReview = await resumedBrowser.page.locator("#h1AuthStageReview").innerText();',
