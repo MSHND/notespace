@@ -41,6 +41,7 @@
     if (account.syncedPocketId !== pocket || !account.ownerContinuity?.accountId ||
         !account.ownerContinuity.sessionTag || head?.sealRef !== accepted?.sealRef ||
         head?.revision !== accepted?.revision || !PocketOwnerSaveBoundary.isOwnerSaveSessionCurrent(owner)) reject();
+    await PocketSyncDeviceStore.open();
     const record = await PocketSyncDeviceStore.readPocket(pocket);
     if (!record?.deviceWrappingKey || record.deviceWrappingKey.extractable) reject();
     const binding = [SCHEMA, account.ownerContinuity.accountId, pocket, record.deviceId, record.usage.masterKeyGeneration];
