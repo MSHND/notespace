@@ -107,10 +107,10 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "  }",
   "  const savedCredentials = await a.cdp.send",
 ].join("\n"));
-// This source transforms P385, which in turn expands P383. Install this
-// synthetic-only native-fetch wrapper BEFORE the real transport captures fetch.
-// HTTP reaches actual server; the Starling caller never gets its reply.
-source = source.replace("  const page = await context.newPage();", "  await context.addInitScript({ content: \"(() => {\\n  const native = window.fetch.bind(window);\\n  window.fetch = async (input, options) => {\\n    const response = await native(input, options);\\n    const target = typeof input === 'string' ? input : input?.url;\\n    if (window.__p389HoldCas && typeof target === 'string'\\n      && target.includes('/pockets/head/compare-and-set')) {\\n      const request = JSON.parse(options.body);\\n      const acceptedResponse = await response.clone().json();\\n      await window.__p389NativeCasAccepted({ request, response: acceptedResponse, status: response.status });\\n      return new Promise(() => {});\\n    }\\n    return response;\\n  };\\n})();\" });\n  const page = await context.newPage();");
+// Inject this change into the INNER P385 fixture's P383 expansion, not
+// into the outer P389 file. That guarantees the browser fetch wrapper is
+// installed before the actual app/transport scripts capture window.fetch.
+replaceOnce("const runner = new Module(filename, module);", "source = source.replace(\"  const page = await context.newPage();\", \"  await context.addInitScript({ content: \\\"(() => {\\\\n  const native = window.fetch.bind(window);\\\\n  window.fetch = async (input, options) => {\\\\n    const response = await native(input, options);\\\\n    const target = typeof input === 'string' ? input : input?.url;\\\\n    if (window.__p389HoldCas && typeof target === 'string'\\\\n      && target.includes('/pockets/head/compare-and-set')) {\\\\n      const request = JSON.parse(options.body);\\\\n      const acceptedResponse = await response.clone().json();\\\\n      await window.__p389NativeCasAccepted({ request, response: acceptedResponse, status: response.status });\\\\n      return new Promise(() => {});\\\\n    }\\\\n    return response;\\\\n  };\\\\n})();\\\" });\\n  const page = await context.newPage();\");\nconst runner = new Module(filename, module);");
 const runner = new Module(filename, module);
 runner.filename = filename;
 runner.paths = module.paths;
