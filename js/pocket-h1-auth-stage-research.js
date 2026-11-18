@@ -126,6 +126,15 @@
     view.append(currentTitle, pendingTitle);
     document.body.appendChild(view);
   }
+  function concealWhenOwnerIsNotCurrent() {
+    if (!installed || current(session)) return false;
+    // This only observes *locally detectable* owner/session loss. A server-side
+    // rights change is separately tested at the explicit authenticated recheck.
+    held = true;
+    clearPendingReview();
+    notice?.remove(); notice = null;
+    return true;
+  }
   function show(text) {
     if (!current(session)) {
       clearPendingReview();
@@ -145,7 +154,7 @@
     return queue;
   }
   function capture(input) {
-    if (!current(session) || held || completing || !input.isConnected) return;
+    if (concealWhenOwnerIsNotCurrent() || !current(session) || held || completing || !input.isConnected) return;
     const nodeId = input.getAttribute("data-edit-id"), node = state.nodes.find(node => node.id === nodeId);
     if (!node || state.inlineEdit.isNew) return;
     currentDraft = { id: currentDraft?.nodeId === nodeId ? currentDraft.id : crypto.randomUUID(),
@@ -213,6 +222,7 @@
         if (event.target.matches("input.labelEdit")) event.stopImmediatePropagation();
       }, true);
       document.addEventListener("keydown", event => {
+        concealWhenOwnerIsNotCurrent();
         if (held && event.key === "F2") { event.preventDefault(); event.stopImmediatePropagation(); }
         if (event.key !== "Enter" || !event.target.matches("input.labelEdit")) return;
         if (event.isComposing || event.keyCode === 229) {
@@ -234,8 +244,14 @@
     install,
     // These fail-closed hooks are read by the original Main completion/Save boundaries.
     // Only this dormant research adapter exposes them, and only after installation.
-    blocksNativeSave: () => installed,
-    blocksUnstagedInline: () => installed && (!current(session) || held || (completing && !insideCommit)),
+    blocksNativeSave: () => {
+      concealWhenOwnerIsNotCurrent();
+      return installed;
+    },
+    blocksUnstagedInline: () => {
+      concealWhenOwnerIsNotCurrent();
+      return installed && (!current(session) || held || (completing && !insideCommit));
+    },
     async inspect() {
       try {
         const fresh = await authenticate();
@@ -243,6 +259,9 @@
             fresh.sessionTag !== session.sessionTag) reject();
         return read(session);
       } catch (error) {
+        // A failed fresh authority check cannot leave a protected comparison on
+        // screen, or allow further completion from this stale research session.
+        held = true;
         clearPendingReview();
         notice?.remove(); notice = null;
         throw error;
