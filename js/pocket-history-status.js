@@ -1258,6 +1258,11 @@ function vaultSwitchInlineCommitIsCurrent(options = {}) {
 }
 
 function commitInlineEdit(nodeId, rawValue, options = {}) {
+  // Research-only owner staging gate. Ordinary editors are unchanged unless
+  // the authenticated P386 adapter is explicitly installed.
+  if (window.PocketH1AuthStageResearch?.blocksUnstagedInline?.(nodeId) === true) {
+    return { ok: false, reason: "h1-stage-research-held" };
+  }
   const vaultSwitchCommit = !!options.vaultDialogToken;
   if (vaultSwitchCommit) {
     if (!vaultSwitchInlineCommitIsCurrent(options)) {
