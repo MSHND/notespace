@@ -214,7 +214,12 @@
       }, true);
       document.addEventListener("keydown", event => {
         if (held && event.key === "F2") { event.preventDefault(); event.stopImmediatePropagation(); }
-        if (event.key !== "Enter" || event.isComposing || !event.target.matches("input.labelEdit")) return;
+        if (event.key !== "Enter" || !event.target.matches("input.labelEdit")) return;
+        if (event.isComposing || event.keyCode === 229) {
+          // Permit the browser/IME default, never the Main semantic Enter handler.
+          event.stopImmediatePropagation();
+          return;
+        }
         event.preventDefault(); event.stopImmediatePropagation();
         if (!held && !completing) {
           capture(event.target);
