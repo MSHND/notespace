@@ -79,6 +79,7 @@ replaceOnce('  console.info("P385_STAGE_WITNESS=" + JSON.stringify({', [
   '  assert.equal(await resumedBrowser.page.locator("#h1AuthStageReview").count(), 0);',
   '  assert.equal(await resumedBrowser.page.locator("#h1AuthStageStatus").count(), 0);',
   '  assert.equal((await resumedBrowser.page.evaluate(() => exportTree())).reason, "h1-stage-research-held");',
+  '  assert.equal(await resumedBrowser.page.evaluate(() => PocketH1AuthStageResearch.blocksUnstagedInline()), true);',
   '  await resumedBrowser.page.unroute("**/pocket-sync/v1/account/synced-pocket/read");',
   '  const transferred = await resumedBrowser.cdp.send("WebAuthn.getCredentials",',
   '    { authenticatorId: resumedBrowser.authenticatorId });',
