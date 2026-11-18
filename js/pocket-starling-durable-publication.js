@@ -217,11 +217,28 @@ presence-prove, attempt one CAS, or reconcile that exact candidate after reload.
           && (!Number.isSafeInteger(expectedAuthorityRevision) || expectedAuthorityRevision < 1)) {
         throw fail("authority-revision-invalid");
       }
+      const nativeOperationId = freshOperationId("durable-compare-and-set-head", 0);
+      // DORMANT P389 synthetic-only safety boundary. When an H1 research stage
+      // is installed, its encrypted exact candidate/operation binding must be
+      // independently durable BEFORE this native Head CAS may reach the server.
+      // Ordinary production callers have no hook and are not changed.
+      if (typeof global.PocketH1AuthStageResearch?.beforeNativeHeadAttempt === "function") {
+        let bound = false;
+        try {
+          bound = await global.PocketH1AuthStageResearch.beforeNativeHeadAttempt({
+            operationId: nativeOperationId,
+            syncedPocketId: descriptor.syncedPocketId,
+            expectedHead: descriptor.expectedHead,
+            candidateSealStorageRef: descriptor.candidateSealStorageRef,
+          }) === true;
+        } catch (_error) {}
+        if (!bound) throw fail("head-research-binding-unverified");
+      }
       let response;
       try {
         response = await service.compareAndSetShadowHead({
           apiVersion: API_VERSION,
-          operationId: freshOperationId("durable-compare-and-set-head", 0),
+          operationId: nativeOperationId,
           syncedPocketId: descriptor.syncedPocketId,
           expectedHead: descriptor.expectedHead,
           candidateSealStorageRef: descriptor.candidateSealStorageRef,
