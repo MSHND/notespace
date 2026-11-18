@@ -196,6 +196,111 @@
     showPendingReview(confirmed.value);
   }
 
+  // P389: called from the REAL native durable publication coordinator,
+  // after its encrypted candidate seal is prepared but before any CAS request.
+  // It binds the immutable stage ID + native operation ID + encrypted candidate
+  // in the scoped, nonextractable-key IndexedDB ledger, not in a second Canon.
+  async function beforeNativeHeadAttempt(candidate) {
+    if (!installed || !saving || !current(session) || !candidate
+        || typeof candidate.operationId !== "string" || !candidate.operationId
+        || typeof candidate.candidateSealStorageRef !== "string"
+        || !candidate.candidateSealStorageRef
+        || candidate.syncedPocketId !== session.pocket) return false;
+    try {
+      const proof = session, previously = await read(proof);
+      const stage = previously.value.stages?.[0], draft = stage?.draft;
+      const attempt = stage?.attempt;
+      const node = state.nodes?.find(item => item.id === draft?.nodeId);
+      const change = stage?.operation?.operations?.[0];
+      const seq = getPocketHighestOperationSequence();
+      const working = freezePocketStarlingOwnerWorkingSetThrough(seq);
+      if (previously.value.stages.length !== 1 || previously.value.draft
+          || !stage?.id || attempt?.kind !== "possibly-sent"
+          || attempt.stageId !== stage.id || attempt.nativeRequest
+          || attempt.ceiling !== stage.operation.ceiling
+          || candidate.expectedHead?.revision !== stage.baseHead?.revision
+          || candidate.expectedHead?.sealRef !== stage.baseHead?.sealRef
+          || node?.parentId !== draft?.parentId || node?.label !== draft?.text
+          || change?.type !== "payload" || change.input?.nodeId !== node?.id
+          || change.input?.payload?.label !== draft?.text
+          || stage.operation?.ceiling !== seq
+          || JSON.stringify(working?.operations) !== JSON.stringify(stage.operation.operations)) return false;
+      const request = { operationId: candidate.operationId,
+        syncedPocketId: session.pocket, expectedHead: plain(candidate.expectedHead),
+        candidateSealStorageRef: candidate.candidateSealStorageRef, stageId: stage.id };
+      await write(ledger => {
+        if (ledger.stages?.length !== 1 || ledger.stages[0]?.id !== stage.id
+            || ledger.stages[0]?.attempt?.nativeRequest) reject();
+        ledger.stages[0].attempt.nativeRequest = request;
+      });
+      const confirmed = await read(proof);
+      return confirmed.value.stages?.[0]?.attempt?.nativeRequest?.operationId === request.operationId
+        && confirmed.value.stages[0].attempt.nativeRequest.candidateSealStorageRef === request.candidateSealStorageRef;
+    } catch (_error) { return false; }
+  }
+
+  // Only a freshly authorised Connected Open may invoke this. In this bounded
+  // H2→H3 witness, a Head at the EXACT native candidate seal plus the
+  // verified stage's original operation/context is sufficient; any later or
+  // different Head is UNKNOWN and left held, not guessed equivalent.
+  async function reconcileLostAck() {
+    if (!installed || saving || !held || !current(session)) reject();
+    const proof = session, confirmed = await global.PocketH1AuthStageResearch.inspect();
+    const stage = confirmed.value.stages?.[0], request = stage?.attempt?.nativeRequest;
+    const draft = stage?.draft, change = stage?.operation?.operations?.[0];
+    const visible = state.nodes?.find(item => item.id === draft?.nodeId);
+    if (confirmed.value.stages.length !== 1 || confirmed.value.draft || !stage?.id
+        || stage.attempt?.kind !== "possibly-sent"
+        || !request || request.stageId !== stage.id
+        || request.syncedPocketId !== proof.pocket
+        || !request.operationId || !request.candidateSealStorageRef
+        || request.expectedHead?.sealRef !== stage.baseHead?.sealRef
+        || request.expectedHead?.revision !== stage.baseHead?.revision
+        || !draft || change?.type !== "payload" || stage.operation?.operations.length !== 1
+        || change.input?.nodeId !== draft.nodeId
+        || change.input?.payload?.label !== draft.text) reject();
+    const head = proof.head;
+    if (head?.revision !== request.expectedHead.revision + 1
+        || head?.sealRef !== request.candidateSealStorageRef
+        || visible?.id !== draft.nodeId || visible?.parentId !== draft.parentId
+        || visible?.label !== draft.text) {
+      held = true;
+      clearPendingReview();
+      show("Save outcome unconfirmed. Editing is paused.");
+      return { ok: false, reason: "exact-operation-unconfirmed", stageId: stage.id };
+    }
+    // The native candidate Head is bound to THIS original stage by the durable
+    // pre-CAS request. We still retain the exact request ID in encrypted receipt.
+    const receipt = { stageId: stage.id, nativeOperationId: request.operationId,
+      candidateSealStorageRef: request.candidateSealStorageRef,
+      nodeId: draft.nodeId, baseHead: plain(stage.baseHead),
+      acceptedHead: plain(head), operation: plain(stage.operation) };
+    try {
+      await write(ledger => {
+        if (ledger.stages?.length !== 1 || ledger.stages[0]?.id !== stage.id
+            || ledger.stages[0]?.attempt?.nativeRequest?.operationId !== request.operationId
+            || ledger.stages[0]?.attempt.nativeRequest.candidateSealStorageRef !== head.sealRef) reject();
+        ledger.acceptedReceipts = [...(ledger.acceptedReceipts || []), receipt];
+        ledger.stages = [];
+        ledger.draft = null;
+      });
+      const readback = await read(proof);
+      if (readback.value.stages?.length !== 0
+          || readback.value.acceptedReceipts?.at(-1)?.stageId !== stage.id
+          || readback.value.acceptedReceipts.at(-1).nativeOperationId !== request.operationId
+          || readback.value.acceptedReceipts.at(-1).acceptedHead.sealRef !== head.sealRef) reject();
+    } catch (_error) {
+      held = true;
+      show("Accepted offsite; local receipt settlement needs review.");
+      return { ok: false, reason: "local-receipt-unsettled", stageId: stage.id };
+    }
+    held = false;
+    clearPendingReview();
+    show("Saved.");
+    return { ok: true, reason: "verified-lost-ack-recovered", stageId: stage.id,
+      nativeOperationId: request.operationId, acceptedHead: head };
+  }
+
   // P388: One authenticated, source-integrated, synthetic research admission.
   // Never send directly to the Head endpoint. Native exportTree and its owner
   // Starling/CAS gate remain the sole authority for offsite acceptance.
@@ -379,6 +484,8 @@
       }
     },
     acceptPending,
+    beforeNativeHeadAttempt,
+    reconcileLostAck,
     flush: () => queue,
   });
 })(window);
