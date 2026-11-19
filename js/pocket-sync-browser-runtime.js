@@ -2400,7 +2400,7 @@
           : null;
         try {
           if (!isAttemptCurrent()) return safeFailure("additional-device-target-stale");
-          return await additionalDevice.openExisting({
+          const opened = await additionalDevice.openExisting({
             captureTarget: additionalTarget,
             isTargetCurrent: additionalTargetCurrent,
             validatePayload: (payload) => global.isPocketPayloadShape?.(payload) === true,
@@ -2422,6 +2422,21 @@
           }, input.accountSelection === "choose-another"
             ? { accountSelection: "choose-another" }
             : {});
+          // P391 SYNTHETIC RESEARCH ONLY. This hook is unreachable in ordinary
+          // Pocket without an explicit research-page opt-in AND the separately
+          // loaded dormant adapter. Successful native authenticated adoption
+          // precedes any stage inspection, and unknown outcomes remain held.
+          if (opened?.ok === true && global.PocketH1ResearchAppPath?.enabled === true) {
+            if (typeof global.PocketH1AuthStageResearch?.install !== "function") {
+              return safeFailure("h1-research-stage-adapter-unavailable");
+            }
+            try {
+              await global.PocketH1AuthStageResearch.install({ autoReconcileOnOpen: true });
+            } catch (_error) {
+              return safeFailure("h1-research-open-stage-verification-unavailable");
+            }
+          }
+          return opened;
         } finally {
           global.releaseJsonSafetyForSyncedDiscard?.(jsonSafetyToken);
         }
