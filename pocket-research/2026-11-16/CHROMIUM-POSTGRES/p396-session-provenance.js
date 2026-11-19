@@ -12,10 +12,11 @@ async function sessionBefore({ reader, origin, sql }) {
   if (cookies.length === 1) {
     const value = cookies[0].value;
     const { rows } = await sql.query(
-      "SELECT record->>'status' AS status, record->>'expiresAt' AS expires_at FROM public.pocket_sync_records WHERE collection = 'sessions' AND record_key = $1",
+      "SELECT record->>'status' AS status, record->>'expiresAt' AS expires_at, record->>'replacedBy' AS replaced_by FROM public.pocket_sync_records WHERE collection = 'sessions' AND record_key = $1",
       [value]
     );
     if (rows.length !== 1) state = "unknown-session";
+    else if (rows[0].status === "revoked") state = rows[0].replaced_by ? "revoked-and-replaced-session" : "revoked-session";
     else if (rows[0].status !== "active") state = "inactive-session";
     else if (!Number.isFinite(Date.parse(rows[0].expires_at))
         || Date.parse(rows[0].expires_at) <= Date.now()) state = "expired-session";
