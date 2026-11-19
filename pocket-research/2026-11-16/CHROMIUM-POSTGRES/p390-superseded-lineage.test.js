@@ -61,6 +61,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   '  assert.equal(await reopenedBrowser.page.locator("#h1AuthStageStatus").count(), 0);',
   "  const signed = await openWithSyncedFixturePasskey(reopenedBrowser,",
   '    { cdp: { send: async () => currentTransferCredentials }, authenticatorId: "synthetic-transfer" }, prf);',
+  '  console.info("P394_H4_OPEN_TRACE=" + JSON.stringify({ ok: signed.ok, reason: signed.reason, prfTransfers: signed.prfTransfers, routes: reopenedBrowser.responses.map(entry => ({ route: entry.route, http: entry.response.status() })) }));',
   '  assert.equal(signed.ok, true, "Reopened after H4: "+signed.reason);',
   "  const auto = await reopenedBrowser.page.evaluate(() =>",
   "    PocketH1AuthStageResearch.install({ autoReconcileOnOpen: true }));",
