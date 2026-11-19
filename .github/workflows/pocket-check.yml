@@ -144,7 +144,6 @@ jobs:
           timeout --signal=TERM --kill-after=10s 240s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p382-real-browser-postgres-research.test.js
           printf 'P382_SCOPE=real-Chromium-real-Postgres-still-no-user-data-or-production\n'
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p383-authenticated-open-save-readback.test.js
-          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p392-normal-save-button-reopen.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p384-title-staging-gap.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p385-authenticated-stage-bridge.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p386-pending-guard.test.js
@@ -157,3 +156,4 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p390-superseded-lineage.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p390-auto-no-proof-no-authority.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p391-app-open-auto-reconcile.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p392-normal-save-button-reopen.test.js
