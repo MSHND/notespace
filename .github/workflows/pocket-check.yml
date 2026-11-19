@@ -158,3 +158,60 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p391-app-open-auto-reconcile.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p392-normal-save-button-reopen.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p394-post-adoption-stage-lock.test.js
+
+  p394-isolated-diagnostic:
+    if: github.event_name == 'pull_request'
+    name: P394 research isolated ${{ matrix.witness }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        witness:
+          - p390-superseded-lineage
+          - p394-post-adoption-stage-lock
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: p382_disposable_test_only
+          POSTGRES_DB: pocket_p382_research
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d pocket_p382_research"
+          --health-interval 5s --health-timeout 3s --health-retries 15
+    steps:
+      - name: Checkout exact research commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Establish Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install research dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm install --no-save --package-lock=false --ignore-scripts --no-audit --no-fund playwright-core@1.55.0
+      - name: Run one fictional Chromium / disposable Postgres witness
+        shell: bash
+        env:
+          POCKET_SYNC_DATABASE_URL: postgresql://postgres:p382_disposable_test_only@127.0.0.1:5432/pocket_p382_research
+          POCKET_P382_CERT: /tmp/pocket-p382-research.crt
+          POCKET_P382_KEY: /tmp/pocket-p382-research.key
+          P394_WITNESS: ${{ matrix.witness }}
+        run: |
+          set -euo pipefail
+          [[ "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" ]]
+          printf 'P394_ISOLATED_TEST=%s\n' "$P394_WITNESS"
+          npm run sync:db:migrate
+          openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
+            -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout "$POCKET_P382_KEY" -out "$POCKET_P382_CERT" >/dev/null 2>&1
+          chmod 600 "$POCKET_P382_KEY"
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          export CHROME_BIN
+          timeout --signal=TERM --kill-after=10s 210s node --test --test-reporter=tap "pocket-research/2026-11-16/CHROMIUM-POSTGRES/${P394_WITNESS}.test.js"
