@@ -641,6 +641,10 @@ function adoptPocketDocumentFromPip(snapshot) {
 
 function canShowPocketTree() {
   const session = pocketFileState();
+  // P394-A fictional research: once Synced owner is adopted but the
+  // protected stage cannot be verified, do not render stale tree content.
+  if (session.ownerKind === "synced"
+      && window.PocketH1ResearchOpenGate?.blocksView?.() === true) return false;
   return hasWritablePocketFile()
     || (session.ownerKind === "synced"
       && window.PocketOwnerSaveBoundary?.hasSyncedOwner?.() === true)
@@ -649,6 +653,10 @@ function canShowPocketTree() {
 }
 
 function canModifyPocket() {
+  // The same research hold blocks ALL regular tree/editor mutation gates
+  // during verification and after a failed post-adoption stage check.
+  if (pocketFileState().ownerKind === "synced"
+      && window.PocketH1ResearchOpenGate?.blocksEdit?.() === true) return false;
   if (isPocketFilePermissionPromptOpen()) return false;
   if (isPocketVaultRecoveryFlowOpen()) return false;
   if (window.PocketVaultBrowserIo
@@ -1659,6 +1667,13 @@ async function exportTree(options = {}) {
   return enqueueTreeSave(async () => {
     if (!isPocketFileSaveSessionCurrent(saveSession)) {
       return exportTreeResult(options, false, "file-session-changed");
+    }
+    // P394-A: this guard remains active even if the protected stage adapter
+    // is missing, has thrown, or has only partially installed. Never fall
+    // through to legacy/native Save while this research owner is held.
+    if (saveSession.ownerKind === "synced"
+        && window.PocketH1ResearchOpenGate?.blocksEdit?.() === true) {
+      return exportTreeResult(options, false, "h1-research-open-held");
     }
     // Dormant P386 research gate: fail closed before any source/Canon mutation.
     // Do not rely on replacing the public exportTree function as authority.
