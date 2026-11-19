@@ -411,6 +411,14 @@
     const now = typeof environment.now === "function" ? environment.now : Date.now;
     let ownerlessAuthenticatedWitness = null;
     let activeExistingOpen = null;
+    // P394-A fictional research only. This guard is never armed by ordinary
+    // Open. During stage verification it blocks edits/Save; if verification
+    // fails after adoption it also hides the main tree until a fresh Open.
+    let h1ResearchOpenState = "idle";
+    global.PocketH1ResearchOpenGate = frozen({
+      blocksEdit: () => h1ResearchOpenState === "checking" || h1ResearchOpenState === "locked",
+      blocksView: () => h1ResearchOpenState === "locked",
+    });
 
     function freshRuntimeIdentifier() {
       const bytes = browserRandom(environment)(32);
@@ -2359,6 +2367,8 @@
       }
       const lease = { retired: false };
       activeExistingOpen = lease; // Synchronous acquisition before any await.
+      const h1ResearchOptIn = global.PocketH1ResearchAppPath?.enabled === true;
+      if (h1ResearchOptIn) h1ResearchOpenState = "checking";
       const isAttemptCurrent = () => !lease.retired && activeExistingOpen === lease
         && additionalTargetCurrent(originalTarget)
         && additionalTargetReplaceable(originalTarget, discardTarget);
@@ -2422,21 +2432,38 @@
           }, input.accountSelection === "choose-another"
             ? { accountSelection: "choose-another" }
             : {});
-          // P391 SYNTHETIC RESEARCH ONLY. This hook is unreachable in ordinary
-          // Pocket without an explicit research-page opt-in AND the separately
-          // loaded dormant adapter. Successful native authenticated adoption
-          // precedes any stage inspection, and unknown outcomes remain held.
-          if (opened?.ok === true && global.PocketH1ResearchAppPath?.enabled === true) {
-            if (typeof global.PocketH1AuthStageResearch?.install !== "function") {
-              return safeFailure("h1-research-stage-adapter-unavailable");
-            }
+          // P394-A research-only: the owner has ALREADY been adopted here.
+          // A missing or throwing stage adapter must never be described as
+          // "nothing opened". Keep edit/Save held even if no adapter exists.
+          if (opened?.ok === true && h1ResearchOptIn) {
             try {
-              await global.PocketH1AuthStageResearch.install({
+              const adapter = global.PocketH1AuthStageResearch;
+              if (typeof adapter?.install !== "function" ||
+                  typeof adapter?.inspect !== "function") throw new Error("h1-adapter-missing");
+              const installed = await adapter.install({
                 autoReconcileOnOpen: true,
                 uiSaveEnabled: global.PocketH1ResearchAppPath?.uiSaveEnabled === true,
               });
+              if (!installed || typeof installed.scope !== "string"
+                  || !Number.isSafeInteger(installed.pending) || installed.pending < 0) {
+                throw new Error("h1-stage-result-unverified");
+              }
+              // Re-check current authority after adapter registration; an
+              // earlier authenticated Open cannot license a later stale view.
+              await adapter.inspect();
+              h1ResearchOpenState = "idle";
             } catch (_error) {
-              return safeFailure("h1-research-open-stage-verification-unavailable");
+              h1ResearchOpenState = "locked";
+              try { global.PocketH1AuthStageResearch?.pauseAfterOpenFailure?.(); }
+              catch (_ignored) {}
+              // canShowPocketTree now denies the old DOM projection. No stage
+              // bytes are deleted, no new CAS and no local Canon is created.
+              try { global.renderTree?.(); } catch (_ignored) {}
+              return frozen({
+                ok: false, reason: "h1-research-stage-adopted-locked",
+                adopted: true, sourceOwnerPreserved: false,
+                editingLocked: true, stageUnverified: true,
+              });
             }
           }
           return opened;
@@ -2447,6 +2474,15 @@
         // A terminal attempt becomes ineligible before retiring private
         // observers; only its own lease can be released.
         lease.retired = true;
+        // On pre-adoption failure do not leave a research hold on an ordinary
+        // source. A confirmed post-adoption failure sets "locked" above.
+        if (h1ResearchOptIn && h1ResearchOpenState === "checking") {
+          h1ResearchOpenState = global.capturePocketFileSaveSession?.()?.ownerKind === "synced"
+            ? "locked" : "idle";
+          if (h1ResearchOpenState === "locked") {
+            try { global.renderTree?.(); } catch (_ignored) {}
+          }
+        }
         if (observer) {
           try {
             const result = observer.retire();
