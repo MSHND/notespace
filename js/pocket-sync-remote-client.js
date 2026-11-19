@@ -383,6 +383,22 @@ persisting session state, retrying work, or changing a Pocket owner.
             );
           } catch (_error) {}
         }
+        // P395-A: do not retry authentication or infer an owner from a 401.
+        // Only the exact server-authored invalid/expired-session reason is
+        // actionable; other 401s retain the existing fail-closed outcome.
+        if (routeName === "beginAuthentication" && response.status === 401) {
+          let reason = null;
+          try {
+            const rejected = await readResponseBody(response, limits.response, encoder, Decoder);
+            if (Object.keys(rejected).length === 3 && rejected.apiVersion === 1
+                && rejected.ok === false && typeof rejected.reason === "string") {
+              reason = rejected.reason;
+            }
+          } catch (_ignored) {}
+          if (reason === "service-session-invalid" || reason === "service-session-expired") {
+            throw remoteError("remote-fresh-passkey-required", false, 401);
+          }
+        }
         throw rejectedStatus(response.status, recoveryFailureClass);
       }
       const body = await readResponseBody(response, limits.response, encoder, Decoder);
