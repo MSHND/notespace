@@ -158,6 +158,8 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p391-app-open-auto-reconcile.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p392-normal-save-button-reopen.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p394-post-adoption-stage-lock.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p395-stale-session-fail-closed.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p396-user-initiated-fresh-open.test.js
 
   p394-isolated-diagnostic:
     if: github.event_name == 'pull_request'
@@ -172,6 +174,7 @@ jobs:
           - p390-superseded-lineage
           - p394-post-adoption-stage-lock
           - p395-stale-session-fail-closed
+          - p396-user-initiated-fresh-open
     services:
       postgres:
         image: postgres:18
@@ -207,7 +210,7 @@ jobs:
           P394_WITNESS: ${{ matrix.witness }}
         run: |
           set -euo pipefail
-          [[ "$P394_WITNESS" == "p387-authority-repeat-recovery" || "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" || "$P394_WITNESS" == "p395-stale-session-fail-closed" ]]
+          [[ "$P394_WITNESS" == "p387-authority-repeat-recovery" || "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" || "$P394_WITNESS" == "p395-stale-session-fail-closed" || "$P394_WITNESS" == "p396-user-initiated-fresh-open" ]]
           printf 'P394_ISOLATED_TEST=%s\n' "$P394_WITNESS"
           npm run sync:db:migrate
           openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
