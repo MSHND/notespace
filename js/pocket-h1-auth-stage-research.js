@@ -7,6 +7,7 @@
   let session = null, queue = Promise.resolve(), held = false, version = 0, installed = false;
   let currentDraft = null, notice = null, completing = false, insideCommit = false;
   let nativeSave = null, saveToken = null, saving = false;
+  let uiSaveEnabled = false;
   const plain = value => JSON.parse(JSON.stringify(value));
   const reject = () => { throw new Error("h1-authority-unavailable"); };
   const current = proof => proof && session === proof &&
@@ -428,10 +429,14 @@
     completing = false;
     saving = false;
     saveToken = null;
+    uiSaveEnabled = false;
     clearPendingReview();
     notice?.remove(); notice = null;
     const proof = await authenticate();
     session = proof;
+    // P392 synthetic-only research activation; no unapproved default UI changes.
+    uiSaveEnabled = options.uiSaveEnabled === true
+      && global.PocketH1ResearchAppPath?.enabled === true;
     const restored = await read(proof);
     held = restored.value.stages.length > 0 || !!restored.value.draft;
     if (restored.value.stages.length) {
@@ -448,6 +453,19 @@
       // admission; the ordinary UI remains held throughout research.
       nativeSave = global.exportTree;
       global.exportTree = async () => ({ ok: false, reason: "h1-stage-research-held" });
+      // Only a currently authenticated, explicit P392 research session may
+      // turn an ordinary Save-button click into an exact Pending admission.
+      // Never let the underlying legacy click issue an independent Save.
+      document.addEventListener("click", event => {
+        if (!uiSaveEnabled || !event.target?.closest?.("#btnExportTree")) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!current(session)) { held = true; clearPendingReview(); return; }
+        void acceptPending().catch(() => {
+          held = true;
+          show("Save outcome unconfirmed. Editing is paused.");
+        });
+      }, true);
       document.addEventListener("input", event => {
         if (event.target.matches("input.labelEdit")) capture(event.target);
       }, true);
