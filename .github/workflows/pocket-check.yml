@@ -125,7 +125,7 @@ jobs:
         run: npm run check
 
       - name: P382 and P383 real Chromium and disposable PostgreSQL research
-        if: github.ref == 'refs/heads/research/pocket-chromium-postgres-20261116' || github.ref == 'refs/heads/codex/pocket-h1-browser-recovery-20261118' || github.ref == 'refs/heads/codex/pocket-auth-stage-bridge-20261118' || github.ref == 'refs/heads/research/pocket-p386-chatgpt-20261118' || github.event_name == 'pull_request'
+        if: github.ref == 'refs/heads/research/pocket-chromium-postgres-20261116' || github.ref == 'refs/heads/codex/pocket-h1-browser-recovery-20261118' || github.ref == 'refs/heads/codex/pocket-auth-stage-bridge-20261118' || github.ref == 'refs/heads/research/pocket-p386-chatgpt-20261118' || github.ref == 'refs/heads/research/pocket-p407-p401-ci-isolated-20261119' || github.event_name == 'pull_request'
         shell: bash
         env:
           POCKET_SYNC_DATABASE_URL: postgresql://postgres:p382_disposable_test_only@127.0.0.1:5432/pocket_p382_research
@@ -171,10 +171,10 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p399-wrong-account-h4.test.js
 
   p394-isolated-diagnostic:
-    if: github.event_name == 'pull_request'
-    name: P394 research isolated ${{ matrix.witness }}
+    if: github.ref == 'refs/heads/research/pocket-p407-p401-ci-isolated-20261119' || github.event_name == 'pull_request'
+    name: P394/P401 research isolated ${{ matrix.witness }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.witness == 'p401-cookie-provenance' && 20 || 10 }}
     strategy:
       fail-fast: false
       matrix:
@@ -193,6 +193,9 @@ jobs:
           - p399-absent-cookie-bootstrap
           - p399-wrong-account-pending
           - p399-wrong-account-h4
+          - p401-cookie-provenance
+          - p401-revoked-session-two-open
+          - p401-native-challenge-cancel
     services:
       postgres:
         image: postgres:18
@@ -228,7 +231,7 @@ jobs:
           P394_WITNESS: ${{ matrix.witness }}
         run: |
           set -euo pipefail
-          [[ "$P394_WITNESS" == "p387-authority-repeat-recovery" || "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" || "$P394_WITNESS" == "p395-stale-session-fail-closed" || "$P394_WITNESS" == "p396-user-initiated-fresh-open" || "$P394_WITNESS" == "p397-pending-two-open-recovery" || "$P394_WITNESS" == "p397-h4-two-open-recovery" || "$P394_WITNESS" == "p398-valid-session-pending-contract" || "$P394_WITNESS" == "p398-valid-session-h4-contract" || "$P394_WITNESS" == "p398-pending-denied-second-open" || "$P394_WITNESS" == "p398-h4-denied-second-open" || "$P394_WITNESS" == "p399-absent-cookie-bootstrap" || "$P394_WITNESS" == "p399-wrong-account-pending" || "$P394_WITNESS" == "p399-wrong-account-h4" ]]
+          [[ "$P394_WITNESS" == "p387-authority-repeat-recovery" || "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" || "$P394_WITNESS" == "p395-stale-session-fail-closed" || "$P394_WITNESS" == "p396-user-initiated-fresh-open" || "$P394_WITNESS" == "p397-pending-two-open-recovery" || "$P394_WITNESS" == "p397-h4-two-open-recovery" || "$P394_WITNESS" == "p398-valid-session-pending-contract" || "$P394_WITNESS" == "p398-valid-session-h4-contract" || "$P394_WITNESS" == "p398-pending-denied-second-open" || "$P394_WITNESS" == "p398-h4-denied-second-open" || "$P394_WITNESS" == "p399-absent-cookie-bootstrap" || "$P394_WITNESS" == "p399-wrong-account-pending" || "$P394_WITNESS" == "p399-wrong-account-h4" || "$P394_WITNESS" == "p401-cookie-provenance" || "$P394_WITNESS" == "p401-revoked-session-two-open" || "$P394_WITNESS" == "p401-native-challenge-cancel" ]]
           printf 'P394_ISOLATED_TEST=%s\n' "$P394_WITNESS"
           npm run sync:db:migrate
           openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
@@ -237,4 +240,15 @@ jobs:
           chmod 600 "$POCKET_P382_KEY"
           CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
           export CHROME_BIN
+          if [[ "$P394_WITNESS" == p401-* ]]; then
+            witness_timeout=210
+            if [[ "$P394_WITNESS" == "p401-cookie-provenance" ]]; then
+              witness_timeout=1050
+            fi
+            timeout --signal=TERM --kill-after=10s "${witness_timeout}s" node --test --test-reporter=tap "pocket-research/2026-11-16/CHROMIUM-POSTGRES/${P394_WITNESS}.test.js" | tee "$RUNNER_TEMP/pocket-p401-isolated.tap"
+            p401_todo="$(sed -n 's/^# todo \([0-9][0-9]*\)$/\1/p' "$RUNNER_TEMP/pocket-p401-isolated.tap" | tail -n 1)"
+            [[ "$p401_todo" =~ ^[0-9]+$ ]] || { echo "P401 isolated TODO counter missing"; exit 1; }
+            test "$p401_todo" -eq 0 || { echo "P401 native Cancel/Pending/H4 still TODO"; exit 1; }
+          else
           timeout --signal=TERM --kill-after=10s 210s node --test --test-reporter=tap "pocket-research/2026-11-16/CHROMIUM-POSTGRES/${P394_WITNESS}.test.js"
+          fi
