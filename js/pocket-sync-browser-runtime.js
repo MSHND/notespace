@@ -2431,7 +2431,10 @@
               return safeFailure("h1-research-stage-adapter-unavailable");
             }
             try {
-              await global.PocketH1AuthStageResearch.install({ autoReconcileOnOpen: true });
+              await global.PocketH1AuthStageResearch.install({
+                autoReconcileOnOpen: true,
+                uiSaveEnabled: global.PocketH1ResearchAppPath?.uiSaveEnabled === true,
+              });
             } catch (_error) {
               return safeFailure("h1-research-open-stage-verification-unavailable");
             }
