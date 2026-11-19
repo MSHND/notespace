@@ -59,6 +59,7 @@ replaceOnce("  const savedCredentials = await a.cdp.send", [
   "    catch { return false; }",
   "  }), false);",
   '  assert.equal(await reopenedBrowser.page.locator("#h1AuthStageStatus").count(), 0);',
+  '  console.info("P394_H4_COOKIE_PRE=" + JSON.stringify({ count: (await reopenedBrowser.context.cookies(origin)).length }));',
   "  const signed = await openWithSyncedFixturePasskey(reopenedBrowser,",
   '    { cdp: { send: async () => currentTransferCredentials }, authenticatorId: "synthetic-transfer" }, prf);',
   '  console.info("P394_H4_OPEN_TRACE=" + JSON.stringify({ ok: signed.ok, reason: signed.reason, prfTransfers: signed.prfTransfers, routes: reopenedBrowser.responses.map(entry => ({ route: entry.route, http: entry.response.status() })) }));',
