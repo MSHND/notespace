@@ -71,7 +71,7 @@ replaceOnce("  const b = await openBrowser(browser, origin);",[
 "    secondPasskeyTransfers:second.prfTransfers, beginCalls:begins.length,",
 "    sourceOwnerPreserved:true, openedSamePocket:true, newCas:0, fictional:true }));",
 "  return;",
-"  const b = await openBrowser(browser, origin);",
+"  const unusedLegacyB = await openBrowser(browser, origin);",
 ].join("\n"));
 const runner=new Module(filename,module);
 runner.filename=filename;runner.paths=module.paths;
