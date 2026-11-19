@@ -59,6 +59,11 @@
 
   function message(result) {
     const reason = result?.reason;
+    if (reason === "additional-device-open-failed"
+        && result?.sourceOwnerPreserved === true
+        && result?.failureCode === "account-fresh-passkey-required") {
+      return "Your previous Sync session is no longer valid. Synced Pocket was not opened. Your current work is unchanged. Start Open again to authenticate with your passkey; no automatic retry was made.";
+    }
     if (result?.adopted === true && result?.editingLocked === true
         && result?.stageUnverified === true) {
       return "Synced Pocket opened, but protected work could not be verified. Editing and Save are paused. Reopen only after fresh verification.";
