@@ -547,6 +547,18 @@
     acceptPending,
     beforeNativeHeadAttempt,
     reconcileLostAck,
+    // P394-A: a post-adoption installation/authority failure is not an
+    // authorisation to show stale Pending plaintext or continue editing.
+    // This never deletes independently durable encrypted stage contents.
+    pauseAfterOpenFailure: () => {
+      held = true;
+      uiSaveEnabled = false;
+      saveToken = null;
+      clearPendingReview();
+      notice?.remove();
+      notice = null;
+      return true;
+    },
     flush: () => queue,
   });
 })(window);
