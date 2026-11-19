@@ -157,3 +157,4 @@ jobs:
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p390-auto-no-proof-no-authority.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p391-app-open-auto-reconcile.test.js
           timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p392-normal-save-button-reopen.test.js
+          timeout --signal=TERM --kill-after=10s 180s node --test --test-reporter=tap pocket-research/2026-11-16/CHROMIUM-POSTGRES/p394-post-adoption-stage-lock.test.js
