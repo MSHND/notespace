@@ -27,7 +27,9 @@ function isolatedEnvironment() {
 }
 
 function prefixedLines(stream, prefix) {
-  return stream.split(/\r?\n/).filter(line => line.startsWith(prefix))
+  return stream.split(/\r?\n/)
+    .map(line => line.replace(/^\s*#\s?/, "").trimStart()) // node --test TAP comment prefix
+    .filter(line => line.startsWith(prefix))
     .map(line => JSON.parse(line.slice(prefix.length)));
 }
 
