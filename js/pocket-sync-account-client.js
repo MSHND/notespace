@@ -1181,7 +1181,14 @@ ceremony boundary without adding UI, transport, persistence, or ownership.
     }
     try {
       return await pending;
-    } catch (_error) {
+    } catch (error) {
+      // P395-A: preserve only a narrowly server-confirmed stale-session
+      // classification; no automatic authentication retry or account switch.
+      if (method === "beginAuthentication"
+          && error?.code === "remote-fresh-passkey-required"
+          && error?.status === 401) {
+        throw accountError("account-fresh-passkey-required");
+      }
       throw accountError("account-service-failed");
     }
   }

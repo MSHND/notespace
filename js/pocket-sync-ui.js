@@ -59,6 +59,15 @@
 
   function message(result) {
     const reason = result?.reason;
+    if (reason === "additional-device-open-failed"
+        && result?.sourceOwnerPreserved === true
+        && result?.failureCode === "account-fresh-passkey-required") {
+      return "Your previous Sync session is no longer valid. Synced Pocket was not opened. Your current work is unchanged. Start Open again to authenticate with your passkey; no automatic retry was made.";
+    }
+    if (result?.adopted === true && result?.editingLocked === true
+        && result?.stageUnverified === true) {
+      return "Synced Pocket opened, but protected work could not be verified. Editing and Save are paused. Reopen only after fresh verification.";
+    }
     if (result?.adopted === true && result?.sourceOwnerPreserved === false) {
       return "Sync setup hit a finalisation problem, but Synced Pocket is now the owner.";
     }
@@ -551,6 +560,20 @@
         incomingPreview?.clearIdle();
         overlay.hidden = true;
         continuation = null;
+        refresh();
+        return;
+      }
+      // P394-A: the synced owner was adopted. Never display a false
+      // "not opened" outcome or offer Open again against this same owner.
+      if (mode === "open" && result?.adopted === true
+          && result?.editingLocked === true && result?.stageUnverified === true) {
+        primary.hidden = true;
+        recovery.hidden = true;
+        if (chooseAccount) chooseAccount.hidden = true;
+        title.textContent = "Synced Pocket opened, editing paused";
+        body.textContent = "Protected work could not be verified after Open. Close this message. Do not edit or Save until Pocket is reopened with fresh verification.";
+        status.textContent = message(result);
+        incomingPreview?.clearIdle();
         refresh();
         return;
       }
