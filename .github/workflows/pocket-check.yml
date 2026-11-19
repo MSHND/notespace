@@ -168,6 +168,7 @@ jobs:
       fail-fast: false
       matrix:
         witness:
+          - p387-authority-repeat-recovery
           - p390-superseded-lineage
           - p394-post-adoption-stage-lock
     services:
@@ -205,7 +206,7 @@ jobs:
           P394_WITNESS: ${{ matrix.witness }}
         run: |
           set -euo pipefail
-          [[ "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" ]]
+          [[ "$P394_WITNESS" == "p387-authority-repeat-recovery" || "$P394_WITNESS" == "p390-superseded-lineage" || "$P394_WITNESS" == "p394-post-adoption-stage-lock" ]]
           printf 'P394_ISOLATED_TEST=%s\n' "$P394_WITNESS"
           npm run sync:db:migrate
           openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
