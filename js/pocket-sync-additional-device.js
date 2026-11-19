@@ -21,6 +21,7 @@
   ]);
   const AUTHENTICATION_FAILURE_STAGE = "account-passkey-authentication-completion";
   const AUTHENTICATION_FAILURE_CODES = Object.freeze([
+    "account-fresh-passkey-required",
     "account-service-failed",
     "account-service-invalid",
     "authentication-options-invalid",
